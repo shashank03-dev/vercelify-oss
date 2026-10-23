@@ -19,7 +19,7 @@ tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 axum = "0.8"
-tower-http = { version = "0.6", features = ["cors", "trace", "timeout"] }
+tower-http = { version = "0.7", features = ["cors", "trace", "timeout"] }
 clap = { version = "4", features = ["derive", "env"] }
 toml = "0.8"
 subtle = "2"
