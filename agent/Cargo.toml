@@ -32,7 +32,7 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 http-body = "1"
 bytes = "1"
-base64 = "0.22"
+base64 = "0.23"
 sha2 = "0.10"
 # Validates rule regexes as RE2 (what Traefik/Go accepts); already linked via tracing-subscriber.
 regex-syntax = "0.8"

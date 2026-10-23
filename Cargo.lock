@@ -4766,7 +4766,7 @@ name = "vercelify-agent"
 version = "0.2.0"
 dependencies = [
  "axum",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bytes",
  "chrono",
  "clap",
@@ -4814,7 +4814,7 @@ dependencies = [
 name = "vercelify-core"
 version = "0.2.0"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.23.1",
  "serde",
  "serde_json",
  "sysinfo",
