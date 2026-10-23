@@ -19,6 +19,40 @@ The Ollama image is about a **4 GB download and ~9.5 GB on disk** (it bundles GP
 libraries); the agent refuses to start the install with less than 12 GB free on the
 system disk. Models are extra: 0.3–5 GB each.
 
+## Why did my deploy fail?
+
+The first built-in use of the local models: a failed build log goes to
+[Gemma 4 E2B](https://ai.google.dev/gemma) (`gemma4:e2b`, ~2.3B effective parameters,
+[Apache 2.0](https://ai.google.dev/gemma/apache_2)) and comes back as three lines,
+**Cause**, **Fix** and **Check**, in under 120 words.
+
+| Where | What runs the model |
+| --- | --- |
+| Cockpit: a failed deployment → **Build logs** → **Explain with AI** | The Ollama on the server that built the app, through `POST /v1/llm/chat` |
+| `vfy why APP` | The same (`--provider server`, the default) |
+| `vfy why --log FILE` (or `-` for stdin) | The Ollama on your own machine (`VFY_OLLAMA_URL`, default `http://localhost:11434`); no server needed |
+| `vfy why … --provider gemini` | Gemma 4 on Google's Gemini API (`GEMINI_API_KEY`; `VFY_GEMINI_MODEL`, default `gemma-4-26b-a4b-it`) |
+
+How it keeps an old CPU fast enough:
+
+- **Small input.** The log is trimmed to lines that look like errors (2 before, 3 after)
+  plus the last 30 lines, with `…` for the gaps, and at most 5000 characters (the tail wins).
+  Build-log `stderr` lines are marked `[stderr] `. With `--vercel-json`, the first 1500
+  characters of vercel.json go along.
+- **Small output.** `max_tokens` 400, temperature 0.2, one fixed system prompt
+  (`EXPLAIN_SYSTEM` in `cli/vfy`, identical to `cockpit/src/lib/explain.ts`, and a unit
+  test fails if they drift).
+- **Model choice.** `gemma4:e2b` if installed, then any other `gemma4*`, then any model
+  that isn't an embedding model. `VFY_AI_MODEL` overrides it in the CLI.
+
+Memory: Ollama's default `gemma4:e2b` is about a 7 GB download and wants about that much
+free memory while it answers (the app's model list shows whether it fits). On an 8 GB
+server that is also running Coolify and your apps, prefer running it on your Mac with
+`vfy why --log`, or use the Gemini API path. `gemma4:e4b` is smarter but needs roughly 10 GB.
+
+Try it without a server: `ollama pull gemma4:e2b && ./cli/vfy why --log cli/examples/failed-build.log`.
+The answer is advice, not a guarantee: check it against the log before changing code.
+
 ## Tuned for old laptops
 
 The agent runs Ollama in a container named `vercelify-ollama` with:
@@ -33,7 +67,7 @@ The agent runs Ollama in a container named `vercelify-ollama` with:
 
 The **Download a model** list in the app shows which models fit the server's free
 memory right now (*fits*, *tight* if other apps must give some back, *too big*).
-Good starting points: `llama3.2:3b` (8 GB laptops), `gemma3:1b` or `qwen2.5:1.5b`
+Good starting points: `gemma4:e2b` to explain failed deploys (16 GB machines), `llama3.2:3b` (8 GB laptops), `gemma3:1b` or `qwen2.5:1.5b`
 (4 GB), `qwen2.5-coder:1.5b` for code, `nomic-embed-text` for search/RAG.
 
 ## Use it from your Mac

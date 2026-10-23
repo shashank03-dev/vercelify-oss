@@ -15,6 +15,108 @@
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
 </p>
 
+<p align="center">
+  <b>New: "Why did my deploy fail?"</b> An open-weight model (Gemma 4 E2B) on your own hardware reads the failed build log and tells you the cause, the fix and how to check it.
+</p>
+
+<!-- Replace with a GIF of a real `vfy why` run (see the hackathon checklist). The image below is the cockpit in demo mode. -->
+<p align="center">
+  <img src="docs/screenshots/explain-failure.png" width="860" alt="The Vercelify app explaining a failed Next.js build: Cause, Fix and Check, from gemma4:e2b" />
+  <br/><sub>The cockpit's <b>Explain with AI</b> button, shown in demo mode (<code>VITE_DEMO=1</code>, canned answer). With a real server the answer streams from Gemma 4 running in Ollama.</sub>
+</p>
+
+---
+
+## Open-source AI: "Why did my deploy fail?"
+
+A failed build on Linux often comes down to one line buried in 300: a case-sensitive
+import, a missing env var, a lockfile out of sync. Vercelify hands that log to a small
+open model and gets back three lines:
+
+```text
+**Cause:** the failing step and the root cause
+**Fix:**   the exact change (file and line, setting, or command)
+**Check:** one command to confirm the fix locally before pushing again
+```
+
+| | |
+| --- | --- |
+| **Model** | [Gemma 4 E2B](https://ai.google.dev/gemma) (`gemma4:e2b`): a small language model with ~2.3B effective parameters, open weights |
+| **Model license** | Apache 2.0: <https://ai.google.dev/gemma/apache_2> |
+| **Runtime** | [Ollama](https://github.com/ollama/ollama) (MIT), on your laptop or on the Vercelify server that built the app. No API bill, and the log never leaves your machines. |
+| **Where** | `vfy why APP` and `vfy why --log FILE` in the CLI ([`cli/vfy`](cli/vfy)); **Explain with AI** on a failed build log in the cockpit ([`AppsView.tsx`](cockpit/src/views/AppsView.tsx)) |
+| **Prompt** | One prompt shared by both ([`cockpit/src/lib/explain.ts`](cockpit/src/lib/explain.ts), and a test keeps it identical to the copy in `cli/vfy`). The log is trimmed to error lines with context plus the last 30 lines (≤ 5000 characters), and answers are capped at 400 tokens at temperature 0.2, so it stays quick on an old CPU. |
+| **Model choice** | `gemma4:e2b` if installed, then any other Gemma 4, then any chat model. Override with `VFY_AI_MODEL`. |
+
+Ollama's default `gemma4:e2b` download is about **7 GB**, and it needs about that much free
+memory while it answers. On an 8 GB server, run it on your Mac instead (`vfy why --log`), or
+use the Gemini API below. Details: [docs/AI.md](docs/AI.md).
+
+### Try it in 2 minutes
+
+You don't need a Vercelify server for either of these:
+
+```bash
+git clone https://github.com/shashank03-dev/vercelify-oss && cd vercelify-oss
+
+# 1. The CLI, with Ollama on this machine (needs curl and jq)
+ollama pull gemma4:e2b && ./cli/vfy why --log cli/examples/failed-build.log
+
+# 2. The desktop UI in the browser, with demo data (canned answer, no model needed)
+cd cockpit && npm ci && VITE_DEMO=1 npm run dev
+# open http://localhost:1420 → Connect dell-e7450 (code K7QF-M2XD) → notes-api:
+# "Deployments & logs" → the "Error" row → Build logs → Explain with AI
+```
+
+[`cli/examples/failed-build.log`](cli/examples/failed-build.log) is a Next.js build that works
+on a Mac but fails on Linux: `app/page.tsx` imports `../components/Header`, and Linux file
+names are case-sensitive.
+
+### Gemma 4 via the Gemini API (optional)
+
+No GPU and not enough RAM? The same prompt can go to Gemma 4 hosted on Google's Gemini API
+(`why_gemini` in [`cli/vfy`](cli/vfy); model `gemma-4-26b-a4b-it`, or `gemma-4-31b-it` with
+`VFY_GEMINI_MODEL`):
+
+```bash
+cp .env.example .env          # put your key from https://aistudio.google.com/apikey in it
+set -a; . ./.env; set +a
+./cli/vfy why --log cli/examples/failed-build.log --provider gemini
+```
+
+The key goes to curl on stdin, never on the command line, and `.env` is gitignored. This
+path sends the trimmed log to Google, so it is opt-in; the default stays local.
+
+### Use it from a coding agent
+
+[`skills/vercelify`](skills/vercelify/SKILL.md) is an [Agent Skill](https://agentskills.io)
+(MIT) that teaches Claude Code and other skill-aware coding agents to install Vercelify, drive
+`vfy`, explain a failed deploy with `vfy why`, apply the fix and redeploy. Copy the folder into
+your agent's skills directory (for Claude Code: `~/.claude/skills/vercelify`).
+
+### Built with
+
+| Part | Project | License |
+| --- | --- | --- |
+| AI model | Gemma 4 E2B (open weights) | [Apache 2.0](https://ai.google.dev/gemma/apache_2) |
+| AI runtime | Ollama | MIT |
+| PaaS engine | Coolify v4 (+ Traefik, Nixpacks) | Apache 2.0 (Traefik, Nixpacks: MIT) |
+| Private network | Tailscale | BSD-3-Clause |
+| Public HTTPS (optional) | Cloudflare Tunnel (`cloudflared`) | Apache 2.0 |
+| Agent | Rust: tokio, axum, hyper, serde, clap | MIT / Apache 2.0 |
+| Desktop app | Tauri v2, React 19, TypeScript, Tailwind CSS v4, Framer Motion, cmdk, Lucide | MIT / Apache 2.0 (Lucide: ISC) |
+| Fonts | Geist, Geist Mono | SIL OFL 1.1 |
+| CLI | bash, curl, jq | GPL (bash), curl license, MIT (jq) |
+
+Vercelify itself is [MIT licensed](LICENSE).
+
+### Hacktoberfest Hack Day Bengaluru 2026
+
+Entered in **Track 1: Best Open-Source AI Project**, with **Track 2: Gemma 4 via the Gemini
+API** as a stretch (`--provider gemini`). The pitch: deploying to your own old hardware should be as easy as
+Vercel, with no cloud bill, and when a deploy breaks an open model on that same
+hardware should tell you why.
+
 ---
 
 ## What is this?
