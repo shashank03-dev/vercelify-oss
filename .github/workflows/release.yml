@@ -36,7 +36,7 @@ jobs:
           mkdir -p out
           cp target/${{ matrix.target }}/release/vercelify-agent out/vercelify-agent-${{ matrix.target }}
           cd out && sha256sum vercelify-agent-${{ matrix.target }} > vercelify-agent-${{ matrix.target }}.sha256
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: out/*
