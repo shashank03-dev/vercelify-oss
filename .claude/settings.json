@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(./cli/vfy:*)",
+      "Bash(vfy:*)",
+      "Bash(curl:*)",
+      "Bash(jq:*)",
+      "Bash(ollama:*)",
+      "Bash(git:*)",
+      "Bash(npm:*)",
+      "Bash(npx:*)",
+      "Bash(cargo:*)",
+      "Bash(bats:*)",
+      "Bash(shellcheck:*)"
+    ]
+  }
+}
