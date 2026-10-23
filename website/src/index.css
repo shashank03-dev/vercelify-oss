@@ -1,0 +1,650 @@
+@import "tailwindcss";
+
+/*
+ * Same semantic tokens as the cockpit (cockpit/src/index.css): warm graphite
+ * neutrals, one ember accent from the logo. The site adds a single cool
+ * slate tone (--cool) used only at low opacity, under the ember, never on
+ * its own.
+ */
+:root {
+  color-scheme: dark;
+  --bg: #0b0b0a;
+  --panel: #121211;
+  --surface: #171716;
+  --surface-2: #1c1c1a;
+  --surface-3: #252522;
+  --line: rgb(255 250 240 / 0.07);
+  --line-strong: rgb(255 250 240 / 0.12);
+  --fg: #edece9;
+  --fg-muted: #a09e98;
+  --fg-dim: #6b6964;
+
+  --accent: #ff6a3d;
+  --accent-fg: #ff8a5c;
+  --accent-soft: #ffd596;
+  --ember-1: #ff4a2b;
+  --ember-2: #ff8a4a;
+  --cool: #7d8fb0;
+  --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='22' viewBox='0 0 22 22'%3E%3Cpath d='M5 12.5 11 7.5l6 5' fill='none' stroke='%23ff7a45' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M6 16h10' stroke='%23ff7a45' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E");
+
+  --ok: #6fb58c;
+  --warn: #d4a24c;
+  --bad: #e06c5f;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-panel: var(--panel);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-dim: var(--fg-dim);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-cool: var(--cool);
+  --color-ember-1: var(--ember-1);
+  --color-ember-2: var(--ember-2);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+}
+
+html {
+  /* Glows (button light, laser fog) may reach past the edge; never scroll sideways for them. */
+  overflow-x: clip;
+  scroll-behavior: smooth;
+  scroll-padding-top: 80px;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+@layer base {
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+    outline-offset: 3px;
+  }
+}
+
+/* Accent words in headings: italic serif, as in the reference hero. */
+.serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.01em;
+}
+
+@utility text-brand {
+  background: linear-gradient(100deg, var(--ember-1), var(--ember-2) 55%, var(--accent-soft));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Headline fill: bright at the top, cooling toward warm grey. */
+@utility text-headline {
+  background: linear-gradient(180deg, #fffaf3 10%, #d9d3ca 70%, #b9b1a6);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+@utility dot-grid {
+  background-image: radial-gradient(rgb(255 255 255 / 0.055) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+/* Pointer spotlight (React Bits' Spotlight Card): JS only writes --mx/--my. */
+@utility spotlight {
+  background-image: radial-gradient(
+    380px circle at var(--mx, -999px) var(--my, -999px),
+    color-mix(in srgb, var(--accent) 7%, transparent),
+    transparent 60%
+  );
+}
+
+/* ---------------------------------------------------------------------------
+ * Hero glyph field. A tiny copy of the logo's roof chevron, tiled. The bright
+ * layer is masked to a ring around the headline, like the reference's halo
+ * of arrows, and the mask drifts slowly so the field breathes.
+ * ------------------------------------------------------------------------- */
+.glyph-field {
+  position: absolute;
+  inset: 0;
+  background-image: var(--glyph);
+  background-size: 22px 22px;
+}
+.glyph-field--dim {
+  opacity: 0.05;
+  mask-image: radial-gradient(ellipse 70% 60% at 75% 20%, #000 10%, transparent 75%);
+}
+/* With the WebGPU shards on, the hot glyphs step back so the two don't fight. */
+.hero-bg:has(.aero-shards) .glyph-field--hot {
+  animation: none;
+  opacity: 0.18;
+}
+.glyph-field--hot {
+  opacity: 0.55;
+  mask-image:
+    radial-gradient(ellipse 30% 46% at 86% 26%, #000, transparent 70%),
+    radial-gradient(ellipse 18% 30% at 0% 46%, rgb(0 0 0 / 0.55), transparent 70%);
+  mask-composite: add;
+  animation: glyph-breathe 9s ease-in-out infinite alternate;
+}
+@keyframes glyph-breathe {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 0.6;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+ * The pour. One beam of light runs the whole page: it falls through the hero
+ * like a waterfall, lands on the app's top-left corner, runs down its left
+ * edge, then down the page's left rail (lit as you scroll) until it lands on
+ * the horizon in the footer. Everything below is gradients, masks, blur and
+ * transforms: no canvas, no WebGL, cheap on an old GPU.
+ *
+ * --rail is the x of that line inside the page container (its content edge);
+ * content sits --indent to its right.
+ * ------------------------------------------------------------------------- */
+:root {
+  --indent: 28px;
+  --pad: 16px;
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 .8 0 0 0 0 .6 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+@media (min-width: 640px) {
+  :root {
+    --indent: 48px;
+    --pad: 24px;
+  }
+}
+@media (min-width: 1024px) {
+  :root {
+    --indent: 72px;
+    --pad: 32px;
+  }
+}
+
+/* Waterfall above the app window, centred on its left edge; layers centre on it. */
+.pour {
+  position: absolute;
+  left: -300px;
+  bottom: calc(100% - 220px);
+  width: 600px;
+  height: 1370px;
+  pointer-events: none;
+  mask-image: linear-gradient(to bottom, transparent 7%, rgb(0 0 0 / 0.35) 34%, #000 70%, #000 82%, transparent);
+}
+.pour > * {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+}
+/* Wide warm column of air the light falls through, densest at the bottom. */
+.pour-haze {
+  width: 520px;
+  height: 100%;
+  background: radial-gradient(50% 100% at 50% 100%, color-mix(in srgb, var(--ember-1) 24%, transparent), transparent 70%);
+  mask-image: linear-gradient(to bottom, transparent, #000 75%);
+}
+/* Film grain over the haze, after Raycast's grainy light. */
+.pour-grain {
+  width: 300px;
+  height: 85%;
+  background-image: var(--grain);
+  opacity: 0.35;
+  mix-blend-mode: overlay;
+  mask-image: radial-gradient(40% 100% at 50% 100%, #000, transparent 75%);
+}
+.pour-glow {
+  width: 30px;
+  height: 100%;
+  background: linear-gradient(to bottom, transparent 20%, color-mix(in srgb, var(--ember-1) 45%, transparent) 65%, var(--ember-2));
+  filter: blur(10px);
+}
+/* Falling water: thin streaks of light sliding down, two speeds. */
+.pour-streaks {
+  width: 44px;
+  height: 100%;
+  overflow: hidden;
+  opacity: 0.7;
+  mask-image:
+    radial-gradient(50% 100% at 50% 100%, #000 30%, transparent 75%);
+}
+.pour-streaks::before,
+.pour-streaks::after {
+  content: "";
+  position: absolute;
+  inset: -100% 0 0;
+  background: repeating-linear-gradient(to bottom, transparent 0 70px, rgb(255 214 170 / 0.75) 70px 110px, transparent 110px 190px);
+  mask-image: repeating-linear-gradient(90deg, transparent 0 9px, #000 9px 10px, transparent 10px 23px, #000 23px 24px, transparent 24px 31px);
+  animation: fall 2.4s linear infinite;
+}
+.pour-streaks::after {
+  background: repeating-linear-gradient(to bottom, transparent 0 40px, rgb(255 180 130 / 0.6) 40px 64px, transparent 64px 130px);
+  mask-image: repeating-linear-gradient(90deg, transparent 0 4px, #000 4px 5px, transparent 5px 17px);
+  animation-duration: 1.6s;
+}
+@keyframes fall {
+  to {
+    transform: translateY(50%);
+  }
+}
+.pour-core {
+  width: 2px;
+  height: 100%;
+  background: linear-gradient(to bottom, transparent, rgb(255 190 150 / 0.6) 45%, #fff4e8 92%, #fff);
+  box-shadow: 0 0 10px 2px color-mix(in srgb, var(--ember-2) 70%, transparent);
+}
+
+/*
+ * Where it lands. The window's top-left corner is rounded (14px), so the
+ * light follows that curve: a small hot point on the arc, a lit rounded
+ * corner, then the top edge carrying the light right and the left edge
+ * carrying it down. A soft wash spills into the window itself.
+ */
+.impact {
+  position: absolute;
+  pointer-events: none;
+  left: 5px;
+  top: 5px;
+  width: 200px;
+  height: 90px;
+  transform: translate(-50%, -50%);
+  background:
+    radial-gradient(closest-side, #fff 0%, rgb(255 236 218 / 0.9) 5%, transparent 13%),
+    radial-gradient(closest-side, color-mix(in srgb, var(--ember-2) 45%, transparent), transparent 70%);
+  animation: impact 4.8s ease-in-out infinite;
+}
+@keyframes impact {
+  0%,
+  100% {
+    opacity: 0.85;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.bloom {
+  position: absolute;
+  pointer-events: none;
+  left: 0;
+  top: 0;
+  width: 640px;
+  height: 440px;
+  transform: translate(-50%, -50%);
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--ember-1) 26%, transparent), transparent);
+}
+.rim-corner {
+  position: absolute;
+  pointer-events: none;
+  top: -1px;
+  left: -1px;
+  width: 260px;
+  height: 200px;
+  border-top: 1.5px solid #ffe6cf;
+  border-left: 1.5px solid #ffe6cf;
+  border-top-left-radius: 14px;
+  box-shadow: -3px -3px 18px -6px var(--ember-2);
+  mask-image: radial-gradient(100% 100% at 0 0, #000 15%, transparent 75%);
+}
+.rim-top {
+  position: absolute;
+  pointer-events: none;
+  top: -1px;
+  left: 14px;
+  right: 14px;
+  height: 1px;
+  background: linear-gradient(90deg, #ffe6cf, var(--ember-2) 12%, color-mix(in srgb, var(--ember-1) 40%, transparent) 42%, color-mix(in srgb, var(--cool) 25%, transparent) 78%, transparent);
+}
+.rim-top::after {
+  /* The same line, blurred: light lying on the edge, not a floating streak. */
+  content: "";
+  position: absolute;
+  inset: -3px 0;
+  background: inherit;
+  filter: blur(5px);
+  opacity: 0.9;
+}
+.rim-left {
+  position: absolute;
+  pointer-events: none;
+  top: 14px;
+  bottom: 0;
+  left: -1px;
+  width: 1px;
+  background: linear-gradient(to bottom, #ffe6cf, var(--ember-2) 25%, color-mix(in srgb, var(--ember-1) 70%, transparent));
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--ember-1) 45%, transparent);
+}
+.rim-left::after {
+  /* Light sheeting down the outside of the window. */
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -50px;
+  width: 50px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--ember-1) 14%, transparent));
+  mask-image: linear-gradient(to bottom, #000, transparent 70%);
+}
+/* With the LaserFlow shader, the shader owns the corner: the rim only fades
+   in below its spill and carries the light down to the page rail. */
+.rim-left--flow {
+  mask-image: linear-gradient(to bottom, transparent 60px, #000 220px);
+}
+/* Light falling into the window: warms the title bar and the app's corner. */
+.spill {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background:
+    radial-gradient(420px 220px at 0 0, color-mix(in srgb, var(--ember-2) 16%, transparent), transparent 70%),
+    radial-gradient(160px 90px at 0 0, rgb(255 236 218 / 0.1), transparent 70%);
+  mix-blend-mode: screen;
+}
+
+/* The page rail: an unlit line with drips; the lit part grows with scroll. */
+.rail {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 1px;
+  background: linear-gradient(to bottom, color-mix(in srgb, var(--ember-1) 55%, transparent), var(--line-strong) 260px, var(--line-strong));
+}
+.rail-lit {
+  position: absolute;
+  top: 0;
+  left: -1px;
+  width: 3px;
+  height: 100%;
+  transform-origin: top;
+  border-radius: 3px;
+  background: linear-gradient(to bottom, var(--ember-2), var(--ember-1) 40%, var(--ember-2));
+  box-shadow:
+    0 0 10px 1px color-mix(in srgb, var(--ember-2) 60%, transparent),
+    0 0 40px 6px color-mix(in srgb, var(--ember-1) 22%, transparent);
+}
+.rail-head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+}
+.rail-head::before {
+  content: "";
+  position: absolute;
+  left: -110px;
+  top: -150px;
+  width: 220px;
+  height: 180px;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--ember-1) 30%, transparent), transparent);
+}
+.rail-head::after {
+  content: "";
+  position: absolute;
+  left: -3px;
+  top: -40px;
+  width: 6px;
+  height: 44px;
+  border-radius: 6px;
+  background: linear-gradient(to bottom, transparent, #fff4e8);
+  box-shadow: 0 0 14px 3px color-mix(in srgb, var(--ember-2) 80%, transparent);
+}
+.drip {
+  position: absolute;
+  top: 0;
+  left: -1px;
+  width: 3px;
+  height: 70px;
+  border-radius: 3px;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--ember-2) 80%, transparent));
+  animation: drip var(--dur, 9s) linear infinite;
+  animation-delay: var(--delay, 0s);
+  will-change: transform;
+}
+@keyframes drip {
+  from {
+    transform: translateY(-70px);
+  }
+  to {
+    transform: translateY(var(--h, 4000px));
+  }
+}
+
+/* Horizon in the footer, where the beam lands for the last time. */
+.horizon-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, var(--line) , color-mix(in srgb, var(--ember-2) 80%, transparent) var(--land), #fff4e8 var(--land), color-mix(in srgb, var(--ember-1) 55%, transparent) calc(var(--land) + 22%), var(--line) 85%);
+}
+.horizon-pool {
+  position: absolute;
+  top: 0;
+  left: var(--land);
+  width: 1400px;
+  height: 520px;
+  transform: translate(-30%, -12%);
+  background:
+    radial-gradient(30% 7% at 30% 12%, #fff1e2, transparent),
+    radial-gradient(60% 40% at 32% 12%, color-mix(in srgb, var(--ember-1) 30%, transparent), transparent 70%);
+  pointer-events: none;
+}
+/* With the LaserFlow shader landing on the horizon, the CSS pool is only a
+   faint floor glow under it. */
+.horizon-pool--soft {
+  opacity: 0.45;
+}
+/* Giant wordmark: dark letters, and a second copy made of the logo's chevron
+ * glyphs that only shows where the light falls. */
+.wordmark {
+  font-weight: 600;
+  letter-spacing: -0.065em;
+  line-height: 0.8;
+  white-space: nowrap;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.wordmark--base {
+  /* --wm-base / --wm (0–1) come from scroll: the letters stay hidden until
+     the beam reaches the horizon. */
+  opacity: var(--wm-base, 1);
+  background-image:
+    radial-gradient(40% 90% at 3% 0%, rgb(255 120 70 / 0.35), transparent 70%),
+    linear-gradient(to bottom, #2e2a26, #12110f 75%);
+}
+.wordmark--lit {
+  background-image:
+    radial-gradient(28% 70% at var(--land-in) 0%, rgb(255 225 195 / 0.85), transparent 70%),
+    var(--glyph);
+  background-size: 100% 100%, 11px 11px;
+  mask-image: radial-gradient(
+    calc(4% + 105% * var(--wm, 1)) calc(10% + 140% * var(--wm, 1)) at var(--land-in) 0%,
+    #000,
+    transparent 80%
+  );
+  opacity: calc(0.9 * var(--wm, 1));
+}
+.wire {
+  position: absolute;
+  width: 1px;
+  background: linear-gradient(to bottom, transparent, var(--line-strong) 15%, var(--line-strong) 85%, transparent);
+  overflow: hidden;
+}
+.wire::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  width: 1px;
+  height: 90px;
+  background: linear-gradient(to bottom, transparent, var(--ember-2), #fff3e4);
+  box-shadow: 0 0 8px var(--ember-2);
+  animation: wire-run 3.2s linear infinite;
+}
+@keyframes wire-run {
+  from {
+    top: -90px;
+  }
+  to {
+    top: 100%;
+  }
+}
+
+/* Horizontal packets in the network diagram. */
+.packet-x {
+  position: absolute;
+  top: -1.5px;
+  width: 44px;
+  height: 3px;
+  border-radius: 3px;
+  background: linear-gradient(90deg, transparent, var(--ember-2), #fff3e4);
+  box-shadow: 0 0 10px var(--ember-2);
+  animation: packet-x var(--dur, 2.8s) linear infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes packet-x {
+  from {
+    left: -44px;
+  }
+  to {
+    left: 100%;
+  }
+}
+
+/* Marquee for the stack strip (React Bits' Logo Loop, CSS only). */
+.marquee {
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
+.marquee-track {
+  display: flex;
+  width: max-content;
+  animation: marquee 38s linear infinite;
+}
+@keyframes marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* Shiny text (React Bits): a highlight sweeping across muted text. */
+.shiny {
+  background: linear-gradient(110deg, var(--fg-muted) 40%, #fff3e4 50%, var(--fg-muted) 60%);
+  background-size: 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shiny 4.5s linear infinite;
+}
+@keyframes shiny {
+  from {
+    background-position: 150% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+
+
+.pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
+}
+@keyframes pulse-dot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 50%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* On phones the headline spans the glyph halo and sits close to the pour:
+ * keep both quieter. */
+@media (max-width: 640px) {
+  .pour-haze {
+    width: 200px;
+    opacity: 0.55;
+  }
+  .pour-grain {
+    display: none;
+  }
+  .bloom {
+    width: 420px;
+    height: 320px;
+  }
+  .impact {
+    width: 140px;
+    height: 64px;
+  }
+  .glyph-field--hot {
+    animation: none;
+    opacity: 0.22;
+  }
+}
+
+/* The nav notch's concave "ears": they join the notch to the top edge of the
+   window. A quarter circle cut from a square, with the notch's hairline on
+   the curve. */
+.notch::before,
+.notch::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  width: 18px;
+  height: 18px;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  pointer-events: none;
+}
+.notch::before {
+  left: -19px;
+  background: radial-gradient(circle at 0 100%, transparent 17.5px, var(--line-strong) 18px, rgb(13 13 12 / 0.92) 18.6px);
+}
+.notch::after {
+  right: -19px;
+  background: radial-gradient(circle at 100% 100%, transparent 17.5px, var(--line-strong) 18px, rgb(13 13 12 / 0.92) 18.6px);
+}
+.notch--on::before,
+.notch--on::after {
+  opacity: 1;
+}

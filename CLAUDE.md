@@ -22,6 +22,7 @@ running several deployments on a weak machine more reliable.
 | `install.sh` | `curl … \| sudo bash` entry point that fetches `host/`. |
 | `cli/vfy` | Mac/Linux command-line tool (`vfy apps/deploy/logs/env pull…`) using the app's paired servers. Bash 3.2 compatible. |
 | `install-mac.sh` | `curl … \| bash` for the Mac: Tailscale + the cockpit app (release `.dmg` or a source build). Must stay bash 3.2 compatible. |
+| `website/` | Open-source launch site (Vite, React 19, Tailwind v4, same tokens and fonts as the cockpit). `npm run dev` serves it on `:5180`. |
 | `docs/` | Architecture, Coolify notes, development, display streaming, troubleshooting, Vercel parity, `vercel.json` support (PROJECT-CONFIG). |
 
 The stack is **Coolify v4** as the PaaS engine (builds, Traefik, Let's Encrypt,
