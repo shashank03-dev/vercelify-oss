@@ -5,8 +5,8 @@
 <h1 align="center">Vercelify</h1>
 
 <p align="center">
-  <b>Your own Vercel on an old laptop. Free, forever.</b><br/>
-  Put websites and apps online from a computer you already own, and control everything from your Mac.
+  <b>Deploy on hardware you own. Understand failures with AI you can run yourself.</b><br/>
+  A self-hosted deployment platform for spare laptops and Raspberry Pis, with a Mac app and an open-weight AI build-log assistant.
 </p>
 
 <p align="center">
@@ -15,724 +15,364 @@
   <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
 </p>
 
-<p align="center">
-  <b>New: "Why did my deploy fail?"</b> An open-weight model (Gemma 4 E2B) on your own hardware reads the failed build log and tells you the cause, the fix and how to check it.
-</p>
+Vercelify turns a spare Linux computer into a place to deploy websites, APIs and databases.
+It brings Git-based deployments, pull request previews, rollbacks and server management
+into a desktop app. When a build fails, an open-weight model reads the relevant log and
+suggests a **cause**, a **fix** and a **command to check the result**.
 
-<!-- Replace with a GIF of a real `vfy why` run (see the hackathon checklist). The image below is the cockpit in demo mode. -->
-<p align="center">
-  <img src="docs/screenshots/explain-failure.png" width="860" alt="The Vercelify app explaining a failed Next.js build: Cause, Fix and Check, from gemma4:e2b" />
-  <br/><sub>The cockpit's <b>Explain with AI</b> button, shown in demo mode (<code>VITE_DEMO=1</code>, canned answer). With a real server the answer streams from Gemma 4 running in Ollama.</sub>
-</p>
+The goal is to make self-hosting practical for students and independent developers who
+already have usable hardware. The core workflow requires no paid inference API or hosting
+subscription. Electricity, internet, hardware, and optional domains or cloud services still
+have their own costs.
 
----
+**Hacktoberfest Hack Day Bengaluru 2026 · Track 1: Best Open-Source AI Project**
 
-## Open-source AI: "Why did my deploy fail?"
+[Try the AI assistant](#try-the-ai-assistant) · [Explore the demo](#explore-the-interface) ·
+[Install Vercelify](#install-on-your-own-hardware) · [Contribute](#contributing)
 
-A failed build on Linux often comes down to one line buried in 300: a case-sensitive
-import, a missing env var, a lockfile out of sync. Vercelify hands that log to a small
-open model and gets back three lines:
+## Why this project exists
+
+Deploying a small project should not require a complicated hosting setup. A spare laptop
+can run it, but managing builds, networking, storage and failures takes work. Build errors
+add another obstacle: a project that works on macOS may fail inside a Linux container
+because an import has different capitalization or an environment variable is missing.
+
+Vercelify combines a deployment workflow with help at that point of failure. It uses
+Coolify for the hosting engine, adds controls for running on modest hardware, and connects
+failed build logs to a model that can run on the developer's computer or server.
+
+## Open-source AI that does useful work
+
+The AI feature answers one concrete question: **“Why did my deploy fail?”**
+
+1. Read a failed deployment's build log, or supply a log file through the CLI.
+2. Keep error lines with nearby context and the last 30 lines, within a 5,000-character budget.
+3. Send that context to an installed chat model through Ollama.
+4. Ask for a short explanation in the same three-part format each time.
+5. Review the suggestion, make the change and check it before redeploying.
+
+For the included [example build log](cli/examples/failed-build.log), the output is intended
+to look like this:
 
 ```text
-**Cause:** the failing step and the root cause
-**Fix:**   the exact change (file and line, setting, or command)
-**Check:** one command to confirm the fix locally before pushing again
+Cause: The Linux build cannot resolve ../components/Header from app/page.tsx.
+Fix: Check the component's filename and make the import match its capitalization.
+Check: Run npm run build after correcting the path.
 ```
 
-| | |
+This is an illustrative explanation, not a recorded model response. The model only sees
+the supplied context; it cannot inspect the repository or prove a fix is correct. The
+assistant offers advice and does not edit code or redeploy automatically.
+
+### Model and implementation
+
+| Part | Implementation |
 | --- | --- |
-| **Model** | [Gemma 4 E2B](https://ai.google.dev/gemma) (`gemma4:e2b`): a small language model with ~2.3B effective parameters, open weights |
-| **Model license** | Apache 2.0: <https://ai.google.dev/gemma/apache_2> |
-| **Runtime** | [Ollama](https://github.com/ollama/ollama) (MIT), on your laptop or on the Vercelify server that built the app. No API bill, and the log never leaves your machines. |
-| **Where** | `vfy why APP` and `vfy why --log FILE` in the CLI ([`cli/vfy`](cli/vfy)); **Explain with AI** on a failed build log in the cockpit ([`AppsView.tsx`](cockpit/src/views/AppsView.tsx)) |
-| **Prompt** | One prompt shared by both ([`cockpit/src/lib/explain.ts`](cockpit/src/lib/explain.ts), and a test keeps it identical to the copy in `cli/vfy`). The log is trimmed to error lines with context plus the last 30 lines (≤ 5000 characters), and answers are capped at 400 tokens at temperature 0.2, so it stays quick on an old CPU. |
-| **Model choice** | `gemma4:e2b` if installed, then any other Gemma 4, then any chat model. Override with `VFY_AI_MODEL`. |
+| Preferred model | **Gemma 4 E2B**, Ollama tag `gemma4:e2b`. Gemma 4 has open weights under [Apache 2.0](https://ai.google.dev/gemma/apache_2). |
+| Local runtime | [Ollama](https://github.com/ollama/ollama), on your computer or the Vercelify server. Local inference keeps the supplied log on your machines. |
+| CLI | [`cli/vfy`](cli/vfy): `vfy why APP` reads a failed deployment; `vfy why --log FILE` accepts an existing log without a Vercelify server. |
+| Desktop UI | Failed deployment → **Build logs** → **Explain with AI**, implemented in [`AppsView.tsx`](cockpit/src/views/AppsView.tsx). Live responses stream from the server's Ollama. |
+| Prompt and context | [`explain.ts`](cockpit/src/lib/explain.ts) defines the prompt, log selection and model preference. The CLI carries the same prompt; [tests](cockpit/src/lib/explain.test.ts) check that they stay in sync. |
+| Generation settings | Local explanations use temperature `0.2` and a 400-token output cap. The prompt requests **Cause**, **Fix** and **Check** in fewer than 120 words. |
+| Model selection | Prefer `gemma4:e2b`, then another installed Gemma 4 model, then a non-embedding model. Set `VFY_AI_MODEL` to choose a specific model in the CLI. |
 
-Ollama's default `gemma4:e2b` download is about **7 GB**, and it needs about that much free
-memory while it answers. On an 8 GB server, run it on your Mac instead (`vfy why --log`), or
-use the Gemini API below. Details: [docs/AI.md](docs/AI.md).
+The integration uses an existing model; it does not train a new one. Vercelify's work is
+the deployment context, log preparation, shared prompt, provider integration and the CLI
+and desktop workflows around them. See [the AI guide](docs/AI.md) for details.
 
-### Try it in 2 minutes
+### Agent Skill
 
-You don't need a Vercelify server for either of these:
+The repository also includes [`skills/vercelify`](skills/vercelify/SKILL.md), an MIT-licensed
+skill packaged with metadata and reference files in the
+[Agent Skills format](https://agentskills.io/specification).
+
+It gives skill-aware coding agents instructions for installing Vercelify, using `vfy`,
+interpreting a failed build with `vfy why`, and helping a developer fix and redeploy an app.
+Copy the `skills/vercelify` directory into your agent's skills location; for example,
+`~/.claude/skills/vercelify` for Claude Code. The skill supplies instructions to an existing
+agent; it does not include its own model or agent runtime.
+
+## Try the AI assistant
+
+You can run a real model against the example log without installing a hosting server.
+You need Git, Bash, `curl`, `jq`, and [Ollama](https://docs.ollama.com/quickstart) installed
+and running on your computer.
 
 ```bash
-git clone https://github.com/shashank03-dev/vercelify-oss && cd vercelify-oss
+git clone https://github.com/shashank03-dev/vercelify-oss.git
+cd vercelify-oss
 
-# 1. The CLI, with Ollama on this machine (needs curl and jq)
-ollama pull gemma4:e2b && ./cli/vfy why --log cli/examples/failed-build.log
-
-# 2. The desktop UI in the browser, with demo data (canned answer, no model needed)
-cd cockpit && npm ci && VITE_DEMO=1 npm run dev
-# open http://localhost:1420 → Connect dell-e7450 (code K7QF-M2XD) → notes-api:
-# "Deployments & logs" → the "Error" row → Build logs → Explain with AI
+ollama pull gemma4:e2b
+./cli/vfy why --log cli/examples/failed-build.log
 ```
 
-[`cli/examples/failed-build.log`](cli/examples/failed-build.log) is a Next.js build that works
-on a Mac but fails on Linux: `app/page.tsx` imports `../components/Header`, and Linux file
-names are case-sensitive.
-
-### Gemma 4 via the Gemini API (optional)
-
-No GPU and not enough RAM? The same prompt can go to Gemma 4 hosted on Google's Gemini API
-(`why_gemini` in [`cli/vfy`](cli/vfy); model `gemma-4-26b-a4b-it`, or `gemma-4-31b-it` with
-`VFY_GEMINI_MODEL`):
+The first model download can take time. Allow several gigabytes of disk space and enough
+free memory for inference. The project's AI guide estimates roughly 7 GB for Ollama's
+default E2B package and a similar amount of free memory while answering; actual requirements
+vary with the model package, quantization and context. An 8 GB server already running apps
+may have too little memory available. Use a computer with more free memory or select a
+smaller installed chat model:
 
 ```bash
-cp .env.example .env          # put your key from https://aistudio.google.com/apikey in it
-set -a; . ./.env; set +a
+VFY_AI_MODEL=YOUR_INSTALLED_MODEL ./cli/vfy why --log cli/examples/failed-build.log
+```
+
+On a paired server with Ollama and a chat model installed, use the installed CLI:
+
+```bash
+vfy why my-app
+```
+
+This fetches a recent failed deployment and runs the explanation on the server. See
+[local AI setup](docs/AI.md) for installation and configuration.
+
+### Optional hosted inference
+
+The CLI can also call Gemma 4 through the Gemini API. This is optional; local Ollama is
+the default path for the open-source track demo. The hosted path sends the selected log
+context to Google and requires an API key and access to the chosen model.
+
+From the repository root:
+
+```bash
+cp .env.example .env
+# Edit .env and set GEMINI_API_KEY using a key from https://aistudio.google.com/apikey.
+set -a
+. ./.env
+set +a
 ./cli/vfy why --log cli/examples/failed-build.log --provider gemini
 ```
 
-The key goes to curl on stdin, never on the command line, and `.env` is gitignored. This
-path sends the trimmed log to Google, so it is opt-in; the default stays local.
+The default hosted model is `gemma-4-26b-a4b-it`; override it with `VFY_GEMINI_MODEL`.
+The integration is in `why_gemini` in [`cli/vfy`](cli/vfy). Keep `.env` private; it is
+excluded from Git. Inspect logs for secrets before sending them to any model provider.
 
-Real output from `gemma-4-26b-a4b-it` via the Gemini API for the example log (23 Oct 2026):
+## Explore the interface
+
+To explore the app without a Linux server, use the browser demo. You need Node.js 22
+and npm, plus Git to clone the repository if you have not already done so.
+
+```bash
+# From the repository root:
+cd cockpit
+npm ci
+VITE_DEMO=1 npm run dev
+```
+
+Open [localhost:1420](http://localhost:1420), select `dell-e7450`, and pair using
+`K7QF-M2XD`. Open `notes-api` → **Deployments & logs** → the **Error** deployment →
+**Build logs** → **Explain with AI**.
+
+**Demo mode uses simulated server data and a canned AI explanation.** It demonstrates
+the interface; use the CLI example above to demonstrate real inference.
+
+<p align="center">
+  <img src="docs/screenshots/explain-failure.png" width="860" alt="Vercelify's demo interface showing a failed build explanation with Cause, Fix and Check" />
+  <br/><sub>Explain with AI in demo mode. A connected server uses live Ollama inference.</sub>
+</p>
+
+| Apps | Deployments |
+| --- | --- |
+| ![Apps interface](docs/screenshots/apps.png) | ![Deployment history](docs/screenshots/deployments.png) |
+| **Storage** | **Health** |
+| ![Storage management](docs/screenshots/storage.png) | ![Server health](docs/screenshots/health.png) |
+
+## Hack Day: open-source track
+
+This README focuses on **Track 1: Best Open-Source AI Project** at Hacktoberfest Hack Day
+Bengaluru, held on 23 October 2026 at Atria Institute of Technology and organized by the
+AWS Student Builder Group at Atria Institute of Technology.
+
+The project addresses the track through an open-weight model doing a practical task:
+explaining deployment failures. The source, prompt and integration are available in this
+repository under the [MIT License](LICENSE), alongside the reusable Agent Skill.
+
+A reproducible walkthrough for reviewers:
+
+1. Open the example log and identify the build failure.
+2. Run `./cli/vfy why --log cli/examples/failed-build.log` with Ollama and a model ready.
+3. Compare the generated **Cause**, **Fix** and **Check** with the log.
+4. Show the shared prompt and log-selection code, then the included Agent Skill.
+5. Use the browser demo to show where the feature fits in the deployment workflow,
+   identifying the demo response as canned.
+
+Relevant event resources: [Open-Source AI track brief](https://mlh.com/opensource-ai),
+[Agent Skills specification](https://agentskills.io/specification),
+[Gemma documentation](https://ai.google.dev/gemma/docs/core), and
+[Ollama quickstart](https://docs.ollama.com/quickstart).
+
+## What Vercelify provides
+
+| Capability | What it does |
+| --- | --- |
+| Git-based deployments | Deploy a repository branch and watch for updates. GitHub pull requests can receive preview deployments. |
+| Deployment recovery | Inspect build and runtime logs, roll back a deployment, and explain failed builds with a local model. |
+| Applications and databases | Manage apps and database services through Coolify, including Dockerfile-based projects. |
+| Domains and routing | Use private app URLs, or configure a domain and public HTTPS through Cloudflare Tunnel or direct ingress. |
+| Project configuration | Apply supported `vercel.json` redirects, rewrites, headers and cron jobs; add firewall rules with `vercelify.json`. |
+| Server care | Monitor CPU, memory, storage, battery and temperature; configure alerts, backups and hardware protections. |
+| Multiple machines | Manage connected servers and add Raspberry Pi workers. |
+| Local AI | Install and manage Ollama models for chat and deployment explanations. |
+
+Vercelify builds on **Coolify**, rather than replacing its deployment engine. It adds the
+desktop control app, host agent, hardware management, configuration integration and AI
+workflow. It supports part of Vercel's configuration format; consult the
+[feature comparison](docs/VERCEL-PARITY.md) and [configuration guide](docs/PROJECT-CONFIG.md)
+for differences and unsupported options.
+
+## Install on your own hardware
+
+### Requirements
+
+- A spare 64-bit Linux laptop or PC. Ubuntu 24.04 LTS is the recommended starting point;
+  see the [Raspberry Pi guide](docs/RASPBERRY-PI.md) for Pi setup.
+- At least 4 GB RAM and 20 GB free disk space as a starting point for hosting. Builds,
+  databases and AI models need additional capacity; 8 GB or more is preferable for hosting.
+- A Mac for the desktop control app and a free [Tailscale account](https://tailscale.com).
+- An internet connection. Ethernet is preferable for a server.
+
+Back up files before replacing an operating system. The server installer changes system
+configuration and installs services; a separate storage disk can be erased if you explicitly
+choose to format it. The command below keeps storage on the system disk.
+
+### 1. Prepare the Linux server
+
+Install `curl`, then run the server installer:
+
+```bash
+sudo apt update
+sudo apt install -y curl
+curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install.sh | sudo bash -s -- --storage-device none
+```
+
+Follow the prompts and approve the Tailscale sign-in link. Save the Coolify login details
+and pairing code printed when installation finishes. Leave the server powered on and
+connected to the network. AI installation is optional and can be added later.
+
+### 2. Install the Mac app
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash
+```
+
+Sign in to the same Tailscale account, open Vercelify, select the server and enter the
+pairing code. If it expires, run `sudo vercelify pair` on the Linux server to issue a new one.
+
+If a downloadable app release is unavailable, the Mac installer offers a source build.
+That requires Rust, Node.js 22 and Xcode Command Line Tools. See
+[development setup](docs/DEVELOPMENT.md) and [troubleshooting](docs/TROUBLESHOOTING.md).
+
+### 3. Deploy an app
+
+In the Mac app, choose **New app**, enter a repository URL, select a branch and deploy.
+Configure any required build settings and environment variables for your project.
+Private repositories require repository access configuration.
+
+Apps start with private access through Tailscale. To publish an app, configure a domain
+and ingress using the [domain setup guide](docs/COOLIFY.md). GitHub previews and automatic
+deployments are covered in the [auto-deploy guide](docs/AUTODEPLOY.md).
+
+## Architecture
 
 ```text
-**Cause:** The `next build` step failed because `./app/page.tsx` attempts to import a component using a case-sensitive path that does not match the actual filename on the Linux filesystem.
-
-**Fix:** Rename the import in `app/page.tsx` to match the exact casing of the file in the `components/` directory (e.g., change `../components/Header` to `../components/header` if the file is lowercase).
-
-**Check:** `ls components/` to verify the exact casing of the file, then `npm run build` to test the import locally.
-
-— gemma-4-26b-a4b-it via the Gemini API (Gemma 4, Apache 2.0)
+Mac app / vfy CLI
+       |
+       | private connection over Tailscale
+       v
+Linux server
+  ├── Vercelify agent  → system health, storage, services and AI requests
+  ├── Coolify         → builds, deployments, containers and databases
+  ├── Ollama          → optional local model inference
+  └── Traefik         → application routing
+       |
+       └── Optional public access through Cloudflare Tunnel or direct ingress
 ```
 
-### Use it from a coding agent
-
-[`skills/vercelify`](skills/vercelify/SKILL.md) is an [Agent Skill](https://agentskills.io)
-(MIT) that teaches Claude Code and other skill-aware coding agents to install Vercelify, drive
-`vfy`, explain a failed deploy with `vfy why`, apply the fix and redeploy. Copy the folder into
-your agent's skills directory (for Claude Code: `~/.claude/skills/vercelify`).
-
-### Built with
-
-| Part | Project | License |
-| --- | --- | --- |
-| AI model | Gemma 4 E2B (open weights) | [Apache 2.0](https://ai.google.dev/gemma/apache_2) |
-| AI runtime | Ollama | MIT |
-| PaaS engine | Coolify v4 (+ Traefik, Nixpacks) | Apache 2.0 (Traefik, Nixpacks: MIT) |
-| Private network | Tailscale | BSD-3-Clause |
-| Public HTTPS (optional) | Cloudflare Tunnel (`cloudflared`) | Apache 2.0 |
-| Agent | Rust: tokio, axum, hyper, serde, clap | MIT / Apache 2.0 |
-| Desktop app | Tauri v2, React 19, TypeScript, Tailwind CSS v4, Framer Motion, cmdk, Lucide | MIT / Apache 2.0 (Lucide: ISC) |
-| Fonts | Geist, Geist Mono | SIL OFL 1.1 |
-| CLI | bash, curl, jq | GPL (bash), curl license, MIT (jq) |
-
-Vercelify itself is [MIT licensed](LICENSE).
-
-### Hacktoberfest Hack Day Bengaluru 2026
-
-Entered in **Track 1: Best Open-Source AI Project**, with **Track 2: Gemma 4 via the Gemini
-API** verified against the real API (`--provider gemini`, sample output above). The pitch: deploying to your own old hardware should be as easy as
-Vercel, with no cloud bill, and when a deploy breaks an open model on that same
-hardware should tell you why.
-
----
-
-## What is this?
-
-You have an old laptop in a drawer. Vercelify turns it into your own personal
-hosting service, like Vercel or Netlify, but free and on your own hardware.
-
-- **Push your code to GitHub → your site updates by itself.**
-- Every pull request gets its own **preview link**.
-- A bad update? **One click to roll back** (or it rolls back by itself).
-- **Databases** (Postgres, MySQL, Redis…) in one click.
-- Your **own domain with HTTPS** (optional), even on a home internet connection.
-- **Moving from Vercel?** Your `vercel.json` keeps working: redirects, rewrites, headers
-  and cron jobs.
-- A built-in **firewall**: block IPs, limit how fast bots can hit your site, or let only
-  your own IPs in.
-- Run **many apps at once**, and add more old laptops or Raspberry Pis when you need them.
-
-You control it all from a friendly Mac app, from anywhere: home, office or café.
-
-| Apps | Deployments, previews and rollback |
-| --- | --- |
-| ![Apps](docs/screenshots/apps.png) | ![Deployments](docs/screenshots/deployments.png) |
-| **Storage** | **Health** |
-| ![Storage](docs/screenshots/storage.png) | ![Health](docs/screenshots/health.png) |
-
----
-
-## Before you start: what you need
-
-| ✅ | What | Notes |
-| --- | --- | --- |
-| ☐ | **An old laptop or PC** (the "server") | Any 64-bit Intel/AMD machine. 4 GB RAM or more is best (8 GB is great), and at least 20 GB of free disk space. A Raspberry Pi 4/5 also works. |
-| ☐ | **Ubuntu installed on it** | **Ubuntu 24.04 LTS** is recommended (Desktop or Server). Debian 12/13 and Ubuntu 22.04 work too. **This erases the old laptop**, so copy off anything you want to keep first. |
-| ☐ | **Internet** on that laptop | A network cable is best; Wi-Fi is fine. |
-| ☐ | **A Mac** | To run the control app. |
-| ☐ | **A free Tailscale account** | Sign up at [tailscale.com](https://tailscale.com) with Google, Microsoft, GitHub or Apple. It connects your Mac to the laptop privately and safely. |
-| ☐ | **About 30 minutes** | Most of it is waiting while things download. |
-
-You do **not** need a domain name, a credit card, or to change any router settings.
-
-> **Never installed Ubuntu before?** Follow Ubuntu's official step-by-step guide:
-> [Install Ubuntu Desktop](https://ubuntu.com/tutorials/install-ubuntu-desktop). You'll need
-> a USB stick (8 GB or bigger). When it asks, pick **"Erase disk and install Ubuntu"**.
-
----
-
-## Install in 3 steps
-
-### Step 1: Set up the old laptop (the server)
-
-1. Turn on the laptop and log in to Ubuntu.
-2. Open the **Terminal**: press <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>T</kbd>.
-   (On Ubuntu Server you are already in one.)
-3. Copy this line, paste it into the Terminal (<kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>V</kbd>), and press <kbd>Enter</kbd>:
-
-   ```bash
-   sudo apt update && sudo apt install -y curl
-   ```
-
-   It asks for your password. **When you type it, nothing shows on screen. That is
-   normal.** Just type it and press <kbd>Enter</kbd>.
-
-4. Now copy and paste this line, then press <kbd>Enter</kbd>:
-
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install.sh | sudo bash
-   ```
-
-5. **Answer a few simple questions.** If you're not sure, just press <kbd>Enter</kbd> to
-   accept the default:
-
-   | Question | What to answer |
-   | --- | --- |
-   | *Set up local AI models too?* | Press <kbd>Enter</kbd> (no). You can add it later. |
-   | *E-mail for your Coolify login* | Your e-mail address. |
-   | *Your domain* | Press <kbd>Enter</kbd> to skip. You can add one later. |
-   | *Which disk should hold databases/volumes?* | Press <kbd>Enter</kbd> to keep everything on the main disk. |
-   | *ALL DATA ON /dev/sdb WILL BE ERASED* (only if the laptop has a **second** disk) | Type the disk name it shows (e.g. `/dev/sdb`) only if that disk has nothing you need. **If in doubt, just press <kbd>Enter</kbd>**: nothing is erased and the installer stops. Then run the line below to use only the main disk. |
-
-   > Skipped the disk question? Run this instead and everything goes on the main disk:
-   >
-   > ```bash
-   > curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install.sh | sudo bash -s -- --storage-device none
-   > ```
-
-6. **Approve the laptop on Tailscale.** The installer shows a link that starts with
-   `https://login.tailscale.com/…`. Open it on your phone or Mac, sign in to your
-   Tailscale account, and click **Connect**. (You have 10 minutes.)
-
-7. **Wait.** The installer does the rest by itself. It takes about 10–20 minutes,
-   depending on your internet speed. When it's done you will see:
-
-   ```
-   ✔ Vercelify is ready
-
-     Coolify dashboard  http://laptop.tail1234.ts.net:8000
-     Login              you@example.com / Vf-3a9c1e-B7D2F0!9
-     ...
-     Connect your Mac
-       1. Install the app (and Tailscale):
-            curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash
-       2. Open Vercelify, pick laptop and type the code   K7QF-M2XD   (valid 1 hour)
-   ```
-
-   📸 **Take a photo of this screen** or write down the **Login** line and the
-   **8-character code**. You'll need them in the next step.
-
-8. Leave the laptop **plugged in**. You can close the lid. It keeps running.
-
-### Step 2: Set up your Mac
-
-1. Open the **Terminal** on your Mac: press <kbd>⌘</kbd> + <kbd>Space</kbd>, type
-   `Terminal`, and press <kbd>Enter</kbd>.
-2. Copy and paste this line, then press <kbd>Enter</kbd>:
-
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash
-   ```
-
-3. It installs **Tailscale**. When Tailscale opens (look for its icon in the menu bar at the
-   top of the screen), **sign in with the same Tailscale account** you used in Step 1.
-   (If Tailscale's website opens instead, download and install it from there, then sign in.)
-4. It then installs the **Vercelify app** and opens it.
-
-   > **If it says "no downloadable release yet"**, answer **y** to build the app on your
-   > Mac. That needs three free tools. Install them once, then run the line from point 2
-   > again:
-   >
-   > ```bash
-   > xcode-select --install                                  # Apple's developer tools (a window pops up: click Install)
-   > curl --proto '=https' -sSf https://sh.rustup.rs | sh -s -- -y   # Rust
-   > ```
-   >
-   > and install **Node.js** (the "LTS" version) from [nodejs.org](https://nodejs.org).
-   > Close and reopen the Terminal after installing them. The build takes 5–15 minutes,
-   > one time only.
-
-### Step 3: Connect them
-
-1. In the Vercelify app, your laptop appears in the list. **Click it.**
-2. **Type the 8-character code** from Step 1 (for example `K7QF-M2XD`).
-3. Done! 🎉 You'll see your server's dashboard. A **Get started** card on the Apps page
-   walks you through the next steps (first app, your own domain, phone alerts), each with
-   its own button, and ticks them off as you go.
-
-> **Code expired?** Codes last 1 hour. On the laptop, run `sudo vercelify pair` to get a
-> new one.
-
----
-
-## Put your first app online
-
-1. In the Vercelify app, click **New app**.
-2. Paste your GitHub repository's link (for example `https://github.com/you/my-site`) and
-   pick the branch (usually `main`).
-3. Click deploy. After a minute or two you get a link to your live app.
-
-From now on, **every time you push to that branch, your app updates by itself.** Pull
-requests get their own preview link automatically.
-
-Most projects work with no setup at all: Next.js, React, Vue, Svelte, Astro, Node,
-Python, Go, PHP, static sites, or anything with a `Dockerfile`.
-
-### Finding your way around the app
-
-| Where | What it's for |
-| --- | --- |
-| **Apps** | Your apps and databases. Click an app for its **Deployments, Previews, Logs, Environment, Domains, Auto-deploy** and **vercel.json** tabs. Anything stopped or failing shows in a red banner at the top. |
-| **AI models** | Run open-source AI models on your machines and use them from your Mac. |
-| **Servers · Health · Storage** | Every machine you've connected, how it's doing (CPU, memory, temperature, battery) and where app data lives. |
-| **Second screen** | Use the laptop's screen as a monitor for your Mac. |
-| **Settings** | Two tabs: the **server** (alerts, power, backups, who can connect) and **this computer** (connection, appearance). |
-
-Hover any page in the sidebar to see what it does. Press <kbd>⌘</kbd> <kbd>K</kbd>
-(<kbd>Ctrl</kbd> <kbd>K</kbd> elsewhere) to search apps, pages and actions, and
-<kbd>⌘</kbd> <kbd>1</kbd>–<kbd>7</kbd> to jump between pages. The bell in the top-right
-corner lists what needs your attention.
-
----
-
-## Coming from Vercel?
-
-Keep your `vercel.json`. Vercelify reads it from your repository every time your app
-deploys and applies it on your server:
-
-| In `vercel.json` | What happens |
-| --- | --- |
-| `redirects`, `rewrites`, `headers` | Work like on Vercel, including single-page apps (`/(.*)` → `/index.html`) and proxying to another site |
-| `cleanUrls`, `trailingSlash` | `/about.html` becomes `/about`, slashes added or removed |
-| `crons` | Your server calls the path on schedule, with the same `Authorization: Bearer $CRON_SECRET` header, so your cron code needs no change |
-| `functions`, `regions`, `buildCommand`… | Not needed here: the app shows a short note saying why, and what to do instead |
-
-Open your app in the Mac app and click the **vercel.json** tab to see what was applied,
-anything that works differently, and your cron jobs with their last run (and a
-**Run now** button).
-
-**Add a firewall** with a second file, `vercelify.json`, next to `vercel.json`:
-
-```json
-{
-  "firewall": {
-    "blockIps": ["203.0.113.0/24"],
-    "rules": [
-      { "path": "/wp-admin/(.*)", "action": "deny" },
-      { "path": "/api/(.*)", "action": "rate_limit", "requests": 60, "window": 60 }
-    ]
-  }
-}
-```
-
-**Monorepo?** Set *Watch Paths* for the app in Coolify (for example `apps/web/**`). Pushes
-that don't touch them aren't built, which saves your laptop a lot of work. A commit
-message with `[skip deploy]` skips a build too.
-
-Not on GitHub? Upload the files from the **vercel.json** tab, or from your project folder
-with `vfy config push my-app`.
-
-Everything Vercel does and what Vercelify offers for it, side by side:
-[docs/VERCEL-PARITY.md](docs/VERCEL-PARITY.md). All the details:
-[docs/PROJECT-CONFIG.md](docs/PROJECT-CONFIG.md).
-
----
-
-## Optional extras
-
-### Use your own domain with HTTPS
-
-By default your apps are private: only your own devices (signed in to Tailscale) can
-open them. To make them public at `https://myapp.yourdomain.com`:
-
-1. Put your domain on [Cloudflare](https://cloudflare.com) (the free plan is fine).
-2. Create an API token at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
-   with these permissions: **Account › Cloudflare Tunnel › Edit**, **Zone › DNS › Edit**,
-   **Zone › Zone › Read**.
-3. On the laptop, run (with your own domain and token):
-
-   ```bash
-   sudo vercelify domain yourdomain.com --cloudflare-token YOUR_TOKEN
-   ```
-
-That's it: no router settings and no port forwarding, and it works on any home internet.
-Full guide: [docs/COOLIFY.md](docs/COOLIFY.md).
-
-### Add more laptops or a Raspberry Pi
-
-Run the same Step 1 command on the new machine. In the app, open the server switcher and
-click **Add a server…**, and it walks you through the rest. For a Raspberry Pi, install the
-**64-bit** Raspberry Pi OS first. See [docs/SERVERS.md](docs/SERVERS.md) and
-[docs/RASPBERRY-PI.md](docs/RASPBERRY-PI.md).
-
-### Run AI models (Llama, Qwen, Gemma…)
-
-Open the **AI models** page in the app and click install. It shows which models fit your
-machine. See [docs/AI.md](docs/AI.md).
-
-### Use it from the Terminal on your Mac (`vfy`)
-
-The Mac installer also adds a small `vfy` command. It uses the servers you paired in the
-app, so there's nothing to log in to:
+The desktop app uses Tauri v2, React and TypeScript. The host agent is written in Rust;
+installation and administration use shell scripts. Deployment builds use Coolify's
+Nixpacks or Docker workflows. See [architecture](docs/ARCHITECTURE.md) for the full design.
+
+The management connection is private to the tailnet. Paired clients authenticate to the
+agent with revocable bearer tokens. Public app access is configured separately. See
+[security reporting](SECURITY.md) and the [backup guide](docs/BACKUPS.md) before relying
+on a server for important data.
+
+## Development and verification
+
+Start with [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites and setup. To build the
+Mac app from the repository root:
 
 ```bash
-vfy apps                     # your apps and whether they're up
-vfy deploy my-app            # deploy now
-vfy logs my-app              # what your app is printing
-vfy rollback my-app 4b1d2e7  # put an earlier version back
-vfy env pull my-app          # its settings into a .env file
-vfy config check             # what this folder's vercel.json would do
-vfy crons my-app             # its cron jobs and their last run
-```
-
-Run `vfy help` for everything.
-
-### No Mac?
-
-You can still use everything from the **Coolify dashboard** in any web browser. Install
-Tailscale on your computer or phone, sign in to the same account, and open the dashboard
-link from the end of Step 1.
-
----
-
-## Everyday commands (on the laptop)
-
-You rarely need these, but they're handy. Open the Terminal on the laptop and type:
-
-| Command | What it does |
-| --- | --- |
-| `sudo vercelify status` | Shows if everything is running |
-| `sudo vercelify doctor` | Finds problems and tells you how to fix them |
-| `sudo vercelify pair` | Gives you a new code to connect the Mac app |
-| `sudo vercelify update` | Updates Vercelify (undoes itself if something goes wrong) |
-| `sudo vercelify backup setup` | Turns on nightly encrypted backups |
-
----
-
-## Something went wrong?
-
-| Problem | Fix |
-| --- | --- |
-| `curl: command not found` | Run `sudo apt update && sudo apt install -y curl` first (Step 1, point 3). |
-| Typing my password shows nothing | That's normal. Type it and press <kbd>Enter</kbd>. |
-| `… is not in the sudoers file` | Your user isn't an admin. The easiest fix is reinstalling Ubuntu, which makes the first user an admin automatically. |
-| The Tailscale link expired | Run `sudo tailscale up` on the laptop and open the new link. |
-| My laptop doesn't show up in the Mac app | Make sure Tailscale is **on** (menu-bar icon) and signed in to the **same account** on both machines. |
-| The code doesn't work | It may have expired. Run `sudo vercelify pair` on the laptop for a fresh one. |
-| macOS says the app "can't be opened" | Right-click the Vercelify app in **Applications** → **Open** → **Open**. Only needed the first time. |
-| Anything else | Run `sudo vercelify doctor`. It checks about 15 things and says what to do. Also see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md). |
-
----
-
-## Common questions
-
-**Is it really free?** Yes. Everything is open source. There's nothing to pay for, unless
-you choose to buy a domain name.
-
-**Is 8 GB of RAM enough?** Yes, plenty for several apps and databases. Builds run one at
-a time so the machine never gets overwhelmed.
-
-**Can I close the laptop lid?** Yes. It keeps running with the lid closed.
-
-**What if the battery runs low or it gets too hot?** Vercelify watches for that. If the
-power is out and the battery gets low, it shuts down safely and starts your apps again
-when power returns. If it gets too hot, it slows down busy apps first.
-
-**Is it safe?** Yes. The control panel is only reachable through your private Tailscale
-network, never from the public internet. Apps are only public if you choose to give them
-a domain. Details below.
-
-**Do I need a domain?** No. Without one your apps are private to your own devices. Add a
-domain whenever you like.
-
-**Will my Vercel project work?** Usually without changes. Your app runs as a normal
-server instead of serverless functions, so there are no cold starts and no time limits,
-and your `vercel.json` rules are applied for you. See [Coming from Vercel?](#coming-from-vercel).
-
----
-
-## For developers
-
-Everything below is technical detail. You don't need it to use Vercelify.
-
-<details>
-<summary><b>How it works</b></summary>
-
-Vercelify combines proven open-source tools:
-
-- **[Coolify v4](https://coolify.io)** is the hosting engine: GitHub App, Nixpacks builds,
-  Traefik, Let's Encrypt, preview deployments and one-click databases.
-- **Tailscale** links your Mac and the server privately from any network, with no open
-  ports.
-- **Cloudflare Tunnel** (optional) gives you public `https://*.yourdomain.com` without
-  router configuration, even behind CGNAT.
-- **The Vercelify agent** is a small Rust daemon on the host. It reports disks, power,
-  temperatures and containers, moves volumes between SSD and HDD, deploys from Git
-  without webhooks, turns each app's `vercel.json` into Traefik routes and runs its cron
-  jobs, and runs the display receiver.
-- **The Vercelify cockpit** is a Tauri v2 desktop app (React 19, Tailwind, Framer Motion,
-  Geist) that ties it all together.
-- **Host automation** is a one-line installer that handles storage tiers, kernel tuning,
-  lid-close handling, the battery and thermal guard, the firewall and a `vercelify`
-  admin CLI.
-
-```mermaid
-flowchart LR
-  subgraph Mac["MacBook (anywhere)"]
-    C["Vercelify cockpit<br/>Tauri · React"]
-    FF["ffmpeg sender<br/>(VideoToolbox)"]
-    ML["Moonlight"]
-  end
-  subgraph Host["Linux laptop"]
-    A["vercelify-agent :7420"]
-    CO["Coolify :8000"]
-    T["Traefik :80/:443"]
-    APPS["your apps & databases"]
-    MPV["mpv receiver → laptop panel"]
-    SUN["Sunshine (optional)"]
-    PG["power-guard"]
-    SSD[("SSD /")]
-    HDD[("HDD /mnt/storage")]
-  end
-  PI["Raspberry Pi worker<br/>(agent + Docker)"]
-  CF["Cloudflare edge<br/>*.example.com HTTPS"]
-  Visitors((Visitors)) --> CF -- tunnel --> T --> APPS
-  C -- "Tailscale (WireGuard)" --> A
-  C -- Tailscale --> CO
-  FF -- "MPEG-TS UDP/SRT over Tailscale" --> MPV
-  SUN -- Tailscale --> ML
-  CO -- "SSH over Tailscale" --> PI
-  APPS --- SSD
-  APPS --- HDD
-```
-
-| Layer | Choice | Why this one |
-| --- | --- | --- |
-| PaaS | Coolify v4 | The most complete open-source Vercel/Heroku: GitHub App, PR previews, rollbacks, 280+ one-click services, multi-server, an API. |
-| Builds | Nixpacks (+ Dockerfile/Compose) | Zero-config detection for every common framework. |
-| Ingress | Traefik + Let's Encrypt, or Cloudflare Tunnel | Tunnel: no ports, CGNAT-proof, free wildcard TLS, DDoS protection. |
-| Private network | Tailscale | WireGuard mesh with NAT traversal and MagicDNS. |
-| Host agent | Rust (axum), one static binary | ~5 MB RSS, cross-compiles for the Pi, shares types with the app. |
-| Desktop app | Tauri v2 + React 19 + Tailwind 4 + Framer Motion | Native, about 10 MB. |
-| Display | ffmpeg (VideoToolbox) → mpv over UDP/SRT; Moonlight ↔ Sunshine | Hardware encoding on the Mac, DRM output on the laptop, ~30–60 ms on Tailscale. |
-
-More: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) ·
-[docs/VERCEL-PARITY.md](docs/VERCEL-PARITY.md) (feature-by-feature comparison with Vercel,
-including the honest differences).
-</details>
-
-<details>
-<summary><b>All features</b></summary>
-
-- **Deploy from a branch**: the agent checks the branch every 60 s with `git ls-remote`,
-  so no webhook or open port is needed; private repositories work with a read-only token.
-  [docs/AUTODEPLOY.md](docs/AUTODEPLOY.md)
-- **PR previews**: each open GitHub pull request gets `pr-42-<app>.<domain>`, updated on
-  every push and removed when it closes. Fork PRs are never built. With a token, deploys
-  are reported as commit statuses and the preview URL is commented on the PR.
-- **Automatic rollback**: if a new version comes up unhealthy, the previous one goes back
-  live (instantly when its image is still on disk).
-- **Your `vercel.json` works**: redirects, rewrites (single-page apps, proxying to another
-  site), headers, `cleanUrls`, `trailingSlash` and `has`/`missing` conditions run in
-  Coolify's Traefik, read from the repository at each deploy (previews from their own
-  branch), or uploaded for other Git hosts. [docs/PROJECT-CONFIG.md](docs/PROJECT-CONFIG.md)
-- **Cron jobs** from `vercel.json`, called with `CRON_SECRET` like on Vercel; last run,
-  next run and **Run now** in the app; an alert after three failures in a row.
-- **Firewall** (`vercelify.json`): blocked and trusted IPs (safe behind the Cloudflare
-  tunnel), deny rules by path, user agent or method, and rate limits.
-- **No needless builds**: pushes that change nothing in an app's watch paths, or say
-  `[skip deploy]`, aren't built (Vercel's "Ignored Build Step").
-- **Hardware profiles**: Raspberry Pi 4/5 get their own temperature limits, zram, working
-  memory limits, under-voltage checks, a hang watchdog and clock sync.
-  [docs/RASPBERRY-PI.md](docs/RASPBERRY-PI.md)
-- **Never out of memory**: containers run in a memory-capped slice; the OOM killer takes
-  builds first, databases last.
-- **Power & thermal guard**: on battery ≤ 15% it stops apps, then Coolify, and powers off,
-  restoring exactly those containers on the next boot. At ≥ 92 °C it pauses non-core
-  containers (resumes below 80 °C); sustained ≥ 98 °C means graceful shutdown. Optional
-  80% charge cap.
-- **Alerts** to ntfy, Discord, Slack or any webhook: disk filling or failing (SMART),
-  missing HDD, out of memory, power, Tailscale key expiry, failed deploys or backups,
-  rollbacks. It repairs what it safely can and says so.
-- **Backups**: nightly, encrypted, to the HDD, another server and/or S3, including
-  Coolify's secrets and consistent database dumps. [docs/BACKUPS.md](docs/BACKUPS.md)
-- **Safe updates**: versioned releases that roll themselves back on failure. Coolify is
-  pinned to the tested release; `vercelify coolify upgrade` upgrades it on purpose.
-- **Sleeping apps**: idle apps stop to free memory; the next visitor waits a second or two.
-- **Security updates**: a nightly window reboots only when needed, never during a build,
-  backup or update, or on battery.
-- **Storage tiers**: move any database or volume between SSD and HDD in one click, with
-  data, owners and permissions preserved. The HDD mounts with `nofail` and an immutable
-  empty mount point, so a missing disk fails loudly instead of filling the SSD.
-- **Many servers, one app**: switch with the sidebar or ⌘K; update them all in one click;
-  workers join a main server's pool so one Coolify deploys to all of them.
-  [docs/SERVERS.md](docs/SERVERS.md)
-- **Local AI** with Ollama, tuned for 8 GB: one model in memory, unloaded when idle.
-  [docs/AI.md](docs/AI.md)
-- **Second screen**: use the laptop's screen as a second Mac monitor, or view the Linux
-  desktop on the Mac with Moonlight. [docs/DISPLAY.md](docs/DISPLAY.md)
-- **`vfy` on your Mac**: `vfy apps`, `vfy deploy blog`, `vfy logs blog`,
-  `vfy rollback blog 4b1d2e7`, `vfy env pull blog`, `vfy config check|push|sync blog`,
-  `vfy crons blog [run PATH]`, `vfy sleep blog`, `vfy status`, `-s <server>`.
-</details>
-
-<details>
-<summary><b>All <code>vercelify</code> commands</b></summary>
-
-| Command | What it does |
-| --- | --- |
-| `sudo vercelify status` | One-screen overview |
-| `sudo vercelify doctor` | Checks about 15 things and tells you how to fix each failure |
-| `sudo vercelify pair [--refresh]` | One-time 8-character code for the Mac app, and the full pairing code |
-| `sudo vercelify llm [install\|pull M\|rm M\|chat M "…"\|stop]` | Local AI models (Ollama) |
-| `sudo vercelify autodeploy [list\|add APP REPO [BRANCH]\|rm APP\|check APP]` | Deploy an app on every push to a branch |
-| `sudo vercelify domain [example.com] [--cloudflare-token T]` | Switches domain mode (no argument = private sslip.io) |
-| `sudo vercelify add-worker pi@raspberrypi` | Installs a worker over SSH and registers it in Coolify |
-| `sudo vercelify logs agent\|guard\|coolify\|tunnel` | Follows a component's logs |
-| `sudo vercelify backup [setup\|run\|list\|restore]` | Encrypted nightly backups; restore files or a whole server |
-| `sudo vercelify tokens [revoke ID]` | Devices paired with this server; revoke a lost one |
-| `sudo vercelify registry [install\|trust H:P\|multiarch]` | Image registry on the tailnet: build on the strong machine, pull on the Pi |
-| `sudo vercelify routes sync` | Public routes for apps on pooled servers (runs every 5 min) |
-| `sudo vercelify coolify [check\|upgrade [VERSION]]` | Check or upgrade Coolify (default: the tested version) |
-| `sudo vercelify sleep [on APP [MIN]\|off APP]` | Stop idle apps to free memory; the next visit wakes them |
-| `sudo vercelify maintenance [on [HH:MM]\|off]` | Nightly reboot window for security updates |
-| `sudo vercelify update [--edge\|--ref TAG]` / `rollback` / `uninstall` | Update (rolls back by itself on failure) / previous version / remove Vercelify's parts (keeps Coolify and data) |
-</details>
-
-<details>
-<summary><b>All installer options (unattended installs, workers, storage)</b></summary>
-
-```
-sudo ./host/setup-host.sh --help
-
-Role
-  --worker                 Worker node (e.g. Raspberry Pi): Docker + Tailscale + agent only
-  --coolify-pubkey KEY     (worker) Coolify's SSH public key to authorise for root
-Network & domain
-  --hostname NAME          Machine name on your tailnet
-  --tailscale-authkey KEY  Join Tailscale without opening a login link
-  --domain DOMAIN          Your domain: apps get *.DOMAIN
-  --cloudflare-token TOK   Cloudflare API token: creates a tunnel + DNS for you
-  --force-dns              Replace existing DNS records for *.DOMAIN and DOMAIN
-Storage
-  --storage-device DEV     Disk for databases/volumes (default: auto-detect; 'none')
-  --format-storage         Allow formatting that disk as ext4 (ERASES IT)
-Coolify
-  --admin-email EMAIL / --admin-password PASS
-Features
-  --ai [MODEL]   also install Ollama (local AI) and download MODEL
-  --no-firewall  --no-power-guard  --no-display
-General
-  -y, --yes  --dry-run  -h, --help
-```
-
-Fully unattended:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install.sh | sudo bash -s -- \
-  -y --hostname laptop --tailscale-authkey tskey-auth-… \
-  --domain example.com --cloudflare-token … --storage-device /dev/sdb
-```
-
-Mac installer options: `--with-display` (ffmpeg + Moonlight), `--from-source`,
-`--no-tailscale`, `--dest DIR`, `-y`.
-
-| Domain mode | Command | Apps are at | Needs |
-| --- | --- | --- | --- |
-| Private | *(default)* | `http://<app>.<tailscale-ip>.sslip.io` (tailnet only) | nothing |
-| Cloudflare Tunnel | `vercelify domain example.com --cloudflare-token T` | `https://<app>.example.com` | domain on Cloudflare (free plan) |
-| Direct | `vercelify domain example.com` | `https://<app>.example.com` | public IP, ports 80/443 forwarded, A records |
-</details>
-
-<details>
-<summary><b>Security model</b></summary>
-
-- The control plane is private. The agent listens only on the Tailscale IP and
-  localhost, and every call except `/v1/health` needs a 256-bit bearer token (compared in
-  constant time). Each paired device gets its own hashed, revocable token; every change
-  made through the API is written to an audit log.
-- Containers can't reach the rest of your tailnet, so app code (a PR preview, a
-  compromised dependency) is not a way into your network. Only SSH, Coolify and the
-  registry are allowed across servers (`/etc/vercelify/firewall.conf`). DOCKER-USER rules
-  block the Coolify dashboard and websockets (8000/6001/6002/8080) on every interface
-  except `tailscale0` and Docker bridges.
-- Apps are public only on purpose: through Cloudflare (your home IP is never published)
-  or through ports you forward yourself.
-- `vercel.json` can't open private things to the internet: a rewrite to this machine or a
-  private network (Ollama, the Coolify dashboard, a database) is refused. The firewall
-  trusts Cloudflare's visitor-IP header only on connections from the tunnel on this
-  machine, so it can't be faked from outside.
-- Secrets live in `/etc/vercelify` (0600/0750, root only) on the host and in the app's
-  config directory (0600) on the Mac. The pairing code contains secrets: treat it like a
-  password.
-- The embedded Coolify window has no access to the cockpit's IPC.
-- The agent runs as root under systemd hardening, with an allowlist of controllable units
-  and strict validation of container IDs, volume names and stream URLs.
-- Unattended security upgrades are enabled; SSH allows keys only for root.
-</details>
-
-<details>
-<summary><b>Build from source and run the tests</b></summary>
-
-```bash
-# prerequisites: Rust (rustup), Node 20+, and on macOS Xcode Command Line Tools
-git clone https://github.com/shashank03-dev/vercelify-oss && cd vercelify-oss/cockpit
+cd cockpit
 npm ci
-npm run tauri build        # → target/release/bundle/{dmg,macos}/Vercelify*
-VITE_DEMO=1 npm run dev    # the UI with mock data, in a browser
+npm run tauri build
 ```
 
-| Suite | Command |
+The repository includes the following checks. These commands describe the available
+suites; they do not imply a particular checkout has passed them.
+
+| Check | Command from repository root |
 | --- | --- |
-| Rust unit, fixture and agent e2e tests | `cargo test --workspace --all-features` |
-| Host scripts (bats) | `bats host/tests` |
-| Frontend unit (vitest) | `cd cockpit && npm test` |
-| Demo UI flows (Playwright) | `cd cockpit && npm run e2e:demo` |
-| Coolify contract (real Coolify in Docker) | `sudo host/tests/contract/coolify.sh` |
-| Project rules on a real Traefik (vercel.json, firewall, crons) | `sudo host/tests/contract/routing.sh` |
-| Installer integration (privileged Debian container) | `sudo host/tests/integration/run.sh` |
-| Live, desktop (real Tauri binary) and arm64 (QEMU) suites | see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) |
+| Rust workspace | `cargo test --workspace --all-features` |
+| Host and CLI scripts | `bats host/tests` |
+| Frontend types | `cd cockpit && npm run typecheck` |
+| Frontend unit tests | `cd cockpit && npm test` |
+| Browser demo flows | `cd cockpit && npm run e2e:demo` |
+| Coolify contract | `sudo host/tests/contract/coolify.sh` |
+| Routing contract | `sudo host/tests/contract/routing.sh` |
 
-CI (`.github/workflows/ci.yml`) runs the Rust, bats, ShellCheck, typecheck, vitest and
-demo UI suites plus arm64 under QEMU; `integration.yml` runs the Coolify contract, the
-project rules on a real Traefik (3.7, and 3.4 as an early warning) and the full installer
-test. Release builds produce the macOS app (universal) and Linux packages.
+Rust workspace checks require the Tauri prerequisites and a `cockpit/dist` directory;
+see [development instructions](docs/DEVELOPMENT.md). Contract and installer integration
+tests require a suitable Docker environment. The development guide also covers live,
+desktop and arm64 tests. CI configuration is in [`.github/workflows`](.github/workflows).
 
+### Repository layout
+
+```text
+agent/                  Rust host agent
+crates/vercelify-core/  Shared types and host probes
+cockpit/                Tauri desktop app and React interface
+cli/vfy                 Mac/Linux command-line client
+cli/examples/           Sample build log for the AI walkthrough
+host/                   Installer, admin commands, services and tests
+skills/vercelify/       Agent Skill and reference documentation
+website/                Project website source
+docs/                   Architecture, setup and feature guides
+install.sh              Linux server bootstrap
+install-mac.sh          Mac app installer
 ```
-install.sh          one-line server bootstrap (downloads + runs host/setup-host.sh)
-install-mac.sh      one-line Mac setup: Tailscale + the cockpit app
-host/               installer, power-guard, firewall, vercelify CLI, systemd units, tests
-crates/             shared Rust types (exported to TypeScript) and host probes
-agent/              vercelify-agent (axum)
-cockpit/            Tauri v2 app (src-tauri/ = Rust, src/ = React UI)
-cli/vfy             Mac/Linux command-line tool
-docs/               guides: Coolify, architecture, vercel.json, Vercel parity, display, troubleshooting, development
-```
-</details>
+
+## Documentation
+
+| Guide | Covers |
+| --- | --- |
+| [AI](docs/AI.md) | Ollama setup, deployment explanations, model selection and API access |
+| [Coolify and domains](docs/COOLIFY.md) | Hosting setup and public ingress |
+| [Auto-deploy](docs/AUTODEPLOY.md) | Branch updates and GitHub previews |
+| [Project configuration](docs/PROJECT-CONFIG.md) | `vercel.json`, firewall rules and cron jobs |
+| [Vercel comparison](docs/VERCEL-PARITY.md) | Supported features and differences |
+| [Backups](docs/BACKUPS.md) | Backup configuration and restore workflows |
+| [Servers](docs/SERVERS.md) · [Raspberry Pi](docs/RASPBERRY-PI.md) | Additional machines and workers |
+| [Second screen](docs/DISPLAY.md) | Optional display features |
+| [Troubleshooting](docs/TROUBLESHOOTING.md) | Diagnosis and recovery |
+| [Development](docs/DEVELOPMENT.md) | Local setup and test environments |
 
 ## Contributing
 
-Vercelify is open source and contributions are welcome: bug reports, docs, fixes and
-features. Start with [CONTRIBUTING.md](CONTRIBUTING.md), and please follow the
-[Code of Conduct](CODE_OF_CONDUCT.md). Report security issues privately as described in
-[SECURITY.md](SECURITY.md).
+Bug reports, documentation improvements and code contributions are welcome. Read
+[CONTRIBUTING.md](CONTRIBUTING.md) for setup, conventions and checks. For a larger change,
+open an issue first to discuss the approach. Please follow the
+[Code of Conduct](CODE_OF_CONDUCT.md), and report vulnerabilities privately as described
+in [SECURITY.md](SECURITY.md).
 
-## License
+## License and acknowledgments
 
-[MIT](LICENSE). Coolify, Tailscale, Cloudflare, Moonlight, Sunshine and mpv are separate projects
-under their own licenses.
+Vercelify's source code and included Agent Skill are released under the [MIT License](LICENSE).
+Gemma 4 model weights are provided separately under [Apache 2.0](https://ai.google.dev/gemma/apache_2).
+Other dependencies retain their respective licenses; see their upstream repositories.
+
+Vercelify builds on the work of [Coolify](https://github.com/coollabsio/coolify),
+[Ollama](https://github.com/ollama/ollama), [Tailscale](https://github.com/tailscale/tailscale),
+[Traefik](https://github.com/traefik/traefik), [Tauri](https://github.com/tauri-apps/tauri),
+and the wider open-source community. Vercelify is an independent project and is not
+affiliated with Vercel.
