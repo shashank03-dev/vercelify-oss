@@ -24,10 +24,10 @@ const STEPS = [
 
 export function Steps() {
   return (
-    <Section id="install" className="pb-32">
+    <Section id="install" className="pb-20 sm:pb-32">
       <div className="relative overflow-hidden rounded-3xl border border-line bg-panel/40">
         <div aria-hidden className="dot-grid absolute inset-0 [mask-image:linear-gradient(to_bottom,#000,transparent_70%)]" />
-        <div className="relative grid gap-12 p-6 [&>*]:min-w-0 sm:p-10 lg:grid-cols-[1fr_1.05fr] lg:gap-16 lg:p-14">
+        <div className="relative grid gap-12 p-4 [&>*]:min-w-0 sm:p-10 lg:grid-cols-[1fr_1.05fr] lg:gap-16 lg:p-14">
           <div>
             <SectionHeader
               eyebrow="How it works"
@@ -38,8 +38,9 @@ export function Steps() {
             <ol className="mt-10 space-y-3">
               {STEPS.map((s, i) => (
                 <Reveal key={s.n} delay={i * 0.08}>
-                  <li className="rounded-xl border border-line bg-surface/70 p-5">
-                    <div className="flex items-baseline gap-4">
+                  <li className="rounded-xl border border-line bg-surface/70 p-4 sm:p-5">
+                    {/* The number sits above the title on phones, so the command gets the card's full width. */}
+                    <div className="flex flex-col gap-1.5 sm:flex-row sm:items-baseline sm:gap-4">
                       <span className="font-mono text-[12px] text-accent">{s.n}</span>
                       <div className="min-w-0 flex-1">
                         <h3 className="text-[16px] font-medium">{s.title}</h3>
@@ -55,7 +56,7 @@ export function Steps() {
               No domain, credit card or router settings needed. Any 64-bit PC with 4 GB of RAM works; 8 GB is comfortable.
             </p>
           </div>
-          <Reveal delay={0.15} className="lg:pt-24">
+          <Reveal delay={0.15} className="min-w-0 lg:pt-24">
             <Terminal />
             <Pairing />
           </Reveal>
@@ -74,7 +75,7 @@ function Terminal() {
         <span className="size-2.5 rounded-full bg-surface-3" />
         <span className="ml-3 font-mono text-[11px] text-fg-dim">thinkpad-t470 — install.sh</span>
       </div>
-      <pre className="overflow-x-auto px-5 py-5 font-mono text-[12.5px] leading-[1.75] text-fg-muted">
+      <pre className="overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] text-fg-muted sm:px-5 sm:py-5 sm:text-[12.5px]">
         <span className="text-ok">✔</span> Docker 28 and Coolify 4 installed{"\n"}
         <span className="text-ok">✔</span> Tailscale connected as thinkpad-t470{"\n"}
         <span className="text-ok">✔</span> Firewall, lid-close and battery guard on{"\n"}

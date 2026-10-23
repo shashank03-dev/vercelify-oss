@@ -12,7 +12,7 @@ const RULES = [
 export function FromVercel() {
   const [tab, setTab] = useState<"json" | "cli">("json");
   return (
-    <Section id="vercel" className="pb-32">
+    <Section id="vercel" className="pb-20 sm:pb-32">
       <div className="grid items-start gap-12 [&>*]:min-w-0 lg:grid-cols-[0.9fr_1.1fr] lg:gap-16">
         <div>
           <SectionHeader
@@ -76,7 +76,7 @@ const v = (s: string) => <span className="text-accent-soft">"{s}"</span>;
 function JsonView() {
   return (
     <div>
-      <pre className="overflow-x-auto p-5 font-mono text-[12.5px] leading-[1.75] text-fg-muted">
+      <pre className="overflow-x-auto p-4 font-mono text-[11.5px] leading-[1.75] text-fg-muted sm:p-5 sm:text-[12.5px]">
         {"{\n  "}
         {k("cleanUrls")}: <span className="text-fg">true</span>
         {",\n  "}
@@ -117,7 +117,7 @@ function CliView() {
     ["vfy config check", "what this folder's vercel.json would do"],
   ];
   return (
-    <div className="p-5 font-mono text-[12.5px] leading-[2]">
+    <div className="p-4 font-mono text-[12px] leading-[2] sm:p-5 sm:text-[12.5px]">
       {lines.map(([c, d]) => (
         <div key={c} className="flex flex-wrap gap-x-4">
           <span>

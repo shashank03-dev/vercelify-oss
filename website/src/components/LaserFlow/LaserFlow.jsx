@@ -350,6 +350,11 @@ const BASE_SATURATION = 0.78;
 const MAX_RENDER_DIM = 2048;
 const INTRO_DROP = 1.25;
 const INTRO_END = 5;
+// Never draw faster than ~60fps (120Hz screens would double the GPU work).
+const MIN_FRAME_MS = 1000 / 62;
+// Slower than ~40fps on average: step the render resolution down.
+const SLOW_FRAME_S = 1 / 40;
+const QUALITY_STEPS = [1, 0.75, 0.55];
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 const easeOut = x => 1 - Math.pow(1 - clamp(x, 0, 1), 3);
@@ -565,6 +570,8 @@ export const LaserFlow = ({
     let last = 0;
     let visible = true;
     let alive = true;
+    // Adaptive resolution: an average of recent frame times, sampled while animating.
+    const perf = { step: 0, avg: 0, samples: 0 };
 
     const toRgb = value => {
       if (!probeContext) return [0.22, 0.28, 1];
@@ -656,7 +663,7 @@ export const LaserFlow = ({
       const width = Math.max(1, container.clientWidth);
       const height = Math.max(1, container.clientHeight);
       const s = settingsRef.current;
-      const baseDpr = Math.min(s.dpr || window.devicePixelRatio || 1, 2);
+      const baseDpr = Math.min(s.dpr || window.devicePixelRatio || 1, 2) * QUALITY_STEPS[perf.step];
       const longest = Math.max(width, height) * baseDpr;
       const ratio = longest > MAX_RENDER_DIM ? (baseDpr * MAX_RENDER_DIM) / longest : baseDpr;
       const pixelWidth = Math.max(1, Math.round(width * ratio));
@@ -765,8 +772,21 @@ export const LaserFlow = ({
       raf = 0;
       if (!alive || !visible || document.hidden) return;
       const s = settingsRef.current;
-      const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;
+      if (last && now - last < MIN_FRAME_MS) {
+        raf = requestAnimationFrame(frame);
+        return;
+      }
+      const elapsed = last ? (now - last) / 1000 : 0;
+      const dt = last ? Math.min(0.05, elapsed) : 1 / 60;
       last = now;
+      if (elapsed > 0 && elapsed < 0.25 && perf.step < QUALITY_STEPS.length - 1) {
+        perf.avg += (elapsed - perf.avg) * 0.05;
+        if (++perf.samples > 90 && perf.avg > SLOW_FRAME_S) {
+          perf.step += 1;
+          perf.samples = 0;
+          resize();
+        }
+      }
       const moving = !s.paused && !reduce;
       if (moving) state.time += dt * s.speed;
       const introducing = state.introTime < INTRO_END;

@@ -1,4 +1,4 @@
-import { motion, useScroll, useTransform } from "framer-motion";
+import { m, useScroll, useTransform } from "framer-motion";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 /**
@@ -47,8 +47,8 @@ export function BeamTrack({ children }: { children: ReactNode }) {
           <span className="drip" style={{ ["--dur" as string]: "11s" }} />
           <span className="drip" style={{ ["--dur" as string]: "15s", ["--delay" as string]: "-6s" }} />
           <span className="drip" style={{ ["--dur" as string]: "9s", ["--delay" as string]: "-3s" }} />
-          <motion.div className="rail-lit" style={{ scaleY }} />
-          <motion.div className="rail-head" style={{ y: lit }} />
+          <m.div className="rail-lit" style={{ scaleY }} />
+          <m.div className="rail-head" style={{ y: lit }} />
         </div>
       </div>
       {children}

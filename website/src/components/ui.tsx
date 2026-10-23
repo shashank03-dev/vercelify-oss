@@ -1,12 +1,21 @@
-import { motion } from "framer-motion";
+import { m } from "framer-motion";
 import { Check, Copy } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import { type ImgHTMLAttributes, type ReactNode, useRef, useState } from "react";
 import SpecularButton from "./SpecularButton/SpecularButton.jsx";
 
 export const REPO = "https://github.com/shashank03-dev/vercelify-oss";
 export const DOCS = `${REPO}#readme`;
 export const INSTALL_HOST = "curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install.sh | sudo bash";
 export const INSTALL_MAC = "curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash";
+
+/**
+ * Two cores, under 4 GB of memory or data-saver on: skip the GPU effects and
+ * keep only the CSS ones.
+ */
+export function weakDevice() {
+  const nav = navigator as Navigator & { deviceMemory?: number; connection?: { saveData?: boolean } };
+  return (nav.hardwareConcurrency || 8) <= 2 || (nav.deviceMemory ?? 8) < 4 || !!nav.connection?.saveData;
+}
 
 export function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(" ");
@@ -74,7 +83,7 @@ export function SectionHeader({
 
 export function Reveal({ children, className, delay = 0 }: { children: ReactNode; className?: string; delay?: number }) {
   return (
-    <motion.div
+    <m.div
       className={className}
       initial={{ opacity: 0, y: 14 }}
       whileInView={{ opacity: 1, y: 0 }}
@@ -82,7 +91,7 @@ export function Reveal({ children, className, delay = 0 }: { children: ReactNode
       transition={{ duration: 0.6, ease: [0.22, 1, 0.36, 1], delay }}
     >
       {children}
-    </motion.div>
+    </m.div>
   );
 }
 
@@ -142,7 +151,7 @@ export function CopyCommand({ command, display, className }: { command: string; 
       radius={10}
       tint="#080807"
       tintOpacity={0.85}
-      blur={14}
+      blur={0}
       textColor="var(--fg)"
       lineColor="#ffc9a8"
       baseColor="#3a3733"
@@ -191,6 +200,7 @@ export function Card({ children, className }: { children: ReactNode; className?:
     <div
       ref={ref}
       onPointerMove={(e) => {
+        if (e.pointerType !== "mouse") return;
         const r = ref.current!.getBoundingClientRect();
         ref.current!.style.setProperty("--mx", `${e.clientX - r.left}px`);
         ref.current!.style.setProperty("--my", `${e.clientY - r.top}px`);
@@ -234,14 +244,14 @@ export function Section({
 export function Junction({ top = 12 }: { top?: number }) {
   return (
     <div aria-hidden className="pointer-events-none absolute left-0" style={{ top }}>
-      <motion.span
+      <m.span
         className="absolute top-0 left-0 h-px w-[calc(var(--indent)-10px)] origin-left bg-[linear-gradient(90deg,var(--ember-2),color-mix(in_srgb,var(--ember-1)_30%,transparent))]"
         initial={{ scaleX: 0 }}
         whileInView={{ scaleX: 1 }}
         viewport={{ once: true, margin: "-35% 0px -35% 0px" }}
         transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
       />
-      <motion.span
+      <m.span
         className="absolute -top-[3.5px] -left-[3.5px] size-2 rotate-45 border border-accent/70 bg-bg"
         initial={{ backgroundColor: "var(--bg)", boxShadow: "0 0 0 0 transparent" }}
         whileInView={{ backgroundColor: "var(--accent)", boxShadow: "0 0 12px 2px rgb(255 106 61 / 0.55)" }}
@@ -252,12 +262,36 @@ export function Junction({ top = 12 }: { top?: number }) {
   );
 }
 
+/**
+ * A 2720px app capture (`src` is the full-size .jpg in public/app). Served as
+ * AVIF, with 1360px copies for 1x screens and phones; JPEG only as fallback.
+ */
+export function Screenshot({ src, sizes, ...img }: { src: string; sizes: string } & ImgHTMLAttributes<HTMLImageElement>) {
+  const base = src.replace(/\.jpg$/, "");
+  return (
+    <picture className="contents">
+      <source type="image/avif" srcSet={`${base}-1360.avif 1360w, ${base}.avif 2720w`} sizes={sizes} />
+      <img
+        src={src}
+        srcSet={`${base}-1360.jpg 1360w, ${src} 2720w`}
+        sizes={sizes}
+        width={2720}
+        height={1720}
+        decoding="async"
+        draggable={false}
+        {...img}
+      />
+    </picture>
+  );
+}
+
 /** A real screen from the app (captured from the cockpit's demo mode), cropped with object-position. */
 export function Shot({
   src,
   alt,
   pos = "0% 0%",
   zoom = 1,
+  width = "(min-width: 1024px) 560px, 100vw",
   className,
   imgClassName,
   eager,
@@ -267,20 +301,21 @@ export function Shot({
   /** object-position, and the point the zoom scales around. */
   pos?: string;
   zoom?: number;
+  /** Rendered width as a `sizes` value, before the zoom. */
+  width?: string;
   className?: string;
   imgClassName?: string;
   eager?: boolean;
 }) {
+  // The zoom crops in, so the image needs zoom× the pixels of its frame.
+  const sizes = width.replace(/(\d+(?:px|vw))(?=,|$)/g, (w) => `calc(${zoom} * ${w})`);
   return (
     <div className={cx("relative overflow-hidden rounded-xl border border-line-strong bg-[#121212]", className)}>
-      <img
+      <Screenshot
         src={src}
         alt={alt}
-        width={2720}
-        height={1720}
+        sizes={sizes}
         loading={eager ? "eager" : "lazy"}
-        decoding="async"
-        draggable={false}
         className={cx("size-full object-cover", imgClassName)}
         style={{ objectPosition: pos, transform: zoom === 1 ? undefined : `scale(${zoom})`, transformOrigin: pos }}
       />

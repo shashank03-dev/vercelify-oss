@@ -60,8 +60,14 @@
 html {
   /* Glows (button light, laser fog) may reach past the edge; never scroll sideways for them. */
   overflow-x: clip;
-  scroll-behavior: smooth;
   scroll-padding-top: 80px;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
 }
 
 body {
@@ -73,6 +79,7 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
 }
 
 ::selection {
@@ -501,43 +508,41 @@ body {
   background: linear-gradient(to bottom, transparent, var(--line-strong) 15%, var(--line-strong) 85%, transparent);
   overflow: hidden;
 }
+/* The packet is the last 90px of a full-height strip that slides down: a
+   transform, so it stays on the compositor (animating top would relayout). */
 .wire::after {
   content: "";
   position: absolute;
-  left: 0;
-  width: 1px;
-  height: 90px;
-  background: linear-gradient(to bottom, transparent, var(--ember-2), #fff3e4);
-  box-shadow: 0 0 8px var(--ember-2);
+  inset: 0;
+  background: linear-gradient(to bottom, transparent calc(100% - 90px), var(--ember-2), #fff3e4);
   animation: wire-run 3.2s linear infinite;
+  will-change: transform;
 }
 @keyframes wire-run {
   from {
-    top: -90px;
+    transform: translateY(-100%);
   }
   to {
-    top: 100%;
+    transform: translateY(90px);
   }
 }
 
 /* Horizontal packets in the network diagram. */
+/* Same trick sideways: the packet is the last 44px of a full-width strip. */
 .packet-x {
   position: absolute;
-  top: -1.5px;
-  width: 44px;
-  height: 3px;
-  border-radius: 3px;
-  background: linear-gradient(90deg, transparent, var(--ember-2), #fff3e4);
-  box-shadow: 0 0 10px var(--ember-2);
+  inset: 0;
+  background: linear-gradient(90deg, transparent calc(100% - 44px), var(--ember-2), #fff3e4);
   animation: packet-x var(--dur, 2.8s) linear infinite;
   animation-delay: var(--delay, 0s);
+  will-change: transform;
 }
 @keyframes packet-x {
   from {
-    left: -44px;
+    transform: translateX(-100%);
   }
   to {
-    left: 100%;
+    transform: translateX(44px);
   }
 }
 

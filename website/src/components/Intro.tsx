@@ -1,11 +1,11 @@
 import {
   type MotionValue,
-  motion,
+  m,
   useScroll,
   useTransform,
 } from "framer-motion";
 import { useRef } from "react";
-import { LaserLanding, useMedia, useWebgl2 } from "./LaserLanding";
+import { LaserLanding, useMedia, useShader } from "./LaserLanding";
 import { Reveal, Section, cx } from "./ui";
 
 const STACK = [
@@ -36,11 +36,11 @@ const FACTS = [
  */
 export function Stack() {
   const surfaceRef = useRef<HTMLDivElement>(null);
-  const webgl = useWebgl2();
+  const webgl = useShader();
   const wide = useMedia("(min-width: 768px)");
   const lit = !!webgl && wide;
   return (
-    <Section junction={!lit} className="pt-16 pb-6">
+    <Section junction={!lit} className="pt-12 pb-6 sm:pt-16">
       {lit && (
         <LaserLanding
           surfaceRef={surfaceRef}
@@ -75,7 +75,7 @@ export function Stack() {
           card's top and pours down its left side. */}
       <div
         className={cx(
-          "relative mt-20",
+          "relative mt-14 sm:mt-20",
           lit && "ml-[calc(-1*var(--indent)-22px)]",
         )}
       >
@@ -95,7 +95,7 @@ export function Stack() {
             <div
               key={n}
               className={cx(
-                "px-6 py-8",
+                "px-4 py-6 sm:px-6 sm:py-8",
                 i % 2 === 1 && "border-l border-line",
                 i > 1 && "border-t border-line md:border-t-0",
                 i === 2 && "md:border-l",
@@ -131,7 +131,7 @@ export function Statement() {
   });
   const words = STATEMENT.split(" ");
   return (
-    <Section className="pt-36 pb-36">
+    <Section className="py-24 sm:py-36">
       <p
         ref={ref}
         className="max-w-[980px] text-[clamp(28px,4.4vw,56px)] leading-[1.12] font-medium tracking-[-0.03em] text-balance"
@@ -160,8 +160,8 @@ function Word({
 }) {
   const opacity = useTransform(progress, range, [0.16, 1]);
   return (
-    <motion.span style={{ opacity }} className="text-fg">
+    <m.span style={{ opacity }} className="text-fg">
       {word}{" "}
-    </motion.span>
+    </m.span>
   );
 }

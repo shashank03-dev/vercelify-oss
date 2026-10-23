@@ -11,7 +11,7 @@ const CARE = [
 
 export function Hardware() {
   return (
-    <Section id="hardware" className="pb-32">
+    <Section id="hardware" className="pb-20 sm:pb-32">
       <div className="grid items-center gap-12 [&>*]:min-w-0 lg:grid-cols-[1.05fr_0.95fr] lg:gap-16">
         <Reveal className="order-2 lg:order-1">
           <Health />
@@ -56,15 +56,15 @@ function Health() {
 /** How the pieces connect: Mac ↔ tailnet ↔ laptop ↔ tunnel ↔ visitors. */
 export function Network() {
   return (
-    <Section id="network" className="pb-32">
+    <Section id="network" className="pb-20 sm:pb-32">
       <SectionHeader
         align="center"
         eyebrow="How it connects"
         title="Private by default."
         muted="Public only when you give an app a domain."
       />
-      <Reveal delay={0.1} className="mt-16">
-        <div className="relative overflow-hidden rounded-3xl border border-line bg-panel/40 px-5 py-12 sm:px-10">
+      <Reveal delay={0.1} className="mt-10 sm:mt-16">
+        <div className="relative overflow-hidden rounded-3xl border border-line bg-panel/40 px-4 py-8 sm:px-10 sm:py-12">
           <div aria-hidden className="dot-grid absolute inset-0 [mask-image:radial-gradient(ellipse_at_center,#000,transparent_75%)]" />
           <div className="relative flex flex-col items-stretch lg:flex-row lg:items-center">
             <Node icon={<Laptop className="size-5" />} title="Your Mac" lines={["Vercelify app", "vfy command line"]} />
@@ -78,7 +78,7 @@ export function Network() {
             <Link label="Cloudflare Tunnel" note="optional, for a domain" delay="1.2s" />
             <Node icon={<Globe className="size-5" />} title="Visitors" lines={["https://you.dev", "cached at Cloudflare's edge"]} />
           </div>
-          <p className="relative mx-auto mt-12 max-w-[640px] text-center text-[14.5px] leading-relaxed text-fg-muted">
+          <p className="relative mx-auto mt-8 max-w-[640px] sm:mt-12 text-center text-[14.5px] leading-relaxed text-fg-muted">
             The control panel is reachable only on your Tailscale network, never from the public internet. No ports are
             opened on your router.
           </p>
@@ -111,7 +111,7 @@ function Node({ icon, title, lines, hot }: { icon: React.ReactNode; title: strin
 
 function Link({ label, note, delay }: { label: string; note: string; delay: string }) {
   return (
-    <div className="relative flex min-h-[112px] items-center justify-center lg:min-h-[132px] lg:w-[172px] lg:shrink-0">
+    <div className="relative flex min-h-[96px] items-center justify-center sm:min-h-[112px] lg:min-h-[132px] lg:w-[172px] lg:shrink-0">
       {/* Vertical on small screens, horizontal on large. The label sits above
           the wire and the note below it, so neither covers the cards. */}
       <div className="wire top-0 bottom-0 left-1/2 lg:hidden" />

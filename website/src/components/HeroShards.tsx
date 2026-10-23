@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useState } from "react";
+import { weakDevice } from "./ui";
 
 // WebGPU only: the component and vgpu are fetched on demand, so phones, old
 // browsers and reduced-motion visitors never download them.
@@ -6,8 +7,8 @@ const AeroShards = lazy(() => import("./AeroShards/AeroShards.jsx"));
 
 function canRun() {
   if (typeof window === "undefined" || !("gpu" in navigator)) return false;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
-  return window.matchMedia("(min-width: 900px)").matches;
+  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || weakDevice()) return false;
+  return window.matchMedia("(min-width: 900px) and (pointer: fine)").matches;
 }
 
 /**

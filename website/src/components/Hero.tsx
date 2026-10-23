@@ -1,9 +1,9 @@
-import { motion, useScroll } from "framer-motion";
+import { m, useScroll } from "framer-motion";
 import { ArrowRight, Menu, X } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
-import { LaserLanding, useWebgl2 } from "./LaserLanding";
+import { LaserLanding, useShader } from "./LaserLanding";
 import { HeroShards } from "./HeroShards";
-import { Button, CopyCommand, GithubIcon as Github, INSTALL_HOST, Logo, REPO, cx } from "./ui";
+import { Button, CopyCommand, GithubIcon as Github, INSTALL_HOST, Logo, REPO, Screenshot, cx } from "./ui";
 
 const LINKS = [
   ["Features", "#features"],
@@ -36,7 +36,7 @@ export function Nav() {
         className={cx(
           "notch pointer-events-auto relative w-full transition-[max-width,background-color,border-color,border-radius,box-shadow] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]",
           notch
-            ? "notch--on max-w-[calc(100%-24px)] rounded-b-[20px] border border-t-0 border-line-strong bg-[#0d0d0c]/92 shadow-[0_18px_40px_-18px_rgb(0_0_0/0.8)] backdrop-blur-md sm:max-w-[780px]"
+            ? "notch--on max-w-[calc(100%-24px)] rounded-b-[20px] border border-t-0 border-line-strong bg-[#0d0d0c]/92 shadow-[0_18px_40px_-18px_rgb(0_0_0/0.8)] backdrop-blur-md sm:max-w-[min(780px,calc(100%-48px))]"
             : "max-w-[1200px] rounded-b-none border border-t-0 border-transparent",
         )}
       >
@@ -94,7 +94,7 @@ export function Nav() {
             ))}
           </div>
         )}
-        <motion.div
+        <m.div
           aria-hidden
           className={cx(
             "absolute inset-x-5 -bottom-px h-px origin-left bg-gradient-to-r from-ember-1 via-accent to-[#ffd2b8] transition-opacity duration-500",
@@ -107,9 +107,10 @@ export function Nav() {
   );
 }
 
+// Opacity and transform only: both run on the compositor, even on weak GPUs.
 const rise = (delay: number) => ({
-  initial: { opacity: 0, y: 18, filter: "blur(6px)" },
-  animate: { opacity: 1, y: 0, filter: "blur(0px)" },
+  initial: { opacity: 0, y: 18 },
+  animate: { opacity: 1, y: 0 },
   transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] as const, delay },
 });
 
@@ -123,20 +124,23 @@ const SCREENS = [
 
 export function Hero() {
   const windowRef = useRef<HTMLDivElement>(null);
-  const webgl = useWebgl2();
+  const webgl = useShader();
+  // The shader reveals the first screen under the cursor: hand it the exact
+  // file the <picture> picked, so it comes from cache instead of a second download.
+  const [reveal, setReveal] = useState<string>();
   return (
     <section id="top" className="relative overflow-hidden pt-16">
       <div aria-hidden className="pointer-events-none hero-bg absolute inset-0">
         <div className="glyph-field glyph-field--dim" />
         <div className="glyph-field glyph-field--hot" />
         <HeroShards />
-        {webgl && <LaserLanding surfaceRef={windowRef} className="inset-x-0 top-0" revealImage="/app/apps.jpg" />}
+        {webgl && <LaserLanding surfaceRef={windowRef} className="inset-x-0 top-0" revealImage={reveal} />}
         <div className="absolute inset-x-0 top-0 h-[560px] bg-[radial-gradient(ellipse_55%_80%_at_75%_0%,color-mix(in_srgb,var(--cool)_11%,transparent),transparent_70%)]" />
       </div>
 
       <div className="relative mx-auto max-w-[1200px] px-4 sm:px-6 lg:px-8">
         <div className="relative pl-[var(--indent)] pt-12 sm:pt-16">
-          <motion.a
+          <m.a
             {...rise(0)}
             href={REPO}
             target="_blank"
@@ -146,9 +150,9 @@ export function Hero() {
             <span className="size-1.5 rounded-[1px] bg-accent" />
             <span className="shiny">Now open source · MIT licensed</span>
             <ArrowRight className="size-3 text-fg-dim transition-transform group-hover:translate-x-0.5" />
-          </motion.a>
+          </m.a>
 
-          <motion.h1
+          <m.h1
             {...rise(0.08)}
             className="mt-6 max-w-[18ch] text-[clamp(40px,6.2vw,84px)] leading-[0.96] font-medium tracking-[-0.045em]"
           >
@@ -158,29 +162,29 @@ export function Hero() {
             <span className="text-headline"> on the </span>
             <span className="serif text-headline text-[1.1em]">laptop</span>
             <span className="text-headline"> in your drawer.</span>
-          </motion.h1>
+          </m.h1>
 
-          <motion.p {...rise(0.18)} className="mt-6 max-w-[600px] text-[17px] leading-[1.6] text-fg-muted sm:text-[18px]">
+          <m.p {...rise(0.18)} className="mt-6 max-w-[600px] text-[17px] leading-[1.6] text-fg-muted sm:text-[18px]">
             Vercelify turns a spare PC, old laptop or Raspberry Pi into a hosting platform: push-to-deploy, pull request
             previews, rollbacks, databases and HTTPS on your own domain. Free, forever.
-          </motion.p>
+          </m.p>
 
-          <motion.div {...rise(0.26)} className="mt-8 flex flex-wrap items-center gap-3">
+          <m.div {...rise(0.26)} className="mt-8 flex flex-wrap items-center gap-3">
             <Button href="#install">
               Install on your laptop <ArrowRight className="size-3.5" />
             </Button>
             <Button href={REPO} variant="ghost">
               <Github className="size-3.5" /> Star on GitHub
             </Button>
-          </motion.div>
+          </m.div>
 
-          <motion.div {...rise(0.34)} className="mt-5 max-w-[520px]">
+          <m.div {...rise(0.34)} className="mt-5 max-w-[520px]">
             <CopyCommand command={INSTALL_HOST} display="curl -fsSL …/vercelify-oss/main/install.sh | sudo bash" />
             <p className="mt-2.5 pl-1 font-mono text-[11px] text-fg-muted">Ubuntu 24.04 · Debian 12 · Raspberry Pi OS 64-bit</p>
-          </motion.div>
+          </m.div>
         </div>
 
-        <Showcase windowRef={windowRef} pour={webgl === false} />
+        <Showcase windowRef={windowRef} pour={webgl === false} onFirstLoad={setReveal} />
       </div>
     </section>
   );
@@ -191,7 +195,15 @@ export function Hero() {
  * corner, the light runs along the top edge and down the left side (where
  * the page rail picks it up) and spills a little into the window.
  */
-function Showcase({ windowRef, pour }: { windowRef: RefObject<HTMLDivElement | null>; pour: boolean }) {
+function Showcase({
+  windowRef,
+  pour,
+  onFirstLoad,
+}: {
+  windowRef: RefObject<HTMLDivElement | null>;
+  pour: boolean;
+  onFirstLoad: (src: string) => void;
+}) {
   const [i, setI] = useState(0);
   const [auto, setAuto] = useState(true);
   useEffect(() => {
@@ -201,7 +213,7 @@ function Showcase({ windowRef, pour }: { windowRef: RefObject<HTMLDivElement | n
   }, [auto]);
 
   return (
-    <motion.div
+    <m.div
       initial={{ opacity: 0, y: 40 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1], delay: 0.45 }}
@@ -254,15 +266,14 @@ function Showcase({ windowRef, pour }: { windowRef: RefObject<HTMLDivElement | n
         </div>
         <div className="relative aspect-[2720/1640]">
           {SCREENS.map((s, n) => (
-            <img
+            <Screenshot
               key={s.id}
               src={`/app/${s.id}.jpg`}
               alt={s.alt}
-              width={2720}
-              height={1720}
+              sizes="(min-width: 1200px) 1136px, calc(100vw - 32px)"
               loading={n === 0 ? "eager" : "lazy"}
-              decoding="async"
-              draggable={false}
+              fetchPriority={n === 0 ? "high" : "low"}
+              onLoad={n === 0 ? (e) => onFirstLoad(e.currentTarget.currentSrc) : undefined}
               className={cx(
                 "absolute inset-0 size-full object-cover object-top transition-opacity duration-500",
                 i === n ? "opacity-100" : "opacity-0",
@@ -281,6 +292,6 @@ function Showcase({ windowRef, pour }: { windowRef: RefObject<HTMLDivElement | n
           <div aria-hidden className="impact" />
         </>
       )}
-    </motion.div>
+    </m.div>
   );
 }

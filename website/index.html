@@ -10,6 +10,16 @@
       content="Open-source, self-hosted hosting for the laptop in your drawer. Push-to-deploy, pull request previews, rollbacks, databases and HTTPS on your own domain. Free, forever."
     />
     <meta name="theme-color" content="#0b0b0a" />
+    <meta name="color-scheme" content="dark" />
+    <!-- The hero's first screen: fetched with the HTML instead of after the JS. Matches Hero.tsx's sizes. -->
+    <link
+      rel="preload"
+      as="image"
+      type="image/avif"
+      imagesrcset="/app/apps-1360.avif 1360w, /app/apps.avif 2720w"
+      imagesizes="(min-width: 1200px) 1136px, calc(100vw - 32px)"
+      fetchpriority="high"
+    />
     <meta property="og:title" content="Vercelify · Your own Vercel on an old laptop" />
     <meta
       property="og:description"

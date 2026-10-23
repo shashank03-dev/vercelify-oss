@@ -18,11 +18,11 @@ function Feature({
   return (
     <Reveal delay={delay} className={className}>
       <Card className="flex h-full flex-col">
-        <div className="p-6 pb-0 sm:p-7 sm:pb-0">
+        <div className="p-5 pb-0 sm:p-7 sm:pb-0">
           <h3 className="text-[17px] font-medium tracking-tight">{title}</h3>
           <p className="mt-2 max-w-[46ch] text-[14.5px] leading-relaxed text-fg-muted">{body}</p>
         </div>
-        <div className="relative mt-6 flex-1 px-6 pb-6 sm:px-7 sm:pb-7">{children}</div>
+        <div className="relative mt-6 flex-1 px-5 pb-5 sm:px-7 sm:pb-7">{children}</div>
       </Card>
     </Reveal>
   );
@@ -30,15 +30,15 @@ function Feature({
 
 export function Features() {
   return (
-    <Section id="features" className="pb-32">
+    <Section id="features" className="pb-20 sm:pb-32">
       <SectionHeader
         eyebrow="Features"
         title="Everything you deploy with today."
         muted="Running on a machine you own, with nothing to pay."
       />
-      <div className="mt-14 grid gap-4 [&>*]:min-w-0 lg:grid-cols-6">
+      <div className="mt-10 grid gap-4 [&>*]:min-w-0 sm:mt-14 md:grid-cols-2 lg:grid-cols-6">
         <Feature
-          className="lg:col-span-4"
+          className="md:col-span-2 lg:col-span-4"
           title="Push to deploy"
           body="Push to a branch and your app builds and goes live. It works behind any home router: no webhooks, no open ports."
         >
@@ -104,6 +104,7 @@ function Deployments() {
       alt="Deployment history for portfolio: production, a pull request preview, a failed build and rollbacks"
       pos="64% 50%"
       zoom={1.55}
+      width="(min-width: 1024px) 680px, (min-width: 768px) 90vw, 100vw"
       className="aspect-[16/8]"
     />
   );

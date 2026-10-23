@@ -1,3 +1,4 @@
+import { LazyMotion, domAnimation } from "framer-motion";
 import { BeamTrack } from "./components/Beam";
 import { Compare, Faq, FinalCta, Footer, Horizon } from "./components/Closing";
 import { Features } from "./components/Features";
@@ -8,8 +9,9 @@ import { Hardware, Network } from "./components/Machine";
 import { Steps } from "./components/Steps";
 
 export default function App() {
+  // Only the DOM animation features ship (m.* components, not motion.*).
   return (
-    <>
+    <LazyMotion features={domAnimation} strict>
       <Nav />
       <main>
         <Hero />
@@ -29,6 +31,6 @@ export default function App() {
         </BeamTrack>
         <Horizon />
       </main>
-    </>
+    </LazyMotion>
   );
 }

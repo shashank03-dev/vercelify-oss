@@ -1,11 +1,23 @@
-import { type RefObject, useEffect, useRef, useState } from "react";
-import LaserFlow, { type LaserFlowProps } from "./LaserFlow/LaserFlow.jsx";
-import { cx } from "./ui";
+import { lazy, type RefObject, Suspense, useEffect, useRef, useState } from "react";
+import type { LaserFlowProps } from "./LaserFlow/LaserFlow.jsx";
+import { cx, weakDevice } from "./ui";
 
-/** WebGL2 decides between the shader beam and the CSS fallbacks. */
-export function useWebgl2() {
+// Fetched only when a shader actually runs, so phones never download it.
+const LaserFlow = lazy(() => import("./LaserFlow/LaserFlow.jsx"));
+
+/**
+ * Shader beam or CSS fallback. The shader needs WebGL2 and a machine that can
+ * afford a full-width fragment shader every frame; phones, tablets, weak
+ * hardware and data-saver get the CSS pour, which is only gradients and
+ * transforms. `null` until decided on the client.
+ */
+export function useShader() {
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => {
+    if (weakDevice() || window.matchMedia("(max-width: 767px), (pointer: coarse)").matches) {
+      setOk(false);
+      return;
+    }
     try {
       setOk(!!document.createElement("canvas").getContext("webgl2"));
     } catch {
@@ -107,7 +119,11 @@ export function LaserLanding({
       )}
       style={{ height: box.height || "100%" }}
     >
-      {box.height > 0 && <LaserFlow surfaceRef={surfaceRef} beamPosition={box.beam} {...EMBER} {...props} />}
+      {box.height > 0 && (
+        <Suspense fallback={null}>
+          <LaserFlow surfaceRef={surfaceRef} beamPosition={box.beam} {...EMBER} {...props} />
+        </Suspense>
+      )}
     </div>
   );
 }
