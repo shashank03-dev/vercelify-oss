@@ -146,17 +146,25 @@ pick_model() {
 }
 
 why_gemini() { # MESSAGES → answer (Gemma 4 through the Gemini API)
-  local body out err
+  local body out err answer try
   [[ -n "${GEMINI_API_KEY:-}" ]] || die "GEMINI_API_KEY is not set — create a free key at https://aistudio.google.com/apikey and export it"
   # Gemma takes the instructions as part of the user turn.
+  # Without minimal thinking, Gemma 4 spends the whole token budget on thought parts.
   body=$(jq -c '{contents: [{role: "user", parts: [{text: (map(.content) | join("\n\n"))}]}],
-    generationConfig: {temperature: 0.2, maxOutputTokens: 1024}}' <<<"$1")
-  out=$(printf 'header = "x-goog-api-key: %s"\n' "$GEMINI_API_KEY" |
-    curl -sS -K - -X POST -H 'Content-Type: application/json' --max-time 180 --data "$body" \
-      "${GEMINI_URL%/}/models/$GEMINI_MODEL:generateContent") || die "cannot reach the Gemini API"
-  err=$(jq -r '.error.message // empty' <<<"$out" 2>/dev/null || echo "unexpected answer from the Gemini API")
+    generationConfig: {temperature: 0.2, maxOutputTokens: 1024, thinkingConfig: {thinkingLevel: "minimal"}}}' <<<"$1")
+  # The API sometimes answers 500/503 for a moment: try up to three times.
+  for try in 1 2 3; do
+    out=$(printf 'header = "x-goog-api-key: %s"\n' "$GEMINI_API_KEY" |
+      curl -sS -K - -X POST -H 'Content-Type: application/json' --max-time 180 --data "$body" \
+        "${GEMINI_URL%/}/models/$GEMINI_MODEL:generateContent") || die "cannot reach the Gemini API"
+    err=$(jq -r '.error.message // empty' <<<"$out" 2>/dev/null || echo "unexpected answer from the Gemini API")
+    (( try < 3 )) && [[ "$(jq -r '.error.code // 0' <<<"$out" 2>/dev/null)" =~ ^50[03]$ ]] || break
+    sleep "$try"
+  done
   [[ -z "$err" ]] || die "Gemini API: $err"
-  jq -r '[.candidates[0].content.parts[]? | select(.thought != true) | .text] | join("") | sub("^\\s+"; "")' <<<"$out"
+  answer=$(jq -r '[.candidates[0].content.parts[]? | select(.thought != true) | .text] | join("") | sub("^\\s+"; "")' <<<"$out")
+  [[ -n "$answer" ]] || die "Gemini API: empty answer ($(jq -r '.candidates[0].finishReason // "no candidates"' <<<"$out"))"
+  printf '%s\n' "$answer"
   printf '\n%s— %s via the Gemini API (Gemma 4, Apache 2.0)%s\n' "$D" "$GEMINI_MODEL" "$N"
 }
 

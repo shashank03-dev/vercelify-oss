@@ -34,6 +34,8 @@ FAILED_LOG = json.dumps([
 ])
 ANSWER = ["**Cause:** ", "the import uses `Header` but the file is `header.tsx`.\n", "**Fix:** rename it.\n", "**Check:** `npm run build`"]
 
+FLAKED = []
+
 
 def ndjson(model):
     if model.startswith("missing"):
@@ -96,11 +98,19 @@ class H(BaseHTTPRequestHandler):
             return self.stream(ndjson(json.loads(raw)["model"]))
         # Gemma 4 through the Gemini API.
         if p.startswith("/v1beta/models/"):
-            if self.headers.get("x-goog-api-key") != "gem-key":
+            # "gem-flaky" gets one 500 first, as the real API sometimes answers.
+            if self.headers.get("x-goog-api-key") == "gem-flaky" and not FLAKED:
+                FLAKED.append(1)
+                return self.reply(500, {"error": {"code": 500, "message": "Internal error encountered."}})
+            if self.headers.get("x-goog-api-key") not in ("gem-key", "gem-flaky"):
                 return self.reply(400, {"error": {"code": 400, "message": "API key not valid. Please pass a valid API key."}})
             if p != "/v1beta/models/gemma-4-26b-a4b-it:generateContent":
                 return self.reply(404, {"error": {"code": 404, "message": "model not found"}})
-            return self.reply(200, {"candidates": [{"content": {"role": "model", "parts": [
+            # Like the real API: without minimal thinking, thoughts use up the budget.
+            if json.loads(raw)["generationConfig"].get("thinkingConfig") != {"thinkingLevel": "minimal"}:
+                return self.reply(200, {"candidates": [{"finishReason": "MAX_TOKENS", "content": {"role": "model", "parts": [
+                    {"text": "thinking about the import…", "thought": True}]}}]})
+            return self.reply(200, {"candidates": [{"finishReason": "STOP", "content": {"role": "model", "parts": [
                 {"text": "thinking about the import…", "thought": True}, {"text": "".join(ANSWER)}]}}]})
         if p.startswith("/v1/"):
             if auth != "Bearer agent-secret":
