@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stub admin CLI: `vercelify update`.
+echo "vercelify $* noninteractive=$VERCELIFY_NONINTERACTIVE" >> "${STUB_LOG:-/dev/null}"
+printf '\033[34m==>\033[0m Downloading Vercelify\n  ✓ agent 0.2.0 running on :7420\n'
+exit 0

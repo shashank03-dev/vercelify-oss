@@ -1,0 +1,30 @@
+[Unit]
+Description=Vercelify host agent (cockpit API over Tailscale)
+Documentation=https://github.com/shashank03-dev/vercelify-oss
+After=network-online.target tailscaled.service docker.service
+Wants=network-online.target tailscaled.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/vercelify-agent --config /etc/vercelify/agent.toml serve
+Restart=always
+RestartSec=3
+Environment=RUST_LOG=info,tower_http=warn
+# Root is required for docker, chown of volume directories and systemctl;
+# everything else is locked down.
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=read-only
+# Pools: a worker authorises the main host's Coolify key for root.
+ReadWritePaths=-/root/.ssh
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

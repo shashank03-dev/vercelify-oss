@@ -1,0 +1,42 @@
+# Vercelify agent configuration. Restart after editing:
+#   sudo systemctl restart vercelify-agent
+
+# "tailscale" = this machine's Tailscale IPv4 (private to your tailnet).
+listen = ["tailscale", "127.0.0.1"]
+port = 7420
+token_file = "/etc/vercelify/agent.token"
+
+storage_mount = "/mnt/storage"
+hdd_volume_root = "/mnt/storage/volumes"
+# Refuse to create HDD volumes when the HDD is not mounted (protects the SSD).
+require_storage_mount = true
+
+# Display receiver: "drm" draws straight to the laptop panel (no desktop
+# needed). Use "x11"/"wayland" plus display_env when a desktop is running:
+#   display_backend = "x11"
+#   display_env = { DISPLAY = ":0", XAUTHORITY = "/home/you/.Xauthority" }
+display_backend = "auto"
+mpv_extra_args = []
+
+services = ["docker", "tailscaled", "cloudflared", "sunshine", "vercelify-power-guard", "vercelify-firewall", "vercelify-agent"]
+
+# Auto-deploy: seconds between checks of watched branches (min 15; 0 = only
+# when you press "Check now").
+#   autodeploy_interval_secs = 60
+
+# Local AI models (Ollama). Defaults shown.
+#   ollama_image = "ollama/ollama:0.40.6"   (tested; newer tags at your own risk)
+#   ollama_port = 11434
+
+# Sleeping apps (main server): Traefik sends visits to a sleeping app here.
+# Empty turns sleeping off. The firewall keeps the port to Docker's bridges.
+#   wake_listen = "0.0.0.0:7421"
+#   traefik_metrics_url = "http://127.0.0.1:8080/metrics"
+#   proxy_dir = "/data/coolify/proxy"
+
+# Project rules from vercel.json (apps' redirects, rewrites, firewall, cron jobs).
+# A rewrite to this machine or a private network would publish it on the app's
+# domain, so it is refused unless this is true.
+#   rewrite_private_targets = false
+#   proxy_http_port = 80          (cron jobs call apps through the proxy here)
+#   proxy_https_port = 443

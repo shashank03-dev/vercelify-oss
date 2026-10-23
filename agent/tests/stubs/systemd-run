@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stub systemd-run: records the call and runs the command right away.
+echo "systemd-run $*" >> "${STUB_LOG:-/dev/null}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --setenv=*) export "${1#--setenv=}"; shift ;;
+    --*) shift ;;
+    *) break ;;
+  esac
+done
+"$@" &
+exit 0

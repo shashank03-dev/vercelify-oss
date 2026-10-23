@@ -1,0 +1,10 @@
+# Debian 12 with systemd as PID 1, for running the real installer in CI-like
+# conditions. Run privileged (nested Docker, loop devices, iptables).
+FROM debian:12
+ENV container=docker DEBIAN_FRONTEND=noninteractive
+RUN apt-get update -qq \
+ && apt-get install -y -qq --no-install-recommends systemd systemd-sysv udev dbus ca-certificates curl sudo kmod iproute2 \
+ && rm -rf /var/lib/apt/lists/* \
+ && systemctl mask systemd-firstboot.service getty@tty1.service console-getty.service
+STOPSIGNAL SIGRTMIN+3
+CMD ["/sbin/init"]

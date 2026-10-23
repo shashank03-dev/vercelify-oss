@@ -1,0 +1,5 @@
+#!/bin/sh
+# Stub mpv: records args, prints a warning, then waits like a player would.
+echo "mpv $*" >> "${STUB_LOG:-/dev/null}"
+echo "[stub] waiting for stream" >&2
+exec sleep 300

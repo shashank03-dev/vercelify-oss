@@ -1,0 +1,11 @@
+target/
+node_modules/
+dist/
+cockpit/src-tauri/gen/
+*.log
+.DS_Store
+/test-results/
+/playwright-report/
+.env
+/e2e-logs/
+*.tsbuildinfo

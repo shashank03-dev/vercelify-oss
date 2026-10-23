@@ -1,0 +1,111 @@
+name: Release
+
+# Push a tag like v0.1.0 to publish:
+#   - vercelify-agent-<target> (+ .sha256) — the installer downloads these
+#   - the cockpit app: macOS universal .dmg, Linux .deb and .AppImage
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  agent:
+    name: Agent ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag matches the version (the installer fetches the agent of its own version)
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          [ "${GITHUB_REF_NAME}" = "v$v" ] || { echo "tag ${GITHUB_REF_NAME} != v$v in Cargo.toml"; exit 1; }
+          grep -q "\"version\": \"$v\"" cockpit/src-tauri/tauri.conf.json || { echo "tauri.conf.json version differs"; exit 1; }
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: pip install cargo-zigbuild
+      - run: cargo zigbuild --release --locked -p vercelify-agent --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          mkdir -p out
+          cp target/${{ matrix.target }}/release/vercelify-agent out/vercelify-agent-${{ matrix.target }}
+          cd out && sha256sum vercelify-agent-${{ matrix.target }} > vercelify-agent-${{ matrix.target }}.sha256
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: out/*
+
+  cockpit:
+    name: Cockpit ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (universal)
+            os: macos-14
+            args: --target universal-apple-darwin
+          - name: Linux
+            os: ubuntu-22.04
+            args: ""
+    runs-on: ${{ matrix.os }}
+    env:
+      # Signing and notarisation turn on when the repository has these secrets
+      # (Settings → Secrets → Actions): APPLE_CERTIFICATE (base64 .p12 of a
+      # "Developer ID Application" certificate), APPLE_CERTIFICATE_PASSWORD,
+      # APPLE_SIGNING_IDENTITY, APPLE_ID, APPLE_PASSWORD (an app-specific
+      # password) and APPLE_TEAM_ID. Without them the build is unsigned.
+      HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_ID != '' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Sign and notarise the macOS app
+        if: runner.os == 'macOS' && env.HAS_APPLE_SIGNING == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        # tauri-action reads these from the environment: set them only when
+        # all are present, so a half-configured repository still builds.
+        run: |
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!v}" ] || { echo "::warning::$v is not set — building unsigned"; exit 0; }
+          done
+          for v in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID; do
+            echo "::add-mask::${!v}"
+            echo "$v=${!v}" >>"$GITHUB_ENV"
+          done
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cockpit/package-lock.json
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - name: Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - run: npm ci
+        working-directory: cockpit
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: cockpit
+          args: ${{ matrix.args }}
+          tagName: ${{ github.ref_name }}
+          releaseName: Vercelify ${{ github.ref_name }}
+          releaseBody: |
+            **Host:** `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash`
+            **Mac:** download the `.dmg` below (or `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install-mac.sh | bash`). If this release isn't signed: right-click → Open the first time.
+          releaseDraft: false

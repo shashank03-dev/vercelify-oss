@@ -1,0 +1,332 @@
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "tailwindcss";
+
+/*
+ * Design tokens. Components only use the semantic names below (bg-surface,
+ * text-fg-muted, border-line, …), so a theme is just a different set of
+ * values for these variables. Dark is the default; light follows the system
+ * or the user's choice via <html data-theme>.
+ *
+ * Layering (after Linear's 2026 refresh and shadcn's inset sidebar): the
+ * window chrome and sidebar sit on --bg, the page lives on a raised --panel,
+ * cards on --surface. Neutrals are a warm, low-chroma graphite; the ember
+ * accent is the only saturated colour besides status.
+ */
+:root {
+  color-scheme: dark;
+  --bg: #0b0b0a;
+  --bg-sidebar: #0b0b0a;
+  --panel: #121211;
+  --surface: #171716;
+  --surface-2: #1c1c1a;
+  --surface-3: #252522;
+  --overlay: #1a1a18;
+  --line: rgb(255 250 240 / 0.065);
+  --line-strong: rgb(255 250 240 / 0.115);
+  --fg: #edece9;
+  --fg-muted: #a09e98;
+  --fg-dim: #6b6964;
+  --inverse: #0b0b0a;
+
+  --accent: #ff6a3d;
+  --accent-fg: #ff8a5c;
+  --accent-soft: #ffd596;
+  /* Status: muted and slightly warm so it sits in the graphite, not on top of it. */
+  --ok: #6fb58c;
+  --warn: #d4a24c;
+  --bad: #e06c5f;
+
+  --shadow-lg: 0 24px 60px -24px rgb(0 0 0 / 0.7), 0 0 0 1px var(--line);
+  --shadow-panel: 0 0 0 1px var(--line), 0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  --grid-dot: rgb(255 255 255 / 0.06);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f1f0ed;
+  --bg-sidebar: #f1f0ed;
+  --panel: #fbfbfa;
+  --surface: #ffffff;
+  --surface-2: #f6f5f3;
+  --surface-3: #ebeae6;
+  --overlay: #ffffff;
+  --line: rgb(40 30 20 / 0.085);
+  --line-strong: rgb(40 30 20 / 0.15);
+  --fg: #1b1a18;
+  --fg-muted: #5f5d58;
+  --fg-dim: #8e8b85;
+  --inverse: #ffffff;
+
+  --accent: #f0552a;
+  --accent-fg: #d9461d;
+  --ok: #3d8a5f;
+  --warn: #a67718;
+  --bad: #c2483b;
+
+  --shadow-lg: 0 24px 60px -28px rgb(40 30 20 / 0.28), 0 0 0 1px var(--line);
+  --shadow-panel: 0 0 0 1px var(--line), 0 1px 2px 0 rgb(40 30 20 / 0.05), 0 8px 24px -16px rgb(40 30 20 / 0.12);
+  --grid-dot: rgb(40 30 20 / 0.08);
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-sidebar: var(--bg-sidebar);
+  --color-panel: var(--panel);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-overlay: var(--overlay);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--fg);
+  --color-fg-muted: var(--fg-muted);
+  --color-fg-dim: var(--fg-dim);
+  --color-inverse: var(--inverse);
+  --color-accent: var(--accent);
+  --color-accent-fg: var(--accent-fg);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-bad: var(--bad);
+  --font-sans: "Geist Variable", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "Geist Mono Variable", ui-monospace, "SF Mono", Menlo, monospace;
+  --shadow-lg: var(--shadow-lg);
+  --shadow-panel: var(--shadow-panel);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  font-feature-settings: "ss01", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Text the user may want to copy stays selectable. */
+input,
+textarea,
+pre,
+code,
+.selectable {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+
+/* Brand gradient, taken from the logo. Use for brand moments only. */
+@utility text-brand {
+  background: linear-gradient(100deg, #ff4a2b, #ff8a4a 55%, #ffd596);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Dot grid background (static: no canvas, no animation, cheap on old GPUs). */
+@utility dot-grid {
+  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
+  background-size: 18px 18px;
+}
+
+/*
+ * Pointer spotlight (after React Bits' Spotlight Card): the component only
+ * writes --mx/--my on pointermove, the glow is a background layer, so there
+ * is no per-frame JS and nothing to clip.
+ */
+@utility spotlight {
+  background-image: radial-gradient(
+    420px circle at var(--mx, -999px) var(--my, -999px),
+    color-mix(in srgb, var(--fg) 4.5%, transparent),
+    transparent 60%
+  );
+}
+
+@keyframes stream {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(300%);
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 8px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* In the base layer so utilities like outline-none can opt out. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- Motion primitives (see ui.tsx). All CSS, so old GPUs only composite. --- */
+
+/* Text shimmer wave: each letter lifts and brightens in turn. */
+.shimmer-wave > span {
+  display: inline-block;
+  color: var(--fg-dim);
+  animation: shimmer-wave 1.8s ease-in-out infinite;
+  animation-delay: calc(var(--i) * 55ms);
+}
+@keyframes shimmer-wave {
+  0%,
+  40%,
+  100% {
+    transform: translateY(0);
+    color: var(--fg-dim);
+  }
+  15% {
+    transform: translateY(-1.5px);
+    color: var(--fg);
+  }
+}
+
+/* Pixel wave: a small grid that lights up along its diagonal. */
+.pixel-wave > span {
+  border-radius: 1.5px;
+  background: var(--accent);
+  animation: pixel-wave 1.4s ease-in-out infinite;
+  animation-delay: calc(var(--d) * 110ms);
+}
+@keyframes pixel-wave {
+  0%,
+  100% {
+    opacity: 0.12;
+    transform: scale(0.72);
+  }
+  35% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* Chaotic dots: a strip of dots twinkling out of step. */
+.chaos-dots > span {
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--fg-dim);
+  animation: chaos-dot var(--t) ease-in-out infinite;
+  animation-delay: var(--d);
+}
+.chaos-dots > span[data-hot] {
+  background: var(--accent);
+}
+@keyframes chaos-dot {
+  0%,
+  100% {
+    opacity: 0.12;
+  }
+  50% {
+    opacity: 0.85;
+  }
+}
+
+/* Orbit: a short arc of ember light travelling around a button's border. */
+@property --orbit {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.orbit-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  background: conic-gradient(
+    from var(--orbit),
+    transparent 0deg 250deg,
+    color-mix(in srgb, var(--accent) 60%, transparent) 310deg,
+    var(--accent-soft) 345deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: orbit 1.8s linear infinite;
+}
+.orbit-ring[data-glow] {
+  inset: -2px;
+  padding: 3px;
+  filter: blur(4px);
+  opacity: 0.55;
+}
+@keyframes orbit {
+  to {
+    --orbit: 360deg;
+  }
+}
+
+/* Sparks drifting inside a busy orbit button. */
+.orbit-spark {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--fg);
+  opacity: 0;
+  animation: spark 2.4s ease-in-out infinite;
+  animation-delay: var(--d);
+}
+@keyframes spark {
+  0%,
+  100% {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+  50% {
+    opacity: 0.5;
+    transform: translateY(-3px);
+  }
+}
+
+/* Upload beam: a bright segment sweeping along a progress track. */
+@keyframes beam {
+  from {
+    transform: translateX(-120%);
+  }
+  to {
+    transform: translateX(420%);
+  }
+}

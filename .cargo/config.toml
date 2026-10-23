@@ -1,0 +1,4 @@
+[env]
+# ts-rs: emit plain `number` for 64-bit ints (values stay well below 2^53)
+TS_RS_LARGE_INT = "number"
+TS_RS_EXPORT_DIR = { value = "cockpit/src/types/generated", relative = true }

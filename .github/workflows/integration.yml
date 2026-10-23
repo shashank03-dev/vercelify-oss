@@ -1,0 +1,95 @@
+name: Integration
+
+# Slower checks against real software, run when the code they cover changes,
+# every Monday (to catch upstream changes early) and on demand:
+#   - the Coolify contract: schema, API routes, the agent's SQL, the proxy
+#     edit and a full sleep/wake cycle against the Coolify version the
+#     installer pins (COOLIFY_TESTED_VERSION), and against Coolify's newest
+#     release as an early warning
+#   - project rules (vercel.json) against a real Traefik: redirects,
+#     rewrites, headers, firewall and cron jobs through the agent, on apps
+#     labelled the way Coolify labels them
+#   - the real installer in a systemd container (Docker, Tailscale, Coolify,
+#     agent, guard, firewall), twice, to prove it is idempotent
+on:
+  pull_request:
+    paths:
+      - host/lib/coolify.sh
+      - host/setup-host.sh
+      - host/lib/**
+      - host/tests/contract/**
+      - host/tests/integration/**
+      - agent/src/coolify.rs
+      - agent/src/sleep.rs
+      - agent/src/watch.rs
+      - agent/src/doctor.rs
+      - agent/src/project.rs
+      - agent/src/projects.rs
+      - agent/src/routing.rs
+      - agent/src/cron.rs
+      - .github/workflows/integration.yml
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+concurrency:
+  group: integration-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coolify-contract:
+    name: Coolify contract (${{ matrix.version }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        version: [pinned, newest]
+    # The newest Coolify is an early warning, not a gate.
+    continue-on-error: ${{ matrix.version == 'newest' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p vercelify-agent
+      - name: Pick the Coolify version
+        run: |
+          if [ "${{ matrix.version }}" = newest ]; then
+            echo "COOLIFY_VERSION=$(curl -fsSL https://cdn.coollabs.io/coolify/versions.json | jq -r .coolify.v4.version)" >>"$GITHUB_ENV"
+          fi
+      - name: Contract
+        run: sudo -E env "PATH=$PATH" AGENT_BIN="$PWD/target/debug/vercelify-agent" host/tests/contract/coolify.sh
+
+  routing-contract:
+    name: Project rules on Traefik (${{ matrix.traefik }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Coolify's default proxy, and an older one still found on servers
+        # (no status rewrite for fallbacks). Old Traefik speaks an API newer
+        # Docker versions refuse: an early warning, not a gate.
+        traefik: ["traefik:v3.7", "traefik:v3.4"]
+    continue-on-error: ${{ matrix.traefik != 'traefik:v3.7' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p vercelify-agent
+      - name: Contract
+        run: sudo -E env "PATH=$PATH" TRAEFIK_IMAGE="${{ matrix.traefik }}" AGENT_BIN="$PWD/target/debug/vercelify-agent" host/tests/contract/routing.sh
+
+  installer:
+    name: Installer on Debian 12 (systemd, real Coolify)
+    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'installer')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+      - run: pip install cargo-zigbuild
+      - run: cargo zigbuild --release -p vercelify-agent --target x86_64-unknown-linux-musl
+      - run: sudo AGENT_BINARY="$PWD/target/x86_64-unknown-linux-musl/release/vercelify-agent" REGISTRY_MIRROR=https://mirror.gcr.io host/tests/integration/run.sh

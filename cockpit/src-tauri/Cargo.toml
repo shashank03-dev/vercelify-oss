@@ -1,0 +1,26 @@
+[package]
+name = "vercelify-cockpit"
+description = "Vercelify cockpit: control your self-hosted PaaS from your Mac"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "vercelify_cockpit_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+vercelify-core = { workspace = true, features = ["collect"] }
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+reqwest.workspace = true
+tracing.workspace = true
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-opener = "2"
+tauri-plugin-notification = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }

@@ -1,0 +1,51 @@
+#!/bin/sh
+# Stub docker CLI for agent tests. Records calls in $STUB_LOG.
+echo "docker $*" >> "${STUB_LOG:-/dev/null}"
+case "$1" in
+  ps)
+    echo '{"ID":"a1b2c3d4e5f6","Image":"postgres:16","Labels":"coolify.managed=true,coolify.name=pg-main","Names":"pg-main","Ports":"5432/tcp","State":"running","Status":"Up 2 hours"}'
+    echo '{"ID":"0123456789ab","Image":"ghcr.io/coollabsio/coolify:4","Labels":"","Names":"coolify","Ports":"0.0.0.0:8000->8080/tcp","State":"running","Status":"Up 3 days (healthy)"}'
+    echo '{"ID":"ffffeeeedddd","Image":"alpine","Labels":"","Names":"scratch","Ports":"","State":"exited","Status":"Exited (0)"}'
+    ;;
+  stats)
+    echo '{"ID":"a1b2c3d4e5f6","CPUPerc":"2.50%","MemUsage":"100MiB / 7.6GiB","MemPerc":"1.28%"}'
+    echo '{"ID":"0123456789ab","CPUPerc":"0.30%","MemUsage":"300MiB / 7.6GiB","MemPerc":"3.85%"}'
+    ;;
+  logs)
+    for last; do :; done
+    [ "$last" = "missing" ] && { echo "Error: No such container: missing" >&2; exit 1; }
+    echo "2026-10-18T10:00:01Z stdout line"
+    echo "2026-10-18T10:00:00Z stderr line" >&2
+    ;;
+  volume)
+    case "$2" in
+      inspect) [ "$3" = "existing-data" ] && { echo '[{}]'; exit 0; }; echo "Error: no such volume" >&2; exit 1 ;;
+      create) for last; do :; done; echo "$last" ;;
+      ls) echo "existing-data"; echo "redis-data" ;;
+    esac
+    ;;
+  start|stop|restart|pause|unpause)
+    [ "$2" = "missing" ] && { echo "Error response from daemon: No such container: missing" >&2; exit 1; }
+    echo "$2"
+    ;;
+  inspect)
+    for last; do :; done
+    if [ "$last" = vercelify-ollama ] && [ -n "$STUB_OLLAMA_STATE" ]; then
+      case "$3" in
+        *Mounts*) echo "/var/lib/docker/volumes/ollama-models/_data" ;;
+        *) echo "$STUB_OLLAMA_STATE" ;;
+      esac
+    else
+      echo "Error: No such object: $last" >&2; exit 1
+    fi
+    ;;
+  pull|run|rm|network) echo "ok" ;;
+  image) exit 0 ;;
+  images) [ "$4" = app1 ] && printf '2222222\nlatest\n<none>\n'; exit 0 ;;
+  info) echo "27.3.1" ;;  # `image inspect`: the Ollama image is already here
+  exec)
+    # coolify-db psql: the localhost server's key uuid
+    echo "key-uuid-1"
+    ;;
+  *) echo "unexpected: $*" >&2; exit 2 ;;
+esac

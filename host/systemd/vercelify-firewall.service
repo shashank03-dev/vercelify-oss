@@ -1,0 +1,13 @@
+[Unit]
+Description=Vercelify firewall (control plane reachable only via Tailscale)
+After=docker.service tailscaled.service
+PartOf=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/lib/vercelify/firewall.sh apply
+ExecStop=/usr/local/lib/vercelify/firewall.sh remove
+
+[Install]
+WantedBy=multi-user.target docker.service

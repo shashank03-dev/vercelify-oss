@@ -1,0 +1,27 @@
+{
+  "url": "https://api.github.com/repos/shashank03-dev/vercelify-oss/releases/1",
+  "tag_name": "v0.2.0",
+  "name": "Vercelify v0.2.0",
+  "assets": [
+    {
+      "name": "vercelify-agent-x86_64-unknown-linux-musl",
+      "browser_download_url": "https://github.com/shashank03-dev/vercelify-oss/releases/download/v0.2.0/vercelify-agent-x86_64-unknown-linux-musl"
+    },
+    {
+      "name": "Vercelify_0.2.0_amd64.deb",
+      "browser_download_url": "https://github.com/shashank03-dev/vercelify-oss/releases/download/v0.2.0/Vercelify_0.2.0_amd64.deb"
+    },
+    {
+      "name": "Vercelify_0.2.0_aarch64.dmg",
+      "browser_download_url": "https://github.com/shashank03-dev/vercelify-oss/releases/download/v0.2.0/Vercelify_0.2.0_aarch64.dmg"
+    },
+    {
+      "name": "Vercelify_0.2.0_x64.dmg",
+      "browser_download_url": "https://github.com/shashank03-dev/vercelify-oss/releases/download/v0.2.0/Vercelify_0.2.0_x64.dmg"
+    },
+    {
+      "name": "Vercelify_universal.app.tar.gz",
+      "browser_download_url": "https://github.com/shashank03-dev/vercelify-oss/releases/download/v0.2.0/Vercelify_universal.app.tar.gz"
+    }
+  ]
+}

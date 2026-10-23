@@ -1,0 +1,56 @@
+name: Bug report
+description: Something isn't working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting! Running `sudo vercelify doctor` on the server and checking
+        [Troubleshooting](https://github.com/shashank03-dev/vercelify-oss/blob/main/docs/TROUBLESHOOTING.md)
+        first often finds the cause.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. …
+        2. …
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      multiple: true
+      options:
+        - Host installer / vercelify CLI
+        - Agent
+        - Cockpit desktop app
+        - vfy CLI
+        - Docs
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Vercelify version or commit (`vercelify version` on the server).
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: Server hardware and OS, Mac model and macOS version, Coolify version.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output, e.g. `journalctl -u vercelify-agent -n 100`. Remove tokens and secrets.
+      render: shell

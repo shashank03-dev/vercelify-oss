@@ -1,0 +1,13 @@
+#!/bin/sh
+# Stub git for auto-deploy tests: `ls-remote --heads URL refs/heads/BRANCH`
+# answers with the commit stored in $STUB_GIT_HEAD_FILE.
+auth=
+[ "$GIT_CONFIG_COUNT" = 1 ] && [ "$GIT_CONFIG_KEY_0" = http.extraHeader ] && auth=yes
+echo "git $* auth=$auth prompt=$GIT_TERMINAL_PROMPT" >> "${STUB_LOG:-/dev/null}"
+[ "$1" = ls-remote ] || { echo "unexpected: $*" >&2; exit 2; }
+case "$3" in
+  *private*) [ -n "$auth" ] || { echo "fatal: could not read Username for 'https://github.com': terminal prompts disabled" >&2; exit 128; } ;;
+esac
+branch=${4#refs/heads/}
+[ "$branch" = main ] || exit 2
+printf '%s\trefs/heads/main\n' "$(cat "$STUB_GIT_HEAD_FILE")"

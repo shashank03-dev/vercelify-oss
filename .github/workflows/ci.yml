@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: Rust (core, agent, cockpit backend)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: System libraries for Tauri
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: Placeholder frontend for tauri::generate_context!
+        run: mkdir -p cockpit/dist && echo '<!doctype html>' > cockpit/dist/index.html
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --workspace --all-features
+      - name: Generated TypeScript types are up to date
+        run: git diff --exit-code -- cockpit/src/types/generated
+
+  host:
+    name: Host scripts (ShellCheck + bats)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y shellcheck bats jq rsync
+      - run: shellcheck -x -S warning install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/*.bash host/tests/contract/*.sh
+      - run: bats host/tests
+      - name: Installer dry run on Debian 12
+        run: |
+          docker run --rm -v "$PWD":/src:ro debian:12 bash -ec '
+            apt-get update -qq && apt-get install -y -qq curl jq util-linux iproute2 >/dev/null
+            bash /src/host/setup-host.sh --dry-run -y --hostname ci --storage-device none'
+
+  arm64:
+    name: Raspberry Pi (arm64 under QEMU)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-musl
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: aarch64
+      - run: sudo apt-get update && sudo apt-get install -y qemu-user-static
+      - name: Agent and core tests as arm64 binaries
+        env:
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER: qemu-aarch64-static
+        run: cargo test -p vercelify-core -p vercelify-agent --target aarch64-unknown-linux-musl
+      - name: Host scripts on arm64 Debian 12 (what Raspberry Pi OS is built on)
+        run: |
+          docker run --rm --platform linux/arm64 -v "$PWD":/src:ro debian:12 bash -ec '
+            apt-get update -qq && apt-get install -y -qq bats jq rsync python3 curl util-linux iproute2 >/dev/null
+            mkdir /w && tar -C /src --exclude=./target --exclude=./.git -c . | tar -C /w -x && cd /w
+            bats host/tests'
+      - name: Installer dry run as a Raspberry Pi 5
+        run: |
+          docker run --rm --platform linux/arm64 -v "$PWD":/src:ro debian:12 bash -ec '
+            apt-get update -qq && apt-get install -y -qq curl jq util-linux iproute2 >/dev/null
+            printf "Raspberry Pi 5 Model B Rev 1.0\0" >/tmp/model
+            DEVICE_TREE_MODEL=/tmp/model NO_COLOR=1 bash /src/host/setup-host.sh --dry-run -y --hostname pi5 --storage-device none 2>&1 | tee /tmp/out
+            grep -q "hardware profile: pi5" /tmp/out
+            grep -q "zram swap" /tmp/out'
+
+  cockpit:
+    name: Cockpit frontend
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: cockpit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: cockpit/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npx vite build
+      - name: UI flows against the demo backend (Playwright)
+        run: |
+          npx playwright install --with-deps chromium
+          npm run e2e:demo
+        env:
+          CI: "1"
+
+  agent-binaries:
+    name: Agent (${{ matrix.target }})
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+      - run: pip install cargo-zigbuild
+      - run: cargo zigbuild --release --locked -p vercelify-agent --target ${{ matrix.target }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vercelify-agent-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/vercelify-agent

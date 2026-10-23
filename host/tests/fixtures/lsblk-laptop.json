@@ -1,0 +1,19 @@
+{
+   "blockdevices": [
+      {"name":"zram0","path":"/dev/zram0","type":"disk","size":4294967296,"fstype":"swap","uuid":null,"mountpoints":["[SWAP]"],"rm":false,"rota":false,"model":null,"tran":null,"label":null},
+      {"name":"sda","path":"/dev/sda","type":"disk","size":256060514304,"fstype":null,"uuid":null,"mountpoints":[null],"rm":false,"rota":false,"model":"SAMSUNG MZ7LN256HAJQ-000L7","tran":"sata","label":null,
+         "children": [
+            {"name":"sda1","path":"/dev/sda1","type":"part","size":536870912,"fstype":"vfat","uuid":"ABCD-1234","mountpoints":["/boot/efi"],"rm":false,"rota":false,"model":null,"tran":null,"label":null},
+            {"name":"sda2","path":"/dev/sda2","type":"part","size":247000000000,"fstype":"ext4","uuid":"11111111-2222-3333-4444-555555555555","mountpoints":["/"],"rm":false,"rota":false,"model":null,"tran":null,"label":null},
+            {"name":"sda3","path":"/dev/sda3","type":"part","size":8000000000,"fstype":"swap","uuid":"9999","mountpoints":["[SWAP]"],"rm":false,"rota":false,"model":null,"tran":null,"label":null}
+         ]
+      },
+      {"name":"sdb","path":"/dev/sdb","type":"disk","size":1000204886016,"fstype":null,"uuid":null,"mountpoints":[null],"rm":false,"rota":true,"model":"ST1000LM035-1RK172","tran":"sata","label":null,
+         "children": [
+            {"name":"sdb1","path":"/dev/sdb1","type":"part","size":1000203837440,"fstype":"ext4","uuid":"aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee","mountpoints":[null],"rm":false,"rota":true,"model":null,"tran":null,"label":"data"}
+         ]
+      },
+      {"name":"sdc","path":"/dev/sdc","type":"disk","size":31000000000,"fstype":"vfat","uuid":"USB1-0001","mountpoints":[null],"rm":true,"rota":false,"model":"USB Flash","tran":"usb","label":"STICK"},
+      {"name":"sr0","path":"/dev/sr0","type":"rom","size":1073741312,"fstype":null,"uuid":null,"mountpoints":[null],"rm":true,"rota":true,"model":"DVD","tran":"sata","label":null}
+   ]
+}

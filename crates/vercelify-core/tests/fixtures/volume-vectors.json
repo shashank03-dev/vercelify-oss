@@ -1,0 +1,13 @@
+[
+  {"tier": "hdd", "service": "postgres", "name": "data", "source": "/mnt/storage/volumes/postgres/data", "host_path": "/mnt/storage/volumes/postgres/data"},
+  {"tier": "hdd", "service": "minio", "name": null, "source": "/mnt/storage/volumes/minio", "host_path": "/mnt/storage/volumes/minio"},
+  {"tier": "hdd", "service": "app", "name": "/uploads//images/", "source": "/mnt/storage/volumes/app/uploads/images", "host_path": "/mnt/storage/volumes/app/uploads/images"},
+  {"tier": "ssd", "service": "redis", "name": "data", "source": "redis-data", "host_path": "/var/lib/docker/volumes/redis-data/_data"},
+  {"tier": "ssd", "service": "next-cache", "name": null, "source": "next-cache-data", "host_path": "/var/lib/docker/volumes/next-cache-data/_data"},
+  {"tier": "ssd", "service": "app", "name": "cache/img", "source": "app-cache-img", "host_path": "/var/lib/docker/volumes/app-cache-img/_data"},
+  {"tier": "hdd", "service": "Postgres", "name": "data", "error": "service"},
+  {"tier": "hdd", "service": "-bad", "name": null, "error": "service"},
+  {"tier": "hdd", "service": "pg", "name": "../etc", "error": "name"},
+  {"tier": "ssd", "service": "pg", "name": "a/./b", "error": "name"},
+  {"tier": "hdd", "service": "pg", "name": "with space", "error": "name"}
+]

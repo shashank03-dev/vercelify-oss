@@ -1,0 +1,13 @@
+#!/bin/sh
+echo "systemctl $*" >> "${STUB_LOG:-/dev/null}"
+case "$1" in
+  show)
+    for last; do :; done
+    case "$last" in
+      docker) printf 'ActiveState=active\nLoadState=loaded\nUnitFileState=enabled\n' ;;
+      sunshine) printf 'ActiveState=inactive\nLoadState=not-found\nUnitFileState=\n' ;;
+      *) printf 'ActiveState=inactive\nLoadState=loaded\nUnitFileState=disabled\n' ;;
+    esac ;;
+  start|stop|restart|reset-failed) exit 0 ;;
+  is-active) exit 3 ;;  # nothing is running (e.g. no update in progress)
+esac

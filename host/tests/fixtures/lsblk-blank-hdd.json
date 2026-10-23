@@ -1,0 +1,6 @@
+{"blockdevices":[
+  {"name":"nvme0n1","path":"/dev/nvme0n1","type":"disk","size":512110190592,"fstype":null,"uuid":null,"mountpoints":[null],"rm":false,"rota":false,"model":"WDC PC SN530","tran":"nvme","label":null,
+   "children":[{"name":"nvme0n1p1","path":"/dev/nvme0n1p1","type":"part","size":1000000000,"fstype":"vfat","uuid":"E","mountpoints":["/boot/efi"],"rm":false,"rota":false,"model":null,"tran":null,"label":null},
+               {"name":"nvme0n1p2","path":"/dev/nvme0n1p2","type":"part","size":511000000000,"fstype":"ext4","uuid":"R","mountpoints":["/"],"rm":false,"rota":false,"model":null,"tran":null,"label":null}]},
+  {"name":"sda","path":"/dev/sda","type":"disk","size":2000398934016,"fstype":null,"uuid":null,"mountpoints":[null],"rm":false,"rota":true,"model":"WD20SPZX","tran":"sata","label":null}
+]}

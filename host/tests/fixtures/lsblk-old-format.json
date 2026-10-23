@@ -1,0 +1,9 @@
+{"blockdevices": [
+  {"name": "mmcblk0", "type": "disk", "size": "63864569856", "fstype": null, "uuid": null, "mountpoint": null, "rm": "0", "rota": "0", "model": null, "tran": null, "label": null,
+   "children": [
+     {"name": "mmcblk0p1", "type": "part", "size": "268435456", "fstype": "vfat", "uuid": "B", "mountpoint": "/boot/firmware", "rm": "0", "rota": "0"},
+     {"name": "mmcblk0p2", "type": "part", "size": "63500000000", "fstype": "ext4", "uuid": "R", "mountpoint": "/", "rm": "0", "rota": "0"}
+   ]},
+  {"name": "sda", "type": "disk", "size": "500107862016", "fstype": null, "mountpoint": null, "rm": "0", "rota": "1", "model": "USB HDD", "tran": "usb",
+   "children": [{"name": "sda1", "type": "part", "size": "500106813440", "fstype": "ntfs", "uuid": "NTFS1", "mountpoint": "/media/pi/Backup", "rm": "0", "rota": "1"}]}
+]}

@@ -1,0 +1,279 @@
+#!/usr/bin/env bash
+# vfy — Vercelify from your terminal, using the servers paired in the app.
+#
+#   vfy apps                    every app with its status and URL
+#   vfy deploy APP              deploy now (APP = name or uuid)
+#   vfy logs APP [LINES]        runtime logs
+#   vfy rollback APP COMMIT     put an earlier commit back live
+#   vfy env pull APP [FILE]     write the app's production variables to FILE (.env)
+#   vfy open APP                open the app's URL
+#   vfy status                  the server's health checks
+#   vfy alerts                  what the server reported lately
+#   vfy backup                  start a backup now
+#   vfy sleep APP [MINUTES|off] stop APP after MINUTES without visits (default 30)
+#   vfy config check [DIR]      what DIR's vercel.json (+ vercelify.json) would do
+#   vfy config push APP [DIR]   apply DIR's vercel.json to APP (any Git host)
+#   vfy config sync APP         read APP's vercel.json from its GitHub repository now
+#   vfy config show|rm APP      its rules and where they came from / remove them
+#   vfy crons APP [run PATH]    APP's cron jobs and their last runs / run one now
+#   vfy servers                 paired servers (* = selected in the app)
+#
+#   -s, --server NAME           use another paired server than the selected one
+#
+# Reads the Mac app's settings (VFY_SETTINGS overrides the path). Tokens go to
+# curl on stdin, never on the command line. Needs curl and jq; written for
+# the bash 3.2 that macOS ships.
+
+set -euo pipefail
+
+if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
+  B=$'\e[1m'; D=$'\e[2m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; N=$'\e[0m'
+else
+  B=''; D=''; G=''; Y=''; R=''; N=''
+fi
+die() { printf '%svfy: %s%s\n' "$R" "$*" "$N" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; }
+
+settings_file() {
+  if [[ -n "${VFY_SETTINGS:-}" ]]; then echo "$VFY_SETTINGS"; return; fi
+  local f
+  for f in "$HOME/Library/Application Support/dev.vercelify.cockpit/settings.json" \
+           "${XDG_CONFIG_HOME:-$HOME/.config}/dev.vercelify.cockpit/settings.json"; do
+    [[ -r "$f" ]] && { echo "$f"; return; }
+  done
+  die "no paired server found — open the Vercelify app and pair one first"
+}
+
+SERVER=''
+args=()
+while (( $# )); do
+  case "$1" in
+    -s|--server) SERVER=${2:?--server needs a name}; shift ;;
+    -h|--help|help) usage; exit 0 ;;
+    *) args+=("$1") ;;
+  esac
+  shift
+done
+set -- ${args[@]+"${args[@]}"}
+
+have jq || die "jq is missing (brew install jq)"
+have curl || die "curl is missing"
+SETTINGS=$(settings_file)
+
+# The chosen server as one JSON object.
+server_json() {
+  jq -ce --arg s "$SERVER" '
+    (if has("servers") then . else {servers: [.], active: .agent_url} end) as $c
+    | if $s != "" then ($c.servers[] | select(.hostname == $s or .agent_url == $s))
+      else (($c.servers[] | select(.agent_url == $c.active)) // $c.servers[0]) end' "$SETTINGS" 2>/dev/null |
+    head -1 || true
+}
+
+SJ=$(server_json)
+[[ -n "$SJ" ]] || die "no server ${SERVER:+named $SERVER }in $SETTINGS (see: vfy servers)"
+field() { jq -r --arg k "$1" '.[$k] // ""' <<<"$SJ"; }
+
+# api agent|coolify METHOD PATH [JSON] — prints the body; dies with the error.
+api() {
+  local kind=$1 method=$2 path=$3 body=${4:-} base token out code
+  if [[ $kind == agent ]]; then
+    base=$(field agent_url); token=$(field agent_token)
+  else
+    base=$(field coolify_url); token=$(field coolify_token)
+    [[ -n "$base" && -n "$token" ]] || die "$(field hostname) is a worker without Coolify — use -s with your main server"
+    base="${base%/}/api/v1"
+  fi
+  local opts=(-sS -X "$method" -K - -w '\n%{http_code}' --max-time 60 -H 'Accept: application/json')
+  [[ -n "$body" ]] && opts+=(-H 'Content-Type: application/json' --data "$body")
+  out=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl "${opts[@]}" "${base%/}$path") ||
+    die "cannot reach $(field hostname) — is Tailscale connected?"
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+  if [[ "$code" != 2* ]]; then
+    die "$(jq -r '.error // .message // empty' <<<"$out" 2>/dev/null || true) (HTTP $code)"
+  fi
+  printf '%s' "$out"
+}
+
+# APP name or uuid → uuid
+app_uuid() {
+  local want=${1:?which app? (name or uuid)} uuid
+  uuid=$(api coolify GET /applications | jq -r --arg a "$want" '[.[] | select(.uuid == $a or .name == $a)][0].uuid // empty')
+  [[ -n "$uuid" ]] || die "no app named $want (see: vfy apps)"
+  echo "$uuid"
+}
+
+# A coloured dot on a terminal; without colour (NO_COLOR, pipes) a symbol,
+# so a warning still reads differently from ok.
+dot() {
+  local ok='●' warn='●' bad='●' idle='○'
+  [[ -z "$G" ]] && { ok='✓'; warn='!'; bad='✗'; idle='-'; }
+  case "$1" in
+    idle) printf '%s%s%s' "$D" "$idle" "$N" ;;
+    running*healthy|ok|true) printf '%s%s%s' "$G" "$ok" "$N" ;;
+    *unhealthy*|exited*|bad|false) printf '%s%s%s' "$R" "$bad" "$N" ;;
+    *) printf '%s%s%s' "$Y" "$warn" "$N" ;;
+  esac
+}
+
+cmd=${1:-apps}
+(( $# )) && shift
+case "$cmd" in
+  servers)
+    jq -r '(if has("servers") then . else {servers: [.], active: .agent_url} end) as $c
+      | $c.servers[] | [(if .agent_url == $c.active then "*" else " " end), .hostname, (.role // "main"), .agent_url] | @tsv' "$SETTINGS" |
+      while IFS=$'\t' read -r mark name role url; do printf '%s %-20s %-7s %s\n' "$mark" "$name" "$role" "$url"; done
+    ;;
+  apps|ls)
+    api coolify GET /applications | jq -r '.[] | [.name, .status, ((.fqdn // "") | split(",")[0]), .uuid] | @tsv' |
+      while IFS=$'\t' read -r name status url uuid; do
+        printf '%s %-22s %-18s %s %s%s%s\n' "$(dot "$status")" "$name" "${status%%:*}" "$url" "$D" "$uuid" "$N"
+      done
+    ;;
+  deploy)
+    uuid=$(app_uuid "${1:-}")
+    api coolify POST "/deploy?uuid=$uuid&force=false" '{}' | jq -r '.deployments[0].message // "queued"'
+    printf '%sfollow it in the app, or: vfy logs %s%s\n' "$D" "$1" "$N"
+    ;;
+  logs)
+    uuid=$(app_uuid "${1:-}")
+    lines=${2:-200}
+    [[ "$lines" =~ ^[0-9]+$ ]] || die "LINES must be a number"
+    api coolify GET "/applications/$uuid/logs?lines=$lines" | jq -r '.logs // ""'
+    ;;
+  rollback)
+    uuid=$(app_uuid "${1:-}")
+    commit=${2:?usage: vfy rollback APP COMMIT}
+    [[ "$commit" =~ ^[0-9a-f]{4,40}$ ]] || die "COMMIT must be a commit SHA"
+    # Coolify needs the full SHA; take it from the app's finished production
+    # deployments (newest first), so a short one from `git log` works too.
+    shas=$(api coolify GET "/deployments/applications/$uuid?take=100" |
+      jq -r '[(.deployments // .)[] | select(.status == "finished" and (.pull_request_id // 0) == 0) | .commit // empty] | .[]')
+    full=$(printf '%s\n' "$shas" | grep "^$commit" | sort -u || true)
+    [[ -n "$full" ]] || die "no finished deployment of ${1} at $commit (rollback goes back to a commit that was live before)"
+    [[ $(printf '%s\n' "$full" | wc -l) -eq 1 ]] || die "$commit matches several commits — give more characters"
+    [[ "$full" != "$(printf '%s\n' "$shas" | head -1)" ]] || die "$commit is already live"
+    api coolify POST "/applications/$uuid/rollback" "$(jq -nc --arg c "$full" '{commit: $c}')" | jq -r '.message // "rolling back"'
+    ;;
+  env)
+    [[ "${1:-}" == pull ]] || die "usage: vfy env pull APP [FILE]"
+    uuid=$(app_uuid "${2:-}")
+    file=${3:-.env}
+    [[ ! -e "$file" ]] || [[ "${VFY_FORCE:-0}" == 1 ]] || die "$file exists — remove it or set VFY_FORCE=1"
+    envs=$(api coolify GET "/applications/$uuid/envs")
+    ( umask 077
+      jq -r '[.[] | select(.is_preview | not)] | sort_by(.key) | .[] | "\(.key)=\(.value // "" | @json)"' <<<"$envs" >"$file" )
+    printf '%s✓%s %s variables written to %s (mode 600)\n' "$G" "$N" "$(wc -l <"$file" | tr -d ' ')" "$file"
+    ;;
+  open)
+    uuid=$(app_uuid "${1:-}")
+    url=$(api coolify GET "/applications/$uuid" | jq -r '(.fqdn // "") | split(",")[0]')
+    [[ -n "$url" ]] || die "that app has no URL yet"
+    if have open; then open "$url"; elif have xdg-open; then xdg-open "$url"; else echo "$url"; fi
+    ;;
+  status|doctor)
+    printf '%s%s%s\n' "$B" "$(field hostname)" "$N"
+    api agent GET /v1/doctor | jq -r '.checks[] | [.status, .label, .detail, (.fix // "")] | @tsv' |
+      while IFS=$'\t' read -r st label detail fix; do
+        printf '%s %-22s %s\n' "$(dot "$st")" "$label" "$detail"
+        [[ -n "$fix" ]] && printf '  %s→ %s%s\n' "$D" "$fix" "$N"
+      done
+    ;;
+  alerts)
+    api agent GET /v1/alerts | jq -r '.alerts[:15][] | [(if .resolved then "ok" else .status end), .at, .title] | @tsv' |
+      while IFS=$'\t' read -r st at title; do printf '%s %s  %s\n' "$(dot "$st")" "$at" "$title"; done
+    ;;
+  backup)
+    api agent POST /v1/backup/run '{}' >/dev/null
+    printf '%s✓%s backup of %s started (vfy status shows when it finished)\n' "$G" "$N" "$(field hostname)"
+    ;;
+  sleep)
+    uuid=$(app_uuid "${1:-}")
+    case "${2:-30}" in
+      off) api agent PUT "/v1/sleep/$uuid" '{"enabled":false}' >/dev/null
+           printf '%s✓%s %s stays awake\n' "$G" "$N" "$1" ;;
+      *[!0-9]*) die "usage: vfy sleep APP [MINUTES|off]" ;;
+      *) api agent PUT "/v1/sleep/$uuid" "$(jq -nc --argjson m "${2:-30}" '{enabled: true, idle_minutes: $m}')" >/dev/null
+         printf '%s✓%s %s sleeps after %s idle minutes; the next visit wakes it\n' "$G" "$N" "$1" "${2:-30}" ;;
+    esac
+    ;;
+  config)
+    sub=${1:-}
+    (( $# )) && shift
+    # Upload body from DIR: vercel.json first, then vercelify.json (wins).
+    files_json() {
+      local dir=${1:-.} f body='[]'
+      for f in vercel.json vercelify.json; do
+        [[ -f "$dir/$f" ]] || continue
+        body=$(jq -c --arg n "$f" --rawfile c "$dir/$f" '. + [{name: $n, content: $c}]' <<<"$body")
+      done
+      [[ "$body" != '[]' ]] || die "no vercel.json or vercelify.json in ${dir}"
+      jq -c '{files: .}' <<<"$body"
+    }
+    # A summary (ProjectSummary) as one line, then its notes.
+    summary() {
+      jq -r '[(if .redirects > 0 then "\(.redirects) redirect\(if .redirects > 1 then "s" else "" end)" else empty end),
+              (if .rewrites > 0 then "\(.rewrites) rewrite\(if .rewrites > 1 then "s" else "" end)" else empty end),
+              (if .headers > 0 then "\(.headers) header rule\(if .headers > 1 then "s" else "" end)" else empty end),
+              (if .firewall_rules > 0 then "\(.firewall_rules) firewall rule\(if .firewall_rules > 1 then "s" else "" end)" else empty end),
+              (if (.crons | length) > 0 then "\(.crons | length) cron job\(if (.crons | length) > 1 then "s" else "" end)" else empty end),
+              (if .clean_urls then "clean URLs" else empty end),
+              (if .trailing_slash == true then "trailing slash" elif .trailing_slash == false then "no trailing slash" else empty end)]
+             | if length == 0 then "no rules" else join(" · ") end'
+    }
+    notes() { jq -r '.warnings[]?' | while IFS= read -r w; do printf '  %s!%s %s\n' "$Y" "$N" "$w"; done; }
+    show() { # ProjectInfo
+      local info=$1
+      printf '%s %s %s(%s)%s\n' "$(dot "$(jq -r 'if .error then "bad" elif .routes_active then "ok" else "idle" end' <<<"$info")")" \
+        "$(jq '.summary' <<<"$info" | summary)" "$D" \
+        "$(jq -r 'if .source == "upload" then "uploaded" else "from the repository at \((.commit // "")[:7])" end' <<<"$info")" "$N"
+      jq -r '.error // empty' <<<"$info" | while IFS= read -r e; do printf '  %s✗%s %s\n' "$R" "$N" "$e"; done
+      jq '.summary' <<<"$info" | notes
+    }
+    case "$sub" in
+      check)
+        out=$(api agent POST /v1/projects/check "$(files_json "${1:-.}")")
+        printf '%s✓%s %s\n' "$G" "$N" "$(summary <<<"$out")"
+        notes <<<"$out"
+        ;;
+      push)
+        uuid=$(app_uuid "${1:-}")
+        show "$(api agent PUT "/v1/projects/$uuid" "$(files_json "${2:-.}")")"
+        ;;
+      sync)
+        uuid=$(app_uuid "${1:-}")
+        show "$(api agent POST "/v1/projects/$uuid/sync" '{}')"
+        ;;
+      show|'')
+        uuid=$(app_uuid "${1:-}")
+        info=$(api agent GET /v1/projects | jq -c --arg k "$uuid" '.projects[] | select(.key == $k)')
+        [[ -n "$info" ]] || die "${1} has no vercel.json applied (vfy config push ${1}, or vfy config sync ${1})"
+        show "$info"
+        ;;
+      rm|remove)
+        uuid=$(app_uuid "${1:-}")
+        api agent DELETE "/v1/projects/$uuid" >/dev/null
+        printf '%s✓%s %s is served as Coolify configures it\n' "$G" "$N" "$1"
+        ;;
+      *) die "usage: vfy config check [DIR] | push APP [DIR] | sync APP | show APP | rm APP" ;;
+    esac
+    ;;
+  crons)
+    uuid=$(app_uuid "${1:-}")
+    if [[ "${2:-}" == run ]]; then
+      path=${3:?usage: vfy crons APP run PATH}
+      api agent POST "/v1/projects/$uuid/crons/run" "$(jq -nc --arg p "$path" '{path: $p}')" >/dev/null
+      printf '%s✓%s %s started (vfy crons %s shows the result)\n' "$G" "$N" "$path" "$1"
+    else
+      api agent GET /v1/projects | jq -r --arg k "$uuid" '.projects[] | select(.key == $k) | .summary.crons[] |
+        [(if .running then "warn" elif .last_run_at == null then "idle" elif (.last_status // 0) >= 200 and (.last_status // 0) < 300 then "ok" else "bad" end),
+         .path, .schedule, (if .last_run_at then "\(.last_status // "no answer") at \(.last_run_at)" else "not run yet" end), (.next_run_at // "")] | @tsv' |
+        while IFS=$'\t' read -r st path sched last next; do
+          printf '%s %-24s %-14s %s  %snext %s%s\n' "$(dot "$st")" "$path" "$sched" "$last" "$D" "$next" "$N"
+        done
+    fi
+    ;;
+  *) usage >&2; exit 2 ;;
+esac
