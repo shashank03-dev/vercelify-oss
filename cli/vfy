@@ -17,12 +17,19 @@
 #   vfy config show|rm APP      its rules and where they came from / remove them
 #   vfy crons APP [run PATH]    APP's cron jobs and their last runs / run one now
 #   vfy servers                 paired servers (* = selected in the app)
+#   vfy why APP                 AI: why APP's last deployment failed and how to fix it
+#                               (Gemma 4 on your own server, through its Ollama)
+#   vfy why --log FILE          the same for any build log, with the Ollama on this
+#                               machine; no server needed. [--vercel-json FILE]
+#       --provider ollama|server|gemini   gemini = Gemma 4 through the Gemini API
+#                               (needs GEMINI_API_KEY)
 #
 #   -s, --server NAME           use another paired server than the selected one
 #
 # Reads the Mac app's settings (VFY_SETTINGS overrides the path). Tokens go to
 # curl on stdin, never on the command line. Needs curl and jq; written for
-# the bash 3.2 that macOS ships.
+# the bash 3.2 that macOS ships. AI settings: VFY_AI_MODEL (gemma4:e2b),
+# VFY_OLLAMA_URL (http://localhost:11434), VFY_GEMINI_MODEL (gemma-4-26b-a4b-it).
 
 set -euo pipefail
 
@@ -34,7 +41,7 @@ fi
 die() { printf '%svfy: %s%s\n' "$R" "$*" "$N" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
-usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,/^$/p' "$0" | sed -e '/^$/d' -e 's/^# \{0,1\}//'; }
 
 settings_file() {
   if [[ -n "${VFY_SETTINGS:-}" ]]; then echo "$VFY_SETTINGS"; return; fi
@@ -60,6 +67,144 @@ set -- ${args[@]+"${args[@]}"}
 
 have jq || die "jq is missing (brew install jq)"
 have curl || die "curl is missing"
+
+# --- vfy why: an open-weight model explains a failed build ------------------
+# The prompt matches cockpit/src/lib/explain.ts (a cockpit test keeps the two
+# in sync). Small log, capped answer: an old laptop's CPU reads every line.
+AI_MODEL=${VFY_AI_MODEL:-gemma4:e2b}
+AI_MAX_TOKENS=400
+OLLAMA_URL=${VFY_OLLAMA_URL:-http://localhost:11434}
+GEMINI_MODEL=${VFY_GEMINI_MODEL:-gemma-4-26b-a4b-it}
+GEMINI_URL=${VFY_GEMINI_URL:-https://generativelanguage.googleapis.com/v1beta}
+EXPLAIN_SYSTEM="You are Vercelify's deploy doctor. A deployment failed on a self-hosted Vercelify server:
+Coolify builds the app with Nixpacks or a Dockerfile inside a Linux container on an old laptop.
+Linux file names are case-sensitive, the build cannot see the developer's machine,
+and environment variables come only from the app's settings.
+Read the build log and answer in exactly this format, under 120 words:
+**Cause:** one sentence naming the failing step and the root cause.
+**Fix:** the exact change (file and line, setting, or command).
+**Check:** one command to confirm the fix locally before pushing again.
+Use only facts from the log. If the log does not show the cause, say what to look for next."
+
+# stdin → the error lines with context, then the last 30 lines (… marks gaps).
+trim_log() {
+  awk '
+    { line[NR] = $0; l = tolower($0)
+      if (l ~ /(error|err!|failed|failure|fatal|cannot|can.t|could not|not found|no such file|denied|killed|out of memory|exit code|exited with|segmentation|panic|traceback|exception|missing|undefined|unresolved|enoent|eacces|enomem)/)
+        for (j = NR - 2; j <= NR + 3; j++) keep[j] = 1 }
+    END {
+      for (j = NR - 29; j <= NR; j++) keep[j] = 1
+      prev = 0
+      for (i = 1; i <= NR; i++) if (keep[i]) { if (i > prev + 1) print "…"; print line[i]; prev = i }
+    }'
+}
+
+# why_messages LOG [VERCEL_JSON] [HEADER] → the chat messages as JSON.
+why_messages() {
+  local log
+  log=$(trim_log <<<"$1")
+  (( ${#log} <= 5000 )) || log="…${log: -4999}"
+  jq -nc --arg sys "$EXPLAIN_SYSTEM" --arg log "$log" --arg vj "${2:-}" --arg head "${3:-}" '
+    (if $head == "" then "" else $head + "\n\n" end)
+    + "Build log (error lines with context, then the last lines):\n```\n" + $log + "\n```"
+    + (if $vj == "" then "" else "\n\nvercel.json:\n```json\n" + $vj[:1500] + "\n```" end)
+    | [{role: "system", content: $sys}, {role: "user", content: .}]'
+}
+
+# stdin = an Ollama chat stream (NDJSON) → the answer, token by token, then
+# which model answered and how fast. Dies on an error line.
+print_stream() {
+  local who=$1 line out tps=''
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    out=$(jq -r 'if .error then "E" + (.error | tostring)
+      elif .done then "D" + (if (.eval_count // 0) > 0 and (.eval_duration // 0) > 0
+        then " · \(.eval_count * 1e10 / .eval_duration | round / 10) tokens/s" else "" end)
+      else "C" + (.message.content // "") end + "."' <<<"$line" 2>/dev/null) || continue
+    out=${out%.}
+    case "$out" in
+      E*) printf '\n' >&2
+          case "$out" in
+            *"not found"*) die "${out#E} — download it first: ${WHY_PULL_HINT:-ollama pull $AI_MODEL}" ;;
+            *) die "${out#E}" ;;
+          esac ;;
+      D*) tps=${out#D} ;;
+      C*) printf '%s' "${out#C}" ;;
+    esac
+  done
+  printf '\n\n%s— %s%s%s\n' "$D" "$who" "$tps" "$N"
+}
+
+# The installed model to use: VFY_AI_MODEL if set, else Gemma 4 E2B, another
+# Gemma 4, then any chat model (stdin = model names, one per line).
+pick_model() {
+  local names
+  names=$(cat)
+  if [[ -n "${VFY_AI_MODEL:-}" ]]; then echo "$VFY_AI_MODEL"; return; fi
+  if grep -qx 'gemma4:e2b' <<<"$names"; then echo gemma4:e2b; return; fi
+  { grep '^gemma4' <<<"$names" || grep -vi embed <<<"$names" || true; } | head -1
+}
+
+why_gemini() { # MESSAGES → answer (Gemma 4 through the Gemini API)
+  local body out err
+  [[ -n "${GEMINI_API_KEY:-}" ]] || die "GEMINI_API_KEY is not set — create a free key at https://aistudio.google.com/apikey and export it"
+  # Gemma takes the instructions as part of the user turn.
+  body=$(jq -c '{contents: [{role: "user", parts: [{text: (map(.content) | join("\n\n"))}]}],
+    generationConfig: {temperature: 0.2, maxOutputTokens: 1024}}' <<<"$1")
+  out=$(printf 'header = "x-goog-api-key: %s"\n' "$GEMINI_API_KEY" |
+    curl -sS -K - -X POST -H 'Content-Type: application/json' --max-time 180 --data "$body" \
+      "${GEMINI_URL%/}/models/$GEMINI_MODEL:generateContent") || die "cannot reach the Gemini API"
+  err=$(jq -r '.error.message // empty' <<<"$out" 2>/dev/null || echo "unexpected answer from the Gemini API")
+  [[ -z "$err" ]] || die "Gemini API: $err"
+  jq -r '[.candidates[0].content.parts[]? | select(.thought != true) | .text] | join("") | sub("^\\s+"; "")' <<<"$out"
+  printf '\n%s— %s via the Gemini API (Gemma 4, Apache 2.0)%s\n' "$D" "$GEMINI_MODEL" "$N"
+}
+
+why_ollama() { # MESSAGES → answer streamed from the Ollama on this machine
+  local body
+  curl -sS --max-time 5 "${OLLAMA_URL%/}/api/version" >/dev/null 2>&1 ||
+    die "Ollama isn't running at $OLLAMA_URL. Start it (open the Ollama app, or run: ollama serve), then: ollama pull $AI_MODEL"
+  body=$(jq -c --arg m "$AI_MODEL" --argjson n "$AI_MAX_TOKENS" \
+    '{model: $m, messages: ., stream: true, options: {temperature: 0.2, num_predict: $n}}' <<<"$1")
+  printf '%sAsking %s on this machine… (the first answer loads the model, give it a moment)%s\n\n' "$D" "$AI_MODEL" "$N" >&2
+  curl -sS -N --max-time 900 -H 'Content-Type: application/json' --data "$body" "${OLLAMA_URL%/}/api/chat" |
+    print_stream "$AI_MODEL via Ollama at $OLLAMA_URL"
+}
+
+WHY_LOG='' WHY_VJ='' WHY_PROVIDER=${VFY_AI_PROVIDER:-}
+if [[ "${1:-}" == why ]]; then
+  shift
+  why_app=''
+  while (( $# )); do
+    case "$1" in
+      --log) WHY_LOG=${2:?--log needs a file (- = stdin)}; shift ;;
+      --vercel-json) WHY_VJ=${2:?--vercel-json needs a file}; shift ;;
+      --provider) WHY_PROVIDER=${2:?--provider needs ollama, server or gemini}; shift ;;
+      -*) die "unknown option $1 for why" ;;
+      *) why_app=$1 ;;
+    esac
+    shift
+  done
+  case "$WHY_PROVIDER" in ''|ollama|server|gemini) ;; *) die "--provider must be ollama, server or gemini" ;; esac
+  if [[ -n "$WHY_VJ" ]]; then
+    [[ -r "$WHY_VJ" ]] || die "cannot read $WHY_VJ"
+    WHY_VJ=$(cat "$WHY_VJ")
+  fi
+  if [[ -n "$WHY_LOG" ]]; then
+    # A log file: no paired server needed.
+    if [[ "$WHY_LOG" == - ]]; then log=$(cat); else [[ -r "$WHY_LOG" ]] || die "cannot read $WHY_LOG"; log=$(cat "$WHY_LOG"); fi
+    [[ -n "${log//[[:space:]]/}" ]] || die "the log is empty"
+    msgs=$(why_messages "$log" "$WHY_VJ")
+    case "$WHY_PROVIDER" in
+      gemini) why_gemini "$msgs" ;;
+      server) die "--provider server needs an app: vfy why APP" ;;
+      *) why_ollama "$msgs" ;;
+    esac
+    exit 0
+  fi
+  set -- why ${why_app:+"$why_app"}
+fi
+
 SETTINGS=$(settings_file)
 
 # The chosen server as one JSON object.
@@ -274,6 +419,41 @@ case "$cmd" in
           printf '%s %-24s %-14s %s  %snext %s%s\n' "$(dot "$st")" "$path" "$sched" "$last" "$D" "$next" "$N"
         done
     fi
+    ;;
+  why)
+    uuid=$(app_uuid "${1:-}")
+    dep=$(api coolify GET "/deployments/applications/$uuid?take=20" |
+      jq -c '[(.deployments // .)[] | select(.status == "failed")][0] // empty')
+    [[ -n "$dep" ]] || { printf '%s✓%s no failed deployments of %s lately\n' "$G" "$N" "$1"; exit 0; }
+    duuid=$(jq -r '.deployment_uuid' <<<"$dep")
+    log=$(api coolify GET "/deployments/$duuid" | jq -r '(.logs // "[]") | fromjson? // [] | .[]
+      | select(.hidden | not) | (if .type == "stderr" then "[stderr] " else "" end) + .output')
+    [[ -n "$log" ]] || die "that deployment has no build log"
+    head=$(jq -r --arg app "$1" '"App: \($app)\nCommit: \((.commit // "")[:7]) \"\((.commit_message // "") | split("\n")[0])\""' <<<"$dep")
+    printf '%s%s failed at %s (%s)%s\n' "$B" "$1" "$(jq -r '(.commit // "")[:7]' <<<"$dep")" "$(jq -r '.created_at // ""' <<<"$dep")" "$N" >&2
+    msgs=$(why_messages "$log" "$WHY_VJ" "$head")
+    case "$WHY_PROVIDER" in
+      gemini) why_gemini "$msgs" ;;
+      ollama) why_ollama "$msgs" ;;
+      *)
+        # Default: the model runs on the server that built the app (nothing
+        # leaves your machines), through the agent's Ollama.
+        st=$(api agent GET /v1/llm)
+        [[ $(jq -r '.installed' <<<"$st") == true ]] ||
+          die "$(field hostname) has no local AI yet — install it: Vercelify app → AI models → Install, or on the server: sudo vercelify llm install"
+        [[ $(jq -r '.ready' <<<"$st") == true ]] ||
+          die "Ollama on $(field hostname) isn't answering — app → AI models → Restart, or on the server: sudo vercelify llm start"
+        model=$(jq -r '.models[].name' <<<"$st" | pick_model)
+        [[ -n "$model" ]] ||
+          die "no model on $(field hostname) yet — download Gemma 4: app → AI models, or on the server: sudo vercelify llm pull gemma4:e2b"
+        body=$(jq -c --arg m "$model" --argjson n "$AI_MAX_TOKENS" '{model: $m, messages: ., stream: true, temperature: 0.2, max_tokens: $n}' <<<"$msgs")
+        printf '%sAsking %s on %s…%s\n\n' "$D" "$model" "$(field hostname)" "$N" >&2
+        WHY_PULL_HINT="sudo vercelify llm pull $model"
+        printf 'header = "Authorization: Bearer %s"\n' "$(field agent_token)" |
+          curl -sS -N -K - --max-time 900 -H 'Content-Type: application/json' --data "$body" "$(field agent_url)/v1/llm/chat" |
+          print_stream "$model on $(field hostname), via Ollama"
+        ;;
+    esac
     ;;
   *) usage >&2; exit 2 ;;
 esac

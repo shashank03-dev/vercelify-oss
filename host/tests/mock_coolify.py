@@ -25,6 +25,23 @@ PROJECT = {
 }
 
 
+# A failed build (d2) and what a model answers about it, as Ollama streams it.
+FAILED_LOG = json.dumps([
+    {"output": "npm run build", "type": "stdout", "hidden": False, "timestamp": "t"},
+    {"output": "Module not found: Can't resolve '../components/Header'", "type": "stderr", "hidden": False, "timestamp": "t"},
+    {"output": "internal helper noise", "type": "stdout", "hidden": True, "timestamp": "t"},
+    {"output": "Deployment failed.", "type": "stdout", "hidden": False, "timestamp": "t"},
+])
+ANSWER = ["**Cause:** ", "the import uses `Header` but the file is `header.tsx`.\n", "**Fix:** rename it.\n", "**Check:** `npm run build`"]
+
+
+def ndjson(model):
+    if model.startswith("missing"):
+        return [{"error": f"model '{model}' not found"}]
+    chunks = [{"model": model, "message": {"role": "assistant", "content": c}, "done": False} for c in ANSWER]
+    return chunks + [{"model": model, "done": True, "eval_count": 40, "eval_duration": 4_000_000_000}]
+
+
 class H(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -33,6 +50,14 @@ class H(BaseHTTPRequestHandler):
         body = json.dumps(obj).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def stream(self, lines):
+        body = "".join(json.dumps(l) + "\n" for l in lines).encode()
+        self.send_response(404 if "error" in lines[0] else 200)
+        self.send_header("Content-Type", "application/x-ndjson")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -64,9 +89,27 @@ class H(BaseHTTPRequestHandler):
         with open(sys.argv[2], "a") as f:
             f.write(f"{method} {self.path} auth={auth} {raw}\n")
         p = self.path
+        # The Ollama on this machine (vfy why --log): no auth.
+        if p == "/api/version":
+            return self.reply(200, {"version": "0.40.6"})
+        if p == "/api/chat":
+            return self.stream(ndjson(json.loads(raw)["model"]))
+        # Gemma 4 through the Gemini API.
+        if p.startswith("/v1beta/models/"):
+            if self.headers.get("x-goog-api-key") != "gem-key":
+                return self.reply(400, {"error": {"code": 400, "message": "API key not valid. Please pass a valid API key."}})
+            if p != "/v1beta/models/gemma-4-26b-a4b-it:generateContent":
+                return self.reply(404, {"error": {"code": 404, "message": "model not found"}})
+            return self.reply(200, {"candidates": [{"content": {"role": "model", "parts": [
+                {"text": "thinking about the import…", "thought": True}, {"text": "".join(ANSWER)}]}}]})
         if p.startswith("/v1/"):
             if auth != "Bearer agent-secret":
                 return self.reply(401, {"error": "missing or invalid agent token"})
+            if p == "/v1/llm":
+                return self.reply(200, {"installed": True, "ready": True, "models": [
+                    {"name": "nomic-embed-text:latest"}, {"name": "llama3.2:3b"}, {"name": "gemma4:e2b"}]})
+            if p == "/v1/llm/chat":
+                return self.stream(ndjson(json.loads(raw)["model"]))
             if p == "/v1/doctor":
                 return self.reply(200, {"checks": [{"id": "disk", "label": "System disk", "status": "warn", "detail": "88% used", "fix": "docker system prune -af"}]})
             if p == "/v1/backup/run":
@@ -110,9 +153,12 @@ class H(BaseHTTPRequestHandler):
             return self.reply(200, {"count": 4, "deployments": [
                 {"deployment_uuid": "d4", "status": "finished", "pull_request_id": 0, "commit": "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"},
                 {"deployment_uuid": "d3", "status": "finished", "pull_request_id": 7, "commit": "4b1dffff00000000000000000000000000000000"},
-                {"deployment_uuid": "d2", "status": "failed", "pull_request_id": 0, "commit": "4b1d0000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+                {"deployment_uuid": "d2", "status": "failed", "pull_request_id": 0, "commit": "4b1d0000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                 "commit_message": "Add header\n\nlong body", "created_at": "2026-10-23T08:00:00Z"},
                 {"deployment_uuid": "d1", "status": "finished", "pull_request_id": 0, "commit": "4b1d2e7a9c0b1d2e3f4a5b6c7d8e9f0a1b2c3d4e"},
             ]})
+        if p == "/api/v1/deployments/d2":
+            return self.reply(200, {"deployment_uuid": "d2", "status": "failed", "logs": FAILED_LOG})
         if p == "/api/v1/applications/a1/rollback":
             return self.reply(200, {"message": "Rollback queued."})
         return self.reply(404, {"message": "Not found."})

@@ -149,3 +149,72 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   [ "$status" -ne 0 ]
   [[ "$output" == *"no cron job for that path"* ]]
 }
+
+@test "why APP: the server's Gemma 4 explains the last failed build" {
+  run "$VFY" why blog
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"blog failed at 4b1d000"* ]]
+  [[ "$output" == *"**Cause:** the import uses \`Header\` but the file is \`header.tsx\`."* ]]
+  [[ "$output" == *"**Check:** \`npm run build\`"* ]]
+  # Gemma 4 E2B is preferred over the other installed models, and the answer is capped.
+  [[ "$output" == *"— gemma4:e2b on laptop, via Ollama · 10 tokens/s"* ]]
+  req=$(grep '^POST /v1/llm/chat auth=Bearer agent-secret ' "$T/requests.log" | sed 's/^[^{]*//')
+  [ "$(jq -r .model <<<"$req")" = gemma4:e2b ]
+  [ "$(jq -r .max_tokens <<<"$req")" = 400 ]
+  [ "$(jq -r '.messages[0].role' <<<"$req")" = system ]
+  user=$(jq -r '.messages[1].content' <<<"$req")
+  [[ "$user" == *"App: blog"*'Commit: 4b1d000 "Add header"'* ]]
+  [[ "$user" == *"[stderr] Module not found: Can't resolve '../components/Header'"* ]]
+  [[ "$user" != *"internal helper noise"* ]]
+  # A model that isn't there: the error and how to get it.
+  VFY_AI_MODEL=missing:1b run "$VFY" why blog
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"model 'missing:1b' not found"*"sudo vercelify llm pull missing:1b"* ]]
+}
+
+@test "why --log: any build log with the local Ollama, no paired server" {
+  cp "$BATS_TEST_DIRNAME/../../cli/examples/failed-build.log" build.log
+  VFY_SETTINGS=/nonexistent VFY_OLLAMA_URL="$URL" run "$VFY" why --log build.log
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"**Fix:** rename it."* ]]
+  [[ "$output" == *"— gemma4:e2b via Ollama at $URL"* ]]
+  req=$(grep '^POST /api/chat ' "$T/requests.log" | sed 's/^[^{]*//')
+  [ "$(jq -r .model <<<"$req")" = gemma4:e2b ]
+  [ "$(jq -r .options.num_predict <<<"$req")" = 400 ]
+  user=$(jq -r '.messages[1].content' <<<"$req")
+  [[ "$user" == *"Module not found: Can't resolve '../components/Header'"* ]]
+  [[ "$user" == *"Deployment failed."* ]]
+  # From stdin, with a vercel.json alongside.
+  echo '{"cleanUrls": true}' >vercel.json
+  VFY_OLLAMA_URL="$URL" run bash -c "printf 'Error: boom\n' | '$VFY' why --log - --vercel-json vercel.json"
+  [ "$status" -eq 0 ]
+  grep '^POST /api/chat ' "$T/requests.log" | tail -1 | grep -q 'cleanUrls'
+  # Ollama not running: say how to start it.
+  VFY_OLLAMA_URL=http://127.0.0.1:9 run "$VFY" why --log build.log
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Ollama isn't running at http://127.0.0.1:9"*"ollama pull gemma4:e2b"* ]]
+  printf '  \n' >empty.log
+  run "$VFY" why --log empty.log
+  [[ "$output" == *"the log is empty"* ]]
+}
+
+@test "why --provider gemini: Gemma 4 through the Gemini API, key via stdin" {
+  cp "$BATS_TEST_DIRNAME/../../cli/examples/failed-build.log" build.log
+  export VFY_GEMINI_URL="$URL/v1beta"
+  GEMINI_API_KEY= run "$VFY" why --log build.log --provider gemini
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"GEMINI_API_KEY is not set"* ]]
+  GEMINI_API_KEY=wrong run "$VFY" why --log build.log --provider gemini
+  [[ "$output" == *"Gemini API: API key not valid"* ]]
+  GEMINI_API_KEY=gem-key run "$VFY" why --log build.log --provider gemini
+  [ "$status" -eq 0 ]
+  [[ "$output" == "**Cause:** the import"* ]]
+  [[ "$output" != *"thinking about"* ]]
+  [[ "$output" == *"— gemma-4-26b-a4b-it via the Gemini API"* ]]
+  run grep -q 'gem-key' "$T/requests.log"   # the mock logs the URL and body, never the key
+  [ "$status" -ne 0 ]
+  # Server mode works with it too.
+  GEMINI_API_KEY=gem-key run "$VFY" why blog --provider gemini
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"**Fix:** rename it."* ]]
+}
