@@ -1,4 +1,4 @@
-import { LazyMotion, domAnimation } from "framer-motion";
+import { LazyMotion, MotionConfig, domAnimation } from "framer-motion";
 import { BeamTrack } from "./components/Beam";
 import { Compare, Faq, FinalCta, Footer, Horizon } from "./components/Closing";
 import { Features } from "./components/Features";
@@ -12,25 +12,34 @@ export default function App() {
   // Only the DOM animation features ship (m.* components, not motion.*).
   return (
     <LazyMotion features={domAnimation} strict>
-      <Nav />
-      <main>
-        <Hero />
-        {/* The beam leaves the hero's app window and runs down to the horizon. */}
-        <BeamTrack>
-          <Stack />
-          <Statement />
-          <Steps />
-          <Features />
-          <FromVercel />
-          <Hardware />
-          <Network />
-          <Compare />
-          <Faq />
-          <FinalCta />
-          <Footer />
-        </BeamTrack>
-        <Horizon />
-      </main>
+      {/* Reduced motion: framer-motion keeps fades but drops the slides and springs. */}
+      <MotionConfig reducedMotion="user">
+        <a
+          href="#content"
+          className="sr-only fixed top-3 left-3 z-[60] rounded-lg bg-fg px-4 py-2 text-[14px] font-medium text-bg focus:not-sr-only"
+        >
+          Skip to content
+        </a>
+        <Nav />
+        <main id="content" tabIndex={-1} className="outline-none">
+          <Hero />
+          {/* The beam leaves the hero's app window and runs down to the horizon. */}
+          <BeamTrack>
+            <Stack />
+            <Statement />
+            <Steps />
+            <Features />
+            <FromVercel />
+            <Hardware />
+            <Network />
+            <Compare />
+            <Faq />
+            <FinalCta />
+            <Footer />
+          </BeamTrack>
+          <Horizon />
+        </main>
+      </MotionConfig>
     </LazyMotion>
   );
 }

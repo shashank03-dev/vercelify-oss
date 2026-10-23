@@ -7,14 +7,16 @@ const LaserFlow = lazy(() => import("./LaserFlow/LaserFlow.jsx"));
 
 /**
  * Shader beam or CSS fallback. The shader needs WebGL2 and a machine that can
- * afford a full-width fragment shader every frame; phones, tablets, weak
- * hardware and data-saver get the CSS pour, which is only gradients and
- * transforms. `null` until decided on the client.
+ * afford a fragment shader every frame; weak hardware and data-saver get the
+ * CSS pour, which is only gradients and transforms. Phones and tablets get the
+ * shader too, rendered at a lower resolution (see `MOBILE_DPR`), and LaserFlow
+ * steps the resolution down further if frames run slow. `null` until decided
+ * on the client.
  */
 export function useShader() {
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => {
-    if (weakDevice() || window.matchMedia("(max-width: 767px), (pointer: coarse)").matches) {
+    if (weakDevice()) {
       setOk(false);
       return;
     }
@@ -25,18 +27,6 @@ export function useShader() {
     }
   }, []);
   return ok;
-}
-
-export function useMedia(query: string) {
-  const [match, setMatch] = useState(false);
-  useEffect(() => {
-    const mq = window.matchMedia(query);
-    const on = () => setMatch(mq.matches);
-    on();
-    mq.addEventListener("change", on);
-    return () => mq.removeEventListener("change", on);
-  }, [query]);
-  return match;
 }
 
 /**
@@ -60,6 +50,11 @@ const EMBER: LaserFlowProps = {
   revealOpacity: 0.6,
   dpr: 1.5,
 };
+
+// Small, dense touch screens: the glow is soft, so a 1x buffer looks the same
+// and costs a third of the pixels a 3x phone would otherwise draw.
+const MOBILE_DPR = 1;
+const isMobile = () => window.matchMedia("(max-width: 767px), (pointer: coarse)").matches;
 
 /**
  * The beam landing on a surface's top-left corner. The layer is placed by
@@ -121,7 +116,13 @@ export function LaserLanding({
     >
       {box.height > 0 && (
         <Suspense fallback={null}>
-          <LaserFlow surfaceRef={surfaceRef} beamPosition={box.beam} {...EMBER} {...props} />
+          <LaserFlow
+            surfaceRef={surfaceRef}
+            beamPosition={box.beam}
+            {...EMBER}
+            {...(isMobile() && { dpr: MOBILE_DPR })}
+            {...props}
+          />
         </Suspense>
       )}
     </div>

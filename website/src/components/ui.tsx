@@ -1,6 +1,6 @@
 import { m } from "framer-motion";
 import { Check, Copy } from "lucide-react";
-import { type ImgHTMLAttributes, type ReactNode, useRef, useState } from "react";
+import { type ImgHTMLAttributes, type KeyboardEvent, type ReactNode, useRef, useState } from "react";
 import SpecularButton from "./SpecularButton/SpecularButton.jsx";
 
 export const REPO = "https://github.com/shashank03-dev/vercelify-oss";
@@ -124,13 +124,49 @@ export function Button({
   );
 }
 
+function legacyCopy(text: string) {
+  const area = document.createElement("textarea");
+  area.value = text;
+  area.setAttribute("readonly", "");
+  area.style.cssText = "position:fixed;top:0;left:0;opacity:0";
+  document.body.appendChild(area);
+  area.select();
+  try {
+    document.execCommand("copy");
+  } catch {
+    // Nothing else to try; the command is still on screen to copy by hand.
+  }
+  area.remove();
+}
+
+/**
+ * Arrow/Home/End keys for a row of tabs (WAI-ARIA tabs pattern): moves focus
+ * and selects in one go. Put it on the tablist's onKeyDown.
+ */
+export function tabKeys(count: number, current: number, select: (n: number) => void) {
+  return (e: KeyboardEvent<HTMLElement>) => {
+    const next =
+      e.key === "ArrowRight" ? (current + 1) % count
+      : e.key === "ArrowLeft" ? (current - 1 + count) % count
+      : e.key === "Home" ? 0
+      : e.key === "End" ? count - 1
+      : -1;
+    if (next < 0) return;
+    e.preventDefault();
+    select(next);
+    e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
+  };
+}
+
 export function useCopy() {
   const [copied, setCopied] = useState(false);
   const t = useRef<number | undefined>(undefined);
   return {
     copied,
     copy(text: string) {
-      void navigator.clipboard?.writeText(text);
+      // The async clipboard is missing on plain-http hosts and older Safari/Firefox.
+      if (navigator.clipboard?.writeText) void navigator.clipboard.writeText(text).catch(() => legacyCopy(text));
+      else legacyCopy(text);
       setCopied(true);
       window.clearTimeout(t.current);
       t.current = window.setTimeout(() => setCopied(false), 1600);
@@ -173,6 +209,9 @@ export function CopyCommand({ command, display, className }: { command: string; 
       <code className="min-w-0 flex-1 truncate text-left leading-7 text-fg">{display ?? command}</code>
       <span className="grid size-7 shrink-0 place-items-center rounded-md text-fg-muted transition-colors group-hover:bg-surface-3 group-hover:text-fg">
         {copied ? <Check className="size-3.5 text-ok" /> : <Copy className="size-3.5" />}
+      </span>
+      <span role="status" className="sr-only">
+        {copied ? "Copied to clipboard" : ""}
       </span>
     </SpecularButton>
   );

@@ -1,6 +1,6 @@
 import { Check } from "lucide-react";
 import { useState } from "react";
-import { Card, Reveal, Section, SectionHeader, cx } from "./ui";
+import { Card, Reveal, Section, SectionHeader, cx, tabKeys } from "./ui";
 
 const RULES = [
   ["redirects, rewrites, headers", "Applied by the proxy, including single-page app fallbacks"],
@@ -42,16 +42,21 @@ export function FromVercel() {
 
         <Reveal delay={0.12} className="lg:sticky lg:top-24">
           <Card className="bg-[#0d0d0c]">
-            <div className="flex items-center gap-1 border-b border-line p-2">
-              {(
-                [
-                  ["json", "vercel.json"],
-                  ["cli", "vfy in your terminal"],
-                ] as const
-              ).map(([id, label]) => (
+            <div
+              role="tablist"
+              aria-label="Project config"
+              className="flex items-center gap-1 border-b border-line p-2"
+              onKeyDown={tabKeys(TABS.length, TABS.findIndex(([id]) => id === tab), (n) => setTab(TABS[n][0]))}
+            >
+              {TABS.map(([id, label]) => (
                 <button
                   key={id}
+                  id={`config-tab-${id}`}
+                  role="tab"
                   type="button"
+                  aria-selected={tab === id}
+                  aria-controls="config-panel"
+                  tabIndex={tab === id ? 0 : -1}
                   onClick={() => setTab(id)}
                   className={cx(
                     "rounded-md px-3 py-1.5 font-mono text-[12px] transition-colors",
@@ -62,13 +67,20 @@ export function FromVercel() {
                 </button>
               ))}
             </div>
-            {tab === "json" ? <JsonView /> : <CliView />}
+            <div id="config-panel" role="tabpanel" aria-labelledby={`config-tab-${tab}`}>
+              {tab === "json" ? <JsonView /> : <CliView />}
+            </div>
           </Card>
         </Reveal>
       </div>
     </Section>
   );
 }
+
+const TABS = [
+  ["json", "vercel.json"],
+  ["cli", "vfy in your terminal"],
+] as const;
 
 const k = (s: string) => <span className="text-accent-fg">"{s}"</span>;
 const v = (s: string) => <span className="text-accent-soft">"{s}"</span>;

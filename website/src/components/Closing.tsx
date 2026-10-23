@@ -103,12 +103,18 @@ export function Faq() {
                     type="button"
                     onClick={() => setOpen(isOpen ? null : i)}
                     aria-expanded={isOpen}
+                    aria-controls={`faq-${i}`}
                     className="flex w-full items-center justify-between gap-4 py-4 text-left text-[15px] transition-colors hover:text-fg sm:gap-6 sm:py-5 sm:text-[16px]"
                   >
                     <span className={isOpen ? "text-fg" : "text-fg-muted"}>{q}</span>
                     <Plus className={cx("size-4 shrink-0 text-fg-dim transition-transform duration-300", isOpen && "rotate-45 text-accent")} />
                   </button>
-                  <div className={cx("grid transition-[grid-template-rows] duration-300", isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}>
+                  <div
+                    id={`faq-${i}`}
+                    inert={!isOpen}
+                    aria-hidden={!isOpen}
+                    className={cx("grid transition-[grid-template-rows] duration-300", isOpen ? "grid-rows-[1fr]" : "grid-rows-[0fr]")}
+                  >
                     <p className="overflow-hidden pr-6 text-[14.5px] leading-relaxed text-fg-muted sm:pr-10 sm:text-[15px]">
                       <span className="block pb-5">{a}</span>
                     </p>

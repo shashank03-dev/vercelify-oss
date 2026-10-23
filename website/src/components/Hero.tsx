@@ -3,7 +3,7 @@ import { ArrowRight, Menu, X } from "lucide-react";
 import { type RefObject, useEffect, useRef, useState } from "react";
 import { LaserLanding, useShader } from "./LaserLanding";
 import { HeroShards } from "./HeroShards";
-import { Button, CopyCommand, GithubIcon as Github, INSTALL_HOST, Logo, REPO, Screenshot, cx } from "./ui";
+import { Button, CopyCommand, GithubIcon as Github, INSTALL_HOST, Logo, REPO, Screenshot, cx, tabKeys } from "./ui";
 
 const LINKS = [
   ["Features", "#features"],
@@ -28,6 +28,12 @@ export function Nav() {
     window.addEventListener("scroll", on, { passive: true });
     return () => window.removeEventListener("scroll", on);
   }, []);
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [open]);
   const notch = scrolled || open;
 
   return (
@@ -74,6 +80,7 @@ export function Nav() {
               className="grid size-9 place-items-center rounded-lg text-fg-muted md:hidden"
               aria-label={open ? "Close menu" : "Open menu"}
               aria-expanded={open}
+              aria-controls="mobile-menu"
               onClick={() => setOpen(!open)}
             >
               {open ? <X className="size-5" /> : <Menu className="size-5" />}
@@ -81,7 +88,7 @@ export function Nav() {
           </div>
         </nav>
         {open && (
-          <div className="border-t border-line px-4 pt-2 pb-4 md:hidden">
+          <div id="mobile-menu" className="border-t border-line px-4 pt-2 pb-4 md:hidden">
             {[...LINKS, ["GitHub", REPO] as const].map(([label, href]) => (
               <a
                 key={href}
@@ -207,7 +214,7 @@ function Showcase({
   const [i, setI] = useState(0);
   const [auto, setAuto] = useState(true);
   useEffect(() => {
-    if (!auto) return;
+    if (!auto || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
     const t = window.setInterval(() => setI((n) => (n + 1) % SCREENS.length), 5200);
     return () => window.clearInterval(t);
   }, [auto]);
@@ -242,13 +249,24 @@ function Showcase({
             <span className="size-3 rounded-full bg-surface-3" />
             <span className="size-3 rounded-full bg-surface-3" />
           </div>
-          <div role="tablist" aria-label="App screens" className="mx-auto flex gap-1 rounded-lg border border-line bg-surface/60 p-0.5">
+          <div
+            role="tablist"
+            aria-label="App screens"
+            className="mx-auto flex gap-1 rounded-lg border border-line bg-surface/60 p-0.5"
+            onKeyDown={tabKeys(SCREENS.length, i, (n) => {
+              setI(n);
+              setAuto(false);
+            })}
+          >
             {SCREENS.map((s, n) => (
               <button
                 key={s.id}
+                id={`screen-tab-${s.id}`}
                 role="tab"
                 type="button"
                 aria-selected={i === n}
+                aria-controls="screen-panel"
+                tabIndex={i === n ? 0 : -1}
                 onClick={() => {
                   setI(n);
                   setAuto(false);
@@ -264,12 +282,18 @@ function Showcase({
           </div>
           <span className="hidden w-[52px] sm:block" />
         </div>
-        <div className="relative aspect-[2720/1640]">
+        <div
+          id="screen-panel"
+          role="tabpanel"
+          aria-labelledby={`screen-tab-${SCREENS[i].id}`}
+          className="relative aspect-[2720/1640]"
+        >
           {SCREENS.map((s, n) => (
             <Screenshot
               key={s.id}
               src={`/app/${s.id}.jpg`}
               alt={s.alt}
+              aria-hidden={i !== n}
               sizes="(min-width: 1200px) 1136px, calc(100vw - 32px)"
               loading={n === 0 ? "eager" : "lazy"}
               fetchPriority={n === 0 ? "high" : "low"}

@@ -5,7 +5,7 @@ import {
   useTransform,
 } from "framer-motion";
 import { useRef } from "react";
-import { LaserLanding, useMedia, useShader } from "./LaserLanding";
+import { LaserLanding, useShader } from "./LaserLanding";
 import { Reveal, Section, cx } from "./ui";
 
 const STACK = [
@@ -37,8 +37,7 @@ const FACTS = [
 export function Stack() {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const webgl = useShader();
-  const wide = useMedia("(min-width: 768px)");
-  const lit = !!webgl && wide;
+  const lit = !!webgl;
   return (
     <Section junction={!lit} className="pt-12 pb-6 sm:pt-16">
       {lit && (
@@ -61,6 +60,8 @@ export function Stack() {
             {[...STACK, ...STACK].map((name, i) => (
               <span
                 key={i}
+                // The second copy only makes the loop seamless; read the list once.
+                aria-hidden={i >= STACK.length || undefined}
                 className="flex items-center gap-3 px-7 text-[17px] font-medium tracking-tight whitespace-nowrap text-fg-muted/80"
               >
                 <span className="size-1 rounded-full bg-fg-dim" />
@@ -100,6 +101,8 @@ export function Stack() {
                 i > 1 && "border-t border-line md:border-t-0",
                 i === 2 && "md:border-l",
                 lit && i === 0 && "pl-[calc(var(--indent)+22px)]",
+                // Two rows below md: the second row starts at the card's edge too.
+                lit && i === 2 && "max-md:pl-[calc(var(--indent)+22px)]",
               )}
             >
               <div
