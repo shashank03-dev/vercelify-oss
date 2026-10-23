@@ -112,9 +112,11 @@ sudo vercelify llm pull gemma4:e2b
 sudo vercelify llm                     # status, endpoints, installed models
 ```
 
-Gemma 4 E2B is the default because it is the smallest Gemma 4 that answers this well on
-a CPU. Check the free memory before pulling bigger models (`gemma4:e4b` wants roughly
-twice the memory): one model is loaded at a time, next to Coolify and the user's apps.
+Gemma 4 E2B is the default because it is the smallest Gemma 4. Ollama's default build is
+still about a 7 GB download and needs about that much free memory while it answers, and a
+server loads one model at a time next to Coolify and the user's apps. On an 8 GB server,
+prefer `vfy why --log` on the user's own computer, or `--provider gemini` if they agree.
+`gemma4:e4b` needs roughly 10 GB.
 
 ## Everyday vfy commands
 
