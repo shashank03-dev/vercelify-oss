@@ -305,12 +305,19 @@ export function Junction({ top = 12 }: { top?: number }) {
  * A 2720px app capture (`src` is the full-size .jpg in public/app). Served as
  * AVIF, with 1360px copies for 1x screens and phones; JPEG only as fallback.
  */
-export function Screenshot({ src, sizes, ...img }: { src: string; sizes: string } & ImgHTMLAttributes<HTMLImageElement>) {
+export function Screenshot({ src, sizes, onError, ...img }: { src: string; sizes: string } & ImgHTMLAttributes<HTMLImageElement>) {
   const base = src.replace(/\.jpg$/, "");
+  // A browser can claim AVIF and still fail to decode a file (Firefox and
+  // grid AVIFs): drop the AVIF source so the <img> falls back to the JPEG.
+  const [avif, setAvif] = useState(true);
   return (
     <picture className="contents">
-      <source type="image/avif" srcSet={`${base}-1360.avif 1360w, ${base}.avif 2720w`} sizes={sizes} />
+      {avif && <source type="image/avif" srcSet={`${base}-1360.avif 1360w, ${base}.avif 2720w`} sizes={sizes} />}
       <img
+        onError={(e) => {
+          if (avif && e.currentTarget.currentSrc.endsWith(".avif")) setAvif(false);
+          onError?.(e);
+        }}
         src={src}
         srcSet={`${base}-1360.jpg 1360w, ${src} 2720w`}
         sizes={sizes}
