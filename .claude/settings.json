@@ -1,18 +1,25 @@
 {
-  "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "Bash(./cli/vfy:*)",
-      "Bash(vfy:*)",
-      "Bash(curl:*)",
-      "Bash(jq:*)",
-      "Bash(ollama:*)",
+      "Bash(mkdir:*)",
+      "Bash(ssh-keygen:*)",
+      "Bash(/usr/sbin/sshd:*)",
+      "Bash(sshd:*)",
+      "Bash(pgrep:*)",
+      "Bash(pkill sshd:*)",
+      "Bash(docker:*)",
+      "Bash(docker compose:*)",
       "Bash(git:*)",
-      "Bash(npm:*)",
+      "Bash(git daemon:*)",
+      "Bash(python3:*)",
+      "Bash(node:*)",
       "Bash(npx:*)",
+      "Bash(npm:*)",
       "Bash(cargo:*)",
-      "Bash(bats:*)",
-      "Bash(shellcheck:*)"
+      "Bash(curl:*)",
+      "Bash(ffmpeg:*)",
+      "Bash(Xvfb:*)",
+      "Bash(/home/user/vercelify-oss/target/debug/vercelify-agent:*)"
     ]
   }
 }
