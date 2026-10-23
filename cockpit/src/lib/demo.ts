@@ -34,8 +34,11 @@ import type {
   SystemSnapshot,
   TailscaleStatus,
   VolumeEntry,
+  LlmChatMessage,
 } from "../types";
 import type { HttpRequest } from "./transport";
+import { isExplainChat } from "./explain";
+import failedBuildLog from "../../../cli/examples/failed-build.log?raw";
 
 const GB = 1024 ** 3;
 const now = Date.now();
@@ -85,6 +88,9 @@ const MESSAGES = [
   "Initial commit",
 ];
 
+// The seeded Next.js build that fails on Linux (cli/examples, also used by `vfy why --log`).
+const FAILED_BUILD = failedBuildLog.trimEnd().split("\n");
+
 function deployments(appUuid: string): CoolifyDeployment[] {
   const sha = (i: number) => (appUuid.charCodeAt(1) * 7919 * (i + 3)).toString(16).padEnd(40, "a3f9");
   const list: CoolifyDeployment[] = [];
@@ -113,7 +119,7 @@ function dep(app: string, i: number, status: string, commit: string, msg: string
     updated_at: created,
     finished_at: live ? null : new Date(Date.parse(created) + (48 + i * 17) * 1000).toISOString(),
     logs: JSON.stringify(
-      [
+      (status === "failed" ? FAILED_BUILD : [
         "Starting deployment of shashank03-dev/portfolio:main",
         "Pulling repository… done",
         "Nixpacks detected Node.js 22 (npm)",
@@ -124,7 +130,7 @@ function dep(app: string, i: number, status: string, commit: string, msg: string
         "Rolling update: starting new container",
         "Healthcheck passed",
         "Deployment finished.",
-      ].map((output, n) => ({ output, type: n === 3 ? "stderr" : "stdout", timestamp: created, hidden: false })),
+      ]).map((output, n) => ({ output, type: n === 3 && status !== "failed" ? "stderr" : "stdout", timestamp: created, hidden: false })),
     ),
   };
 }
@@ -402,6 +408,7 @@ const idle = { running: false, pid: null, command: null, started_at: null, last_
 
 const llmTasks: LlmTask[] = [];
 const llmModels: LlmModel[] = [
+  { name: "gemma4:e2b", size_bytes: 7.2 * GB, modified_at: iso(60 * 6), family: "gemma4", parameter_size: null, quantization: null },
   { name: "llama3.2:3b", size_bytes: 2.0 * GB, modified_at: iso(60 * 30), family: "llama", parameter_size: "3.2B", quantization: "Q4_K_M" },
   { name: "qwen2.5-coder:1.5b", size_bytes: 0.96 * GB, modified_at: iso(60 * 50), family: "qwen2", parameter_size: "1.5B", quantization: "Q4_K_M" },
 ];
@@ -952,9 +959,11 @@ async function demoEvents(onLine: (line: string) => void, signal: AbortSignal): 
 
 export async function demoStream(req: HttpRequest, onLine: (line: string) => void, signal: AbortSignal): Promise<void> {
   if (req.path === "/v1/events") return demoEvents(onLine, signal);
-  const body = req.body as { model: string; messages: { content: string }[] };
+  const body = req.body as { model: string; messages: LlmChatMessage[] };
   const last = body.messages[body.messages.length - 1]?.content ?? "";
-  const reply = `Running ${body.model} on your old laptop. You asked: “${last.slice(0, 80)}”. This is demo mode, so the answer is canned — on a real server the tokens stream in as the CPU produces them.`;
+  const reply = isExplainChat(body.messages)
+    ? DEMO_EXPLANATION
+    : `Running ${body.model} on your old laptop. You asked: “${last.slice(0, 80)}”. This is demo mode, so the answer is canned — on a real server the tokens stream in as the CPU produces them.`;
   const words = reply.split(/(?<= )/);
   await new Promise((r) => setTimeout(r, 400));
   for (const w of words) {
@@ -964,6 +973,14 @@ export async function demoStream(req: HttpRequest, onLine: (line: string) => voi
   }
   onLine(JSON.stringify({ done: true, eval_count: words.length * 1.3, eval_duration: words.length * 45e6 * 1.3 }));
 }
+
+// Demo mode only: what Gemma 4 E2B is expected to say about cli/examples/failed-build.log.
+// Not model output; a real server streams the model's own answer.
+const DEMO_EXPLANATION = `(Demo mode: canned answer, no model ran.)
+
+**Cause:** \`npm run build\` fails because \`app/page.tsx\` imports \`../components/Header\`, and Linux file names are case-sensitive, so that path doesn't match the file on disk (likely \`components/header.tsx\`).
+**Fix:** make the import match the file name exactly: \`import Header from "../components/header"\` in \`app/page.tsx\` (or \`git mv components/header.tsx components/Header.tsx\`).
+**Check:** \`git ls-files components\` then \`npm run build\`.`;
 
 export const DEMO_SETTINGS = {
   agent_url: "http://thinkpad-t470.tail1234.ts.net:7420",

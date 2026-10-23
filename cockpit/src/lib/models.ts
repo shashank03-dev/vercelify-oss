@@ -25,6 +25,8 @@ export const CATALOG: CatalogModel[] = [
   { name: "gemma3:4b", label: "Gemma 3 4B", size: 3.3 * GB, blurb: "Understands images as well as text.", tags: ["chat", "vision"] },
   { name: "qwen2.5:7b", label: "Qwen 2.5 7B", size: 4.7 * GB, blurb: "Noticeably smarter; wants 8 GB free.", tags: ["chat"] },
   { name: "llama3.1:8b", label: "Llama 3.1 8B", size: 4.9 * GB, blurb: "The classic 8B. Slow on old CPUs.", tags: ["chat"] },
+  { name: "gemma4:e2b", label: "Gemma 4 E2B", size: 7.2 * GB, blurb: "Explains failed deploys. ~2.3B effective params, 128K context.", tags: ["chat", "reasoning"] },
+  { name: "gemma4:e4b", label: "Gemma 4 E4B", size: 9.6 * GB, blurb: "Smarter Gemma 4; wants 16 GB of RAM.", tags: ["chat", "reasoning"] },
   { name: "nomic-embed-text", label: "Nomic Embed", size: 274 * MB, blurb: "Embeddings for search and RAG in your apps.", tags: ["embeddings"] },
 ];
 

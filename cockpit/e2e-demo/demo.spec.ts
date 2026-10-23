@@ -178,6 +178,25 @@ test("AI models: chat streams, models download, snippets for the Mac", async ({ 
   await expect(page.getByTestId("llm-install-button")).toBeEnabled();
 });
 
+test("apps: a failed build is explained by Gemma 4 on the server", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "dell-e7450");
+  await page.getByRole("row", { name: /notes-api/ }).getByRole("button", { name: "Deployments & logs" }).click();
+  const failed = page.getByTestId("deployment-row").filter({ hasText: "Error" }).first();
+  await failed.hover();
+  await failed.getByRole("button", { name: "Build logs" }).click();
+  await expect(page.getByTestId("build-log")).toContainText("Module not found: Can't resolve '../components/Header'");
+
+  await page.getByTestId("explain-failure").click();
+  const answer = page.getByTestId("explain-answer");
+  await expect(answer).toContainText("Demo mode");
+  await expect(answer).toContainText("Cause:");
+  await expect(answer).toContainText("Fix:");
+  await expect(answer).toContainText("Check:");
+  await expect(page.getByTestId("explain-meta")).toContainText("gemma4:e2b on dell-e7450");
+  await expect(page.getByTestId("explain-meta")).toContainText("tokens/s");
+});
+
 test("apps: create from Git with auto-deploy, manage a branch watch", async ({ page }) => {
   await page.goto("/");
   await pairFound(page, "dell-e7450");
