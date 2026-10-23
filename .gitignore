@@ -10,3 +10,5 @@ cockpit/src-tauri/gen/
 .env
 /e2e-logs/
 *.tsbuildinfo
+.vercel
+.env.local
