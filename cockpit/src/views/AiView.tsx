@@ -354,6 +354,8 @@ function Chat({ s }: { s: LlmStatus }) {
   const endRef = useRef<HTMLDivElement>(null);
   const names = useMemo(() => s.models.map((m) => m.name), [s.models]);
 
+  // Navigation and server switches must release the server's model generation.
+  useEffect(() => () => streaming?.cancel(), [streaming]);
   useEffect(() => {
     if (!names.includes(model)) setModel(names[0] ?? "");
   }, [names, model]);

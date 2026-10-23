@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CockpitError, toCockpitError } from "./transport";
 
 export interface Polled<T> {
@@ -18,42 +18,50 @@ export function usePoll<T>(fn: () => Promise<T>, intervalMs: number, deps: unkno
   const [loading, setLoading] = useState(true);
   const fnRef = useRef(fn);
   fnRef.current = fn;
-  const inflight = useRef(false);
-  const alive = useRef(true);
+  const resource = useMemo(() => ({}), deps);
+  const previousResource = useRef(resource);
+  const generation = useRef({ active: false, inflight: false });
 
   const refresh = useCallback(async () => {
-    if (inflight.current) return;
-    inflight.current = true;
+    const request = generation.current;
+    if (!request.active || request.inflight) return;
+    request.inflight = true;
     try {
       const v = await fnRef.current();
-      if (!alive.current) return;
+      if (!request.active) return;
       setData(v);
       setError(undefined);
     } catch (e) {
-      if (alive.current) setError(toCockpitError(e));
+      if (request.active) setError(toCockpitError(e));
     } finally {
-      inflight.current = false;
-      if (alive.current) setLoading(false);
+      request.inflight = false;
+      if (request.active) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    alive.current = true;
+    const current = { active: true, inflight: false };
+    generation.current = current;
+    if (previousResource.current !== resource) {
+      previousResource.current = resource;
+      setData(undefined);
+      setError(undefined);
+    }
     setLoading(true);
     void refresh();
-    if (!intervalMs) return () => void (alive.current = false);
+    if (!intervalMs) return () => void (current.active = false);
     const id = window.setInterval(() => {
       if (document.visibilityState === "visible") void refresh();
     }, intervalMs);
     const onVisible = () => document.visibilityState === "visible" && void refresh();
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      alive.current = false;
+      current.active = false;
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intervalMs, refresh, ...deps]);
+  }, [intervalMs, refresh, resource]);
 
   return { data, error, loading, refresh };
 }

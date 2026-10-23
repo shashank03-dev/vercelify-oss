@@ -1,6 +1,6 @@
 import { AlertTriangle, Laptop, MonitorPlay, MonitorUp, Play, ScreenShare, Square, TerminalSquare } from "lucide-react";
 import { useEffect, useState } from "react";
-import { agent, local } from "../lib/api";
+import { agentOn, local } from "../lib/api";
 import { usePoll } from "../lib/hooks";
 import { agentHost, useSession } from "../lib/session";
 import { inTauri } from "../lib/transport";
@@ -25,6 +25,7 @@ export const QUALITIES: Quality[] = [
 
 export function DisplayCaster() {
   const { settings } = useSession();
+  const agent = agentOn(settings.agent_url);
   const toast = useToast();
   const display = usePoll(() => agent.display(), 3000);
   const sender = usePoll(() => local.senderStatus(), 2000);

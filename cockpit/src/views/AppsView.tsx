@@ -64,7 +64,7 @@ import {
   Tabs,
   TextInput,
 } from "../components/ui";
-import { agent, coolify, defaultTarget, isWorker, local, parseDeploymentLogs } from "../lib/api";
+import { agent, agentOn, coolify, coolifyOn, defaultTarget, isWorker, local, parseDeploymentLogs } from "../lib/api";
 import { ago, bytes, duration, hostOf, pct, primaryUrl, shortSha, statusHealth, statusLabel } from "../lib/format";
 import { EXPLAIN_MAX_TOKENS, EXPLAIN_MODEL, explainMessages, pickExplainModel } from "../lib/explain";
 import { usePoll } from "../lib/hooks";
@@ -815,10 +815,16 @@ type Explanation = { model?: string; text: string; tps?: number | null; error?: 
 /** "Why did my deploy fail?": the server's own model (Gemma 4 E2B by default) reads the log. */
 function ExplainFailure({ deployment, lines }: { deployment: CoolifyDeployment; lines: CoolifyDeploymentLog[] }) {
   const { settings } = useSession();
+  const agent = agentOn(settings.agent_url);
   const { go } = useNav();
   const [ex, setEx] = useState<Explanation>();
   const [streaming, setStreaming] = useState<{ cancel: () => void } | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   useEffect(() => () => streaming?.cancel(), [streaming]);
   useEffect(() => {
     // Newer browsers return a Promise here; an effect may only return a cleanup.
@@ -831,6 +837,8 @@ function ExplainFailure({ deployment, lines }: { deployment: CoolifyDeployment; 
     let model: string | undefined;
     try {
       const s = await agent.llm();
+      // Model discovery may finish after navigation or closing the log dialog.
+      if (!mounted.current) return;
       if (!s.installed) return fail("No local AI on this server yet", `Install it in AI models, then download ${EXPLAIN_MODEL}. Or on the server: sudo vercelify llm install`);
       if (!s.ready) return fail("Ollama isn't answering", "Start it from AI models, or on the server: sudo vercelify llm start");
       model = pickExplainModel(s.models.map((m) => m.name));
@@ -957,6 +965,8 @@ function DatabasesCard({
   setCreating: (v: boolean) => void;
 }) {
   const toast = useToast();
+  const { settings } = useSession();
+  const coolify = coolifyOn(settings.agent_url);
   const [kind, setKind] = useState<DatabaseKind>("postgresql");
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
@@ -967,7 +977,7 @@ function DatabasesCard({
       const servers = await coolify.servers();
       const server = servers.find((s) => s.ip === "host.docker.internal") ?? servers[0];
       if (!server) throw new Error("Coolify has no servers yet");
-      const target = await defaultTarget();
+      const target = await defaultTarget(coolify);
       const dbName = name.trim() || `${kind}-${Math.random().toString(36).slice(2, 6)}`;
       await coolify.createDatabase(kind, {
         ...target,

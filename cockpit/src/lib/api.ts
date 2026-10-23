@@ -190,9 +190,10 @@ function makeAgent(server?: string) {
 export const agent = makeAgent();
 
 /** Follow a job until it ends (polls, so it works with or without the event stream). */
-export async function waitForJob(id: string, onProgress?: (j: Job) => void, intervalMs = 2000): Promise<Job> {
+export async function waitForJob(id: string, onProgress?: (j: Job) => void, intervalMs = 2000, server?: string): Promise<Job> {
+  const client = makeAgent(server);
   for (;;) {
-    const j = (await agent.jobs()).find((x) => x.id === id);
+    const j = (await client.jobs()).find((x) => x.id === id);
     if (j) {
       onProgress?.(j);
       if (j.status !== "running") return j;

@@ -3,11 +3,12 @@ import { useState } from "react";
 import { StorageToggle } from "../components/StorageToggle";
 import { useToast } from "../components/Toast";
 import { Button, Callout, Card, cx, EmptyState, ErrorNote, IconButton, Loading, Meter, Modal, OrbitButton, PageHeader, PixelWave, ShimmerText, Skeleton } from "../components/ui";
-import { agent, coolify, waitForJob } from "../lib/api";
+import { agent, agentOn, coolifyOn, waitForJob } from "../lib/api";
 import { hasCap } from "../lib/caps";
 import { useLive } from "../lib/live";
 import { bytes, mediaLabel, pct } from "../lib/format";
 import { sleep, usePoll } from "../lib/hooks";
+import { useSession } from "../lib/session";
 import type { CoolifyVolume, DiskInfo, StorageTier } from "../types";
 
 export function StorageView() {
@@ -240,7 +241,7 @@ function TierCard({
 type StepState = "todo" | "doing" | "done" | "error";
 
 /** Stopped = Coolify says exited AND no container mounts the volume, twice in a row. */
-async function waitStopped(vol: CoolifyVolume, isApp: boolean) {
+async function waitStopped(vol: CoolifyVolume, isApp: boolean, agent: ReturnType<typeof agentOn>, coolify: ReturnType<typeof coolifyOn>) {
   const deadline = Date.now() + 150_000;
   let streak = 0;
   for (;;) {
@@ -263,6 +264,10 @@ async function waitStopped(vol: CoolifyVolume, isApp: boolean) {
 function MoveDialog({ vol, to, onClose, onDone }: { vol: CoolifyVolume; to: StorageTier; onClose: () => void; onDone: () => void }) {
   const toast = useToast();
   const { health } = useLive();
+  const { settings } = useSession();
+  // A move continues after this page unmounts: every step belongs to this host.
+  const agent = agentOn(settings.agent_url);
+  const coolify = coolifyOn(settings.agent_url);
   const [steps, setSteps] = useState<StepState[]>(["todo", "todo", "todo", "todo"]);
   const [error, setError] = useState<string>();
   const [note, setNote] = useState<string>();
@@ -287,14 +292,14 @@ function MoveDialog({ vol, to, onClose, onDone }: { vol: CoolifyVolume; to: Stor
       set(0, "done");
       i = 1;
       set(1, "doing");
-      await waitStopped(vol, isApp);
+      await waitStopped(vol, isApp, agent, coolify);
       set(1, "done");
       i = 2;
       set(2, "doing");
       if (hasCap(health.data, "jobs")) {
         // Large volumes take longer than a request may: follow the job.
         const job = await agent.moveVolumeInBackground(vol.id, to);
-        const done = await waitForJob(job.id);
+        const done = await waitForJob(job.id, undefined, 2000, settings.agent_url);
         if (done.status === "failed") throw new Error(done.detail ?? "the move failed");
         setNote(done.detail ?? "");
       } else {

@@ -20,6 +20,7 @@ serde_json.workspace = true
 tokio.workspace = true
 reqwest.workspace = true
 tracing.workspace = true
+tempfile = "3"
 tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"

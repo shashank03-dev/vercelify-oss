@@ -121,13 +121,20 @@ pub async fn send_lines(
     mut cancel: tokio::sync::oneshot::Receiver<()>,
     mut on_line: impl FnMut(String) -> bool,
 ) -> Result<(), String> {
-    let mut resp = build(client, base, token, req)?
-        .send()
-        .await
-        .map_err(|e| unreachable(base, e))?;
+    let request = build(client, base, token, req)?;
+    // A model may take minutes to load before it sends response headers.
+    let mut resp = tokio::select! {
+        biased;
+        _ = &mut cancel => return Ok(()),
+        response = request.send() => response.map_err(|e| unreachable(base, e))?,
+    };
     let status = resp.status();
     if !status.is_success() {
-        let text = resp.text().await.unwrap_or_default();
+        let text = tokio::select! {
+            biased;
+            _ = &mut cancel => return Ok(()),
+            text = resp.text() => text.unwrap_or_default(),
+        };
         return Err(error_message(status, &parse_body(text)));
     }
     let mut buf = Vec::new();
@@ -157,6 +164,41 @@ pub async fn send_lines(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn cancellation_interrupts_a_server_that_never_sends_headers() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let (accepted_tx, accepted_rx) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.unwrap();
+            let _ = accepted_tx.send(());
+            std::future::pending::<()>().await;
+        });
+        let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel();
+        let request = tokio::spawn(async move {
+            send_lines(
+                &client(),
+                &base,
+                None,
+                Request {
+                    method: "GET".into(),
+                    path: "/stream".into(),
+                    body: None,
+                    timeout: Some(30),
+                },
+                cancel_rx,
+                |_| true,
+            )
+            .await
+        });
+        accepted_rx.await.unwrap();
+        cancel_tx.send(()).unwrap();
+        let result = tokio::time::timeout(Duration::from_millis(300), request).await;
+        server.abort();
+        assert!(result.is_ok(), "Stop must cancel before response headers arrive");
+        assert!(result.unwrap().unwrap().is_ok());
+    }
 
     #[test]
     fn lines() {

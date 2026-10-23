@@ -57,14 +57,21 @@ fn read_config(app: &AppHandle) -> CockpitConfig {
 
 fn write_private(path: &PathBuf, contents: &str) -> std::io::Result<()> {
     use std::io::Write;
-    let mut opts = std::fs::OpenOptions::new();
-    opts.write(true).create(true).truncate(true);
+    // Write beside the destination, then replace it atomically. Existing files
+    // (including symlinks) never receive a partial write or retain public modes.
+    let mut file = tempfile::NamedTempFile::new_in(
+        path.parent()
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "settings path has no parent"))?,
+    )?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.mode(0o600);
+        use std::os::unix::fs::PermissionsExt;
+        file.as_file().set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
-    opts.open(path)?.write_all(contents.as_bytes())
+    file.write_all(contents.as_bytes())?;
+    file.as_file().sync_all()?;
+    file.persist(path).map_err(|e| e.error)?;
+    Ok(())
 }
 
 /// Change the config under the lock and persist it (0600).
@@ -74,9 +81,11 @@ fn update_config<T>(
     f: impl FnOnce(&mut CockpitConfig) -> T,
 ) -> CmdResult<(T, CockpitConfig)> {
     let mut cfg = state.config.lock().map_err(|e| e.to_string())?;
-    let out = f(&mut cfg);
-    let json = serde_json::to_string_pretty(&*cfg).map_err(|e| e.to_string())?;
+    let mut next = cfg.clone();
+    let out = f(&mut next);
+    let json = serde_json::to_string_pretty(&next).map_err(|e| e.to_string())?;
     write_private(&settings_path(app)?, &json).map_err(|e| e.to_string())?;
+    *cfg = next;
     Ok((out, cfg.clone()))
 }
 
@@ -486,4 +495,39 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(all(test, unix))]
+mod settings_tests {
+    use super::*;
+    use std::os::unix::fs::{symlink, PermissionsExt};
+
+    #[test]
+    fn saving_credentials_replaces_a_public_file_with_a_private_one() {
+        let dir = std::env::temp_dir().join(format!("vfy-settings-perms-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        std::fs::write(&path, "old").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
+        write_private(&path, "secret-token").unwrap();
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(mode, 0o600, "saved agent and Coolify credentials must be private");
+    }
+
+    #[test]
+    fn saving_credentials_replaces_symlinks_without_overwriting_the_target() {
+        let dir = std::env::temp_dir().join(format!("vfy-settings-link-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("other-file");
+        let path = dir.join("settings.json");
+        std::fs::write(&target, "keep me").unwrap();
+        symlink(&target, &path).unwrap();
+        write_private(&path, "new settings").unwrap();
+        let original = std::fs::read_to_string(&target).unwrap();
+        let saved = std::fs::read_to_string(&path).unwrap();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert_eq!(original, "keep me");
+        assert_eq!(saved, "new settings");
+    }
 }

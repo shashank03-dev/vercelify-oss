@@ -1,6 +1,6 @@
 import { GitBranch, Pause, Play, RefreshCw, Rocket, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { agent, agentOn, coolify, defaultTarget, type NewApp } from "../lib/api";
+import { agentOn, coolifyOn, defaultTarget, type NewApp } from "../lib/api";
 import { ago, bytes, shortSha } from "../lib/format";
 import { cloneUrl, repoName, validBranch } from "../lib/git";
 import { usePoll } from "../lib/hooks";
@@ -44,6 +44,8 @@ async function freeMemory(list: CoolifyServer[], current: CockpitSettings, paire
 export function NewAppModal({ open, onClose, onCreated }: { open: boolean; onClose: () => void; onCreated: (uuid: string) => void }) {
   const toast = useToast();
   const session = useSession();
+  const agent = agentOn(session.settings.agent_url);
+  const coolify = coolifyOn(session.settings.agent_url);
   const servers = usePoll(() => (open ? coolify.servers() : Promise.resolve([])), 0, [open]);
   const free = usePoll(
     () => (servers.data?.length ? freeMemory(servers.data, session.settings, session.servers) : Promise.resolve({} as Record<string, number>)),
@@ -74,7 +76,7 @@ export function NewAppModal({ open, onClose, onCreated }: { open: boolean; onClo
     setError(undefined);
     try {
       if (!server) throw new Error("Coolify has no servers yet");
-      const target = await defaultTarget();
+      const target = await defaultTarget(coolify);
       const appName = name.trim() || repoName(url);
       const created = await coolify.createPublicApp({
         ...target,
@@ -189,6 +191,8 @@ export function AutoDeployPanel({
   refresh: () => Promise<void>;
 }) {
   const toast = useToast();
+  const { settings } = useSession();
+  const agent = agentOn(settings.agent_url);
   const watch = status?.watches.find((w) => w.app_uuid === app.uuid);
   const [repo, setRepo] = useState(watch?.repo ?? cloneUrl(app.git_repository) ?? "");
   const [branch, setBranch] = useState(watch?.branch ?? app.git_branch ?? "main");
