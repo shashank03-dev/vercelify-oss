@@ -1,0 +1,104 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="740" viewBox="0 0 1200 740" role="img" aria-label="Vercelify architecture: the Mac app talks to the old laptop over Tailscale; the laptop runs the Vercelify agent, Coolify, Docker, Traefik and Ollama.">
+<title>Vercelify architecture</title>
+<defs><marker id="a-strong" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#45433e"/></marker><marker id="a-accent" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#ff8a5c"/></marker></defs>
+<rect x="0" y="0" width="1200" height="740" rx="20" fill="#0f0f0e" stroke="#0f0f0e" stroke-width="1"/>
+<rect x="524" y="20" width="300" height="60" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1"/>
+<text x="540" y="46" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">GitHub</text>
+<text x="540" y="66" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">or any Git host</text>
+<line x1="674" y1="222" x2="674" y2="84" stroke="#45433e" stroke-width="1.6" marker-end="url(#a-strong)"/>
+<text x="686" y="118" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#8f8c85" text-anchor="start">checks for new commits</text>
+<text x="686" y="134" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12" font-weight="400" fill="#8f8c85" text-anchor="start">every 60 s, outbound only</text>
+<rect x="40" y="150" width="300" height="466" rx="16" fill="#171716" stroke="#2c2b28" stroke-width="1"/>
+<text x="64" y="180" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#8f8c85" text-anchor="start">YOUR MAC</text>
+<text x="64" y="202" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#ecebe7" text-anchor="start">Control centre</text>
+<rect x="64" y="222" width="252" height="76" rx="10" fill="#2a1810" stroke="#6b3520" stroke-width="1.2"/>
+<text x="80" y="248" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ff8a5c" text-anchor="start">Vercelify app</text>
+<text x="80" y="268" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Desktop app · Tauri + React</text>
+<text x="80" y="288" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#8f8c85" text-anchor="start">deploy · logs · Explain with AI</text>
+<rect x="64" y="318" width="252" height="64" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1"/>
+<text x="80" y="344" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">vfy</text>
+<text x="80" y="364" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Command-line tool</text>
+<rect x="64" y="402" width="252" height="64" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1" stroke-dasharray="5 5"/>
+<text x="80" y="428" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">Ollama</text>
+<text x="135.2" y="428" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="500" fill="#8f8c85" text-anchor="start">optional</text>
+<text x="80" y="448" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">AI for vfy why --log</text>
+<rect x="64" y="486" width="252" height="64" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1" stroke-dasharray="5 5"/>
+<text x="80" y="512" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">Gemini API</text>
+<text x="168.0" y="512" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="500" fill="#8f8c85" text-anchor="start">optional</text>
+<text x="80" y="532" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Hosted Gemma 4</text>
+<rect x="352" y="150" width="136" height="466" rx="16" fill="#131312" stroke="#2c2b28" stroke-width="1" stroke-dasharray="5 5"/>
+<text x="420" y="186" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14" font-weight="650" fill="#ecebe7" text-anchor="middle">Tailscale</text>
+<text x="420" y="204" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#8f8c85" text-anchor="middle">private network</text>
+<text x="420" y="244" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#ff8a5c" text-anchor="middle">agent API</text>
+<text x="432" y="326" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="600" fill="#8f8c85" text-anchor="middle">Coolify API</text>
+<text x="420" y="566" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#8f8c85" text-anchor="middle">encrypted</text>
+<text x="420" y="582" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#8f8c85" text-anchor="middle">no open ports</text>
+<circle cx="420" cy="544" r="5" fill="#5bd47e"/>
+<rect x="500" y="150" width="660" height="466" rx="16" fill="#171716" stroke="#2c2b28" stroke-width="1"/>
+<text x="524" y="180" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11" font-weight="600" fill="#8f8c85" text-anchor="start">OLD LAPTOP</text>
+<text x="524" y="202" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="17" font-weight="650" fill="#ecebe7" text-anchor="start">Main server · Ubuntu</text>
+<line x1="316" y1="251" x2="520" y2="251" stroke="#ff8a5c" stroke-width="1.6" marker-end="url(#a-accent)"/>
+<path d="M316 282H372V335H520" fill="none" stroke="#45433e" stroke-width="1.6" marker-end="url(#a-strong)"/>
+<rect x="524" y="222" width="612" height="58" rx="10" fill="#2a1810" stroke="#6b3520" stroke-width="1.2"/>
+<text x="540" y="248" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ff8a5c" text-anchor="start">Vercelify agent</text>
+<text x="540" y="268" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Health, disks, pairing, auto-deploy and AI requests</text>
+<rect x="1074.0" y="232" width="50.0" height="21" rx="10.5" fill="#252522" stroke="#252522" stroke-width="1"/>
+<text x="1099.0" y="247" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" font-weight="500" fill="#8f8c85" text-anchor="middle">:7420</text>
+<line x1="674" y1="280" x2="674" y2="304" stroke="#45433e" stroke-width="1.6" marker-end="url(#a-strong)"/>
+<line x1="986" y1="280" x2="986" y2="304" stroke="#45433e" stroke-width="1.6" marker-end="url(#a-strong)"/>
+<rect x="524" y="306" width="300" height="58" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1"/>
+<text x="540" y="332" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">Coolify</text>
+<text x="540" y="352" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Builds and deploys your apps</text>
+<rect x="762.0" y="316" width="50.0" height="21" rx="10.5" fill="#252522" stroke="#252522" stroke-width="1"/>
+<text x="787.0" y="331" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" font-weight="500" fill="#8f8c85" text-anchor="middle">:8000</text>
+<rect x="836" y="306" width="300" height="58" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1"/>
+<text x="852" y="332" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">Ollama</text>
+<text x="907.2" y="332" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="500" fill="#8f8c85" text-anchor="start">optional</text>
+<text x="852" y="352" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Gemma 4 runs here, locally</text>
+<rect x="1066.8" y="316" width="57.2" height="21" rx="10.5" fill="#252522" stroke="#252522" stroke-width="1"/>
+<text x="1095.4" y="331" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" font-weight="500" fill="#8f8c85" text-anchor="middle">:11434</text>
+<line x1="674" y1="364" x2="674" y2="388" stroke="#45433e" stroke-width="1.6" marker-end="url(#a-strong)"/>
+<rect x="524" y="390" width="612" height="116" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1"/>
+<text x="540" y="416" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">Docker</text>
+<text x="600" y="416" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">each app runs in its own container</text>
+<rect x="540" y="434" width="57.6" height="30" rx="15" fill="#171716" stroke="#2c2b28" stroke-width="1"/>
+<circle cx="553" cy="449" r="3.5" fill="#5bd47e"/>
+<text x="562" y="453" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#ecebe7" text-anchor="start">blog</text>
+<rect x="607.6" y="434" width="94.60000000000001" height="30" rx="15" fill="#171716" stroke="#2c2b28" stroke-width="1"/>
+<circle cx="620.6" cy="449" r="3.5" fill="#5bd47e"/>
+<text x="629.6" y="453" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#ecebe7" text-anchor="start">notes-api</text>
+<rect x="712.2" y="434" width="131.60000000000002" height="30" rx="15" fill="#171716" stroke="#2c2b28" stroke-width="1"/>
+<circle cx="725.2" cy="449" r="3.5" fill="#5bd47e"/>
+<text x="734.2" y="453" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#ecebe7" text-anchor="start">PR #12 preview</text>
+<rect x="853.8000000000001" y="434" width="102.0" height="30" rx="15" fill="#171716" stroke="#2c2b28" stroke-width="1"/>
+<circle cx="866.8000000000001" cy="449" r="3.5" fill="#8f8c85"/>
+<text x="875.8000000000001" y="453" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#ecebe7" text-anchor="start">PostgreSQL</text>
+<rect x="965.8000000000001" y="434" width="65.0" height="30" rx="15" fill="#171716" stroke="#2c2b28" stroke-width="1"/>
+<circle cx="978.8000000000001" cy="449" r="3.5" fill="#8f8c85"/>
+<text x="987.8000000000001" y="453" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="500" fill="#ecebe7" text-anchor="start">Redis</text>
+<text x="540" y="490" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#8f8c85" text-anchor="start">apps</text>
+<text x="853.8000000000002" y="490" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="400" fill="#8f8c85" text-anchor="start">databases</text>
+<line x1="674" y1="530" x2="674" y2="508" stroke="#45433e" stroke-width="1.6" marker-end="url(#a-strong)"/>
+<rect x="524" y="532" width="300" height="58" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1"/>
+<text x="540" y="558" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">Traefik</text>
+<text x="540" y="578" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Routes web traffic to apps</text>
+<rect x="740.4" y="542" width="71.6" height="21" rx="10.5" fill="#252522" stroke="#252522" stroke-width="1"/>
+<text x="776.2" y="557" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="11.5" font-weight="500" fill="#8f8c85" text-anchor="middle">:80 :443</text>
+<rect x="836" y="532" width="300" height="58" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1"/>
+<text x="852" y="558" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">Guard + firewall</text>
+<text x="852" y="578" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Battery, heat, private ports</text>
+<rect x="160" y="662" width="250" height="56" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1"/>
+<text x="176" y="688" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">Visitors</text>
+<text x="176" y="708" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Anyone on the internet</text>
+<line x1="410" y1="690" x2="518" y2="690" stroke="#45433e" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#a-strong)"/>
+<rect x="524" y="662" width="300" height="56" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1" stroke-dasharray="5 5"/>
+<text x="540" y="688" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">Cloudflare Tunnel</text>
+<text x="685.4" y="688" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="500" fill="#8f8c85" text-anchor="start">optional</text>
+<text x="540" y="708" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Public HTTPS for your domain</text>
+<line x1="674" y1="662" x2="674" y2="594" stroke="#45433e" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#a-strong)"/>
+<rect x="836" y="662" width="300" height="56" rx="10" fill="#1d1d1b" stroke="#2c2b28" stroke-width="1" stroke-dasharray="5 5"/>
+<text x="852" y="688" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="14.5" font-weight="600" fill="#ecebe7" text-anchor="start">Raspberry Pi worker</text>
+<text x="1013.8" y="688" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="11.5" font-weight="500" fill="#8f8c85" text-anchor="start">optional</text>
+<text x="852" y="708" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#8f8c85" text-anchor="start">Extra room for apps</text>
+<line x1="986" y1="662" x2="986" y2="620" stroke="#45433e" stroke-width="1.6" stroke-dasharray="4 4" marker-end="url(#a-strong)"/>
+</svg>
