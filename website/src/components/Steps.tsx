@@ -96,8 +96,8 @@ function Pairing() {
     <Shot
       src="/app/pairing.jpg"
       alt="The Vercelify app pairing with a laptop found on the tailnet using an 8-character code"
-      pos="69% 63%"
-      zoom={1.55}
+      pos="87% 64%"
+      zoom={2.2}
       className="mt-4 aspect-[16/9] shadow-[0_30px_80px_-30px_rgb(0_0_0/0.8)]"
     />
   );

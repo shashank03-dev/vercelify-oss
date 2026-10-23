@@ -102,8 +102,8 @@ function Deployments() {
     <Shot
       src="/app/deployments.jpg"
       alt="Deployment history for portfolio: production, a pull request preview, a failed build and rollbacks"
-      pos="64% 50%"
-      zoom={1.55}
+      pos="100% 45%"
+      zoom={1.6}
       width="(min-width: 1024px) 680px, (min-width: 768px) 90vw, 100vw"
       className="aspect-[16/8]"
     />
@@ -235,8 +235,8 @@ function Machines() {
     <Shot
       src="/app/servers.jpg"
       alt="Servers page: a laptop with CPU, memory, disks, temperature and the workers it deploys to"
-      pos="44% 40%"
-      zoom={1.9}
+      pos="37% 18%"
+      zoom={2.12}
       className="aspect-[16/9]"
     />
   );

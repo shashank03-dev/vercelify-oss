@@ -46,8 +46,8 @@ function Health() {
     <Shot
       src="/app/health.jpg"
       alt="Health page: CPU, memory, disk and temperature, a 24-hour chart and the power and thermal guard"
-      pos="70% 30%"
-      zoom={1.3}
+      pos="100% 10%"
+      zoom={1.06}
       className="aspect-[4/3] shadow-[0_40px_100px_-40px_rgb(0_0_0/0.9)]"
     />
   );
