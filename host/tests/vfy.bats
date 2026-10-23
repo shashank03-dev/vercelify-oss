@@ -56,7 +56,7 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
 @test "env pull writes production values, private, never overwrites" {
   run "$VFY" env pull blog
   [ "$status" -eq 0 ]
-  [ "$(stat -c %a .env)" = 600 ]
+  [ "$(stat -c %a .env 2>/dev/null || stat -f %Lp .env)" = 600 ]
   grep -qx 'DATABASE_URL="postgres://u:p@db/x"' .env
   grep -qx 'QUOTE="say \\"hi\\""' .env
   ! grep -q preview .env
