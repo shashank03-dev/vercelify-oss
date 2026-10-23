@@ -3,6 +3,7 @@ node_modules/
 dist/
 cockpit/src-tauri/gen/
 *.log
+!cli/examples/*.log
 .DS_Store
 /test-results/
 /playwright-report/
