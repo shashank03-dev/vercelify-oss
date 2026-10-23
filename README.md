@@ -87,6 +87,18 @@ set -a; . ./.env; set +a
 The key goes to curl on stdin, never on the command line, and `.env` is gitignored. This
 path sends the trimmed log to Google, so it is opt-in; the default stays local.
 
+Real output from `gemma-4-26b-a4b-it` via the Gemini API for the example log (23 Oct 2026):
+
+```text
+**Cause:** The `next build` step failed because `./app/page.tsx` attempts to import a component using a case-sensitive path that does not match the actual filename on the Linux filesystem.
+
+**Fix:** Rename the import in `app/page.tsx` to match the exact casing of the file in the `components/` directory (e.g., change `../components/Header` to `../components/header` if the file is lowercase).
+
+**Check:** `ls components/` to verify the exact casing of the file, then `npm run build` to test the import locally.
+
+— gemma-4-26b-a4b-it via the Gemini API (Gemma 4, Apache 2.0)
+```
+
 ### Use it from a coding agent
 
 [`skills/vercelify`](skills/vercelify/SKILL.md) is an [Agent Skill](https://agentskills.io)
@@ -113,7 +125,7 @@ Vercelify itself is [MIT licensed](LICENSE).
 ### Hacktoberfest Hack Day Bengaluru 2026
 
 Entered in **Track 1: Best Open-Source AI Project**, with **Track 2: Gemma 4 via the Gemini
-API** as a stretch (`--provider gemini`). The pitch: deploying to your own old hardware should be as easy as
+API** verified against the real API (`--provider gemini`, sample output above). The pitch: deploying to your own old hardware should be as easy as
 Vercel, with no cloud bill, and when a deploy breaks an open model on that same
 hardware should tell you why.
 
