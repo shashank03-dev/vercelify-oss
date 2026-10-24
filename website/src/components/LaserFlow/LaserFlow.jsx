@@ -3,9 +3,11 @@
 // LaserFlow from React Bits (https://reactbits.dev), JavaScript + CSS variant,
 // WebGL2, no dependencies. One addition: `hueSpread` narrows the hue shifts
 // of the derived tints so the light stays in one colour family (the brand
-// ember) instead of fanning out to pink and yellow. LaserLanding.tsx mounts it.
+// ember) instead of fanning out to pink and yellow. Another: after the browser
+// drops the GL context (driver reset, memory pressure on a phone) the beam
+// sets itself up again instead of staying blank. LaserLanding.tsx mounts it.
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import './LaserFlow.css';
 
@@ -462,6 +464,8 @@ export const LaserFlow = ({
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const wakeRef = useRef(null);
+  // Bumped when a lost GL context comes back, to set everything up again.
+  const [contextEpoch, setContextEpoch] = useState(0);
   const settings = {
     surfaceRef,
     beamPosition: clamp(beamPosition, 0, 1),
@@ -877,6 +881,20 @@ export const LaserFlow = ({
       gl.deleteBuffer(buffer);
       gl.deleteVertexArray(vao);
       gl.deleteProgram(program);
+    };
+  }, [contextEpoch]);
+
+  // Ask for the context back when it's lost; set up again once it returns.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const onLost = event => event.preventDefault();
+    const onRestored = () => setContextEpoch(epoch => epoch + 1);
+    canvas.addEventListener('webglcontextlost', onLost);
+    canvas.addEventListener('webglcontextrestored', onRestored);
+    return () => {
+      canvas.removeEventListener('webglcontextlost', onLost);
+      canvas.removeEventListener('webglcontextrestored', onRestored);
     };
   }, []);
 

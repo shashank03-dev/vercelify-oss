@@ -8,15 +8,6 @@ export const DOCS = `${REPO}#readme`;
 export const INSTALL_HOST = "curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install.sh | sudo bash";
 export const INSTALL_MAC = "curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash";
 
-/**
- * Two cores, under 4 GB of memory or data-saver on: skip the GPU effects and
- * keep only the CSS ones.
- */
-export function weakDevice() {
-  const nav = navigator as Navigator & { deviceMemory?: number; connection?: { saveData?: boolean } };
-  return (nav.hardwareConcurrency || 8) <= 2 || (nav.deviceMemory ?? 8) < 4 || !!nav.connection?.saveData;
-}
-
 export function cx(...c: (string | false | null | undefined)[]) {
   return c.filter(Boolean).join(" ");
 }

@@ -1,11 +1,27 @@
 'use client';
 
-// AeroShards from React Bits (https://reactbits.dev), JavaScript + CSS variant,
-// copied unchanged. Rendered with WebGPU through vgpu. Only HeroShards.tsx
-// imports it, lazily, on machines that can run it.
+// AeroShards from React Bits (https://reactbits.dev), JavaScript + CSS variant.
+// Rendered with WebGPU through vgpu where the browser has it, and otherwise
+// with WebGL2 through webgl.js and the GLSL ports in glsl.js, so it shows in
+// every current browser. Only HeroShards.tsx imports it, lazily.
 
 import { useEffect, useRef } from 'react';
-import { draw, effect, frame, init, sampler, storage, surface, target, uniforms } from 'vgpu';
+import * as webgpu from 'vgpu';
+import * as webgl from './webgl.js';
+import {
+  BLUR,
+  COMPOSITE,
+  DOWNSAMPLE,
+  FINISH,
+  LAYER_BLUR,
+  MARKER_FRAGMENT,
+  MARKER_VERTEX,
+  PREFILTER,
+  SHADOW,
+  SHARD_EDGE,
+  SHARD_SOLID,
+  SHARD_VERTEX
+} from './glsl.js';
 import './AeroShards.css';
 
 const ROOT = 'aero-shards';
@@ -783,6 +799,23 @@ fn fs_main(@location(0) uv: vec2f, @builtin(position) pixel: vec4f) -> @location
 }
 `;
 
+// The GLSL version of each WGSL shader, for the WebGL2 renderer.
+const GLSL = new Map([
+  [SHARD_SHADER, { vertex: SHARD_VERTEX, fragment: { fs_solid: SHARD_SOLID, fs_edge: SHARD_EDGE } }],
+  [MARKER_SHADER, { vertex: MARKER_VERTEX, fragment: MARKER_FRAGMENT }],
+  [LAYER_BLUR_SHADER, { fragment: LAYER_BLUR }],
+  [SHADOW_SHADER, { fragment: SHADOW }],
+  [COMPOSITE_SHADER, { fragment: COMPOSITE }],
+  [PREFILTER_SHADER, { fragment: PREFILTER }],
+  [DOWNSAMPLE_SHADER, { fragment: DOWNSAMPLE }],
+  [BLUR_SHADER, { fragment: BLUR }],
+  [FINISH_SHADER, { fragment: FINISH }]
+]);
+
+// Slower than ~40fps on average: step the render resolution down, as LaserFlow does.
+const SLOW_FRAME_S = 1 / 40;
+const QUALITY_STEPS = [1, 0.75, 0.55];
+
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
 const smoother = x => {
@@ -1010,36 +1043,67 @@ export default function AeroShards({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return undefined;
-    const canvas = document.createElement('canvas');
+    let canvas = document.createElement('canvas');
     canvas.className = CANVAS;
     container.appendChild(canvas);
 
     let disposed = false;
     let gpu = null;
     let raf = 0;
+    // 'webgpu' or 'webgl': the renderer in use.
+    let backend = null;
+    // Index into QUALITY_STEPS; raised when frames run slow.
+    let quality = 0;
     const cleanups = [];
 
     const fail = error => {
       if (disposed) return;
-      disposed = true;
       cancelAnimationFrame(raf);
+      cleanups.splice(0).forEach(cleanup => cleanup());
       gpu?.dispose();
       gpu = null;
+      if (backend === 'webgpu') {
+        // WebGPU failed to start or lost its device (a driver reset, sleep):
+        // carry on with WebGL2 on a fresh canvas, since a canvas keeps the
+        // first kind of context it hands out.
+        const fresh = document.createElement('canvas');
+        fresh.className = CANVAS;
+        canvas.replaceWith(fresh);
+        canvas = fresh;
+        backend = 'webgl';
+        start(false).catch(fail);
+        return;
+      }
+      disposed = true;
       onErrorRef.current?.(error instanceof Error ? error : new Error(String(error)));
     };
 
-    const start = async () => {
-      if (typeof navigator === 'undefined' || !('gpu' in navigator)) throw new Error('WebGPU is not available');
-      const instance = await init({ powerPreference: 'high-performance' });
+    const open = async preferWebGPU => {
+      if (preferWebGPU && typeof navigator !== 'undefined' && 'gpu' in navigator) {
+        try {
+          const instance = await webgpu.init({ powerPreference: 'high-performance' });
+          return { api: webgpu, instance, kind: 'webgpu', format: navigator.gpu.getPreferredCanvasFormat() };
+        } catch {
+          // No usable adapter (blocklisted GPU, disabled flag): use WebGL2.
+        }
+      }
+      const instance = await webgl.init({ canvas, sources: GLSL, powerPreference: 'high-performance' });
+      return { api: webgl, instance, kind: 'webgl', format: 'rgba8unorm' };
+    };
+
+    const start = async (preferWebGPU = true) => {
+      const opened = await open(preferWebGPU);
+      const { draw, effect, frame, sampler, storage, surface, target, uniforms } = opened.api;
+      const { instance, format } = opened;
+      backend = opened.kind;
       gpu = instance;
       if (disposed) {
         instance.dispose();
         return;
       }
       cleanups.push(instance.onError(fail));
-      const format = navigator.gpu.getPreferredCanvasFormat();
       const sizeFor = () => {
-        const ratio = Math.min(window.devicePixelRatio || 1, settingsRef.current.dpr);
+        const ratio = Math.min(window.devicePixelRatio || 1, settingsRef.current.dpr) * QUALITY_STEPS[quality];
         return [
           Math.max(1, Math.round(container.clientWidth * ratio)),
           Math.max(1, Math.round(container.clientHeight * ratio))
@@ -2058,9 +2122,23 @@ export default function AeroShards({
         else state.quiet += 1;
         state.seen = s;
         if (state.quiet > 30) return;
-        resize();
-        render(s, dt, reduced);
+        if (dt > 0) {
+          pace.total += dt;
+          pace.frames += 1;
+          if (pace.frames >= 90) {
+            if (pace.total / pace.frames > SLOW_FRAME_S && quality < QUALITY_STEPS.length - 1) quality += 1;
+            pace.total = 0;
+            pace.frames = 0;
+          }
+        }
+        try {
+          resize();
+          render(s, dt, reduced);
+        } catch (error) {
+          fail(error);
+        }
       };
+      const pace = { total: 0, frames: 0 };
 
       const local = event => {
         const rect = container.getBoundingClientRect();

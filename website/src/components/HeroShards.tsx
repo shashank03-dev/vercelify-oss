@@ -1,25 +1,40 @@
 import { lazy, Suspense, useEffect, useState } from "react";
-import { weakDevice } from "./ui";
 
-// WebGPU only: the component and vgpu are fetched on demand, so phones, old
-// browsers and reduced-motion visitors never download them.
+// Fetched on demand. AeroShards draws with WebGPU where the browser has it and
+// with WebGL2 everywhere else, so every current browser shows the shards.
 const AeroShards = lazy(() => import("./AeroShards/AeroShards.jsx"));
 
 function canRun() {
-  if (typeof window === "undefined" || !("gpu" in navigator)) return false;
-  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches || weakDevice()) return false;
-  return window.matchMedia("(min-width: 900px) and (pointer: fine)").matches;
+  if (typeof window === "undefined") return false;
+  if ("gpu" in navigator) return true;
+  try {
+    return !!document.createElement("canvas").getContext("webgl2");
+  } catch {
+    return false;
+  }
 }
+
+// Phones and tablets: fewer shards at 1x, since every shard is ray traced.
+const compact = () => window.matchMedia("(max-width: 899px), (pointer: coarse)").matches;
+
+// A lost GPU context (a driver reset, a backgrounded phone tab) gets this many
+// fresh starts before the shards give way to the glyph field.
+const RETRIES = 2;
 
 /**
  * A ribbon of ember glass drifting through the right of the hero, behind the
- * text. It fades in once the GPU is ready and removes itself on any error, so
- * the glyph field alone is the fallback.
+ * text. It fades in once the GPU is ready; on an error it starts again, and
+ * after RETRIES it removes itself, so the glyph field alone is the fallback.
  */
 export function HeroShards() {
   const [on, setOn] = useState(false);
   const [shown, setShown] = useState(false);
-  useEffect(() => setOn(canRun()), []);
+  const [small, setSmall] = useState(false);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    setSmall(compact());
+    setOn(canRun());
+  }, []);
   useEffect(() => {
     if (!on) return;
     const t = window.setTimeout(() => setShown(true), 250);
@@ -35,12 +50,13 @@ export function HeroShards() {
     >
       <Suspense fallback={null}>
         <AeroShards
+          key={attempt}
           placement="right"
           material="glass"
           shardColor="#c4745a"
           accentColor="#ff6a3d"
           backgroundColor="transparent"
-          count={700}
+          count={small ? 320 : 700}
           shardSize={0.9}
           speed={0.6}
           glow={0.45}
@@ -51,10 +67,11 @@ export function HeroShards() {
           mouseStrength={0.45}
           parallax={0.35}
           holdToGather={false}
-          dpr={1.5}
+          dpr={small ? 1 : 1.5}
           onError={(e) => {
-            if (import.meta.env.DEV) console.warn("AeroShards disabled:", e.message);
-            setOn(false);
+            if (import.meta.env.DEV) console.warn("AeroShards:", e.message);
+            if (attempt < RETRIES) window.setTimeout(() => setAttempt((n) => n + 1), 400);
+            else setOn(false);
           }}
         />
       </Suspense>

@@ -1,25 +1,20 @@
 import { lazy, type RefObject, Suspense, useEffect, useRef, useState } from "react";
 import type { LaserFlowProps } from "./LaserFlow/LaserFlow.jsx";
-import { cx, weakDevice } from "./ui";
+import { cx } from "./ui";
 
 // Fetched only when a shader actually runs, so phones never download it.
 const LaserFlow = lazy(() => import("./LaserFlow/LaserFlow.jsx"));
 
 /**
- * Shader beam or CSS fallback. The shader needs WebGL2 and a machine that can
- * afford a fragment shader every frame; weak hardware and data-saver get the
- * CSS pour, which is only gradients and transforms. Phones and tablets get the
- * shader too, rendered at a lower resolution (see `MOBILE_DPR`), and LaserFlow
- * steps the resolution down further if frames run slow. `null` until decided
- * on the client.
+ * Shader beam or CSS fallback. Every browser with WebGL2 (all current ones)
+ * gets the shader, phones and tablets included at a lower resolution (see
+ * `MOBILE_DPR`); LaserFlow steps the resolution down further if frames run
+ * slow, so modest hardware keeps up. Only a browser without WebGL2 gets the
+ * CSS pour. `null` until decided on the client.
  */
 export function useShader() {
   const [ok, setOk] = useState<boolean | null>(null);
   useEffect(() => {
-    if (weakDevice()) {
-      setOk(false);
-      return;
-    }
     try {
       setOk(!!document.createElement("canvas").getContext("webgl2"));
     } catch {
