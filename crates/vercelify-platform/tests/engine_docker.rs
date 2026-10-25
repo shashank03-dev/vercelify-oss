@@ -427,6 +427,80 @@ async fn deploy_redeploy_rollback_recover() {
     wait_for(&engine, &rolled.id, DeploymentStatus::Healthy).await;
     body_of("web.test.localhost", "version two").await;
 
+    // 7b. Runtime operations: a volume, restart, and moving its data to the
+    // HDD and back (the container is recreated, the data survives).
+    store_
+        .tx(|c| {
+            apps::patch(
+                c,
+                &app.id,
+                &AppPatch {
+                    source: Some(AppSource {
+                        image: Some(built.image.clone()),
+                        ..AppSource::default()
+                    }),
+                    ..AppPatch::default()
+                },
+            )?;
+            vercelify_platform::volumes::create(
+                c,
+                VolumeOwner::App,
+                &app.id,
+                &AppVolumeRequest {
+                    name: "data".into(),
+                    mount_path: "/data".into(),
+                    tier: None,
+                },
+            )
+        })
+        .unwrap();
+    let with_vol = engine.enqueue("web", Enqueue::default()).unwrap();
+    wait_for(&engine, &with_vol.id, DeploymentStatus::Healthy).await;
+    let live = engine.live_container(&app.id).unwrap();
+    let sh = |c: &str, cmd: &str| {
+        let o = std::process::Command::new("docker")
+            .args(["exec", c, "sh", "-c", cmd])
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "{cmd}: {}", String::from_utf8_lossy(&o.stderr));
+        String::from_utf8_lossy(&o.stdout).trim().to_string()
+    };
+    sh(&live, "echo kept > /data/f");
+    let owner = sh(&live, "stat -c %u /data/f");
+    assert_ne!(owner, "0", "the app's own (non-root) user wrote to its volume");
+    assert_eq!(engine.restart_app(&app.id).await.unwrap(), 1);
+    body_of("web.test.localhost", "version two").await;
+    let vol = store_
+        .with(|c| vercelify_platform::volumes::list(c, VolumeOwner::App, &app.id))
+        .unwrap()
+        .remove(0);
+    let docker_root = std::path::PathBuf::from(
+        String::from_utf8(
+            std::process::Command::new("docker")
+                .args(["info", "-f", "{{.DockerRootDir}}"])
+                .output()
+                .unwrap()
+                .stdout,
+        )
+        .unwrap()
+        .trim(),
+    )
+    .join("volumes");
+    for tier in [vercelify_core::StorageTier::Hdd, vercelify_core::StorageTier::Ssd] {
+        let moved = engine.move_app_volume(&vol.id, tier, &docker_root).await.expect("move");
+        assert_eq!(moved.tier, tier);
+        let rec_d = store_.with(|c| deployments::list(c, &app.id, 1)).unwrap().remove(0);
+        assert_eq!(rec_d.trigger, DeploymentTrigger::Recover);
+        wait_for(&engine, &rec_d.id, DeploymentStatus::Healthy).await;
+        let now_live = engine.live_container(&app.id).unwrap();
+        assert_eq!(sh(&now_live, "cat /data/f"), "kept");
+        assert_eq!(sh(&now_live, "stat -c %u /data/f"), owner, "owner kept");
+        if tier == vercelify_core::StorageTier::Hdd {
+            assert!(dir.path().join("hdd/vfy-web-data/f").exists());
+        }
+        body_of("web.test.localhost", "version two").await;
+    }
+
     // 8. A Docker Compose app from a git repository over HTTPS.
     let repo = dir.path().join("git/shop.git");
     let work = dir.path().join("shop-src");
@@ -549,6 +623,62 @@ async fn deploy_redeploy_rollback_recover() {
         .unwrap()
         .iter()
         .any(|c| c.name.starts_with("vfy-shop-")));
+
+    // 9. A compose app without a repository (a catalogue service), its
+    // variables and the app's own URL interpolated into the file.
+    let inline = store_
+        .tx(|c| {
+            apps::create(
+                c,
+                &AppCreate {
+                    name: "kv".into(),
+                    kind: AppKind::Compose,
+                    environment_id: None,
+                    project_id: None,
+                    source: AppSource {
+                        compose_content: Some(
+                            "services:\n  web:\n    image: node:22-slim\n    environment:\n      SELF: ${VERCELIFY_URL}\n      TOKEN: ${TOKEN}\n    command: [\"node\", \"-e\", \"require('http').createServer((q,s)=>s.end('inline '+process.env.SELF+' '+process.env.TOKEN)).listen(8080)\"]\n".into(),
+                        ),
+                        ..AppSource::default()
+                    },
+                    build: None,
+                    runtime: Some(AppRuntime {
+                        port: Some(8080),
+                        health_timeout_secs: 60,
+                        ..AppRuntime::default()
+                    }),
+                    previews: None,
+                    node_id: None,
+                    domains: vec![],
+                },
+            )
+        })
+        .unwrap();
+    store_
+        .tx(|c| {
+            env::put(
+                c,
+                &key,
+                VarScope::App,
+                &inline.id,
+                &EnvVarsPut {
+                    vars: vec![EnvVarInput {
+                        key: "TOKEN".into(),
+                        value: "tok".into(),
+                        build: None,
+                        preview_only: None,
+                        secret: Some(true),
+                    }],
+                    replace: false,
+                },
+            )
+        })
+        .unwrap();
+    let d = engine.enqueue("kv", Enqueue::default()).unwrap();
+    wait_for(&engine, &d.id, DeploymentStatus::Healthy).await;
+    body_of("kv.test.localhost", "inline http://kv.test.localhost tok").await;
+    let kv = store_.tx(|c| apps::delete(c, &inline.id)).unwrap();
+    engine.cleanup_app(&kv, true, &[]).await;
 
     // Clean up.
     for c in docker.list_managed().await.unwrap() {

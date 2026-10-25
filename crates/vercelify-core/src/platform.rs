@@ -118,6 +118,9 @@ pub struct AppSource {
     pub image: Option<String>,
     /// Compose apps: path of the compose file in the repository.
     pub compose_file: Option<String>,
+    /// Compose apps without a repository (services from the catalogue): the
+    /// compose file itself.
+    pub compose_content: Option<String>,
     /// Set by a rollback so auto-deploy doesn't redeploy the branch head;
     /// cleared by the next deploy.
     pub pinned_sha: Option<String>,
@@ -567,6 +570,73 @@ pub struct RollbackRequest {
 pub enum VolumeOwner {
     App,
     Database,
+}
+
+/// A ready-made service from the catalogue (`/v1/platform/templates`):
+/// a compose project with its secrets generated on creation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct ServiceTemplate {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    /// analytics / storage / monitoring / security / flags
+    pub category: String,
+    pub website: String,
+    /// Memory it needs to run comfortably, for the hardware check.
+    pub min_memory_mb: u32,
+    /// The compose file (secrets as `${VAR}`).
+    pub compose: String,
+}
+
+/// Create an app from a template.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct TemplateCreate {
+    /// App name (default: the template's id).
+    #[serde(default)]
+    #[ts(optional)]
+    pub name: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub project_id: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub environment_id: Option<String>,
+}
+
+/// A volume with the name of the app or database it belongs to (the
+/// Storage page lists every volume of the server).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct VolumeInfo {
+    pub volume: AppVolume,
+    pub owner_name: String,
+}
+
+/// Open a terminal in a container.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct TerminalRequest {
+    #[serde(default)]
+    #[ts(optional)]
+    pub cols: Option<u16>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub rows: Option<u16>,
+    /// Databases: their own shell (`psql`…) instead of `sh` (default true).
+    #[serde(default)]
+    #[ts(optional)]
+    pub console: Option<bool>,
+}
+
+/// An open terminal; read `/v1/platform/terminals/{id}/output`, write `…/input`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct TerminalSession {
+    pub id: String,
+    /// The container it runs in.
+    pub target: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

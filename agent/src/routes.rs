@@ -41,6 +41,8 @@ pub struct AppState {
     pub platform_error: Option<crate::platform::OpenError>,
     /// Push-to-deploy and previews of the platform's apps.
     pub platform_git: Option<Arc<crate::platform_git::PlatformGit>>,
+    /// Open web terminals (`docker exec -it`).
+    pub terminals: Arc<crate::terminal::Terminals>,
 }
 
 impl AppState {
@@ -102,6 +104,7 @@ impl AppState {
             platform,
             platform_error,
             platform_git,
+            terminals: Arc::default(),
             events,
             jobs,
             claims: Arc::new(Claims::default()),

@@ -24,7 +24,12 @@ vercelify-platform = { path = "crates/vercelify-platform" }
 vercelify-mesh = { path = "crates/vercelify-mesh" }
 
 [profile.release]
-lto = "thin"
+# Fat LTO and size-first code keep the static daemons inside their budgets
+# (design §16): the agent is ~7.6 MiB this way, ~8.9 MiB with thin LTO and
+# "s". Per-crate opt-levels are worse under fat LTO (10.4 MiB), so the whole
+# workspace builds for size; the daemons wait on I/O, and the app's UI is
+# the webview's work.
+lto = "fat"
 codegen-units = 1
 strip = true
-opt-level = "s"
+opt-level = "z"

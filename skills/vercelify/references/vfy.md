@@ -24,6 +24,22 @@ non-zero on any error, with the reason on stderr prefixed `vfy:`.
 | `vfy why APP` | AI: why APP's last deployment failed and how to fix it | no |
 | `vfy why --log FILE\|-` | The same for any build log, local Ollama, no server | no |
 
+### On servers running Vercelify's own engine
+
+A main server paired without a Coolify URL runs the platform engine; there APP is an
+app's name or id, and these change or add to the commands above:
+
+| Command | Does | Changes anything? |
+| --- | --- | --- |
+| `vfy deploy APP [--no-follow]` | Deploy and stream the build log; exits 1 if the build fails | **yes** |
+| `vfy logs APP [LINES] [-f]` | The app's own output; `-f` keeps following it | no |
+| `vfy rollback APP COMMIT\|#N` | Back to an earlier live deployment, by commit (4+ characters) or number | **yes** |
+| `vfy restart APP` | Restart the running app (compose sidecars too) | **yes** |
+| `vfy env set APP K=V… [--plain] [--build]` | Set variables (secret unless `--plain`; `--build` also at build time) | **yes** |
+| `vfy env push APP [FILE]` | Import a `.env` file (default `.env`); existing keys are overwritten | **yes** |
+| `vfy services` | The service catalogue: Umami, Plausible, MinIO, Unleash, Uptime Kuma, Vaultwarden | no |
+| `vfy services add ID [NAME]` | Create and deploy one, its secrets generated | **yes** |
+
 ## vfy why options
 
 ```

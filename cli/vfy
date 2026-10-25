@@ -17,6 +17,15 @@
 #   vfy config show|rm APP      its rules and where they came from / remove them
 #   vfy crons APP [run PATH]    APP's cron jobs and their last runs / run one now
 #   vfy servers                 paired servers (* = selected in the app)
+#
+# On servers running Vercelify's own engine (no Coolify) also:
+#   vfy deploy APP [--no-follow]  deploy and stream the build log (exit 1 if it fails)
+#   vfy logs APP [LINES] [-f]   the app's output; -f keeps following it
+#   vfy rollback APP COMMIT|#N  back to an earlier deployment (commit or number)
+#   vfy restart APP             restart the running app
+#   vfy env set APP K=V…        set variables (secret; --plain, --build)
+#   vfy env push APP [FILE]     import a .env file (default .env)
+#   vfy services [add ID [NAME]]  the service catalogue (Umami, MinIO…) / add one
 #   vfy why APP                 AI: why APP's last deployment failed and how to fix it
 #                               (Gemma 4 on your own server, through its Ollama)
 #   vfy why --log FILE          the same for any build log, with the Ollama on this
@@ -250,9 +259,18 @@ api() {
   printf '%s' "$out"
 }
 
+# Vercelify's own engine: a main server paired without a Coolify URL.
+is_platform() { [[ "$(field role)" == main && -z "$(field coolify_url)" ]]; }
+
 # APP name or uuid → uuid
 app_uuid() {
   local want=${1:?which app? (name or uuid)} uuid
+  if is_platform; then
+    uuid=$(api agent GET /v1/platform/apps | jq -r --arg a "$want" '[.[] | select(.id == $a or .name == $a)][0].id // empty')
+    [[ -n "$uuid" ]] || die "no app named $want (see: vfy apps)"
+    echo "$uuid"
+    return
+  fi
   uuid=$(api coolify GET /applications | jq -r --arg a "$want" '[.[] | select(.uuid == $a or .name == $a)][0].uuid // empty')
   [[ -n "$uuid" ]] || die "no app named $want (see: vfy apps)"
   echo "$uuid"
@@ -271,8 +289,201 @@ dot() {
   esac
 }
 
+
+# MESSAGES → the model's answer, from the provider picked (default: the
+# model on the server that built the app, through the agent's Ollama).
+why_answer() {
+  local msgs=$1 st model body
+  case "$WHY_PROVIDER" in
+    gemini) why_gemini "$msgs" ;;
+    ollama) why_ollama "$msgs" ;;
+    *)
+      # Default: the model runs on the server that built the app (nothing
+      # leaves your machines), through the agent's Ollama.
+      st=$(api agent GET /v1/llm)
+      [[ $(jq -r '.installed' <<<"$st") == true ]] ||
+        die "$(field hostname) has no local AI yet — install it: Vercelify app → AI models → Install, or on the server: sudo vercelify llm install"
+      [[ $(jq -r '.ready' <<<"$st") == true ]] ||
+        die "Ollama on $(field hostname) isn't answering — app → AI models → Restart, or on the server: sudo vercelify llm start"
+      model=$(jq -r '.models[].name' <<<"$st" | pick_model)
+      [[ -n "$model" ]] ||
+        die "no model on $(field hostname) yet — download Gemma 4: app → AI models, or on the server: sudo vercelify llm pull gemma4:e2b"
+      body=$(jq -c --arg m "$model" --argjson n "$AI_MAX_TOKENS" '{model: $m, messages: ., stream: true, temperature: 0.2, max_tokens: $n}' <<<"$msgs")
+      printf '%sAsking %s on %s…%s\n\n' "$D" "$model" "$(field hostname)" "$N" >&2
+      WHY_PULL_HINT="sudo vercelify llm pull $model"
+      printf 'header = "Authorization: Bearer %s"\n' "$(field agent_token)" |
+        curl -sS -N -K - --max-time 900 -H 'Content-Type: application/json' --data "$body" "$(field agent_url)/v1/llm/chat" |
+        print_stream "$model on $(field hostname), via Ollama"
+      ;;
+  esac
+}
+
+# --- the platform engine (/v1/platform) --------------------------------------
+
+papi() { api agent "$1" "/v1/platform$2" "${3:-}"; }
+
+# Follow a JSON-lines stream of the platform API (token on stdin).
+pstream() {
+  printf 'header = "Authorization: Bearer %s"\n' "$(field agent_token)" |
+    curl -sS -N -K - --max-time 86400 "$(field agent_url)/v1/platform$1" ||
+    die "the stream from $(field hostname) ended early"
+}
+
+# App → "health<TAB>label" (same rules as the app's list).
+pstate_jq='
+  def st: if .desired == "stopped" then ["idle", "stopped"]
+    elif .desired == "sleeping" then ["idle", "asleep"]
+    elif (.last_status // "") as $s | ["queued", "building", "deploying"] | index($s) then ["warn", .last_status]
+    elif .current_deployment_id == null then (if .last_status == "failed" then ["bad", "failed"] else ["idle", "not deployed"] end)
+    elif .last_status == "failed" then ["warn", "live, last deploy failed"]
+    else ["ok", "live"] end;'
+
+# A line of a log stream → text ([stderr] marked).
+log_text='(if .stream == "stderr" or .stream == "error" then "[stderr] " else "" end) + .text'
+
+platform_cmd() {
+  local cmd=$1
+  shift
+  case "$cmd" in
+    apps|ls)
+      papi GET /apps | jq -r "$pstate_jq"' .[] | (st) as $s | [$s[0], .name, $s[1], (.url // ""), .id] | @tsv' |
+        while IFS=$'\t' read -r h name label url id; do
+          printf '%s %-22s %-26s %s %s%s%s\n' "$(dot "$h")" "$name" "$label" "$url" "$D" "$id" "$N"
+        done
+      ;;
+    deploy)
+      local app=${1:?which app? (name or id)} follow=1 d id st
+      [[ "${2:-}" == --no-follow ]] && follow=0
+      d=$(papi POST "/apps/$app/deploy" '{"force_rebuild":false}')
+      id=$(jq -r .id <<<"$d")
+      printf '%sDeploying %s (#%s)%s\n' "$B" "$app" "$(jq -r .number <<<"$d")" "$N"
+      if (( follow == 0 )); then
+        printf '%s`vfy apps` shows when it is live%s\n' "$D" "$N"
+        return
+      fi
+      pstream "/deployments/$id/logs?follow=true" | jq --unbuffered -r "$log_text"
+      d=$(papi GET "/deployments/$id")
+      st=$(jq -r .status <<<"$d")
+      case "$st" in
+        healthy) printf '%s✓%s %s is live%s\n' "$G" "$N" "$app" "$(papi GET "/apps/$app" | jq -r 'if .url then " at \(.url)" else "" end')" ;;
+        failed) die "the deployment failed: $(jq -r .error <<<"$d") (vfy why $app)" ;;
+        *) die "the deployment ended $st" ;;
+      esac
+      ;;
+    logs)
+      local app=${1:?which app? (name or id)} lines=200 follow=0 a
+      shift
+      for a in "$@"; do
+        case "$a" in
+          -f|--follow) follow=1 ;;
+          *[!0-9]*|'') die "usage: vfy logs APP [LINES] [-f]" ;;
+          *) lines=$a ;;
+        esac
+      done
+      if (( follow )); then
+        pstream "/apps/$app/logs?follow=true&tail=$lines" | jq --unbuffered -r "$log_text"
+      else
+        papi GET "/apps/$app/logs?tail=$lines" | jq -r "$log_text"
+      fi
+      ;;
+    rollback)
+      local app=${1:?usage: vfy rollback APP COMMIT|#N} want=${2:?usage: vfy rollback APP COMMIT|#N} deps match n
+      deps=$(papi GET "/apps/$app/deployments?limit=100" |
+        jq -c '[.[] | select(.pr_number == null and (.status == "healthy" or .status == "superseded") and .image != "")]')
+      if [[ "$want" =~ ^#[0-9]+$ ]]; then
+        match=$(jq -c --argjson n "${want#\#}" '[.[] | select(.number == $n)]' <<<"$deps")
+      elif [[ "$want" =~ ^[0-9a-f]{4,40}$ ]]; then
+        match=$(jq -c --arg c "$want" '[.[] | select(.commit_sha | startswith($c))]' <<<"$deps")
+      else
+        die "give a commit SHA (4+ characters) or a deployment number like #12"
+      fi
+      n=$(jq length <<<"$match")
+      (( n > 0 )) || die "no earlier live deployment of $app at $want (vfy rollback goes back to something that was live)"
+      if (( n > 1 )); then
+        # The same commit deployed several times: the newest of them.
+        match=$(jq -c '[sort_by(-.number)[0]]' <<<"$match")
+      fi
+      [[ $(jq -r '.[0].current' <<<"$match") != true ]] || die "$want is already live"
+      d=$(papi POST "/apps/$app/rollback" "$(jq -c '{deployment_id: .[0].id}' <<<"$match")")
+      printf '%s✓%s rolling %s back to #%s %s(new deployment #%s)%s\n' "$G" "$N" "$app" "$(jq -r '.[0].number' <<<"$match")" "$D" "$(jq -r .number <<<"$d")" "$N"
+      ;;
+    restart)
+      local app=${1:?which app? (name or id)}
+      printf '%s✓%s restarted %s (%s container(s))\n' "$G" "$N" "$app" "$(papi POST "/apps/$app/restart" '{}' | jq -r .restarted)"
+      ;;
+    env)
+      local sub=${1:-} app=${2:-}
+      [[ -n "$app" ]] || die "usage: vfy env pull|set|push APP …"
+      shift 2
+      case "$sub" in
+        pull)
+          local file=${1:-.env} vars
+          [[ ! -e "$file" ]] || [[ "${VFY_FORCE:-0}" == 1 ]] || die "$file exists — remove it or set VFY_FORCE=1"
+          vars=$(papi GET "/apps/$app/env?reveal=true")
+          ( umask 077
+            jq -r '[.[] | select(.preview_only | not)] | sort_by(.key) | .[] | "\(.key)=\(.value // "" | @json)"' <<<"$vars" >"$file" )
+          printf '%s✓%s %s variables written to %s (mode 600)\n' "$G" "$N" "$(wc -l <"$file" | tr -d ' ')" "$file"
+          ;;
+        set)
+          local secret=true build=false body='[]' kv
+          for kv in "$@"; do
+            case "$kv" in
+              --plain) secret=false ;;
+              --build) build=true ;;
+              *=*) body=$(jq -c --arg k "${kv%%=*}" --arg v "${kv#*=}" '. + [{key: $k, value: $v}]' <<<"$body") ;;
+              *) die "usage: vfy env set APP KEY=VALUE… [--plain] [--build]" ;;
+            esac
+          done
+          [[ "$body" != '[]' ]] || die "usage: vfy env set APP KEY=VALUE… [--plain] [--build]"
+          body=$(jq -c --argjson s "$secret" --argjson b "$build" '{vars: map(. + {secret: $s, build: $b}), replace: false}' <<<"$body")
+          printf '%s✓%s %s saved — deploy %s to use them\n' "$G" "$N" "$(papi PUT "/apps/$app/env" "$body" | jq -r '"\(.saved) variable\(if .saved == 1 then "" else "s" end)"')" "$app"
+          ;;
+        push)
+          local file=${1:-.env}
+          [[ -r "$file" ]] || die "no $file to import"
+          printf '%s✓%s %s imported from %s — deploy %s to use them\n' "$G" "$N" \
+            "$(papi POST "/apps/$app/env/import" "$(jq -nc --rawfile c "$file" '{content: $c, replace: false}')" | jq -r '"\(.saved) variable\(if .saved == 1 then "" else "s" end)"')" "$file" "$app"
+          ;;
+        *) die "usage: vfy env pull APP [FILE] | set APP KEY=VALUE… | push APP [FILE]" ;;
+      esac
+      ;;
+    open)
+      local url
+      url=$(papi GET "/apps/${1:?which app? (name or id)}" | jq -r '.url // ""')
+      [[ -n "$url" ]] || die "that app has no URL yet (add a domain in the app)"
+      if have open; then open "$url"; elif have xdg-open; then xdg-open "$url"; else echo "$url"; fi
+      ;;
+    services)
+      if [[ "${1:-}" == add ]]; then
+        local id=${2:?usage: vfy services add ID [NAME]} name=${3:-${2}} a
+        a=$(papi POST "/templates/$id" "$(jq -nc --arg n "$name" '{name: $n}')")
+        printf '%s✓%s %s is being created from %s — vfy apps shows when it is live\n' "$G" "$N" "$(jq -r .name <<<"$a")" "$id"
+      else
+        papi GET /templates | jq -r '.[] | [.id, .name, (if .min_memory_mb >= 1024 then "\(.min_memory_mb / 1024) GB" else "\(.min_memory_mb) MB" end), .description] | @tsv' |
+          while IFS=$'\t' read -r id name mem desc; do printf '%-13s %-13s %6s  %s%s%s\n' "$id" "$name" "$mem" "$D" "$desc" "$N"; done
+      fi
+      ;;
+    why)
+      local app=${1:?which app? (name or id)} dep log head msgs
+      dep=$(papi GET "/apps/$app/deployments?limit=20" | jq -c '[.[] | select(.status == "failed")][0] // empty')
+      [[ -n "$dep" ]] || { printf '%s✓%s no failed deployments of %s lately\n' "$G" "$N" "$app"; return; }
+      log=$(papi GET "/deployments/$(jq -r .id <<<"$dep")/logs" | jq -r "$log_text")
+      [[ -n "$log" ]] || die "that deployment has no build log"
+      head=$(jq -r --arg app "$app" '"App: \($app)\nCommit: \(.commit_sha[:7]) \"\(.commit_message | split("\n")[0])\""' <<<"$dep")
+      printf '%s%s failed at %s (%s)%s\n' "$B" "$app" "$(jq -r '.commit_sha[:7]' <<<"$dep")" "$(jq -r .created_at <<<"$dep")" "$N" >&2
+      msgs=$(why_messages "$log" "$WHY_VJ" "$head")
+      why_answer "$msgs"
+      ;;
+  esac
+}
+
 cmd=${1:-apps}
 (( $# )) && shift
+if is_platform; then
+  case "$cmd" in
+    apps|ls|deploy|logs|rollback|restart|env|open|services|why) platform_cmd "$cmd" "$@"; exit 0 ;;
+  esac
+fi
 case "$cmd" in
   servers)
     jq -r '(if has("servers") then . else {servers: [.], active: .agent_url} end) as $c
@@ -440,28 +651,7 @@ case "$cmd" in
     head=$(jq -r --arg app "$1" '"App: \($app)\nCommit: \((.commit // "")[:7]) \"\((.commit_message // "") | split("\n")[0])\""' <<<"$dep")
     printf '%s%s failed at %s (%s)%s\n' "$B" "$1" "$(jq -r '(.commit // "")[:7]' <<<"$dep")" "$(jq -r '.created_at // ""' <<<"$dep")" "$N" >&2
     msgs=$(why_messages "$log" "$WHY_VJ" "$head")
-    case "$WHY_PROVIDER" in
-      gemini) why_gemini "$msgs" ;;
-      ollama) why_ollama "$msgs" ;;
-      *)
-        # Default: the model runs on the server that built the app (nothing
-        # leaves your machines), through the agent's Ollama.
-        st=$(api agent GET /v1/llm)
-        [[ $(jq -r '.installed' <<<"$st") == true ]] ||
-          die "$(field hostname) has no local AI yet — install it: Vercelify app → AI models → Install, or on the server: sudo vercelify llm install"
-        [[ $(jq -r '.ready' <<<"$st") == true ]] ||
-          die "Ollama on $(field hostname) isn't answering — app → AI models → Restart, or on the server: sudo vercelify llm start"
-        model=$(jq -r '.models[].name' <<<"$st" | pick_model)
-        [[ -n "$model" ]] ||
-          die "no model on $(field hostname) yet — download Gemma 4: app → AI models, or on the server: sudo vercelify llm pull gemma4:e2b"
-        body=$(jq -c --arg m "$model" --argjson n "$AI_MAX_TOKENS" '{model: $m, messages: ., stream: true, temperature: 0.2, max_tokens: $n}' <<<"$msgs")
-        printf '%sAsking %s on %s…%s\n\n' "$D" "$model" "$(field hostname)" "$N" >&2
-        WHY_PULL_HINT="sudo vercelify llm pull $model"
-        printf 'header = "Authorization: Bearer %s"\n' "$(field agent_token)" |
-          curl -sS -N -K - --max-time 900 -H 'Content-Type: application/json' --data "$body" "$(field agent_url)/v1/llm/chat" |
-          print_stream "$model on $(field hostname), via Ollama"
-        ;;
-    esac
+    why_answer "$msgs"
     ;;
   *) usage >&2; exit 2 ;;
 esac

@@ -22,6 +22,11 @@ image: string | null,
  */
 compose_file: string | null, 
 /**
+ * Compose apps without a repository (services from the catalogue): the
+ * compose file itself.
+ */
+compose_content: string | null, 
+/**
  * Set by a rollback so auto-deploy doesn't redeploy the branch head;
  * cleared by the next deploy.
  */

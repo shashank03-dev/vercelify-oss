@@ -153,6 +153,7 @@ impl Deployer {
             restart: "unless-stopped".into(),
             ..ContainerSpec::default()
         };
+        self.own_volumes(i.image, &spec.mounts, log).await;
         // A leftover from an interrupted attempt of this same deployment.
         self.docker.remove(&name).await?;
         self.docker.create(&spec).await?;
@@ -182,6 +183,51 @@ impl Deployer {
             }));
         }
         Ok(name)
+    }
+
+    /// Images that run as a non-root user (ours do) can't write to a new
+    /// volume, whose top directory belongs to root: hand it to that user,
+    /// resolved in the image itself (`node`, `1000:1000`…). Only the top
+    /// directory changes; a failure is logged, not fatal.
+    async fn own_volumes(&self, image: &str, mounts: &[Mount], log: &mut (dyn FnMut(&str) + Send)) {
+        if mounts.is_empty() {
+            return;
+        }
+        let user = match self.docker.image_user(image).await {
+            Ok(u) => u,
+            Err(_) => return,
+        };
+        if !needs_chown(&user) {
+            return;
+        }
+        for m in mounts.iter().filter(|m| !m.read_only) {
+            let out = self
+                .docker
+                .run(
+                    &crate::proc::args(&[
+                        "run",
+                        "--rm",
+                        "--network",
+                        "none",
+                        "--user",
+                        "0:0",
+                        "--entrypoint",
+                        "chown",
+                        "-v",
+                        &format!("{}:/vfy-volume", m.source),
+                        image,
+                        &user,
+                        "/vfy-volume",
+                    ]),
+                    Duration::from_secs(120),
+                )
+                .await;
+            match out {
+                Ok(o) if o.success() => {}
+                Ok(o) => log(&format!("could not give {} to {user}: {}", m.target, o.tail(1))),
+                Err(e) => log(&format!("could not give {} to {user}: {e}", m.target)),
+            }
+        }
     }
 
     /// The commit point: route traffic to `container`.
@@ -232,9 +278,25 @@ impl Deployer {
     }
 }
 
+/// Whether the image's user is someone other than root.
+pub fn needs_chown(user: &str) -> bool {
+    let u = user.split(':').next().unwrap_or("").trim();
+    !(u.is_empty() || u == "root" || u == "0")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn who_needs_a_chown() {
+        for root in ["", "root", "0", "0:0", "root:root"] {
+            assert!(!needs_chown(root), "{root}");
+        }
+        for user in ["node", "1000", "1000:1000", "app:app"] {
+            assert!(needs_chown(user), "{user}");
+        }
+    }
 
     #[test]
     fn names() {

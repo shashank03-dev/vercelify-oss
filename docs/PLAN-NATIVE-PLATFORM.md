@@ -348,14 +348,14 @@ preview-only variables, removed when the PR closes.
 | --- | --- |
 | Deployment and runtime logs | Build log files with retention (last 20 per app), runtime via `docker logs` (as today), live in the cockpit and `vfy logs` |
 | Scheduled tasks (command in a container) | `scheduled_tasks` table, run by the existing cron engine (`cron.rs`) via `docker exec` |
-| Web terminal (`:6001/6002`) | `GET /v1/apps/{id}/terminal` WebSocket → `docker exec -it`; xterm.js loaded on demand in the cockpit |
+| Web terminal (`:6001/6002`) | `docker exec -it` on an agent-owned pty, over the agent's ordinary request/stream transport (design §12.1); xterm.js loaded on demand in the cockpit; database consoles open `psql`/`mysql`/… logged in |
 | Shared / build-time / preview variables | `env_vars` with scope (project/app), build-time flag, preview flag |
 | System variables (`COOLIFY_URL`, `SOURCE_COMMIT`…) | `VERCELIFY_URL`, `VERCELIFY_GIT_COMMIT_SHA`, `VERCELIFY_GIT_BRANCH`, `VERCELIFY_ENV`, `VERCELIFY_DEPLOYMENT_ID`, plus `SOURCE_COMMIT` and `COOLIFY_*` aliases for apps migrated from Coolify |
 | Docker cleanup | Disk cleanup at 90% (today) + build cache pruning, keeping 5 images per app |
 | Health checks, restart policies | Section 4.5/4.6 |
 | Watch paths | Field on the app (today read from Coolify) |
 | Resource limits | Memory/CPU per app, defaults from the hardware profile |
-| Service catalogue (Plausible, Umami, MinIO…) | Compose templates in `platform/templates/`, starting with the ones our docs point to (MinIO, Plausible, Umami, Unleash) |
+| Service catalogue (Plausible, Umami, MinIO…) | `vercelify-platform::templates`: Umami, Plausible, MinIO, Unleash, Uptime Kuma, Vaultwarden as compose apps without a repository, secrets generated (design §10.1); New app → Service, `vfy services` |
 
 ### 4.14 API
 

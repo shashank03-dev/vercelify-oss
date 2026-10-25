@@ -85,7 +85,7 @@ fn quick() -> Duration {
 }
 
 impl Docker {
-    async fn run(&self, args: &[String], timeout: Duration) -> Result<proc::Output> {
+    pub async fn run(&self, args: &[String], timeout: Duration) -> Result<proc::Output> {
         proc::run(Spec {
             bin: &self.bin,
             args,
@@ -131,6 +131,18 @@ impl Docker {
         } else {
             Err(Error::Internal(format!("docker network create {name}: {}", o.tail(2))))
         }
+    }
+
+    /// The user an image runs as (`.Config.User`, "" = root).
+    pub async fn image_user(&self, image: &str) -> Result<String> {
+        let o = self
+            .ok(
+                &proc::args(&["image", "inspect", "--format", "{{.Config.User}}", image]),
+                quick(),
+                "docker image inspect",
+            )
+            .await?;
+        Ok(o.stdout.trim().to_string())
     }
 
     pub async fn image_exists(&self, image: &str) -> Result<bool> {
@@ -237,6 +249,16 @@ impl Docker {
             &proc::args(&["start", name]),
             Duration::from_secs(60),
             &format!("docker start {name}"),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    pub async fn restart(&self, name: &str, grace_secs: u32) -> Result<()> {
+        self.ok(
+            &proc::args(&["restart", "--time", &grace_secs.to_string(), name]),
+            Duration::from_secs(grace_secs as u64 + 60),
+            &format!("docker restart {name}"),
         )
         .await
         .map(|_| ())

@@ -1892,6 +1892,62 @@ fn platform_api() {
         json!({"name": "cleanup", "schedule": "*/15 * * * *", "command": "rm -rf /tmp/cache"}),
     );
     assert_eq!(s, 200, "{t}");
+    // Runtime: an undeployed app has no logs, terminal or restart yet.
+    for (m, path) in [
+        ("GET", "/v1/platform/apps/blog/logs"),
+        ("POST", "/v1/platform/apps/blog/restart"),
+        ("POST", "/v1/platform/apps/blog/terminal"),
+    ] {
+        let (s, v) = send(&a, m, path, TOKEN, (m == "POST").then(|| json!({})));
+        assert_eq!(s, 409, "{path}: {v}");
+        assert!(v["error"].as_str().unwrap().contains("isn't deployed"), "{v}");
+    }
+    let (s, v) = send(&a, "GET", "/v1/platform/terminals/term_nope/output", TOKEN, None);
+    assert_eq!(s, 404, "{v}");
+    let (s, v) = send(
+        &a,
+        "POST",
+        "/v1/platform/terminals/term_nope/input",
+        &deployer,
+        Some(json!({"data": "aGk="})),
+    );
+    assert_eq!(s, 404, "a deployer may type into its own terminals: {v}");
+
+    // The catalogue: list, and an app from a template with its secrets.
+    let (s, list) = get(&a, "/v1/platform/templates");
+    assert_eq!(s, 200);
+    assert!(list.as_array().unwrap().iter().any(|t| t["id"] == "umami"), "{list}");
+    let (s, app) = send(
+        &a,
+        "POST",
+        "/v1/platform/templates/uptime-kuma",
+        &deployer,
+        Some(json!({"name": "status"})),
+    );
+    assert_eq!(s, 200, "{app}");
+    assert_eq!(app["kind"], "compose");
+    assert_eq!(app["runtime"]["service"], "kuma");
+    let (s, v) = post(&a, "/v1/platform/templates/nope", json!({}));
+    assert_eq!(s, 404, "{v}");
+    let (s, vars) = get(&a, "/v1/platform/apps/umami/env");
+    assert_eq!(s, 404, "{vars}");
+
+    // Every volume of the server, with its owner's name.
+    let (s, vols) = get(&a, "/v1/platform/volumes");
+    assert_eq!(s, 200, "{vols}");
+    assert!(
+        vols.as_array().unwrap().iter().all(|v| v["owner_name"].is_string()),
+        "{vols}"
+    );
+    let (s, v) = send(
+        &a,
+        "POST",
+        "/v1/platform/volumes/vol_nope/move",
+        &deployer,
+        Some(json!({"tier": "hdd"})),
+    );
+    assert_eq!(s, 403, "storage moves are an owner's: {v}");
+
     let (s, v) = post(&a, "/v1/platform/apps/blog/tasks/cleanup/run", json!({}));
     assert_eq!(
         (s, v["status"].as_str()),

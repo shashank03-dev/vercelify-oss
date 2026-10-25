@@ -363,7 +363,20 @@ impl Engine {
         }
         let reusable = !image.is_empty()
             && (app.kind == AppKind::Image || self.deployer.docker.image_exists(&image).await.unwrap_or(false));
-        if reusable {
+        let inline_compose = app.kind == AppKind::Compose && app.source.repository.is_none();
+        if inline_compose {
+            // A catalogue service: the compose file is part of the app.
+            let dir = self.builder.work_dir.join(&d.id).join("src");
+            std::fs::create_dir_all(&dir)?;
+            std::fs::write(
+                dir.join("docker-compose.yml"),
+                app.source.compose_content.as_deref().unwrap_or_default(),
+            )?;
+            log.info("using the compose file of the app (no repository)");
+            compose_job = Some(("docker-compose.yml".into(), dir));
+            self.store
+                .tx(|c| deployments::transition(c, &d.id, DeploymentStatus::Deploying, None))?;
+        } else if reusable {
             log.info(&format!("using the existing image {image} (no build)"));
             self.store
                 .tx(|c| deployments::transition(c, &d.id, DeploymentStatus::Deploying, None))?;

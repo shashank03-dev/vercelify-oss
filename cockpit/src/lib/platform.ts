@@ -31,7 +31,12 @@ import type {
   ProjectRequest,
   ScheduledTask,
   ScheduledTaskRequest,
+  ServiceTemplate,
   StorageTier,
+  TemplateCreate,
+  TerminalRequest,
+  TerminalSession,
+  VolumeInfo,
 } from "../types";
 
 const q = encodeURIComponent;
@@ -44,6 +49,17 @@ export interface LogLine {
   stream: string;
   text: string;
 }
+
+/** A line of an app's own output (`docker logs`). */
+export interface RuntimeLine {
+  at: string;
+  /** stdout / stderr */
+  stream: string;
+  text: string;
+}
+
+/** What a terminal's output stream carries, line by line. */
+export type TerminalEvent = { data: string } | { exit: number };
 
 /** A preview deployment of a pull request. */
 export interface Preview {
@@ -142,6 +158,47 @@ export function platformOn(server?: string) {
     backup: (db: string) => req<Job>("POST", `/databases/${q(db)}/backups`, {}),
     restore: (db: string, snapshot: string) => req<Job>("POST", `/databases/${q(db)}/restore`, { snapshot }),
 
+    /** The app's own output so far (the last `tail` lines). */
+    runtimeLogs: async (app: string, tail = 300): Promise<RuntimeLine[]> =>
+      parseLines<RuntimeLine>(await req<unknown>("GET", `/apps/${q(app)}/logs?tail=${tail}`)),
+    /** …and new lines as the app writes them. */
+    followRuntimeLogs: (app: string, onLine: (l: RuntimeLine) => void, tail = 300) =>
+      streamLines(
+        { method: "GET", path: `/v1/platform/apps/${q(app)}/logs?follow=true&tail=${tail}`, timeout: 86_400 },
+        (line) => {
+          try {
+            onLine(JSON.parse(line) as RuntimeLine);
+          } catch {
+            /* a partial line */
+          }
+        },
+        server,
+      ),
+    restart: (app: string) => req<{ restarted: number }>("POST", `/apps/${q(app)}/restart`, {}, 120),
+
+    openTerminal: (app: string, r: TerminalRequest = {}) => req<TerminalSession>("POST", `/apps/${q(app)}/terminal`, r),
+    openDatabaseTerminal: (db: string, r: TerminalRequest = {}) => req<TerminalSession>("POST", `/databases/${q(db)}/terminal`, r),
+    terminalOutput: (id: string, on: (e: TerminalEvent) => void) =>
+      streamLines(
+        { method: "GET", path: `/v1/platform/terminals/${q(id)}/output`, timeout: 86_400 },
+        (line) => {
+          try {
+            on(JSON.parse(line) as TerminalEvent);
+          } catch {
+            /* a partial line */
+          }
+        },
+        server,
+      ),
+    terminalInput: (id: string, data: string) => req<unknown>("POST", `/terminals/${q(id)}/input`, { data: toBase64(data) }),
+    terminalResize: (id: string, cols: number, rows: number) => req<unknown>("POST", `/terminals/${q(id)}/resize`, { cols, rows }),
+    closeTerminal: (id: string) => req<unknown>("DELETE", `/terminals/${q(id)}`),
+
+    templates: () => req<ServiceTemplate[]>("GET", "/templates"),
+    createFromTemplate: (id: string, r: TemplateCreate = {}) => req<App>("POST", `/templates/${q(id)}`, r, 60),
+    allVolumes: () => req<VolumeInfo[]>("GET", "/volumes"),
+    moveVolume: (id: string, tier: StorageTier) => req<Job>("POST", `/volumes/${q(id)}/move`, { tier }),
+
     gitSources: () => req<GitSource[]>("GET", "/git-sources"),
     createGitSource: (r: GitSourceRequest) => req<GitSource>("POST", "/git-sources", r),
     deleteGitSource: (id: string) => req<unknown>("DELETE", `/git-sources/${q(id)}`),
@@ -153,6 +210,38 @@ export function platformOn(server?: string) {
 
 export const platform = platformOn();
 export type PlatformClient = ReturnType<typeof platformOn>;
+
+/** UTF-8 text → base64 (what the terminal input takes). */
+export function toBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+/** base64 → bytes (terminal output, which may split a character). */
+export function fromBase64(b64: string): Uint8Array {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+/** JSON-lines answers (or, from the demo, an array). */
+export function parseLines<T>(raw: unknown): T[] {
+  if (Array.isArray(raw)) return raw as T[];
+  if (typeof raw !== "string") return [];
+  return raw
+    .split("\n")
+    .filter((l) => l.trim())
+    .flatMap((l) => {
+      try {
+        return [JSON.parse(l) as T];
+      } catch {
+        return [];
+      }
+    });
+}
 
 /** The log endpoint answers JSON lines (or, from the demo, an array). */
 export function parseLogLines(raw: unknown): LogLine[] {

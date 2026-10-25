@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { App } from "../types";
 import { isWorker } from "./api";
-import { appState, isPlatform, listedApp, parseDotenv, parseLogLines, slug, validName, validRepo } from "./platform";
+import { appState, fromBase64, isPlatform, listedApp, parseDotenv, parseLines, parseLogLines, slug, toBase64, validName, validRepo } from "./platform";
 
 const app = (over: Partial<App> = {}): App => ({
   id: "app_1",
@@ -10,7 +10,7 @@ const app = (over: Partial<App> = {}): App => ({
   environment_id: "e",
   environment: "production",
   kind: "git",
-  source: { repository: "https://github.com/me/shop", branch: "main", git_source_id: null, image: null, compose_file: null, pinned_sha: null },
+  source: { repository: "https://github.com/me/shop", branch: "main", git_source_id: null, image: null, compose_file: null, compose_content: null, pinned_sha: null },
   build: { pack: "auto", dockerfile: null, context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] },
   runtime: { port: null, command: null, replicas: 1, memory_mb: null, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, service: null, failover: false },
   previews: { enabled: true, max: 3 },
@@ -74,5 +74,16 @@ describe("platform helpers", () => {
     expect(parseLogLines(`${JSON.stringify(line)}\n{broken\n`)).toEqual([line]);
     expect(parseLogLines([line])).toEqual([line]);
     expect(parseLogLines(null)).toEqual([]);
+  });
+
+  it("carries terminal bytes as base64, UTF-8 included", () => {
+    expect(toBase64("ls -la\r")).toBe(btoa("ls -la\r"));
+    const b = toBase64("héllo ✓");
+    expect(new TextDecoder().decode(fromBase64(b))).toBe("héllo ✓");
+    // A character split across two chunks still decodes once joined.
+    const bytes = fromBase64(b);
+    const d = new TextDecoder();
+    expect(d.decode(bytes.slice(0, 2), { stream: true }) + d.decode(bytes.slice(2))).toBe("héllo ✓");
+    expect(parseLines<{ text: string }>('{"text":"a"}\nnot json\n{"text":"b"}\n').map((l) => l.text)).toEqual(["a", "b"]);
   });
 });

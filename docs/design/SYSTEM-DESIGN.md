@@ -292,7 +292,7 @@ the main server's node token (role `owner`, kind `server`):
 | `POST /v1/runtime/apply` | `{create: [...], start: [...], stop: [...], remove: [...], routes: {...}}`: idempotent batch |
 | `POST /v1/runtime/images/pull` | pull `<registry>/vfy/<app>:<dpl>` |
 | `GET /v1/runtime/containers/{name}/logs` | logs, streaming with `follow=true` |
-| `POST /v1/runtime/exec` | WebSocket `docker exec` for the terminal |
+| `POST /v1/runtime/terminals` | a terminal session on that node (same protocol as §12.1) |
 
 The main server is just another node to itself; the same code path runs locally without HTTP.
 
@@ -359,7 +359,27 @@ Templates in `crates/vercelify-platform/templates/databases.toml` (versioned wit
 - Backups: `docker exec` dump (`pg_dump -Fc`, `mysqldump --single-transaction`,
   `mongodump --archive`, `BGSAVE` + copy of the RDB) streamed into `restic backup --stdin`,
   tagged `db:<name>`. Restore stops dependants, restores, starts them.
-- Volume tier moves reuse `coolify.rs`'s move logic, rewritten against `volumes`.
+- Volume tier moves (`POST /v1/platform/volumes/{id}/move`, a job): stop, `cp -a` to the
+  other tier (owners and modes kept), record the new place, start. A database restarts on
+  the new path; an app volume is mounted by a fresh container, created by a `recover`
+  deployment from the same image. The app is down while the data is copied.
+- App volumes are handed to the image's user on every deploy (`chown` of the volume's top
+  directory, run in the image itself so `node` or `1000:1000` resolve): our images run as
+  non-root and could not write to a new, root-owned volume otherwise.
+- Database console: `POST /v1/platform/databases/{id}/terminal` opens the database's own
+  shell (`psql`, `mysql`, `mongosh`, `valkey-cli`, `clickhouse-client`) logged in from the
+  container's environment, so the password never crosses the API.
+
+### 10.1 Service catalogue
+
+`vercelify-platform::templates` replaces Coolify's one-click services: Umami, Plausible,
+MinIO, Unleash, Uptime Kuma, Vaultwarden (more by adding an entry). A template is a compose
+file with images pinned to a version (a test refuses `latest`), the routed service, its
+port and health path, and the secrets it needs. `POST /v1/platform/templates/{id}` creates
+a compose app without a repository (`source.compose_content`), generates each secret
+(base62) as a secret variable of the app, and deploys it. Compose interpolation fills
+`${VAR}` from the app's variables plus `VERCELIFY_URL`. Each template lists the memory it
+needs, so the cockpit can say "about 2 GB" for Plausible before it is created.
 
 ## 11. Git, previews, hooks
 
@@ -393,6 +413,25 @@ name. Full list: §4.14 of the plan. Request/response types live in
 `vercelify-core::platform` and are exported to TypeScript. `App.last_status` carries
 the newest production deployment's status, so lists show build state without a
 request per app.
+
+### 12.1 Runtime: logs, restart, terminals
+
+- `GET /v1/platform/apps/{id}/logs?tail=N[&follow=true]`: the live container's output
+  (`docker logs --timestamps`) as JSON lines `{at, stream, text}`; following keeps the
+  response open, and the `docker logs` process ends with it.
+- `POST /v1/platform/apps/{id}/restart`: every container of the live deployment (compose
+  sidecars too).
+- Terminals: not a WebSocket. `POST …/apps/{id}/terminal` (or `…/databases/{id}/terminal`)
+  starts `docker exec -it` on a pseudo-terminal the agent owns (`openpty`, the child leads
+  its own session) and answers `{id}`. `GET /v1/platform/terminals/{id}/output` streams
+  `{"data": base64}` lines (the last 64 KiB first, for a reader that reattaches) and ends
+  with `{"exit": code}`; `POST …/input {data: base64}` and `POST …/resize {cols, rows}`
+  write to it; `DELETE` ends it. This reuses the authenticated request and stream path the
+  Tauri app, the browser and `vfy` already have, and adds no WebSocket stack to the agent.
+  A session belongs to the token that opened it (others get 404), at most 8 run at once,
+  and one without a reader or input for 15 minutes is closed. Terminals are a deployer's.
+  The cockpit loads xterm.js only when a terminal opens, and batches keystrokes for 12 ms
+  into one ordered request.
 
 The cockpit (M6) tells a platform server by its pairing: `role: "main"` with an empty
 `coolify_url` (the agent leaves Coolify out of `vfy1.` codes when `engine = "platform"`).
@@ -568,6 +607,11 @@ the user chose to deploy.
 | Mesh daemon idle CPU on a Pi 4 | < 1 % | mesh test (`ps` sampling) |
 | Reconciler cost | one `docker ps` per node per 30 s | design |
 | Build concurrency | hardware profile | §6.1 |
+
+The release profile uses fat LTO and `opt-level = "z"` for the whole workspace (per-crate
+levels measured larger under fat LTO): with thin LTO and `"s"` the agent measured 8.9 MiB
+after M6, over budget; this way 7.6 MiB. CI builds the binaries of every pull request with
+`cargo zigbuild` and fails over budget, so growth shows up the commit it happens.
 
 ## 17. Decisions log
 

@@ -162,7 +162,21 @@ pub fn find(c: &Connection, id_or_name: &str) -> Result<App> {
 
 fn check_source(kind: AppKind, s: &AppSource) -> Result<AppSource> {
     let mut s = s.clone();
+    let inline = kind == AppKind::Compose && s.compose_content.as_deref().is_some_and(|c| !c.trim().is_empty());
     match kind {
+        AppKind::Compose if inline => {
+            let content = s.compose_content.clone().unwrap_or_default();
+            if content.len() > 64 * 1024 {
+                return Err(Error::Invalid("the compose file is larger than 64 KiB".into()));
+            }
+            if !content.lines().any(|l| l.trim_end() == "services:") {
+                return Err(Error::Invalid("the compose file has no `services:`".into()));
+            }
+            s = AppSource {
+                compose_content: Some(content),
+                ..AppSource::default()
+            };
+        }
         AppKind::Git | AppKind::Compose => {
             let repo = s
                 .repository
@@ -195,6 +209,10 @@ fn check_source(kind: AppKind, s: &AppSource) -> Result<AppSource> {
     }
     if let Some(p) = &s.pinned_sha {
         validate::commit_sha(p)?;
+    }
+    // Inline compose files belong to compose apps without a repository.
+    if kind != AppKind::Compose || s.repository.is_some() {
+        s.compose_content = None;
     }
     if kind == AppKind::Compose {
         let f = s.compose_file.clone().unwrap_or_else(|| "docker-compose.yml".into());

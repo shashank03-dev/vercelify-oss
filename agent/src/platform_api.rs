@@ -88,6 +88,18 @@ pub fn router() -> Router<AppState> {
         .route("/platform/databases/{db}/move", post(db_move))
         .route("/platform/databases/{db}/backups", get(db_backups).post(db_backup_run))
         .route("/platform/databases/{db}/restore", post(db_restore))
+        .route("/platform/databases/{db}/terminal", post(db_terminal))
+        .route("/platform/apps/{app}/logs", get(app_runtime_logs))
+        .route("/platform/apps/{app}/restart", post(app_restart))
+        .route("/platform/apps/{app}/terminal", post(app_terminal))
+        .route("/platform/terminals/{id}", delete(terminal_close))
+        .route("/platform/terminals/{id}/output", get(terminal_output))
+        .route("/platform/terminals/{id}/input", post(terminal_input))
+        .route("/platform/terminals/{id}/resize", post(terminal_resize))
+        .route("/platform/templates", get(template_list))
+        .route("/platform/templates/{id}", post(template_create))
+        .route("/platform/volumes", get(volume_list))
+        .route("/platform/volumes/{id}/move", post(volume_move))
 }
 
 /// The platform of this server, or why there is none.
@@ -1249,4 +1261,359 @@ pub async fn run_database_backups(
             tracing::warn!("scheduled backup of {}: {e}", d.name);
         }
     }
+}
+
+// ----- runtime: logs, restart, terminals, volumes ---------------------------------
+
+#[derive(Deserialize, Default)]
+struct RuntimeLogQuery {
+    #[serde(default)]
+    follow: bool,
+    tail: Option<u32>,
+}
+
+/// The live container's output (`docker logs`) as JSON lines
+/// `{at, stream, text}`; with `follow=true` it stays open for new lines.
+async fn app_runtime_logs(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+    Query(q): Query<RuntimeLogQuery>,
+) -> Result<axum::response::Response, AppError> {
+    use axum::response::IntoResponse;
+    let p = platform(&s)?;
+    let id = tx(&s, move |c, _| Ok(apps::find(c, &app)?.id)).await?;
+    let container = p.engine.live_container(&id)?;
+    let tail = q.tail.unwrap_or(200).clamp(1, 5000).to_string();
+    let mut args = vec!["logs", "--timestamps", "--tail", &tail];
+    if q.follow {
+        args.push("--follow");
+    }
+    args.push(&container);
+    let mut child = tokio::process::Command::new(&p.engine.deployer.docker.bin)
+        .args(&args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| AppError::internal(format!("docker logs: {e}")))?;
+    let (out, err) = (child.stdout.take(), child.stderr.take());
+    let (tx_, rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(256);
+    if let Some(o) = out {
+        tokio::spawn(forward_lines(o, "stdout", tx_.clone()));
+    }
+    if let Some(e) = err {
+        tokio::spawn(forward_lines(e, "stderr", tx_.clone()));
+    }
+    drop(tx_);
+    // The process lives as long as the response: dropped (and killed) when
+    // the reader goes away or both pipes end.
+    tokio::spawn(async move {
+        let _ = child.wait().await;
+    });
+    let headers = [
+        (axum::http::header::CONTENT_TYPE, "application/x-ndjson"),
+        (axum::http::header::CACHE_CONTROL, "no-store"),
+    ];
+    Ok((headers, axum::body::Body::new(crate::routes::LineBody(rx))).into_response())
+}
+
+/// Each line of `pipe` as `{at, stream, text}` JSON until it ends or the
+/// reader goes away.
+async fn forward_lines<R: tokio::io::AsyncRead + Unpin>(
+    pipe: R,
+    stream: &'static str,
+    tx_: tokio::sync::mpsc::Sender<bytes::Bytes>,
+) {
+    use tokio::io::AsyncBufReadExt;
+    let mut lines = tokio::io::BufReader::new(pipe).lines();
+    while let Ok(Some(line)) = lines.next_line().await {
+        let (at, text) = split_timestamp(&line);
+        let mut v = serde_json::to_vec(&json!({ "at": at, "stream": stream, "text": text })).unwrap_or_default();
+        v.push(b'\n');
+        if tx_.send(bytes::Bytes::from(v)).await.is_err() {
+            return;
+        }
+    }
+}
+
+/// `2025-01-02T03:04:05.123456789Z text` → (`2025-01-02T03:04:05Z`, `text`).
+pub fn split_timestamp(line: &str) -> (String, &str) {
+    match line.split_once(' ') {
+        Some((ts, rest)) if ts.len() >= 20 && ts.as_bytes()[4] == b'-' && ts.ends_with('Z') => {
+            let secs = ts.split('.').next().unwrap_or(ts);
+            let at = if secs.ends_with('Z') {
+                secs.to_string()
+            } else {
+                format!("{secs}Z")
+            };
+            (at, rest)
+        }
+        _ => (String::new(), line),
+    }
+}
+
+async fn app_restart(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<Value> {
+    let p = platform(&s)?;
+    let id = tx(&s, move |c, _| Ok(apps::find(c, &app)?.id)).await?;
+    let n = p.engine.restart_app(&id).await?;
+    changed(&s, "apps");
+    Ok(Json(json!({ "restarted": n })))
+}
+
+fn open_terminal(
+    s: &AppState,
+    actor: &Actor,
+    container: String,
+    command: Option<Vec<String>>,
+    req: &TerminalRequest,
+) -> ApiResult<TerminalSession> {
+    let p = platform(s)?;
+    let argv = crate::terminal::exec_argv(&p.engine.deployer.docker.bin, &container, command.as_deref());
+    let t = s
+        .terminals
+        .open(
+            &actor.id,
+            &container,
+            &argv,
+            req.cols.unwrap_or(100),
+            req.rows.unwrap_or(30),
+        )
+        .map_err(AppError::conflict)?;
+    Ok(Json(TerminalSession {
+        id: t.id.clone(),
+        target: t.target.clone(),
+    }))
+}
+
+async fn app_terminal(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(app): Path<String>,
+    body: Option<Json<TerminalRequest>>,
+) -> ApiResult<TerminalSession> {
+    let req = body.map(|b| b.0).unwrap_or_default();
+    let p = platform(&s)?;
+    let id = tx(&s, move |c, _| Ok(apps::find(c, &app)?.id)).await?;
+    let container = p.engine.live_container(&id)?;
+    open_terminal(&s, &actor, container, None, &req)
+}
+
+async fn db_terminal(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(db): Path<String>,
+    body: Option<Json<TerminalRequest>>,
+) -> ApiResult<TerminalSession> {
+    let req = body.map(|b| b.0).unwrap_or_default();
+    let d = tx(&s, move |c, k| databases::get(c, k, &db, false)).await?;
+    let command = req.console.unwrap_or(true).then(|| databases::console_command(d.kind));
+    open_terminal(&s, &actor, d.container, command, &req)
+}
+
+fn session(s: &AppState, actor: &Actor, id: &str) -> Result<Arc<crate::terminal::Session>, AppError> {
+    s.terminals
+        .get(id, &actor.id)
+        .ok_or_else(|| AppError::not_found(format!("no terminal {id} (it ended, or another token opened it)")))
+}
+
+/// The terminal's output as JSON lines: `{"data": "<base64>"}`, then
+/// `{"exit": code}` when its shell ends. Starts with recent output.
+async fn terminal_output(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(id): Path<String>,
+) -> Result<axum::response::Response, AppError> {
+    use crate::terminal::Chunk;
+    use axum::response::IntoResponse;
+    use base64::Engine as _;
+    let t = session(&s, &actor, &id)?;
+    let (backlog, mut live, exit, reader) = t.attach();
+    let (tx_, rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(64);
+    let line = |v: Value| {
+        let mut b = serde_json::to_vec(&v).unwrap_or_default();
+        b.push(b'\n');
+        bytes::Bytes::from(b)
+    };
+    let b64 = |d: &[u8]| base64::engine::general_purpose::STANDARD.encode(d);
+    tokio::spawn(async move {
+        let _reader = reader;
+        if !backlog.is_empty() && tx_.send(line(json!({ "data": b64(&backlog) }))).await.is_err() {
+            return;
+        }
+        if let Some(code) = exit {
+            let _ = tx_.send(line(json!({ "exit": code }))).await;
+            return;
+        }
+        loop {
+            match live.recv().await {
+                Ok(Chunk::Data(d)) => {
+                    if tx_.send(line(json!({ "data": b64(&d) }))).await.is_err() {
+                        return;
+                    }
+                }
+                Ok(Chunk::Exit(code)) => {
+                    let _ = tx_.send(line(json!({ "exit": code }))).await;
+                    return;
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => return,
+            }
+        }
+    });
+    let headers = [
+        (axum::http::header::CONTENT_TYPE, "application/x-ndjson"),
+        (axum::http::header::CACHE_CONTROL, "no-store"),
+    ];
+    Ok((headers, axum::body::Body::new(crate::routes::LineBody(rx))).into_response())
+}
+
+#[derive(Deserialize)]
+struct TerminalInput {
+    /// Base64 of the bytes typed.
+    data: String,
+}
+
+async fn terminal_input(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(id): Path<String>,
+    Json(req): Json<TerminalInput>,
+) -> ApiResult<Value> {
+    use base64::Engine as _;
+    let t = session(&s, &actor, &id)?;
+    let data = base64::engine::general_purpose::STANDARD
+        .decode(req.data.as_bytes())
+        .map_err(|_| AppError::bad_request("data must be base64"))?;
+    if data.len() > 64 * 1024 {
+        return Err(AppError::bad_request("at most 64 KiB per write"));
+    }
+    tokio::task::spawn_blocking(move || t.write(&data))
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?
+        .map_err(|e| AppError::conflict(format!("the terminal is closed: {e}")))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+#[derive(Deserialize)]
+struct TerminalSize {
+    cols: u16,
+    rows: u16,
+}
+
+async fn terminal_resize(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(id): Path<String>,
+    Json(req): Json<TerminalSize>,
+) -> ApiResult<Value> {
+    let t = session(&s, &actor, &id)?;
+    t.resize(req.cols.min(1000), req.rows.min(500))
+        .map_err(|e| AppError::conflict(e.to_string()))?;
+    Ok(Json(json!({ "ok": true })))
+}
+
+async fn terminal_close(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(id): Path<String>,
+) -> ApiResult<Value> {
+    if !s.terminals.close(&id, &actor.id) {
+        return Err(AppError::not_found(format!("no terminal {id}")));
+    }
+    Ok(Json(json!({ "closed": true })))
+}
+
+async fn template_list() -> Json<Vec<ServiceTemplate>> {
+    Json(vercelify_platform::templates::list())
+}
+
+/// Create the app of a catalogue service and deploy it.
+async fn template_create(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    body: Option<Json<TemplateCreate>>,
+) -> ApiResult<App> {
+    let req = body.map(|b| b.0).unwrap_or_default();
+    let p = platform(&s)?;
+    let app = tx(&s, move |c, k| vercelify_platform::templates::create(c, k, &id, &req)).await?;
+    p.engine.enqueue(
+        &app.id,
+        Enqueue {
+            trigger: Some(DeploymentTrigger::Manual),
+            ..Enqueue::default()
+        },
+    )?;
+    changed(&s, "apps");
+    Ok(Json(app))
+}
+
+async fn volume_list(State(s): State<AppState>) -> ApiResult<Vec<VolumeInfo>> {
+    Ok(Json(
+        tx(&s, |c, k| {
+            let mut out = vec![];
+            for v in volumes::all(c)? {
+                let owner_name = match v.owner_kind {
+                    VolumeOwner::App => apps::get(c, &v.owner_id).map(|a| a.name),
+                    VolumeOwner::Database => databases::get(c, k, &v.owner_id, false).map(|d| d.name),
+                }
+                .unwrap_or_default();
+                out.push(VolumeInfo { volume: v, owner_name });
+            }
+            Ok(out)
+        })
+        .await?,
+    ))
+}
+
+/// Move a volume to the other disk. Database volumes move with their
+/// database (stop, copy, start); app volumes recreate the app's container.
+async fn volume_move(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(req): Json<MoveRequest>,
+) -> ApiResult<vercelify_core::Job> {
+    let p = platform(&s)?;
+    let vid = id.clone();
+    let (vol, owner) = tx(&s, move |c, k| {
+        let v = volumes::get(c, &vid)?;
+        let name = match v.owner_kind {
+            VolumeOwner::App => apps::get(c, &v.owner_id)?.name,
+            VolumeOwner::Database => databases::get(c, k, &v.owner_id, false)?.name,
+        };
+        Ok((v, name))
+    })
+    .await?;
+    if req.tier == vercelify_core::StorageTier::Hdd
+        && !crate::volumes::is_mount_point(std::path::Path::new(&s.config.storage_mount))
+        && s.config.require_storage_mount
+    {
+        return Err(AppError::conflict("the storage disk isn't mounted"));
+    }
+    let tier = if req.tier == vercelify_core::StorageTier::Hdd {
+        "HDD"
+    } else {
+        "SSD"
+    };
+    let job = s.jobs.start(
+        "volume-move",
+        format!("Move {owner}/{} to the {tier}", vol.name),
+        Some(&vol.id),
+    );
+    let snapshot = job.snapshot();
+    let root = s.config.docker_volumes_root.clone();
+    let events = s.events.clone();
+    tokio::spawn(async move {
+        let res = match vol.owner_kind {
+            VolumeOwner::Database => p.engine.move_database(&vol.owner_id, req.tier, &root).await.map(|_| ()),
+            VolumeOwner::App => p.engine.move_app_volume(&vol.id, req.tier, &root).await.map(|_| ()),
+        };
+        match res {
+            Ok(()) => job.done(format!("{owner}/{} is on the {tier} now", vol.name)),
+            Err(e) => job.fail(e.to_string()),
+        }
+        events.changed("volumes");
+        events.changed("apps");
+    });
+    snapshot.map(Json).ok_or_else(|| AppError::internal("job vanished"))
 }

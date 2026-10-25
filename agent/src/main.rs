@@ -28,6 +28,7 @@ mod services;
 mod sleep;
 mod ssh;
 mod tailscale;
+mod terminal;
 mod tokens;
 mod update;
 mod volumes;
@@ -287,6 +288,13 @@ async fn serve(cfg: Config) {
         p.spawn(Duration::from_secs(every));
         if every > 0 {
             tokio::spawn(platform_api::run_tasks(p.clone(), state.config.clone()));
+            let terminals = state.terminals.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+                    terminals.reap();
+                }
+            });
         }
     }
     if let Some(g) = &state.platform_git {

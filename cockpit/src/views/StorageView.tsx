@@ -1,16 +1,16 @@
 import { ArrowRightLeft, Boxes, CheckCircle2, Circle, HardDrive, RefreshCw, Wand2, XCircle, Zap } from "lucide-react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { StorageToggle } from "../components/StorageToggle";
 import { useToast } from "../components/Toast";
 import { Button, Callout, Card, cx, EmptyState, ErrorNote, IconButton, Loading, Meter, Modal, OrbitButton, PageHeader, PixelWave, ShimmerText, Skeleton } from "../components/ui";
 import { agent, agentOn, coolifyOn, waitForJob } from "../lib/api";
 import { hasCap } from "../lib/caps";
-import { useLive } from "../lib/live";
+import { useLive, useLiveTopic } from "../lib/live";
 import { bytes, mediaLabel, pct } from "../lib/format";
 import { sleep, usePoll } from "../lib/hooks";
-import { isPlatform } from "../lib/platform";
+import { isPlatform, platformOn } from "../lib/platform";
 import { useSession } from "../lib/session";
-import type { CoolifyVolume, DiskInfo, StorageTier } from "../types";
+import type { CoolifyVolume, DiskInfo, StorageTier, VolumeInfo } from "../types";
 
 export function StorageView() {
   const { settings } = useSession();
@@ -124,6 +124,8 @@ export function StorageView() {
           )}
         </Card>
       )}
+
+      {own && <PlatformVolumes hdd={!!hdd} />}
 
       <Card
         title="Volume assistant"
@@ -264,6 +266,114 @@ async function waitStopped(vol: CoolifyVolume, isApp: boolean, agent: ReturnType
     if (Date.now() > deadline) throw new Error(`${vol.resource_name} did not stop within 2½ minutes`);
     await sleep(2500);
   }
+}
+
+/** Volumes of the platform engine's apps and databases, movable between disks. */
+function PlatformVolumes({ hdd }: { hdd: boolean }) {
+  const { settings } = useSession();
+  const client = useMemo(() => platformOn(settings.agent_url), [settings.agent_url]);
+  const vols = usePoll(() => client.allVolumes(), 15_000, [client]);
+  useLiveTopic("volumes", () => void vols.refresh());
+  const toast = useToast();
+  const [moving, setMoving] = useState<{ v: VolumeInfo; to: StorageTier } | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function move() {
+    if (!moving) return;
+    const { v, to } = moving;
+    setBusy(true);
+    try {
+      const job = await client.moveVolume(v.volume.id, to);
+      const done = await waitForJob(job.id, undefined, 2000, settings.agent_url);
+      if (done.status === "failed") throw new Error(done.detail ?? "the move failed");
+      toast.ok(done.detail ?? `${v.owner_name}/${v.volume.name} is on the ${to.toUpperCase()} now`);
+      setMoving(null);
+      void vols.refresh();
+    } catch (e) {
+      toast.bad((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <>
+      <Card
+        title="Volumes"
+        description="Persistent data of your apps and databases. Move it between disks with one click."
+        icon={<Boxes />}
+        className="mb-6"
+        testId="platform-volumes"
+        flush
+      >
+        <ErrorNote error={vols.error} className="m-4" />
+        {vols.loading && !vols.data ? (
+          <div className="p-4">
+            <Loading />
+          </div>
+        ) : !vols.data?.length ? (
+          <EmptyState icon={<Boxes />} title="No persistent volumes yet">
+            Databases, and apps with a volume (Settings of the app), show up here.
+          </EmptyState>
+        ) : (
+          <div role="table" aria-label="Volumes" className="text-[13px]">
+            <div role="row" className={cx(VOLUME_GRID, "h-8 border-b border-line bg-fg/[0.015] text-[11px] font-medium text-fg-dim")}>
+              <span>Resource</span>
+              <span>Volume</span>
+              <span>Mounted at</span>
+              <span>Disk</span>
+              <span />
+            </div>
+            <div className="divide-y divide-line">
+              {vols.data.map(({ volume: v, owner_name }) => {
+                const to: StorageTier = v.tier === "ssd" ? "hdd" : "ssd";
+                return (
+                  <div role="row" key={v.id} data-testid={`pvolume-${owner_name}-${v.name}`} className={cx(VOLUME_GRID, "py-2.5 transition-colors hover:bg-fg/[0.025]")}>
+                    <div className="min-w-0 leading-tight">
+                      <div className="truncate font-medium">{owner_name || "—"}</div>
+                      <div className="mt-1 text-[11px] text-fg-dim">{v.owner_kind === "app" ? "App" : "Database"}</div>
+                    </div>
+                    <span className="truncate font-mono text-xs text-fg-muted" title={v.host_path ?? undefined}>
+                      {v.name}
+                    </span>
+                    <span className="truncate font-mono text-xs text-fg-muted">{v.mount_path}</span>
+                    <span className="text-[12px] text-fg-muted">{v.tier === "ssd" ? "SSD" : "HDD"}</span>
+                    <span className="flex justify-end">
+                      <Button
+                        size="sm"
+                        icon={<ArrowRightLeft />}
+                        disabled={to === "hdd" && !hdd}
+                        title={to === "hdd" && !hdd ? "No HDD mounted at /mnt/storage" : undefined}
+                        onClick={() => setMoving({ v: { volume: v, owner_name }, to })}
+                        data-testid={`pmove-${owner_name}-${v.name}`}
+                      >
+                        Move to {to.toUpperCase()}
+                      </Button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+      </Card>
+      <Modal open={!!moving} onClose={() => !busy && setMoving(null)} title={moving ? `Move ${moving.v.owner_name}/${moving.v.volume.name} to the ${moving.to.toUpperCase()}` : ""}>
+        <div className="space-y-3 p-5 text-[13px] text-fg-muted">
+          <p>
+            {moving?.v.owner_name} stops while its data is copied (owners and permissions are kept), then starts again from the new disk. Large volumes take a while on an HDD.
+          </p>
+        </div>
+        <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
+          <Button variant="ghost" disabled={busy} onClick={() => setMoving(null)}>
+            Cancel
+          </Button>
+          <Button variant="primary" busy={busy} onClick={() => void move()} data-testid="pmove-run">
+            Move
+          </Button>
+        </div>
+      </Modal>
+    </>
+  );
 }
 
 /** Stop the resource, copy its data to the other tier, start it again. */

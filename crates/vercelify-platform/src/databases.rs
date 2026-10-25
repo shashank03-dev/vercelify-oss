@@ -210,6 +210,25 @@ pub fn dump_command(kind: DatabaseKind) -> Option<Vec<String>> {
     }
 }
 
+/// The database's own shell (`psql`, `mysql`…), logged in from the
+/// container's environment: the password never crosses the API.
+pub fn console_command(kind: DatabaseKind) -> Vec<String> {
+    use DatabaseKind::*;
+    sh(match kind {
+        Postgresql => "exec psql -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\"",
+        Mysql => "MYSQL_PWD=\"$MYSQL_PASSWORD\" exec mysql -u \"$MYSQL_USER\" \"$MYSQL_DATABASE\"",
+        Mariadb => "MYSQL_PWD=\"$MARIADB_PASSWORD\" exec mariadb -u \"$MARIADB_USER\" \"$MARIADB_DATABASE\"",
+        Mongodb => {
+            "exec mongosh -u \"$MONGO_INITDB_ROOT_USERNAME\" -p \"$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin \"$MONGO_INITDB_DATABASE\""
+        }
+        Redis => "REDISCLI_AUTH=\"$VFY_PASSWORD\" exec valkey-cli",
+        Keydb => "REDISCLI_AUTH=\"$VFY_PASSWORD\" exec keydb-cli",
+        // Dragonfly's image ships no CLI; a shell is the best it has.
+        Dragonfly => "exec sh",
+        Clickhouse => "exec clickhouse-client --user \"$CLICKHOUSE_USER\" --password \"$CLICKHOUSE_PASSWORD\" -d \"$CLICKHOUSE_DB\"",
+    })
+}
+
 pub fn restore_command(kind: DatabaseKind) -> Option<Vec<String>> {
     use DatabaseKind::*;
     match kind {

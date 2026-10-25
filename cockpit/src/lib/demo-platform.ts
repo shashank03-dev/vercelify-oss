@@ -25,6 +25,7 @@ import type {
   Project,
   ScheduledTask,
   ScheduledTaskRequest,
+  ServiceTemplate,
 } from "../types";
 import type { HttpRequest } from "./transport";
 import type { LogLine, Preview } from "./platform";
@@ -86,7 +87,7 @@ function newApp(name: string, kind: App["kind"], over: Partial<App> = {}): App {
     environment_id: ENV_ID,
     environment: "production",
     kind,
-    source: { repository: null, branch: null, git_source_id: null, image: null, compose_file: null, pinned_sha: null },
+    source: { repository: null, branch: null, git_source_id: null, image: null, compose_file: null, compose_content: null, pinned_sha: null },
     build: { pack: "auto", dockerfile: null, context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] },
     runtime: { port: null, command: null, replicas: 1, memory_mb: null, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, service: null, failover: false },
     previews: { enabled: kind === "git", max: 3 },
@@ -102,11 +103,11 @@ function newApp(name: string, kind: App["kind"], over: Partial<App> = {}): App {
   };
 }
 
-const git = (repo: string) => ({ repository: `https://github.com/shashank03-dev/${repo}`, branch: "main", git_source_id: null, image: null, compose_file: null, pinned_sha: null });
+const git = (repo: string) => ({ repository: `https://github.com/shashank03-dev/${repo}`, branch: "main", git_source_id: null, image: null, compose_file: null, compose_content: null, pinned_sha: null });
 const apps: App[] = [
   newApp("shop", "git", { source: git("shop") }),
   newApp("api", "git", { source: git("notes-api"), build: { pack: "dockerfile", dockerfile: "Dockerfile", context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] } }),
-  newApp("umami", "image", { source: { repository: null, branch: null, git_source_id: null, image: "ghcr.io/umami-software/umami:postgresql-latest", compose_file: null, pinned_sha: null } }),
+  newApp("umami", "image", { source: { repository: null, branch: null, git_source_id: null, image: "ghcr.io/umami-software/umami:postgresql-latest", compose_file: null, compose_content: null, pinned_sha: null } }),
   newApp("wiki", "git", { source: git("wiki"), desired: "sleeping" }),
 ];
 
@@ -461,6 +462,8 @@ export function platformRoute(req: HttpRequest): unknown {
   const seg = path!.split("/").filter(Boolean).map(decodeURIComponent);
   const m = req.method;
   const body = (req.body ?? {}) as Record<string, unknown>;
+  const extra = runtimeRoute(seg, m, body, params);
+  if (extra !== undefined) return extra;
 
   if (seg[0] === "projects" && m === "GET") {
     return [{ ...project, app_count: apps.length, database_count: databases.length }];
@@ -692,8 +695,12 @@ function createDatabase(r: DatabaseCreate): Database {
   return clone(d);
 }
 
-/** The deployment's log so far, then new lines until it settles. */
+/** Streams of the demo platform: deployment logs, app output, terminals. */
 export async function followPlatformLogs(path: string, onLine: (line: string) => void, signal: AbortSignal): Promise<void> {
+  const runtime = /\/apps\/([^/]+)\/logs/.exec(path)?.[1];
+  if (runtime) return followRuntime(findApp(decodeURIComponent(runtime)), onLine, signal);
+  const term = /\/terminals\/([^/]+)\/output/.exec(path)?.[1];
+  if (term) return followTerminal(decodeURIComponent(term), onLine, signal);
   const depId = /\/deployments\/([^/]+)\/logs/.exec(path)?.[1];
   if (!depId) return;
   const d = findDeployment(decodeURIComponent(depId));
@@ -714,3 +721,200 @@ export async function followPlatformLogs(path: string, onLine: (line: string) =>
     signal.addEventListener("abort", done, { once: true });
   });
 }
+
+// ----- runtime: app output, restart, terminals, templates, volumes ----------------------
+
+const RUNTIME = [
+  "> shop@1.4.0 start",
+  "> next start -p 3000",
+  "  ▲ Next.js 15.4.2",
+  "  - Local: http://localhost:3000",
+  " ✓ Ready in 412ms",
+  "GET / 200 in 38ms",
+  "GET /api/products 200 in 12ms",
+  "GET /cart 200 in 21ms",
+];
+
+function runtimeLine(text: string, minsAgo = 0, stream = "stdout") {
+  return { at: new Date(Date.now() - minsAgo * 60_000).toISOString().replace(/\.\d+Z$/, "Z"), stream, text };
+}
+
+function runtimeLog(app: App) {
+  const out = RUNTIME.map((t, i) => runtimeLine(t.replace("shop", app.name), RUNTIME.length - i));
+  if (app.name === "api") out.push(runtimeLine("warn: slow query on /notes (812ms)", 1, "stderr"));
+  return out;
+}
+
+async function followRuntime(app: App, onLine: (line: string) => void, signal: AbortSignal) {
+  for (const l of runtimeLog(app)) onLine(JSON.stringify(l));
+  const paths = ["/", "/api/products", "/cart", "/checkout", "/api/health"];
+  let n = 0;
+  await new Promise<void>((resolve) => {
+    const id = window.setInterval(() => {
+      const p = paths[n++ % paths.length]!;
+      onLine(JSON.stringify(runtimeLine(`GET ${p} 200 in ${8 + ((n * 7) % 40)}ms`)));
+    }, 900);
+    signal.addEventListener("abort", () => (window.clearInterval(id), resolve()), { once: true });
+  });
+}
+
+/** A pretend shell: echoes keys, knows a few commands. */
+interface DemoTerm {
+  id: string;
+  target: string;
+  line: string;
+  listeners: Set<(e: { data?: string; exit?: number }) => void>;
+  backlog: string;
+  exited: number | null;
+  db: boolean;
+}
+const terms = new Map<string, DemoTerm>();
+const b64 = (t: string) => btoa(String.fromCharCode(...new TextEncoder().encode(t)));
+const unb64 = (b: string) => new TextDecoder().decode(Uint8Array.from(atob(b), (c) => c.charCodeAt(0)));
+
+function termOut(t: DemoTerm, text: string) {
+  t.backlog += text;
+  t.listeners.forEach((fn) => fn({ data: text }));
+}
+
+function prompt(t: DemoTerm) {
+  return t.db ? `${t.target.replace("vfy-db-", "")}=> ` : `/app $ `;
+}
+
+function openTerm(target: string, db: boolean) {
+  const t: DemoTerm = { id: id("term"), target, line: "", listeners: new Set(), backlog: "", exited: null, db };
+  terms.set(t.id, t);
+  window.setTimeout(() => termOut(t, (db ? "psql (17.2)\r\nType \"help\" for help.\r\n\r\n" : "") + prompt(t)), 150);
+  return { id: t.id, target };
+}
+
+function runCommand(t: DemoTerm, cmd: string): string | null {
+  const c = cmd.trim();
+  if (c === "exit" || c === "\\q") return null;
+  if (!c) return "";
+  if (t.db) {
+    if (/^select 1/i.test(c)) return " ?column? \r\n----------\r\n        1\r\n(1 row)\r\n";
+    if (c === "\\dt") return "         List of relations\r\n Schema |   Name   | Type  \r\n--------+----------+-------\r\n public | orders   | table\r\n public | products | table\r\n(2 rows)\r\n";
+    return `ERROR:  syntax error at or near "${c.split(" ")[0]}"\r\n`;
+  }
+  if (c === "pwd") return "/app\r\n";
+  if (c === "ls") return "node_modules  package.json  public  server.js  .next\r\n";
+  if (c === "whoami") return "node\r\n";
+  if (c.startsWith("echo ")) return c.slice(5) + "\r\n";
+  if (c === "node -v") return "v22.11.0\r\n";
+  return `sh: ${c.split(" ")[0]}: not found\r\n`;
+}
+
+function termInput(t: DemoTerm, data: string) {
+  for (const ch of data) {
+    if (t.exited !== null) return;
+    if (ch === "\r") {
+      termOut(t, "\r\n");
+      const res = runCommand(t, t.line);
+      t.line = "";
+      if (res === null) {
+        t.exited = 0;
+        t.listeners.forEach((fn) => fn({ exit: 0 }));
+        return;
+      }
+      termOut(t, res + prompt(t));
+    } else if (ch === "\u007f") {
+      if (t.line) {
+        t.line = t.line.slice(0, -1);
+        termOut(t, "\b \b");
+      }
+    } else if (ch >= " ") {
+      t.line += ch;
+      termOut(t, ch);
+    }
+  }
+}
+
+async function followTerminal(tid: string, onLine: (line: string) => void, signal: AbortSignal) {
+  const t = terms.get(tid);
+  if (!t) throw new Error(`no terminal ${tid}`);
+  if (t.backlog) onLine(JSON.stringify({ data: b64(t.backlog) }));
+  if (t.exited !== null) return onLine(JSON.stringify({ exit: t.exited }));
+  await new Promise<void>((resolve) => {
+    const fn = (e: { data?: string; exit?: number }) => {
+      if (e.data !== undefined) onLine(JSON.stringify({ data: b64(e.data) }));
+      else {
+        onLine(JSON.stringify({ exit: e.exit }));
+        t.listeners.delete(fn);
+        resolve();
+      }
+    };
+    t.listeners.add(fn);
+    signal.addEventListener("abort", () => (t.listeners.delete(fn), resolve()), { once: true });
+  });
+}
+
+const TEMPLATE_INFO: ServiceTemplate[] = [
+  { id: "umami", name: "Umami", description: "Privacy-friendly website analytics, a light alternative to Google Analytics.", category: "analytics", website: "https://umami.is", min_memory_mb: 512, compose: "services:\n  umami:\n    image: ghcr.io/umami-software/umami:postgresql-v2.15.1\n" },
+  { id: "plausible", name: "Plausible", description: "Simple, cookie-free analytics with a fast dashboard. Runs ClickHouse: needs about 2 GB of memory.", category: "analytics", website: "https://plausible.io", min_memory_mb: 2048, compose: "services:\n  plausible:\n" },
+  { id: "minio", name: "MinIO", description: "S3-compatible object storage for uploads and backups. The domain opens its console; apps reach the S3 API at minio:9000.", category: "storage", website: "https://min.io", min_memory_mb: 512, compose: "services:\n  minio:\n" },
+  { id: "unleash", name: "Unleash", description: "Feature flags and gradual rollouts for your apps.", category: "flags", website: "https://www.getunleash.io", min_memory_mb: 512, compose: "services:\n  unleash:\n" },
+  { id: "uptime-kuma", name: "Uptime Kuma", description: "Status pages and uptime monitoring for any website or service.", category: "monitoring", website: "https://uptime.kuma.pet", min_memory_mb: 256, compose: "services:\n  kuma:\n" },
+  { id: "vaultwarden", name: "Vaultwarden", description: "A password manager server compatible with the Bitwarden apps. Keep it on HTTPS.", category: "security", website: "https://github.com/dani-garcia/vaultwarden", min_memory_mb: 128, compose: "services:\n  vaultwarden:\n" },
+];
+
+function runtimeRoute(seg: string[], m: string, body: Record<string, unknown>, params: URLSearchParams): unknown {
+  if (seg[0] === "templates") {
+    if (!seg[1]) return clone(TEMPLATE_INFO);
+    const t = TEMPLATE_INFO.find((x) => x.id === seg[1]);
+    if (!t) throw new Error(`no template ${seg[1]}`);
+    const a = createApp({
+      name: String(body.name ?? t.id),
+      kind: "compose",
+      source: { repository: null, branch: null, git_source_id: null, image: null, compose_file: null, compose_content: t.compose, pinned_sha: null },
+      domains: [],
+    });
+    env.set(a.id, [envVar("POSTGRES_PASSWORD", "", true), envVar("APP_SECRET", "", true)]);
+    return a;
+  }
+  if (seg[0] === "volumes") {
+    if (seg[2] === "move") {
+      const vol = [...volumes.values()].flat().find((v) => v.id === seg[1]) ?? null;
+      const dbVol = databases.find((d) => `vol_${d.id}` === seg[1]);
+      const label = vol ? vol.name : dbVol ? dbVol.name : seg[1]!;
+      return job("volume-move", `Move ${label} to the ${String(body.tier).toUpperCase()}`, seg[1]!, `${label} is on the ${String(body.tier).toUpperCase()} now`, () => {
+        if (vol) vol.tier = body.tier as AppVolume["tier"];
+        if (dbVol) dbTier.set(dbVol.id, body.tier as AppVolume["tier"]);
+        changed("volumes");
+      });
+    }
+    const out = [];
+    for (const a of apps) for (const v of volumes.get(a.id) ?? []) out.push({ volume: clone(v), owner_name: a.name });
+    for (const d of databases) {
+      out.push({
+        volume: { id: `vol_${d.id}`, owner_kind: "database" as const, owner_id: d.id, name: "data", mount_path: d.kind === "postgresql" ? "/var/lib/postgresql/data" : "/data", tier: dbTier.get(d.id) ?? "ssd", host_path: null, created_at: d.created_at },
+        owner_name: d.name,
+      });
+    }
+    return out;
+  }
+  if (seg[0] === "terminals" && seg[1]) {
+    const t = terms.get(seg[1]);
+    if (!t) throw new Error(`no terminal ${seg[1]} (it ended, or another token opened it)`);
+    if (m === "DELETE") {
+      terms.delete(t.id);
+      return { closed: true };
+    }
+    if (seg[2] === "input") termInput(t, unb64(String(body.data ?? "")));
+    return { ok: true };
+  }
+  if (seg[0] === "databases" && seg[2] === "terminal") {
+    const d = findDb(seg[1]!);
+    return openTerm(d.container, body.console !== false);
+  }
+  if (seg[0] === "apps" && seg[1] && ["logs", "restart", "terminal"].includes(seg[2] ?? "")) {
+    const a = findApp(seg[1]);
+    if (!a.current_deployment_id) throw new Error(`${a.name} isn't deployed yet`);
+    if (seg[2] === "logs") return runtimeLog(a).slice(-Number(params.get("tail") ?? 300));
+    if (seg[2] === "restart") return { restarted: 1 };
+    return openTerm(`vfy-${a.name}-1`, false);
+  }
+  return undefined;
+}
+
+const dbTier = new Map<string, AppVolume["tier"]>();

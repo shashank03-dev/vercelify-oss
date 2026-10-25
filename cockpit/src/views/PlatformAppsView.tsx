@@ -14,24 +14,29 @@ import {
   GitBranch,
   GitPullRequest,
   Globe,
+  HardDrive,
   History,
   KeyRound,
   Link2,
+  LayoutGrid,
   Lock,
   Play,
   Plus,
   RefreshCw,
   Rocket,
   RotateCcw,
+  RotateCw,
   ScrollText,
   Search,
   Settings2,
   Square,
+  SquareTerminal,
   Trash2,
   Upload,
   Webhook,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { TerminalView } from "../components/Terminal";
 import { useToast } from "../components/Toast";
 import {
   Button,
@@ -70,6 +75,7 @@ import {
   validRepo,
   type LogLine,
   type PlatformClient,
+  type RuntimeLine,
 } from "../lib/platform";
 import { useSession } from "../lib/session";
 import type { App, AppKind, BuildPack, Database, DatabaseKind, Deployment, StorageTier } from "../types";
@@ -104,7 +110,7 @@ function useAct() {
 }
 
 type Filter = "all" | "live" | "issues";
-type DetailTab = "deployments" | "env" | "domains" | "previews" | "settings";
+type DetailTab = "deployments" | "logs" | "terminal" | "env" | "domains" | "previews" | "settings";
 
 export function PlatformApps() {
   const client = useClient();
@@ -342,7 +348,9 @@ const PACKS: { value: BuildPack; label: string }[] = [
 ];
 
 function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; client: PlatformClient; onClose: () => void; onCreated: (a: App) => void }) {
-  const [kind, setKind] = useState<AppKind>("git");
+  const [kind, setKind] = useState<AppKind | "service">("git");
+  const templates = usePoll(() => (open && kind === "service" ? client.templates() : Promise.resolve(null)), 0, [open, kind, client]);
+  const [template, setTemplate] = useState<string>();
   const [repo, setRepo] = useState("");
   const [branch, setBranch] = useState("main");
   const [image, setImage] = useState("");
@@ -362,11 +370,12 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
   // The name follows the repository or image until it is edited.
   useEffect(() => {
     if (named) return;
-    const from = kind === "image" ? image.split("/").pop()?.split(":")[0] : repo.replace(/\.git$/, "").split(/[/:]/).pop();
+    const from =
+      kind === "service" ? template : kind === "image" ? image.split("/").pop()?.split(":")[0] : repo.replace(/\.git$/, "").split(/[/:]/).pop();
     setName(slug(from ?? ""));
-  }, [repo, image, kind, named]);
+  }, [repo, image, kind, named, template]);
 
-  const sourceOk = kind === "image" ? image.trim().length > 0 : validRepo(repo);
+  const sourceOk = kind === "service" ? !!template : kind === "image" ? image.trim().length > 0 : validRepo(repo);
   const portNum = port ? Number(port) : null;
   const portOk = portNum === null || (Number.isInteger(portNum) && portNum > 0 && portNum < 65536);
   const ok = sourceOk && validName(name) && portOk;
@@ -375,6 +384,13 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
     setBusy(true);
     setError(undefined);
     try {
+      if (kind === "service") {
+        const a = await client.createFromTemplate(template!, { name });
+        setTemplate(undefined);
+        setNamed(false);
+        onCreated(a);
+        return;
+      }
       const a = await client.createApp({
         name,
         kind,
@@ -384,6 +400,7 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
           git_source_id: kind === "git" && gitSource ? gitSource : null,
           image: kind === "image" ? image.trim() : null,
           compose_file: null,
+          compose_content: null,
           pinned_sha: null,
         },
         build:
@@ -416,9 +433,37 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
           options={[
             { value: "git", label: <><GitBranch /> Git repository</>, testId: "kind-git" },
             { value: "image", label: <><Box /> Docker image</>, testId: "kind-image" },
+            { value: "service", label: <><LayoutGrid /> Service</>, testId: "kind-service" },
           ]}
         />
-        {kind === "git" ? (
+        {kind === "service" ? (
+          <div className="space-y-2" data-testid="templates">
+            {templates.loading && !templates.data && <Loading rows={3} />}
+            <ErrorNote error={templates.error} />
+            <div className="grid max-h-[40vh] grid-cols-1 gap-2 overflow-y-auto sm:grid-cols-2">
+              {(templates.data ?? []).map((t) => (
+                <button
+                  key={t.id}
+                  type="button"
+                  data-testid={`template-${t.id}`}
+                  aria-pressed={template === t.id}
+                  onClick={() => setTemplate(t.id)}
+                  className={cx(
+                    "rounded-lg border p-3 text-left transition-colors",
+                    template === t.id ? "border-accent/60 bg-accent/[0.06]" : "border-line hover:bg-fg/[0.03]",
+                  )}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[13px] font-medium text-fg">{t.name}</span>
+                    <span className="text-[10px] text-fg-dim">{t.min_memory_mb >= 1024 ? `${t.min_memory_mb / 1024} GB` : `${t.min_memory_mb} MB`}</span>
+                  </div>
+                  <p className="mt-1 line-clamp-3 text-[11.5px] leading-snug text-fg-muted">{t.description}</p>
+                </button>
+              ))}
+            </div>
+            <p className="text-[11px] text-fg-dim">Passwords and keys are generated and kept as the app's secret variables.</p>
+          </div>
+        ) : kind === "git" ? (
           <>
             <Field label="Repository" hint="https://github.com/you/app, or git@github.com:you/app.git for a private one">
               <TextInput value={repo} onChange={(e) => setRepo(e.target.value)} placeholder="https://github.com/you/app" spellCheck={false} data-testid="new-repo" autoFocus />
@@ -467,8 +512,8 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
               data-testid="new-name"
             />
           </Field>
-          <Field label="Port" hint="Leave empty to detect it">
-            <TextInput value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} placeholder="3000" inputMode="numeric" data-testid="new-port" />
+          <Field label="Port" hint={kind === "service" ? "Set by the service" : "Leave empty to detect it"}>
+            <TextInput disabled={kind === "service"} value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} placeholder="3000" inputMode="numeric" data-testid="new-port" />
           </Field>
         </div>
         {error && <Callout tone="bad">{error}</Callout>}
@@ -530,6 +575,18 @@ function AppDetail({
         </span>
       }
       actions={
+        <>
+        {app.current_deployment_id && app.desired === "running" && (
+          <Button
+            size="sm"
+            icon={<RotateCw />}
+            busy={busy === "restart"}
+            data-testid="app-restart"
+            onClick={() => void act("restart", () => client.restart(app.id), `Restarted ${app.name}`)}
+          >
+            Restart
+          </Button>
+        )}
         <Button
           variant="primary"
           size="sm"
@@ -549,6 +606,7 @@ function AppDetail({
         >
           {deploying ? "Deploying…" : "Deploy"}
         </Button>
+        </>
       }
     >
       <div className="border-b border-line px-5">
@@ -558,6 +616,8 @@ function AppDetail({
           onChange={setTab}
           items={[
             { value: "deployments", label: "Deployments", icon: <History />, testId: "tab-deployments" },
+            { value: "logs", label: "Logs", icon: <ScrollText />, testId: "tab-logs" },
+            { value: "terminal", label: "Terminal", icon: <SquareTerminal />, testId: "tab-terminal" },
             { value: "env", label: "Variables", icon: <KeyRound />, testId: "tab-env" },
             { value: "domains", label: "Domains", icon: <Globe />, testId: "tab-domains", count: app.domains.length },
             { value: "previews", label: "Previews", icon: <GitPullRequest />, testId: "tab-previews", count: previews.data?.filter((p) => !p.closed_at).length },
@@ -567,6 +627,13 @@ function AppDetail({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         {tab === "deployments" && <Deployments app={app} client={client} deps={deps.data} loading={deps.loading} error={deps.error} refresh={deps.refresh} onChanged={onChanged} />}
+        {tab === "logs" && <RuntimeLogs app={app} client={client} />}
+        {tab === "terminal" &&
+          (app.current_deployment_id && app.desired !== "stopped" ? (
+            <TerminalView client={client} open={(cols, rows) => client.openTerminal(app.id, { cols, rows })} />
+          ) : (
+            <Callout tone="idle">The terminal opens a shell in the running app: deploy or start {app.name} first.</Callout>
+          ))}
         {tab === "env" && <EnvTab app={app} client={client} />}
         {tab === "domains" && <DomainsTab app={app} client={client} onChanged={onChanged} />}
         {tab === "previews" && <PreviewsTab app={app} client={client} previews={previews} onChanged={onChanged} />}
@@ -733,6 +800,92 @@ function DeploymentLog({ client, d, app }: { client: PlatformClient; d: Deployme
           lines={lines.map((l) => ({ output: l.text, type: l.stream === "error" ? "stderr" : l.stream, timestamp: l.at, hidden: false }))}
         />
       )}
+    </div>
+  );
+}
+
+/** The app's own output, live: what `console.log` and crashes print. */
+function RuntimeLogs({ app, client }: { app: App; client: PlatformClient }) {
+  const [lines, setLines] = useState<RuntimeLine[]>([]);
+  const [error, setError] = useState<string>();
+  const [follow, setFollow] = useState(true);
+  const [query, setQuery] = useState("");
+  const box = useRef<HTMLDivElement>(null);
+  const stick = useRef(true);
+  const deployed = !!app.current_deployment_id;
+
+  useEffect(() => {
+    setError(undefined);
+    setLines([]);
+    if (!deployed) return;
+    if (!follow) {
+      let alive = true;
+      client.runtimeLogs(app.id, 500).then(
+        (l) => alive && setLines(l),
+        (e: Error) => alive && setError(e.message),
+      );
+      return () => void (alive = false);
+    }
+    // Lines arrive one by one; render them in batches.
+    let queue: RuntimeLine[] = [];
+    const tick = window.setInterval(() => {
+      if (!queue.length) return;
+      const add = queue;
+      queue = [];
+      setLines((x) => [...x, ...add].slice(-2000));
+    }, 250);
+    const s = client.followRuntimeLogs(app.id, (l) => queue.push(l), 500);
+    s.done.catch((e: Error) => setError(e.message));
+    return () => {
+      window.clearInterval(tick);
+      s.cancel();
+    };
+  }, [client, app.id, follow, deployed]);
+
+  useEffect(() => {
+    const el = box.current;
+    if (el && stick.current) el.scrollTop = el.scrollHeight;
+  }, [lines]);
+
+  if (!deployed) return <Callout tone="idle">{app.name} isn't running yet: its output shows here once it is deployed.</Callout>;
+  const q = query.trim().toLowerCase();
+  const shown = q ? lines.filter((l) => l.text.toLowerCase().includes(q)) : lines;
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <Segmented
+          label="log mode"
+          value={follow ? "live" : "last"}
+          onChange={(v) => setFollow(v === "live")}
+          options={[
+            { value: "live", label: "Live", testId: "logs-live" },
+            { value: "last", label: "Last 500 lines", testId: "logs-last" },
+          ]}
+        />
+        <div className="relative">
+          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-fg-dim" />
+          <TextInput placeholder="Filter lines…" value={query} onChange={(e) => setQuery(e.target.value)} className="h-8 w-56 pl-8" spellCheck={false} data-testid="logs-filter" />
+        </div>
+      </div>
+      {error && <Callout tone="bad">{error}</Callout>}
+      <div
+        ref={box}
+        className="max-h-[56vh] overflow-auto rounded-lg"
+        onScroll={(e) => {
+          const el = e.currentTarget;
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+        }}
+      >
+        <LogView testId="runtime-log" className="max-h-none!">
+          {shown.map((l, i) => (
+            <div key={i} className={l.stream === "stderr" ? "text-bad" : undefined}>
+              {l.at && <span className="mr-2 text-fg-dim select-none">{l.at.slice(11, 19)}</span>}
+              {l.text}
+            </div>
+          ))}
+          {shown.length === 0 && (q ? "No lines match." : follow ? "Waiting for output…" : "No output.")}
+        </LogView>
+      </div>
     </div>
   );
 }
@@ -1212,6 +1365,8 @@ function SettingsTab({ app, client, onChanged, onDeleted }: { app: App; client: 
         </div>
       </Card>
 
+      <VolumesCard app={app} client={client} />
+
       <Card title="Danger zone">
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
@@ -1254,6 +1409,66 @@ function SettingsTab({ app, client, onChanged, onDeleted }: { app: App; client: 
         </div>
       </Card>
     </div>
+  );
+}
+
+/** Persistent folders of the app: kept across deploys (and rollbacks). */
+function VolumesCard({ app, client }: { app: App; client: PlatformClient }) {
+  const vols = usePoll(() => client.volumes(app.id), 0, [app.id, client]);
+  const { busy, act } = useAct();
+  const [name, setName] = useState("data");
+  const [path, setPath] = useState("/data");
+  const nameOk = /^[a-z0-9][a-z0-9_.-]{0,62}$/.test(name);
+  const pathOk = /^\/[^\s]*$/.test(path) && path !== "/";
+  return (
+    <Card
+      flush
+      icon={<HardDrive />}
+      title="Volumes"
+      description="Folders that keep their files across deploys. New ones are used from the next deploy; move them between disks on the Storage page."
+      testId="volumes-card"
+    >
+      {!!vols.data?.length && (
+        <div className="divide-y divide-line border-b border-line">
+          {vols.data.map((v) => (
+            <div key={v.id} className="flex items-center gap-3 px-4 py-2" data-testid={`volume-${v.name}`}>
+              <span className="w-36 shrink-0 truncate font-mono text-[12px] text-fg">{v.name}</span>
+              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg-muted">{v.mount_path}</span>
+              <Tag>{v.tier.toUpperCase()}</Tag>
+              <IconButton
+                label={`Remove ${v.name}`}
+                onClick={() => void act(`rm-${v.id}`, () => client.removeVolume(app.id, v.name), `Removed ${v.name}; its data is kept until the app is deleted`).then(() => void vols.refresh())}
+              >
+                <Trash2 />
+              </IconButton>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap items-end gap-2 p-4">
+        <div className="w-36">
+          <Field label="Name">
+            <TextInput value={name} onChange={(e) => setName(e.target.value.toLowerCase())} spellCheck={false} data-testid="volume-name" />
+          </Field>
+        </div>
+        <div className="min-w-48 flex-1">
+          <Field label="Mount path">
+            <TextInput value={path} onChange={(e) => setPath(e.target.value)} className="font-mono" spellCheck={false} data-testid="volume-path" />
+          </Field>
+        </div>
+        <Button
+          icon={<Plus />}
+          disabled={!nameOk || !pathOk}
+          busy={busy === "add"}
+          data-testid="volume-add"
+          onClick={() =>
+            void act("add", () => client.addVolume(app.id, { name, mount_path: path }), `Added ${name}. Deploy to mount it.`).then(() => void vols.refresh())
+          }
+        >
+          Add
+        </Button>
+      </div>
+    </Card>
   );
 }
 
@@ -1422,11 +1637,28 @@ function DatabaseDetail({ db, apps, client, onChanged, onClose }: { db: Database
   useLiveTopic("databases", () => void backups.refresh());
   const [link, setLink] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [console_, setConsole] = useState(false);
   const url = (reveal ? full.data?.internal_url : db.internal_url) ?? "";
   const reference = `\${{db.${db.name}.url}}`;
 
   return (
-    <Modal open sheet onClose={onClose} title={<span data-testid="db-detail">{db.name}</span>} description={`${kindLabel(db.kind)} ${db.version} · ${db.image}`}>
+    <Modal
+      open
+      sheet
+      onClose={onClose}
+      title={<span data-testid="db-detail">{db.name}</span>}
+      description={`${kindLabel(db.kind)} ${db.version} · ${db.image}`}
+      actions={
+        <Button size="sm" icon={<SquareTerminal />} onClick={() => setConsole(true)} data-testid="db-console">
+          Console
+        </Button>
+      }
+    >
+      <Modal open={console_} onClose={() => setConsole(false)} wide title={`${db.name} console`} description={`${kindLabel(db.kind)}'s own shell, logged in as the app user`}>
+        <div className="p-4">
+          {console_ && <TerminalView client={client} testId="db-terminal" open={(cols, rows) => client.openDatabaseTerminal(db.id, { cols, rows })} />}
+        </div>
+      </Modal>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
         <Card title="Connect" description="Apps of this project reach it by name. Use the reference in a variable so the password never sits in your app's settings.">
           <div className="space-y-3">

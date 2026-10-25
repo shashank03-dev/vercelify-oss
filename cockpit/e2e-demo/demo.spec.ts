@@ -440,10 +440,72 @@ test("platform engine: deploy with a live log, roll back, variables, domains, da
   await expect(page.getByTestId("db-backups")).toContainText("just now", { timeout: 10_000 });
   await page.keyboard.press("Escape");
 
-  // pages without a platform version yet don't call Coolify
+  // the Storage page lists the platform's volumes and moves them
   await page.getByTestId("nav-storage").click();
   await expect(page.getByText("SSD tier")).toBeVisible();
   await expect(page.getByTestId("coolify-volumes")).toHaveCount(0);
+  await expect(page.getByTestId("platform-volumes")).toContainText("umami-data");
+  await page.getByTestId("pmove-shop-db-data").click();
+  await page.getByTestId("pmove-run").click();
+  await expect(page.getByText("shop-db is on the HDD now")).toBeVisible({ timeout: 10_000 });
+  await expect(page.getByTestId("pvolume-shop-db-data")).toContainText("HDD");
   await page.getByTestId("nav-servers").click();
   await expect(page.getByText("optiplex-7050").first()).toBeVisible();
+});
+
+test("platform engine: live output, a terminal, restart, services and a database console", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "optiplex-7050");
+  await page.getByTestId("papp-shop").getByRole("button", { name: /shop/ }).first().click();
+
+  // the app's own output, live
+  await page.getByTestId("tab-logs").click();
+  await expect(page.getByTestId("runtime-log")).toContainText("Ready in 412ms");
+  await expect(page.getByTestId("runtime-log")).toContainText("/checkout", { timeout: 10_000 });
+  await page.getByTestId("logs-filter").fill("ready");
+  await expect(page.getByTestId("runtime-log")).not.toContainText("GET /cart");
+
+  // a shell in the container
+  await page.getByTestId("tab-terminal").click();
+  const term = page.getByTestId("terminal");
+  await expect(term).toHaveAttribute("data-state", "open");
+  await expect(term).toContainText("/app $");
+  await term.click();
+  await page.keyboard.type("echo hello from the box");
+  await page.keyboard.press("Enter");
+  await expect(term).toContainText("hello from the box", { timeout: 10_000 });
+  await page.keyboard.type("exit");
+  await page.keyboard.press("Enter");
+  await expect(term).toHaveAttribute("data-state", "ended");
+
+  // restart, and a volume for the next deploy
+  await page.getByTestId("app-restart").click();
+  await expect(page.getByText("Restarted shop")).toBeVisible();
+  await page.getByTestId("tab-settings").click();
+  await page.getByTestId("volume-name").fill("uploads");
+  await page.getByTestId("volume-path").fill("/app/uploads");
+  await page.getByTestId("volume-add").click();
+  await expect(page.getByTestId("volume-uploads")).toContainText("/app/uploads");
+  await page.keyboard.press("Escape");
+
+  // a service from the catalogue
+  await page.getByTestId("new-app").click();
+  await page.getByTestId("kind-service").click();
+  await page.getByTestId("template-uptime-kuma").click();
+  await expect(page.getByTestId("new-name")).toHaveValue("uptime-kuma");
+  await page.getByTestId("new-name").fill("status");
+  await page.getByTestId("create-app").click();
+  await expect(page.getByTestId("app-detail")).toContainText("status");
+  await expect(page.getByTestId("deploy-log")).toContainText("Deployment is live", { timeout: 15_000 });
+  await page.keyboard.press("Escape");
+
+  // the database's own console
+  await page.getByTestId("db-shop-db").click();
+  await page.getByTestId("db-console").click();
+  const psql = page.getByTestId("db-terminal");
+  await expect(psql).toContainText("shop-db=>");
+  await psql.click();
+  await page.keyboard.type("select 1;");
+  await page.keyboard.press("Enter");
+  await expect(psql).toContainText("(1 row)", { timeout: 10_000 });
 });

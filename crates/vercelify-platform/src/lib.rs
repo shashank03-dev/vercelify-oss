@@ -33,8 +33,10 @@ pub mod proxy;
 pub mod reconcile;
 pub mod secrets;
 pub mod sleeping;
+pub mod storage;
 pub mod store;
 pub mod tasks;
+pub mod templates;
 pub mod validate;
 pub mod volumes;
 

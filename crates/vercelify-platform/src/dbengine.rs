@@ -545,7 +545,7 @@ async fn pipe(
 
 /// Copy a directory tree keeping owners, permissions and links (`cp -a`),
 /// replacing what is at `to`.
-async fn copy_tree(from: &Path, to: &Path) -> Result<()> {
+pub(crate) async fn copy_tree(from: &Path, to: &Path) -> Result<()> {
     if !from.is_dir() {
         return Err(Error::NotFound(format!("{} doesn't exist", from.display())));
     }

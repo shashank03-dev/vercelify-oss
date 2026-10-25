@@ -49,6 +49,11 @@ pub fn all(c: &Connection) -> Result<Vec<AppVolume>> {
     Ok(rows.collect::<rusqlite::Result<_>>()?)
 }
 
+pub fn get(c: &Connection, id: &str) -> Result<AppVolume> {
+    c.query_row("SELECT * FROM volumes WHERE id = ?1", [id], row)
+        .map_err(|_| Error::not_found(format!("volume {id}")))
+}
+
 /// Docker volume name / HDD directory name of a volume: unique per owner.
 pub fn docker_name(owner_name: &str, volume: &str) -> String {
     format!("vfy-{owner_name}-{volume}")
