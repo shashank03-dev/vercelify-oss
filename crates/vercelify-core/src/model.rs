@@ -890,12 +890,17 @@ pub struct DeviceToken {
     pub last_used_at: Option<String>,
     /// The token making this request.
     pub current: bool,
+    pub role: crate::platform::Role,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct DeviceTokenRequest {
     pub name: String,
+    /// Default owner.
+    #[serde(default)]
+    #[ts(optional)]
+    pub role: Option<crate::platform::Role>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

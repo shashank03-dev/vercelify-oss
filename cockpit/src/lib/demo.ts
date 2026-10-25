@@ -269,8 +269,8 @@ const alerts: Alert[] = [
 let notifyTarget: string | null = "https://ntfy.sh/•••";
 
 const tokens: DeviceToken[] = [
-  { id: "3f9a1c2e", name: "paired 2026-10-12 21:04 UTC", created_at: iso(60 * 24 * 8), last_used_at: iso(0.2), current: true },
-  { id: "b71d08aa", name: "iPad (status only)", created_at: iso(60 * 24 * 30), last_used_at: iso(60 * 24 * 3), current: false },
+  { id: "3f9a1c2e", name: "paired 2026-10-12 21:04 UTC", created_at: iso(60 * 24 * 8), last_used_at: iso(0.2), current: true, role: "owner" },
+  { id: "b71d08aa", name: "iPad (status only)", created_at: iso(60 * 24 * 30), last_used_at: iso(60 * 24 * 3), current: false, role: "viewer" },
 ];
 
 const audit: AuditEntry[] = [

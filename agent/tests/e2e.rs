@@ -200,6 +200,9 @@ fn agent_cmd(
         .env("VERCELIFY_MAINTENANCE_CONF", dir.join("maintenance.conf"))
         .env("VERCELIFY_PROXY_DIR", dir.join("proxy"))
         .env("VERCELIFY_TRAEFIK_METRICS_URL", "http://127.0.0.1:9/metrics")
+        .env("VERCELIFY_PLATFORM_DB", dir.join("state/platform.db"))
+        .env("VERCELIFY_MASTER_KEY_FILE", dir.join("state/master.key"))
+        .env("VERCELIFY_MESH_DIR", dir.join("state/mesh"))
         .env("STUB_LOG", log);
     for (k, v) in extra_env {
         cmd.env(k, v);
@@ -1613,4 +1616,187 @@ fn chrono_now() -> String {
     let mo = if mp < 10 { mp + 3 } else { mp - 9 };
     let y = yoe + era * 400 + if mo <= 2 { 1 } else { 0 };
     format!("{y:04}-{mo:02}-{d:02}T{h:02}:{m:02}:{s:02}Z")
+}
+
+fn send(a: &Agent, method: &str, path: &str, token: &str, body: Option<Value>) -> (u16, Value) {
+    let (s, v, _) = req(a, method, path, Some(token), body);
+    (s, v)
+}
+
+#[test]
+fn platform_api() {
+    // The Coolify engine (default): the platform API says why it is off.
+    let coolify = start();
+    let (s, h, _) = req(&coolify, "GET", "/v1/health", None, None);
+    assert_eq!(s, 200);
+    assert!(!h["capabilities"].as_array().unwrap().iter().any(|c| c == "platform"));
+    let (s, v) = get(&coolify, "/v1/platform/apps");
+    assert_eq!(s, 503);
+    assert!(v["error"].as_str().unwrap().contains("Coolify engine"), "{v}");
+    drop(coolify);
+
+    let a = start_with(&[("VERCELIFY_ENGINE", "platform".into())]);
+    let (_, h, _) = req(&a, "GET", "/v1/health", None, None);
+    let caps = h["capabilities"].as_array().unwrap();
+    assert!(
+        caps.iter().any(|c| c == "platform") && caps.iter().any(|c| c == "roles"),
+        "{h}"
+    );
+    assert!(a.root.join("state/platform.db").exists());
+    assert!(a.root.join("state/master.key").exists());
+
+    // The main server registered itself.
+    let (s, nodes) = get(&a, "/v1/platform/nodes");
+    assert_eq!(s, 200);
+    assert_eq!(nodes[0]["role"], "main");
+
+    // Projects and apps.
+    let (s, p) = post(&a, "/v1/platform/projects", json!({"name": "Blog"}));
+    assert_eq!(s, 200, "{p}");
+    assert_eq!(p["environments"][0]["name"], "production");
+    let pid = p["id"].as_str().unwrap().to_string();
+    let (s, app) = post(
+        &a,
+        "/v1/platform/apps",
+        json!({"name": "blog", "kind": "git", "project_id": pid,
+               "source": {"repository": "https://github.com/me/blog", "branch": "main"},
+               "domains": ["blog.example.com"]}),
+    );
+    assert_eq!(s, 200, "{app}");
+    assert_eq!(app["url"], "https://blog.example.com");
+    assert_eq!(app["runtime"]["replicas"], 1);
+    let (s, v) = post(
+        &a,
+        "/v1/platform/apps",
+        json!({"name": "blog", "kind": "git",
+        "source": {"repository": "https://github.com/me/blog"}}),
+    );
+    assert_eq!(s, 409, "{v}");
+    let (s, v) = post(
+        &a,
+        "/v1/platform/apps",
+        json!({"name": "x", "kind": "git",
+        "source": {"repository": "file:///etc"}}),
+    );
+    assert_eq!(s, 400, "{v}");
+    let (s, v) = send(
+        &a,
+        "PATCH",
+        "/v1/platform/apps/blog",
+        TOKEN,
+        Some(json!({"runtime": {"port": 8080}})),
+    );
+    assert_eq!(s, 200, "{v}");
+    assert_eq!(v["runtime"]["port"], 8080);
+    let (s, list) = get(&a, &format!("/v1/platform/apps?project={pid}"));
+    assert_eq!((s, list.as_array().unwrap().len()), (200, 1));
+
+    // Variables: sealed at rest, masked unless revealed.
+    let (s, v) = send(
+        &a,
+        "PUT",
+        "/v1/platform/apps/blog/env",
+        TOKEN,
+        Some(json!({"vars": [{"key": "DATABASE_URL", "value": "postgres://secret"}]})),
+    );
+    assert_eq!(s, 200, "{v}");
+    let (s, v) = post(
+        &a,
+        "/v1/platform/apps/blog/env/import",
+        json!({"content": "NODE_ENV=production\nA=1\n"}),
+    );
+    assert_eq!((s, &v["saved"]), (200, &json!(2)), "{v}");
+    let (_, vars) = get(&a, "/v1/platform/apps/blog/env");
+    assert_eq!(vars.as_array().unwrap().len(), 3);
+    assert!(vars.as_array().unwrap().iter().all(|v| v["value"].is_null()));
+    let (_, vars) = get(&a, "/v1/platform/apps/blog/env?reveal=true");
+    let db = vars
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["key"] == "DATABASE_URL")
+        .unwrap();
+    assert_eq!(db["value"], "postgres://secret");
+    let raw = std::fs::read(a.root.join("state/platform.db")).unwrap();
+    assert!(
+        !String::from_utf8_lossy(&raw).contains("postgres://secret"),
+        "sealed on disk"
+    );
+
+    // Domains and volumes.
+    let (s, d) = post(
+        &a,
+        "/v1/platform/apps/blog/domains",
+        json!({"host": "www.example.com", "redirect_to": "blog.example.com"}),
+    );
+    assert_eq!(s, 200, "{d}");
+    let (s, _) = send(
+        &a,
+        "DELETE",
+        "/v1/platform/apps/blog/domains/www.example.com",
+        TOKEN,
+        None,
+    );
+    assert_eq!(s, 200);
+    let (s, v) = post(
+        &a,
+        "/v1/platform/apps/blog/volumes",
+        json!({"name": "data", "mount_path": "/data"}),
+    );
+    assert_eq!(s, 200, "{v}");
+    let (s, v) = get(&a, "/v1/platform/apps/blog/deployments");
+    assert_eq!((s, v.as_array().unwrap().len()), (200, 0));
+
+    // Roles: a deployer ships but doesn't delete; a viewer only reads.
+    let (s, t) = post(&a, "/v1/tokens", json!({"name": "ci", "role": "deployer"}));
+    assert_eq!(s, 200, "{t}");
+    assert_eq!(t["token"]["role"], "deployer");
+    let deployer = t["secret"].as_str().unwrap().to_string();
+    let (_, t) = post(&a, "/v1/tokens", json!({"name": "dash", "role": "viewer"}));
+    let viewer = t["secret"].as_str().unwrap().to_string();
+    let (s, _) = send(
+        &a,
+        "PATCH",
+        "/v1/platform/apps/blog",
+        &deployer,
+        Some(json!({"desired": "stopped"})),
+    );
+    assert_eq!(s, 200);
+    let (s, v) = send(&a, "DELETE", "/v1/platform/apps/blog", &deployer, None);
+    assert_eq!(s, 403, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("deployer"));
+    let (s, _) = send(&a, "POST", "/v1/tokens", &deployer, Some(json!({"name": "escalate"})));
+    assert_eq!(s, 403, "deployers can't mint tokens");
+    let (s, _) = send(&a, "GET", "/v1/platform/apps/blog", &viewer, None);
+    assert_eq!(s, 200);
+    let (s, _) = send(&a, "GET", "/v1/platform/apps/blog/env?reveal=true", &viewer, None);
+    assert_eq!(s, 403, "viewers can't reveal secrets");
+    let (s, _) = send(
+        &a,
+        "PUT",
+        "/v1/platform/apps/blog/env",
+        &viewer,
+        Some(json!({"vars": []})),
+    );
+    assert_eq!(s, 403);
+    let audit = std::fs::read_to_string(a.root.join("state/audit.log")).unwrap();
+    assert!(audit.contains("\"status\":403"), "refusals are audited");
+
+    // Delete.
+    let (s, _) = send(&a, "DELETE", "/v1/platform/apps/blog", TOKEN, None);
+    assert_eq!(s, 200);
+    let (s, _) = get(&a, "/v1/platform/apps/blog");
+    assert_eq!(s, 404);
+    let (s, _) = send(&a, "DELETE", &format!("/v1/platform/projects/{pid}"), TOKEN, None);
+    assert_eq!(s, 200);
+
+    // The doctor reports the platform database.
+    let (_, doc) = get(&a, "/v1/doctor");
+    let check = doc["checks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["id"] == "platform")
+        .unwrap();
+    assert_eq!(check["status"], "ok", "{check}");
 }

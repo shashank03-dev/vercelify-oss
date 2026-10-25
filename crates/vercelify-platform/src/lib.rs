@@ -5,12 +5,21 @@
 //! (`store`), secrets at rest (`secrets`) and identifiers (`ids`); builds,
 //! deployments and the reconciler build on those.
 
+pub mod apps;
+pub mod deployments;
+pub mod env;
 pub mod error;
 pub mod ids;
+pub mod nodes;
+pub mod projects;
 pub mod secrets;
 pub mod store;
+pub mod validate;
+pub mod volumes;
 
 pub use error::{Error, Result};
+/// Re-exported so the agent's handlers name the same `Transaction` type.
+pub use rusqlite;
 pub use store::Store;
 
 /// Current time as RFC 3339 UTC with seconds, the format of every timestamp

@@ -9,8 +9,6 @@ use vercelify_platform::Store;
 
 pub struct Platform {
     pub store: Arc<Store>,
-    // Read by the platform API from M1 on (sealed variables and credentials).
-    #[allow(dead_code)]
     pub key: Arc<MasterKey>,
 }
 
@@ -26,6 +24,22 @@ impl Platform {
             store: Arc::new(store),
             key: Arc::new(key),
         })
+    }
+
+    /// Bookkeeping at agent start: deployments that were mid-flight when the
+    /// agent stopped failed; this server is registered as the main node.
+    pub fn on_start(&self, cfg: &Config, host: &vercelify_core::HostInfo) {
+        let url = format!("http://127.0.0.1:{}", cfg.port);
+        let res = self.store.tx(|c| {
+            let n = vercelify_platform::deployments::fail_interrupted(c)?;
+            vercelify_platform::nodes::ensure_main(c, &host.hostname, &url, &host.arch)?;
+            Ok(n)
+        });
+        match res {
+            Ok(0) => {}
+            Ok(n) => tracing::warn!("platform: {n} deployment(s) were interrupted by the restart"),
+            Err(e) => tracing::error!("platform: start-up bookkeeping failed: {e}"),
+        }
     }
 
     /// Open when this server runs the platform engine. A failure is logged and

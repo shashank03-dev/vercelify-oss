@@ -123,8 +123,10 @@ The authoritative copy is `crates/vercelify-platform/migrations/0001_init.sql`. 
 | `git_sources` | `provider`, `base_url`, `auth` none/token/deploy_key/github_app, `secret` BLOB (sealed), `public_key` | |
 | `deploy_hooks` | `app_id`, `secret_hash` UNIQUE | |
 | `scheduled_tasks` | `app_id`, `schedule`, `command`, `enabled`, `last_*` | |
-| `tokens` | `hash` UNIQUE, `role` owner/deployer/viewer, `project_id`, `revoked_at` | Replaces `tokens.json` (migrated in M1) |
-| `audit` | INTEGER PK, `at`, `actor`, `method`, `path`, `status` | Replaces `audit.log` (migrated in M1) |
+
+Tokens and the audit log stay in `tokens.json` and `audit.log` on every node: workers
+keep no platform database but must still authenticate the main server and devices.
+Tokens gain a `role` (§12).
 
 Rules enforced in SQL (CHECK constraints) rather than only in Rust: enum columns, DNS-label
 names, `public_port` range, `number > 0`. Foreign keys cascade from apps to their domains,
@@ -379,7 +381,11 @@ Roles: **viewer** = GET; **deployer** = apps, deployments, env, domains, preview
 databases (not delete), logs, terminal; **owner** = everything incl. tokens, mesh, nodes,
 settings, deletes. The host token (`agent.token`) is owner.
 
-Full route list: §4.14 of the plan. Request/response types live in
+The platform routes live under `/v1/platform/` (`/v1/projects` is already the
+`vercel.json` rules API): `/v1/platform/projects`, `/v1/platform/apps`,
+`/v1/platform/apps/{id}/env`, `…/domains`, `…/volumes`, `…/deployments`,
+`/v1/platform/deployments/{id}`, `/v1/platform/nodes`. Apps are addressed by id or
+name. Full list: §4.14 of the plan. Request/response types live in
 `vercelify-core::platform` and are exported to TypeScript.
 
 ## 13. Mesh

@@ -70,6 +70,9 @@ impl AppState {
         projects.set_watcher(watcher.clone());
         autodeploy.set_projects(projects.clone());
         let (platform, platform_error) = crate::platform::Platform::open_if_enabled(&config);
+        if let Some(p) = &platform {
+            p.on_start(&config, &collector.host());
+        }
         let llm = Arc::new(Llm::new(config.clone()));
         llm.set_jobs(jobs.clone());
         Self {
@@ -146,6 +149,7 @@ pub fn router(state: AppState) -> Router {
         .route("/projects/{app}", put(projects_upload).delete(projects_remove))
         .route("/projects/{app}/sync", post(projects_sync))
         .route("/projects/{app}/crons/run", post(projects_cron_run))
+        .merge(crate::platform_api::router())
         .layer(timeout(Duration::from_secs(120)));
     // Kept open: the live event stream.
     let stream = Router::new().route("/events", get(events_stream));
@@ -175,7 +179,7 @@ pub fn router(state: AppState) -> Router {
         app = app.layer(
             CorsLayer::new()
                 .allow_origin(AllowOrigin::list(origins))
-                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE])
+                .allow_methods([Method::GET, Method::POST, Method::PUT, Method::PATCH, Method::DELETE])
                 .allow_headers([axum::http::header::AUTHORIZATION, axum::http::header::CONTENT_TYPE]),
         );
     }
@@ -194,8 +198,18 @@ async fn health(State(s): State<AppState>) -> Json<Health> {
         role: s.config.role(),
         pairing_open: pairing::is_open(&s.config),
         api_version: API_VERSION,
-        capabilities: CAPABILITIES.iter().map(|c| c.to_string()).collect(),
+        capabilities: capabilities(&s),
     })
+}
+
+/// Static capabilities, plus `platform` when this server runs the platform
+/// engine and it opened.
+pub fn capabilities(s: &AppState) -> Vec<String> {
+    let mut caps: Vec<String> = CAPABILITIES.iter().map(|c| c.to_string()).collect();
+    if s.platform.is_some() {
+        caps.push("platform".into());
+    }
+    caps
 }
 
 /// Bump on breaking changes to existing endpoints.
@@ -221,6 +235,7 @@ pub const CAPABILITIES: &[&str] = &[
     "power-guard",
     "domain",
     "projects",
+    "roles",
 ];
 
 async fn tokens_list(State(s): State<AppState>, Extension(actor): Extension<Actor>) -> Json<Vec<DeviceToken>> {
@@ -232,10 +247,12 @@ async fn tokens_create(
     Json(req): Json<DeviceTokenRequest>,
 ) -> ApiResult<DeviceTokenCreated> {
     let cfg = s.config.clone();
-    let (token, secret) = tokio::task::spawn_blocking(move || crate::tokens::create(&cfg, &req.name))
-        .await
-        .map_err(|e| AppError::internal(e.to_string()))?
-        .map_err(|e| AppError::internal(format!("writing the token file: {e}")))?;
+    let (token, secret) = tokio::task::spawn_blocking(move || {
+        crate::tokens::create_with_role(&cfg, &req.name, req.role.unwrap_or_default())
+    })
+    .await
+    .map_err(|e| AppError::internal(e.to_string()))?
+    .map_err(|e| AppError::internal(format!("writing the token file: {e}")))?;
     Ok(Json(DeviceTokenCreated { token, secret }))
 }
 

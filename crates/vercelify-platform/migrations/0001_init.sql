@@ -220,24 +220,3 @@ CREATE TABLE scheduled_tasks (
   created_at  TEXT NOT NULL,
   UNIQUE (app_id, name)
 );
-
-CREATE TABLE tokens (
-  id           TEXT PRIMARY KEY,
-  name         TEXT NOT NULL,
-  hash         TEXT NOT NULL UNIQUE,
-  role         TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner', 'deployer', 'viewer')),
-  project_id   TEXT REFERENCES projects(id) ON DELETE CASCADE,
-  created_at   TEXT NOT NULL,
-  last_used_at TEXT,
-  revoked_at   TEXT
-);
-
-CREATE TABLE audit (
-  id     INTEGER PRIMARY KEY,
-  at     TEXT NOT NULL,
-  actor  TEXT NOT NULL,
-  method TEXT NOT NULL,
-  path   TEXT NOT NULL,
-  status INTEGER NOT NULL
-);
-CREATE INDEX audit_at ON audit(at);

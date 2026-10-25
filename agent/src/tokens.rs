@@ -14,11 +14,25 @@ use std::io::Write;
 use std::sync::Mutex;
 use std::time::{Instant, SystemTime};
 use subtle::ConstantTimeEq;
+use vercelify_core::platform::Role;
 use vercelify_core::{AuditEntry, DeviceToken};
 
-/// Who made a request: `admin` (the host's token) or a device token id.
+/// Who made a request: `admin` (the host's token) or a device token id, and
+/// what that token may do.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Actor(pub String);
+pub struct Actor {
+    pub id: String,
+    pub role: Role,
+}
+
+impl Actor {
+    pub fn admin() -> Self {
+        Self {
+            id: "admin".into(),
+            role: Role::Owner,
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 struct StoredToken {
@@ -29,6 +43,9 @@ struct StoredToken {
     created_at: String,
     #[serde(default)]
     last_used_at: Option<String>,
+    /// Tokens from before roles existed are owners (they could do everything).
+    #[serde(default)]
+    role: Role,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -64,9 +81,13 @@ fn write_file(cfg: &Config, f: &TokenFile) -> std::io::Result<()> {
     write_private(&cfg.tokens_file, &serde_json::to_vec_pretty(f).expect("serializable"))
 }
 
-/// Mint a token for a device (also used by `vercelify-agent pair`).
+/// Mint an owner token for a device (also used by `vercelify-agent pair`).
 /// Returns (record, secret).
 pub fn create(cfg: &Config, name: &str) -> std::io::Result<(DeviceToken, String)> {
+    create_with_role(cfg, name, Role::Owner)
+}
+
+pub fn create_with_role(cfg: &Config, name: &str, role: Role) -> std::io::Result<(DeviceToken, String)> {
     let secret = format!("vfyd_{}", random_hex(32));
     let name: String = name.chars().filter(|c| !c.is_control()).take(80).collect();
     let t = StoredToken {
@@ -75,6 +96,7 @@ pub fn create(cfg: &Config, name: &str) -> std::io::Result<(DeviceToken, String)
         hash: sha256_hex(&secret),
         created_at: now(),
         last_used_at: None,
+        role,
     };
     let mut f = read_file(cfg);
     f.tokens.push(t.clone());
@@ -89,6 +111,7 @@ fn public(t: &StoredToken, current: Option<&str>) -> DeviceToken {
         created_at: t.created_at.clone(),
         last_used_at: t.last_used_at.clone(),
         current: current == Some(t.id.as_str()),
+        role: t.role,
     }
 }
 
@@ -148,7 +171,7 @@ impl Tokens {
     /// Who presented `secret`, if anyone.
     pub fn verify(&self, cfg: &Config, secret: &str) -> Option<Actor> {
         if !secret.is_empty() && bool::from(secret.as_bytes().ct_eq(self.admin.as_bytes())) {
-            return Some(Actor("admin".into()));
+            return Some(Actor::admin());
         }
         if !secret.starts_with("vfyd_") {
             return None;
@@ -165,11 +188,11 @@ impl Tokens {
             c.tokens = read_file(cfg).tokens;
             c.mtime = mtime;
         }
-        let id = c
+        let (id, role) = c
             .tokens
             .iter()
             .find(|t| bool::from(t.hash.as_bytes().ct_eq(hash.as_bytes())))
-            .map(|t| t.id.clone())?;
+            .map(|t| (t.id.clone(), t.role))?;
         c.used.insert(id.clone(), now());
         // Note last use on disk at most every 10 minutes.
         if c.flushed.is_none_or(|t| t.elapsed().as_secs() > 600) {
@@ -185,7 +208,7 @@ impl Tokens {
             }
             c.flushed = Some(Instant::now());
         }
-        Some(Actor(id))
+        Some(Actor { id, role })
     }
 
     pub fn list(&self, cfg: &Config, current: &Actor) -> Vec<DeviceToken> {
@@ -194,7 +217,7 @@ impl Tokens {
             .tokens
             .iter()
             .map(|t| {
-                let mut d = public(t, Some(&current.0));
+                let mut d = public(t, Some(&current.id));
                 if let Some(u) = c.used.get(&t.id) {
                     d.last_used_at = Some(u.clone());
                 }
@@ -259,10 +282,7 @@ mod tests {
         let d = tempfile::tempdir().unwrap();
         let cfg = cfg(d.path());
         let tokens = Tokens::new("admin-token-0123456789".into());
-        assert_eq!(
-            tokens.verify(&cfg, "admin-token-0123456789"),
-            Some(Actor("admin".into()))
-        );
+        assert_eq!(tokens.verify(&cfg, "admin-token-0123456789"), Some(Actor::admin()));
         assert_eq!(tokens.verify(&cfg, "vfyd_nope"), None);
         assert_eq!(tokens.verify(&cfg, ""), None);
 
@@ -277,7 +297,8 @@ mod tests {
         );
 
         let actor = tokens.verify(&cfg, &secret).unwrap();
-        assert_eq!(actor.0, t.id);
+        assert_eq!(actor.id, t.id);
+        assert_eq!(actor.role, Role::Owner);
         let l = tokens.list(&cfg, &actor);
         assert!(l[0].current && l[0].last_used_at.is_some());
 
@@ -286,6 +307,29 @@ mod tests {
         // The file changed: the cache notices.
         std::thread::sleep(std::time::Duration::from_millis(20));
         assert_eq!(tokens.verify(&cfg, &secret), None, "revoked");
+    }
+
+    #[test]
+    fn roles() {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = cfg(d.path());
+        let tokens = Tokens::new("admin-token-0123456789".into());
+        // A token file from before roles: its tokens stay owners.
+        let secret = "vfyd_legacy";
+        std::fs::write(
+            &cfg.tokens_file,
+            format!(
+                r#"{{"tokens":[{{"id":"aa11","name":"old","hash":"{}","created_at":"2026-01-01T00:00:00Z"}}]}}"#,
+                sha256_hex(secret)
+            ),
+        )
+        .unwrap();
+        assert_eq!(tokens.verify(&cfg, secret).unwrap().role, Role::Owner);
+        let (t, s2) = create_with_role(&cfg, "CI", Role::Deployer).unwrap();
+        assert_eq!(t.role, Role::Deployer);
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let a = tokens.verify(&cfg, &s2).unwrap();
+        assert_eq!((a.id.as_str(), a.role), (t.id.as_str(), Role::Deployer));
     }
 
     #[test]

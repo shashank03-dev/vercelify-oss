@@ -7,6 +7,7 @@ pub mod disks;
 pub mod hardware;
 pub mod model;
 pub mod pairing;
+pub mod platform;
 pub mod power;
 pub mod stream;
 pub mod sysfs;

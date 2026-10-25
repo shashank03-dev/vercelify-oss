@@ -263,7 +263,6 @@ mod tests {
         for want in [
             "apps",
             "app_domains",
-            "audit",
             "database_backups",
             "databases",
             "deploy_hooks",
@@ -278,7 +277,6 @@ mod tests {
             "resource_names",
             "scheduled_tasks",
             "settings",
-            "tokens",
             "volumes",
         ] {
             assert!(t.contains(&want.to_string()), "missing table {want}");

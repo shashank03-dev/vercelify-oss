@@ -263,6 +263,15 @@ impl Config {
         if let Some(v) = var("VERCELIFY_ENGINE") {
             self.engine = v;
         }
+        if let Some(v) = var("VERCELIFY_PLATFORM_DB") {
+            self.platform_db = v.into();
+        }
+        if let Some(v) = var("VERCELIFY_MASTER_KEY_FILE") {
+            self.master_key_file = v.into();
+        }
+        if let Some(v) = var("VERCELIFY_MESH_DIR") {
+            self.mesh_dir = v.into();
+        }
         if let Some(v) = var("VERCELIFY_LISTEN") {
             self.listen = v.split(',').map(|s| s.trim().to_string()).collect();
         }

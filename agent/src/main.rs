@@ -17,6 +17,7 @@ mod http;
 mod llm;
 mod pairing;
 mod platform;
+mod platform_api;
 mod powerguard;
 mod project;
 mod projects;
