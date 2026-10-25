@@ -735,8 +735,10 @@ levels measured larger under fat LTO): with thin LTO and `"s"` the agent measure
 after M6, over budget; this way 7.6 MiB. M7 (the coordinator, `vercelify-mesh` as a library)
 brought it to 8.0 MiB; logging filters with `tracing_subscriber::filter::Targets` instead of
 `EnvFilter` (which pulls in a regex engine) brought it back to 7.75 MiB; the relay hub (axum's
-WebSocket) added 0.07 MiB. `vercelify-mesh` measures 2.9 MiB, 1.1 MiB of it rustls with
-webpki roots for `wss://` and `https://` through a tunnel. CI builds the binaries of every pull request with
+WebSocket) added 0.07 MiB, mDNS and SPAKE2 0.08 MiB (7.90); `toml` 1 with only its parser
+(no `toml_edit`) and axum without its unused default features brought it back to 7.75 MiB.
+`panic = "abort"` would save more but turns a panicking task into a dead agent; not taken. `vercelify-mesh` measures 3.2 MiB, 1.1 MiB of it rustls with
+webpki roots for `wss://` and `https://` through a tunnel, 0.3 MiB the userspace stack. CI builds the binaries of every pull request with
 `cargo zigbuild` and fails over budget, so growth shows up the commit it happens.
 
 ## 17. Decisions log
