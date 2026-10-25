@@ -200,16 +200,20 @@ pub fn resolve(c: &Connection, key: &MasterKey, app_id: &str, preview: bool) -> 
 
 /// [`resolve`], with database references (`${{db.<name>.url}}`) filled in:
 /// what a deployment actually gets.
+///
+/// `main_ip`: the main server's mesh address, for an app on another server
+/// (the databases' public ports are used then).
 pub fn resolve_for_deploy(
     c: &Connection,
     key: &MasterKey,
     app_id: &str,
     preview: bool,
+    main_ip: Option<&str>,
 ) -> Result<BTreeMap<String, Resolved>> {
     let mut vars = resolve(c, key, app_id, preview)?;
     for (k, v) in vars.iter_mut() {
         if v.value.contains("${{db.") {
-            let filled = crate::databases::resolve_references(c, key, &v.value)
+            let filled = crate::databases::resolve_references_at(c, key, &v.value, main_ip)
                 .map_err(|e| Error::Invalid(format!("{k}: {}", e.message())))?;
             v.value = Zeroizing::new(filled);
         }

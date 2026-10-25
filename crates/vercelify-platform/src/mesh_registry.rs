@@ -89,6 +89,7 @@ impl Node {
             ip_index: self.ip_index,
             endpoints: self.endpoints.clone(),
             extra_device_ports: vec![],
+            container_ports: vec![],
             revoked: self.revoked_at.is_some(),
         }
     }
@@ -420,8 +421,12 @@ pub fn revoke(c: &Connection, id_or_name: &str) -> Result<Node> {
             "UPDATE mesh_nodes SET revoked_at = ?2 WHERE id = ?1",
             params![n.id, now()],
         )?;
-        // Removing the platform's link to it keeps the worker list honest.
-        c.execute("UPDATE nodes SET mesh_node_id = NULL WHERE mesh_node_id = ?1", [&n.id])?;
+        // Removing the platform's link to it keeps the worker list honest,
+        // and its runtime token stops being used.
+        c.execute(
+            "UPDATE nodes SET mesh_node_id = NULL, token = NULL WHERE mesh_node_id = ?1",
+            [&n.id],
+        )?;
         bump(c)?;
     }
     get(c, &n.id)
@@ -438,8 +443,33 @@ pub fn delete(c: &Connection, id_or_name: &str) -> Result<()> {
 }
 
 /// Every node, as the map builder takes them.
+///
+/// Databases run on the main server (the coordinator): their public ports
+/// are open there to devices and to other servers' containers (apps placed
+/// elsewhere reach them over the mesh); every server's proxy (80) is open
+/// to other servers' containers, for the main server's forwarding (§8.2).
 pub fn records(c: &Connection) -> Result<Vec<NodeRecord>> {
-    Ok(list(c)?.iter().map(Node::record).collect())
+    let db_ports: Vec<String> = c
+        .prepare("SELECT public_port FROM databases WHERE public_port IS NOT NULL ORDER BY public_port")?
+        .query_map([], |r| r.get::<_, u16>(0))?
+        .collect::<rusqlite::Result<Vec<u16>>>()?
+        .into_iter()
+        .map(|p| format!("{p}/tcp"))
+        .collect();
+    Ok(list(c)?
+        .iter()
+        .map(|n| {
+            let mut r = n.record();
+            if r.kind == NodeKind::Server {
+                r.container_ports = vec!["80/tcp".into()];
+                if r.ip_index == COORDINATOR_INDEX {
+                    r.extra_device_ports = db_ports.clone();
+                    r.container_ports.extend(db_ports.iter().cloned());
+                }
+            }
+            r
+        })
+        .collect())
 }
 
 #[cfg(test)]

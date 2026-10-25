@@ -545,3 +545,35 @@ test("Vercelify network: pair on the LAN, see each path, invite a server, revoke
   await expect(net.getByTestId("mesh-node-old-ipad")).toContainText("revoked");
   await expect(net.getByTestId("mesh-revoke-old-ipad")).toHaveCount(0);
 });
+
+test("platform engine: apps across servers — where they run, replicas, drain a worker", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "optiplex-7050");
+  // api runs twice: on the Pi and on the main server.
+  await page.getByTestId("papp-api").getByRole("button", { name: /api/ }).first().click();
+  await page.getByTestId("tab-settings").click();
+  const placement = page.getByTestId("placement-card");
+  await expect(placement.getByTestId("instances")).toContainText("pi-5");
+  await expect(placement.getByTestId("instances")).toContainText("optiplex-7050");
+  await expect(placement.getByTestId("placement-node")).toHaveValue("node_demopi5000000000");
+  await expect(placement.getByTestId("placement-failover")).toBeChecked();
+  await placement.getByTestId("placement-replicas").fill("3");
+  await placement.getByTestId("placement-save").click();
+  await expect(page.getByText("Saved: the next deployment uses it")).toBeVisible();
+  // until the next deploy, what runs stays as it is
+  await expect(placement.getByTestId("instances").locator("li")).toHaveCount(2);
+  await page.keyboard.press("Escape");
+
+  // the fleet on the Servers page
+  await page.getByTestId("nav-servers").click();
+  const fleet = page.getByTestId("platform-servers");
+  await expect(fleet.getByTestId("platform-node-optiplex-7050")).toContainText("main");
+  await expect(fleet.getByTestId("platform-node-pi-5")).toContainText("aarch64");
+  await expect(fleet.getByTestId("platform-node-pi-5")).toContainText("online");
+  await fleet.getByTestId("platform-drain-pi-5").click();
+  await expect(fleet.getByTestId("platform-node-pi-5")).toContainText("drained");
+  // a worker with instances can't be removed
+  await fleet.getByRole("button", { name: "Remove pi-5" }).click();
+  await page.getByTestId("platform-remove-yes").click();
+  await expect(page.getByText(/still runs/)).toBeVisible();
+});

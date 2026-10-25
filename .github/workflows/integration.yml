@@ -12,6 +12,9 @@ name: Integration
 #   - the mesh: four nodes in network namespaces with the real agent and
 #     vercelify-mesh (joining, paths, DNS, firewall, rotation, revocation),
 #     then three behind real NAT routers (hole punching, the relay)
+#   - multi-node: a worker with its own Docker in a network namespace; an
+#     app placed on it through the mesh registry, replicas on both servers,
+#     logs, restart, a terminal, automatic rollback and revocation
 #   - the real installer in a systemd container (Docker, Tailscale, Coolify,
 #     agent, guard, firewall), twice, to prove it is idempotent
 on:
@@ -33,6 +36,13 @@ on:
       - agent/src/mesh.rs
       - crates/vercelify-mesh/**
       - crates/vercelify-platform/src/mesh_registry.rs
+      - crates/vercelify-platform/src/engine.rs
+      - crates/vercelify-platform/src/fleet.rs
+      - crates/vercelify-platform/src/reconcile.rs
+      - crates/vercelify-platform/src/registry.rs
+      - crates/vercelify-platform/src/runtime.rs
+      - agent/src/runtime_api.rs
+      - agent/src/worker.rs
       - host/firewall.sh
       - .github/workflows/integration.yml
   schedule:
@@ -101,6 +111,19 @@ jobs:
         run: sudo -E env "PATH=$PATH" host/tests/contract/mesh.sh
       - name: NAT traversal (hole punching, relay)
         run: sudo -E env "PATH=$PATH" host/tests/contract/mesh-nat.sh
+
+  multinode-contract:
+    name: Two servers (platform worker over the mesh)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p vercelify-agent && cargo build -p vercelify-mesh --features daemon
+      - run: sudo apt-get update && sudo apt-get install -y iputils-ping jq
+      - name: Contract
+        run: sudo -E env "PATH=$PATH" host/tests/contract/multinode.sh
 
   installer:
     name: Installer on Debian 12 (systemd, real Coolify)

@@ -1,8 +1,8 @@
+use crate::json::Json;
 use axum::extract::{Request, State};
 use axum::http::{header, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use vercelify_core::ApiError;
 
 use crate::routes::AppState;
@@ -46,8 +46,17 @@ pub fn allowed(role: Role, method: &Method, path: &str) -> bool {
     }
 }
 
-/// Bearer auth: the host's own token or a device token. Every change
-/// (anything but GET) is written to the audit log with who made it.
+/// The main server calling a worker: its runtime token, from the
+/// coordinator's mesh address, and only for `/v1/runtime/*` (design §8.2).
+pub const MAIN_SERVER: &str = "main-server";
+
+pub fn runtime_path(path: &str) -> bool {
+    path.starts_with("/v1/runtime/")
+}
+
+/// Bearer auth: the host's own token or a device token (on a worker also
+/// the main server's runtime token). Every change (anything but GET) is
+/// written to the audit log with who made it.
 pub async fn require_token(State(state): State<AppState>, mut req: Request, next: Next) -> Response {
     let presented = req
         .headers()
@@ -56,7 +65,28 @@ pub async fn require_token(State(state): State<AppState>, mut req: Request, next
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or("")
         .to_string();
-    let Some(actor) = state.tokens.verify(&state.config, &presented) else {
+    let from = req
+        .extensions()
+        .get::<axum::extract::ConnectInfo<std::net::SocketAddr>>()
+        .map(|c| c.0.ip());
+    let full_path = req
+        .extensions()
+        .get::<axum::extract::OriginalUri>()
+        .map(|u| u.0.path().to_string())
+        .unwrap_or_else(|| req.uri().path().to_string());
+    let main_server = state
+        .worker
+        .as_ref()
+        .is_some_and(|w| runtime_path(&full_path) && w.verify(&presented, from));
+    let actor = if main_server {
+        Some(tokens::Actor {
+            id: MAIN_SERVER.into(),
+            role: Role::Owner,
+        })
+    } else {
+        state.tokens.verify(&state.config, &presented)
+    };
+    let Some(actor) = actor else {
         return (
             StatusCode::UNAUTHORIZED,
             [(header::WWW_AUTHENTICATE, "Bearer")],

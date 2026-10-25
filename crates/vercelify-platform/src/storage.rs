@@ -4,6 +4,7 @@
 use crate::deploy::LABEL_DEPLOYMENT;
 use crate::engine::{Engine, EngineEvent, Enqueue};
 use crate::proc::{self, Spec};
+use crate::runtime::{Apply, NodeRuntime};
 use crate::{apps, deployments, volumes, Error, Result};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -14,43 +15,66 @@ impl Engine {
     /// The container serving the app now (for compose apps: the routed
     /// service), or why there is none.
     pub fn live_container(&self, app_id: &str) -> Result<String> {
-        self.store.with(|c| {
-            let a = apps::get(c, app_id)?;
-            let d = a
-                .current_deployment_id
-                .ok_or_else(|| Error::Conflict(format!("{} isn't deployed yet", a.name)))?;
-            let name = deployments::container(c, &d)?;
-            if name.is_empty() {
-                return Err(Error::Conflict(format!("{} has no running container", a.name)));
-            }
-            Ok(name)
-        })
+        Ok(self.live_instance(app_id)?.1)
     }
 
-    /// Restart every container of the live deployment (a compose app's
-    /// sidecars too). Returns how many were restarted.
+    /// Where the live deployment's first instance runs, and its container.
+    pub fn live_instance(&self, app_id: &str) -> Result<(NodeRuntime, String)> {
+        let (name, dep) = self.store.with(|c| {
+            let a = apps::get(c, app_id)?;
+            Ok((a.name, a.current_deployment_id))
+        })?;
+        let dep = dep.ok_or_else(|| Error::Conflict(format!("{name} isn't deployed yet")))?;
+        let p = self
+            .placed(&dep)?
+            .into_iter()
+            .next()
+            .ok_or_else(|| Error::Conflict(format!("{name} has no running container")))?;
+        Ok((self.node_runtime(&p.node)?, p.instance.container))
+    }
+
+    /// Restart every container of the live deployment (every replica, a
+    /// compose app's sidecars too). Returns how many were restarted.
     pub async fn restart_app(&self, app_id: &str) -> Result<usize> {
         let (dep, name) = self.store.with(|c| {
             let a = apps::get(c, app_id)?;
             Ok((a.current_deployment_id, a.name))
         })?;
         let dep = dep.ok_or_else(|| Error::Conflict(format!("{name} isn't deployed yet")))?;
-        let docker = &self.deployer.docker;
-        let mut names: Vec<String> = docker
+        let placed = self.placed(&dep)?;
+        let mut n = 0;
+        let mut local: Vec<String> = self
+            .deployer
+            .docker
             .list_managed()
             .await?
             .into_iter()
             .filter(|c| c.labels.get(LABEL_DEPLOYMENT) == Some(&dep))
             .map(|c| c.name)
             .collect();
-        if names.is_empty() {
-            names.push(self.live_container(app_id)?);
+        for p in &placed {
+            let rt = self.node_runtime(&p.node)?;
+            if rt.is_local() {
+                if !local.contains(&p.instance.container) {
+                    local.push(p.instance.container.clone());
+                }
+                continue;
+            }
+            rt.apply_ok(&Apply {
+                restart: vec![p.instance.container.clone()],
+                ..Apply::default()
+            })
+            .await?;
+            n += 1;
         }
-        for n in &names {
-            docker.restart(n, 20).await?;
+        if local.is_empty() && placed.is_empty() {
+            return Err(Error::Conflict(format!("{name} has no running container")));
+        }
+        for c in &local {
+            self.deployer.docker.restart(c, 20).await?;
         }
         self.emit(EngineEvent::Changed);
-        Ok(names.len())
+        Ok(n + local.len())
     }
 
     /// Move an app volume's data to the other tier: stop the app, copy with
@@ -71,6 +95,15 @@ impl Engine {
                 "{} is deploying; move its volume when that's done",
                 app.name
             )));
+        }
+        // The data lives where the app runs; the copy is done here.
+        if let Some(node) = app.node_id.as_deref() {
+            if !self.runtime_of(node)?.is_local() {
+                return Err(Error::Invalid(format!(
+                    "{} runs on another server: moving volumes between disks works for apps on the main server",
+                    app.name
+                )));
+            }
         }
         let docker = &self.deployer.docker;
         let name = volumes::docker_name(&app.name, &vol.name);

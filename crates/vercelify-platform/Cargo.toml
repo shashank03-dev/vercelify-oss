@@ -22,6 +22,11 @@ sha2 = "0.10"
 zeroize = "1"
 bcrypt = { version = "0.16", default-features = false, features = ["std"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+# The client for workers' runtime API over the mesh (the agent links hyper already).
+hyper = { version = "1", features = ["client", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+http-body-util = "0.1"
+bytes = "1"
 
 [dev-dependencies]
 tempfile = "3"

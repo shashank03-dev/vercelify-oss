@@ -19,7 +19,10 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
 /// Embedded migrations: (version, SQL). Versions are consecutive from 1.
-pub const MIGRATIONS: &[(u32, &str)] = &[(1, include_str!("../migrations/0001_init.sql"))];
+pub const MIGRATIONS: &[(u32, &str)] = &[
+    (1, include_str!("../migrations/0001_init.sql")),
+    (2, include_str!("../migrations/0002_multinode.sql")),
+];
 
 pub fn latest_version() -> u32 {
     MIGRATIONS.last().map(|m| m.0).unwrap_or(0)
@@ -270,6 +273,7 @@ mod tests {
             "env_vars",
             "environments",
             "git_sources",
+            "instances",
             "mesh_nodes",
             "nodes",
             "previews",

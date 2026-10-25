@@ -7,16 +7,15 @@
 //! so visitors see the "waking up" page rather than a 502.
 
 use crate::deploy::{self, probe_for};
-use crate::docker::PROXY_NETWORK;
-use crate::engine::{Engine, EngineEvent};
-use crate::reconcile::route_for;
-use crate::{apps, deployments, health, previews, proxy, Error, Result};
-use std::time::Duration;
+use crate::engine::{hosts_for, Engine, EngineEvent};
+use crate::fleet::{Placed, RouteBase};
+use crate::runtime::{Apply, HealthWait};
+use crate::{apps, deployments, nodes, previews, proxy, Error, Result};
 use vercelify_core::platform::{AppPatch, Desired};
 
-/// The containers serving an app or preview (the routed one first; compose
-/// apps have more).
-async fn containers_of(engine: &Engine, app_id: &str, pr: Option<u32>) -> Result<(Vec<String>, Option<String>)> {
+/// The deployment serving an app or preview, its instances, and the local
+/// compose sidecars (the routed one first).
+async fn serving(engine: &Engine, app_id: &str, pr: Option<u32>) -> Result<Option<(String, Vec<Placed>, Vec<String>)>> {
     let dep = engine.store.with(|c| {
         Ok(match pr {
             None => apps::get(c, app_id)?.current_deployment_id,
@@ -24,19 +23,20 @@ async fn containers_of(engine: &Engine, app_id: &str, pr: Option<u32>) -> Result
         })
     })?;
     let Some(dep) = dep else {
-        return Ok((vec![], None));
+        return Ok(None);
     };
-    let routed = engine.store.with(|c| deployments::container(c, &dep))?;
-    let mut names = vec![];
-    if !routed.is_empty() {
-        names.push(routed);
-    }
-    for c in engine.deployer.docker.list_managed().await? {
-        if c.labels.get(deploy::LABEL_DEPLOYMENT) == Some(&dep) && !names.contains(&c.name) {
-            names.push(c.name);
+    let placed = engine.placed(&dep)?;
+    let mut sidecars = vec![];
+    if placed.iter().all(|p| p.node.role == "main") {
+        for c in engine.deployer.docker.list_managed().await? {
+            if c.labels.get(deploy::LABEL_DEPLOYMENT) == Some(&dep)
+                && !placed.iter().any(|p| p.instance.container == c.name)
+            {
+                sidecars.push(c.name);
+            }
         }
     }
-    Ok((names, Some(dep)))
+    Ok(Some((dep, placed, sidecars)))
 }
 
 impl Engine {
@@ -55,10 +55,21 @@ impl Engine {
             .map(|_| ()),
             Some(n) => previews::set_asleep(c, app_id, n, true),
         })?;
-        proxy::remove_route(&self.deployer.proxy, &deploy::route_key(&app.name, pr))?;
-        let (names, _) = containers_of(self, app_id, pr).await?;
-        for n in &names {
-            self.deployer.docker.stop(n, 20).await?;
+        let key = deploy::route_key(&app.name, pr);
+        proxy::remove_route(&self.deployer.proxy, &key)?;
+        if let Some((_, placed, sidecars)) = serving(self, app_id, pr).await? {
+            for p in &placed {
+                let rt = self.node_runtime(&p.node)?;
+                rt.apply_ok(&Apply {
+                    stop: vec![p.instance.container.clone()],
+                    remove_routes: if rt.is_local() { vec![] } else { vec![key.clone()] },
+                    ..Apply::default()
+                })
+                .await?;
+            }
+            for n in &sidecars {
+                self.deployer.docker.stop(n, 20).await?;
+            }
         }
         self.emit(EngineEvent::Changed);
         Ok(())
@@ -67,32 +78,35 @@ impl Engine {
     /// Wake an app or preview: start it, wait until it answers, route it.
     pub async fn wake(&self, app_id: &str, pr: Option<u32>) -> Result<()> {
         let app = self.store.with(|c| apps::get(c, app_id))?;
-        let (names, dep) = containers_of(self, app_id, pr).await?;
-        let Some(dep) = dep else {
+        let Some((dep, placed, sidecars)) = serving(self, app_id, pr).await? else {
             return Err(Error::Conflict(format!("{} has no deployment to wake", app.name)));
         };
-        // Sidecars first, the routed container last.
-        for n in names.iter().rev() {
+        // Sidecars first, the routed containers last.
+        for n in sidecars.iter().rev() {
             self.deployer.docker.start(n).await?;
         }
-        let d = self.store.with(|c| deployments::get(c, &dep))?;
-        let routed = names.first().cloned().unwrap_or_default();
         let (port, _) = self.store.with(|c| deployments::built_info(c, &dep))?;
         let port = app.runtime.port.or(port).unwrap_or(3000);
-        health::wait_healthy(
-            health::Wait {
-                docker: &self.deployer.docker,
-                container: &routed,
-                network: PROXY_NETWORK,
-                port,
-                probe: probe_for(app.runtime.health.as_ref()),
-                timeout: Duration::from_secs(app.runtime.health_timeout_secs as u64),
-                interval: Duration::from_millis(250),
-            },
-            &mut |_| {},
-        )
-        .await?;
-        let route = self.store.tx(|c| {
+        for p in &placed {
+            let rt = self.node_runtime(&p.node)?;
+            rt.apply_ok(&Apply {
+                start: vec![p.instance.container.clone()],
+                ..Apply::default()
+            })
+            .await?;
+        }
+        // The first one answering is enough to route visitors to it.
+        if let Some(p) = placed.first() {
+            self.node_runtime(&p.node)?
+                .wait_healthy(&HealthWait {
+                    container: p.instance.container.clone(),
+                    port,
+                    probe: probe_for(app.runtime.health.as_ref()),
+                    timeout_secs: app.runtime.health_timeout_secs as u64,
+                })
+                .await?;
+        }
+        let (base, main_id) = self.store.tx(|c| {
             match pr {
                 None => {
                     apps::patch(
@@ -107,11 +121,19 @@ impl Engine {
                 Some(n) => previews::set_asleep(c, app_id, n, false)?,
             }
             let settings = apps::domain_settings(c)?;
-            route_for(c, &settings, &app, &d, &routed)
+            let (hosts, _) = hosts_for(&settings, &app, pr);
+            Ok((
+                RouteBase {
+                    key: deploy::route_key(&app.name, pr),
+                    hosts,
+                    port,
+                    basic_auth: apps::basic_auth(c, &app.id)?,
+                    dns_challenge: false,
+                },
+                nodes::main(c)?.id,
+            ))
         })?;
-        if let Some(r) = route {
-            proxy::write_route(&self.deployer.proxy, &r)?;
-        }
+        self.switch_routes(&base, &placed, &[], &main_id).await?;
         self.emit(EngineEvent::Changed);
         Ok(())
     }

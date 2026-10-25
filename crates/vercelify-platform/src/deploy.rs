@@ -48,6 +48,16 @@ pub fn container_name(app: &str, pr: Option<u32>, deployment_id: &str) -> String
     }
 }
 
+/// Replica `n` of a deployment: the first keeps the plain name.
+pub fn instance_name(app: &str, pr: Option<u32>, deployment_id: &str, replica: u8) -> String {
+    let base = container_name(app, pr, deployment_id);
+    if replica == 0 {
+        base
+    } else {
+        format!("{base}-r{replica}")
+    }
+}
+
 /// The proxy key of an app or preview (file `base-<key>.yaml`).
 pub fn route_key(app: &str, pr: Option<u32>) -> String {
     match pr {
@@ -81,6 +91,8 @@ pub struct DeployInput<'a> {
     pub hosts: Vec<RouteHost>,
     pub basic_auth: Vec<String>,
     pub dns_challenge: bool,
+    /// Replica number (0 = the first).
+    pub replica: u8,
 }
 
 impl Deployer {
@@ -116,7 +128,7 @@ impl Deployer {
     /// new container is removed and the error carries its last log lines.
     pub async fn start(&self, i: &DeployInput<'_>, log: &mut (dyn FnMut(&str) + Send)) -> Result<String> {
         let pr = i.deployment.pr_number;
-        let name = container_name(&i.app.name, pr, &i.deployment.id);
+        let name = instance_name(&i.app.name, pr, &i.deployment.id, i.replica);
         let net = project_network(&i.app.project_id);
         self.docker.ensure_network(&net).await?;
         self.docker.ensure_network(PROXY_NETWORK).await?;
@@ -261,18 +273,20 @@ impl Deployer {
         }
     }
 
-    /// Keep the 5 newest images of an app plus the ones in `keep`.
+    /// Keep the 5 newest images of an app plus the ones in `keep` (built
+    /// here as `vfy/<app>`, pulled on a worker from the mesh registry).
     pub async fn prune_images(&self, app: &str, keep: &[String]) -> Result<usize> {
-        let repo = format!("vfy/{app}");
-        let images = self.docker.images(&repo).await?;
         let mut removed = 0;
-        for (i, (tag, _)) in images.iter().enumerate() {
-            let full = format!("{repo}:{tag}");
-            if i < 5 || keep.contains(&full) {
-                continue;
+        for repo in [format!("vfy/{app}"), crate::registry::reference(&format!("vfy/{app}"))] {
+            let images = self.docker.images(&repo).await?;
+            for (i, (tag, _)) in images.iter().enumerate() {
+                let full = format!("{repo}:{tag}");
+                if i < 5 || keep.contains(&full) {
+                    continue;
+                }
+                self.docker.remove_image(&full).await?;
+                removed += 1;
             }
-            self.docker.remove_image(&full).await?;
-            removed += 1;
         }
         Ok(removed)
     }
@@ -309,6 +323,10 @@ mod tests {
             "vfy-blog-pr7-1x8z3c5v"
         );
         assert_eq!(route_key("blog", Some(7)), "blog-pr-7");
+        assert_eq!(
+            instance_name("blog", None, "dpl_7k2m9q4w1x8z3c5v", 2),
+            "vfy-blog-1x8z3c5v-r2"
+        );
         assert_eq!(preview_host("blog", 7, "example.com"), "pr-7-blog.example.com");
         assert_eq!(project_network("prj_ABC"), "vfy-net-prj-abc");
         assert_eq!(probe_for(None), Probe::Tcp);

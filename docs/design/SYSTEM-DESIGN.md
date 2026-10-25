@@ -173,7 +173,7 @@ backs up the copy, never the live file.
 | fetch | `git init` + `git fetch --depth 1 origin <sha>` into `/var/lib/vercelify/builds/<dpl>/src`, `GIT_TERMINAL_PROMPT=0`, inherited config ignored, credentials from the git source (token in an `http.extraHeader` passed by env, or `GIT_SSH_COMMAND` with the deploy key and a pinned known_hosts) | repository or commit unreachable |
 | plan | `detect::plan(src, app.build, vercel_json)` → `BuildPlan { kind: Dockerfile(path) \| Generated(String) \| Compose(path) \| Image(ref), context, port_hint, notes }` | no plan: message lists what was looked for |
 | build | `docker buildx build --builder vercelify --load -t vfy/<app>:<dpl> --build-arg …` (build-time variables as `--secret id=env,src=…` for secrets, `--build-arg` for the rest), `--cgroup-parent vercelify-build.slice`, BuildKit cache mounts in the generated Dockerfiles | non-zero exit; log tail in the error |
-| push | Only if the target node ≠ this node: tag `<registry>/vfy/<app>:<dpl>`, push to the mesh registry | registry down |
+| push | Only for instances on other servers: tag `127.0.0.1:5055/vfy/<app>:<dpl>[-<arch>]`, push to the mesh registry (§8.2); image apps are pulled here once and pushed the same way | registry down |
 | cleanup | remove `src`, keep the log, prune images of the app beyond the 5 newest that are not current/rollback targets | never fails the build |
 
 The build log is `/var/lib/vercelify/logs/<app>/<dpl>.log` (line-oriented, `ts stream text`),
@@ -281,32 +281,103 @@ changes `current_deployment_id` itself. Sleeping apps
 (`sleep.rs`) are "desired asleep" while the sleep module says so; the wake listener starts
 them, and the reconciler leaves them alone.
 
-### 8.2 Runtime API (worker side)
+### 8.2 Workers and the runtime API
 
-The main server drives other nodes through their agents over the mesh, authenticated with
-the main server's node token (role `owner`, kind `server`):
+A worker is a server on the mesh whose agent runs with `role = worker`, `engine =
+"platform"` (`sudo vercelify mesh join TOKEN --platform`, which a platform main
+server's invite prints). It keeps no platform state:
+
+- **Registration.** Every minute (every 10 s while failing) it sends `POST
+  /v1/platform/nodes/heartbeat` to the main server over the mesh with its node token,
+  accepted from its own mesh address only (§13.2). The body carries its architecture,
+  agent port, resources and condition (`NodeStatus`: CPUs, memory, battery, the power
+  guard's thermal pause, Docker up, its proxy's HTTP port) and its **runtime token**
+  (32 random characters in `runtime.token`, 0600). The first heartbeat creates the
+  `nodes` row; later ones refresh it. The main server keeps the runtime token sealed
+  (`nodes.token`, AAD `nodes/token/<id>`); revoking the node on the mesh clears it. A
+  worker not heard from for 2 minutes is offline.
+- **Runtime API** (`/v1/runtime/*`, `runtime_api.rs`): accepted only with the runtime
+  token *and* from the coordinator's mesh address (auth.rs), and only for these paths.
+  The worker does with the same platform code what the main server does for itself:
 
 | Route | Does |
 | --- | --- |
-| `GET /v1/runtime/containers` | our containers with state, health, restart count, image, labels |
-| `POST /v1/runtime/apply` | `{create: [...], start: [...], stop: [...], remove: [...], routes: {...}}`: idempotent batch |
-| `POST /v1/runtime/images/pull` | pull `<registry>/vfy/<app>:<dpl>` |
-| `GET /v1/runtime/containers/{name}/logs` | logs, streaming with `follow=true` |
-| `POST /v1/runtime/terminals` | a terminal session on that node (same protocol as §12.1) |
+| `GET /v1/runtime/containers` | our containers (`docker ps`, label `vercelify.managed=platform`) |
+| `GET /v1/runtime/containers/{name}` | `docker inspect` (404: gone) |
+| `GET /v1/runtime/containers/{name}/logs?tail&follow` | `{at, stream, text}` lines |
+| `POST /v1/runtime/instances` | start one instance (`StartSpec`: app, deployment, image, variables, volumes, port, replica) and wait for health; progress as `{"log"}` lines, then `{"container"}` or `{"error", "status"}` |
+| `POST /v1/runtime/apply` | idempotent batch: start, stop, restart, remove, write/remove routes, remove volumes, prune images; failures listed per item |
+| `GET /v1/runtime/routes` | route keys on its proxy |
+| `POST /v1/runtime/health` | wait until a container answers (waking) |
+| `/v1/runtime/terminals…` | a terminal in a container (§12.1 protocol) |
 
-The main server is just another node to itself; the same code path runs locally without HTTP.
+- **Its proxy.** Each worker runs `vercelify-proxy` too. Public traffic arrives at the
+  main server (port forwards and the tunnel point there): its route for an app lists
+  its own containers and `http://<worker mesh IP>:<http port>` for every server with
+  instances; the worker's route sends the same hosts (plain HTTP, the Host header
+  kept) to its local containers. TLS, redirects and Basic Auth are the main server's
+  (Basic Auth is checked on both). Servers that are offline leave the main route
+  (unless none is online: a 502 says more than nothing).
+- **Images.** The main server builds and runs `vfy-registry` (pinned `registry:2`,
+  128 MB, published on 127.0.0.1:5055 and its mesh address:5055, data in
+  `<state>/registry`). Every server calls it `127.0.0.1:5055`: Docker trusts a
+  loopback registry without TLS, so no `daemon.json` changes and no Docker restart;
+  on a worker the agent forwards that port to the main server over the mesh
+  (WireGuard encrypts it). The engine starts the registry before the first push and
+  waits for it. Built images go as `vfy/<app>:<dpl>`; image apps placed elsewhere are
+  pulled here once (for the target's architecture) and pushed the same way, so
+  workers need neither internet access nor registry credentials. Registry tags this
+  server no longer keeps are deleted after each deploy, layers collected daily.
+- **Architectures.** Builds run on the main server; for a target of another
+  architecture the builder runs a second `buildx --platform linux/<arch>` into
+  `vfy/<app>:<dpl>-<arch>` (QEMU emulation; without binfmt the build fails with
+  `sudo vercelify registry multiarch` or "pin it to a <arch> server").
+- **Everything through the engine:** deploys, the reconciler (one `docker ps` per
+  server per 30 s), sleep/wake, restart, logs, terminals (relayed: the main server
+  opens it on the worker and passes output, input and resizes through under an id of
+  its own, owned by the token that opened it), automatic rollback (it inspects the
+  instances where they run), preview teardown and app deletion (containers, routes,
+  images and, when asked, volumes on every server). The main server is just another
+  node to itself: `NodeRuntime::Local` runs the same calls without HTTP.
+- **Databases** run on the main server. An app on another server gets
+  `${{db.<name>.url}}` with the main server's mesh address and the database's public
+  port, so that database needs one (it binds the mesh address by default); the
+  coordinator lists public database ports in the maps (§13.8).
+- Moving volumes between disks, compose apps and databases stay on the main server.
 
 ### 8.3 Placement
 
-`app.node_id` if set. Otherwise score every usable node (online in the last 2 min, not on
-battery below 50 %, not `thermal_paused`, architecture compatible with the image or
-buildable for it): `free_memory − requested_memory`, highest wins, ties to the main server.
-Placement is decided once per app (sticky), so volumes stay put; moving an app is an explicit
-operation (`POST /v1/apps/{id}/move {node_id}`) that refuses when the app has volumes.
+`app.node_id` if set. Otherwise the usable server with the most memory to spare
+(`memory_available − memory_mb` (default 256 MB)) wins, ties to the main server.
+Usable: heard from in 2 minutes, not drained, Docker up, not paused by the power guard,
+not on battery below 50 %. Placement is decided once per app (sticky: the first deploy
+records `node_id`), so volumes stay put; changing `node_id` of an app with volumes
+that has run is refused. A drained server keeps what is pinned to it and takes nothing
+new (`PATCH /v1/platform/nodes/{id} {drained}`); a server with instances can't be
+removed (`DELETE`). Compose apps run on the main server; previews run one instance on
+the app's server.
 
-Replicas (`runtime.replicas > 1`): spread across distinct nodes when possible; each node's
-Traefik load-balances its local replicas; the main server's base route lists the other nodes'
-mesh IPs as additional servers.
+Replicas (`runtime.replicas`, 1–32): spread over usable servers, the app's own
+first, round robin; apps with volumes keep every replica on their server. Each replica
+is a container (`vfy-<app>-<suffix>`, then `…-r1`, `…-r2`); `instances` records each
+one's server (`deployments.container`/`node_id` keep the first, for what reads only
+those; older deployments read as one instance on the main server). A deploy starts the
+instances one by one (any failure removes the ones started), then switches routes:
+the other servers first, so the main server never forwards to a server without the
+route, then its own. The old instances drain, then go; servers that served them and
+not the new ones drop the route.
+
+Failover: when a server is offline, stateless apps with `runtime.failover = true`
+(no volumes, not compose) are redeployed (a `recover` deployment of the same image,
+at most every 5 minutes) on another server; the others wait for it (their containers
+keep running if it is only cut off).
+
+The pure parts are unit tested (`placement::place`, `fleet::routes`,
+`reconcile::plan` per server); `host/tests/contract/multinode.sh` runs a worker with
+its own Docker daemon in a network namespace on the mesh: registration, an app placed
+on it through the registry and routed through both proxies, logs, restart and a
+terminal from the main server, replicas on both servers, automatic rollback after a
+replica dies there, and revocation.
 
 ### 8.4 Warm standby
 
@@ -641,6 +712,15 @@ daemon checks it with the webpki roots).
 
 ### 13.8 DNS and ACLs
 
+Containers and the mesh (M9): containers stay off the mesh except what the coordinator
+lists per server in the maps (`Peer.container_ports`): every server's proxy (80/tcp,
+for the main server's forwarding) and, on the main server, the databases' public
+ports (which devices may reach too). The daemon writes them into the ACL file
+(`container`), and `firewall.sh mesh` turns them into `VERCELIFY-MESH-OUT` (`-o vfy0
+-d <server> -p tcp --dport <port> -j ACCEPT`, everything else falls through to the
+container block). A database's public port changing bumps the map version.
+
+
 - DNS server on `<mesh ipv4>:53` and `[<mesh ipv6>]:53` (servers and system-mode Macs), zone
   `vfy`: `A`/`AAAA` for `<node>.vfy` and `*.<node>.vfy`; everything else `REFUSED`. Linux
   hosts with `systemd-resolved` get `resolvectl dns vfy0 10.77.0.x; resolvectl domain vfy0 ~vfy`.
@@ -721,7 +801,8 @@ the user chose to deploy.
 | Power loss mid-deploy | On start, deployments in `building|deploying` → `failed: interrupted`; the reconciler restores the current deployment's container; route files are written atomically, so they always point at a container that was healthy |
 | Database corrupt | `PRAGMA quick_check` at start; on failure the agent starts read-only for the platform routes, alerts, and `vercelify restore-state` restores `platform.db.bak` or a restic snapshot |
 | Disk full | Builds refuse to start under 2 GB free on the Docker disk; disk cleanup (existing) runs first |
-| Worker offline | Its apps keep running on it; the main server marks it offline after 2 min, alerts, does not reschedule apps with volumes; stateless apps with `runtime.failover = true` are started elsewhere |
+| Worker offline | Its apps keep running on it; the main server marks it offline after 2 min (no heartbeat), takes it out of the routes, does not reschedule apps with volumes; stateless apps with `runtime.failover = true` are redeployed elsewhere; when it returns, the containers of the old deployment are orphans and go after 10 min |
+| Main server offline | Workers keep running what they have (their proxies keep serving anything reaching them); nothing is placed or deployed until it returns or a standby is promoted (§8.4) |
 | Coordinator offline | Mesh keeps the last map; joins/revokes wait; certificates are valid for 10 more days at the earliest |
 | Relay offline | Direct paths unaffected; peers without a direct path are unreachable until it returns (doctor explains) |
 | Clock wrong | Certificates checked with 5 min skew; the existing clock-sync doctor check alerts |
@@ -745,6 +826,12 @@ brought it to 8.0 MiB; logging filters with `tracing_subscriber::filter::Targets
 `EnvFilter` (which pulls in a regex engine) brought it back to 7.75 MiB; the relay hub (axum's
 WebSocket) added 0.07 MiB, mDNS and SPAKE2 0.08 MiB (7.90); `toml` 1 with only its parser
 (no `toml_edit`) and axum without its unused default features brought it back to 7.75 MiB.
+M9 (workers, the runtime API, the registry, the engine on several servers) took it to
+8.35 MiB; three changes brought it to 7.96 MiB: request bodies through a small JSON
+extractor of our own on plain serde_json instead of axum's (which runs every type
+through `serde_path_to_error`, a second copy of each deserializer; axum's `json`
+feature is off), a hand-parsed command line instead of clap, and one non-generic
+request path in the worker client.
 `panic = "abort"` would save more but turns a panicking task into a dead agent; not taken. `vercelify-mesh` measures 3.2 MiB, 1.1 MiB of it rustls with
 webpki roots for `wss://` and `https://` through a tunnel, 0.3 MiB the userspace stack. CI builds the binaries of every pull request with
 `cargo zigbuild` and fails over budget, so growth shows up the commit it happens.
@@ -762,3 +849,4 @@ webpki roots for `wss://` and `https://` through a tunnel, 0.3 MiB the userspace
 | D7 | Our own build detection with generated Dockerfiles | Nixpacks/Railpack as a dependency (the request is to own the stack; Dockerfiles stay inspectable) |
 | D8 | Single main + warm standby | Raft cluster (needs 3 always-on machines) |
 | D9 | Enrollment sealed to the coordinator's WireGuard key, everything else inside the mesh (changed in M7) | Self-signed TLS pinned by fingerprint (a second key and certificate to rotate, a TLS stack in a 6 MB daemon), plain HTTP (tokens in the clear), ACME (needs a public name) |
+| D10 | Workers pull images from the main server's registry as `127.0.0.1:5055`, forwarded by their agent over the mesh (M9) | An insecure registry in every `daemon.json` (a Docker restart per server, trust in a plain-HTTP registry on the network), `docker save`/`load` per deploy (no layer sharing, full images over the relay) |

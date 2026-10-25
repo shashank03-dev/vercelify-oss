@@ -20,9 +20,8 @@ thiserror.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
-axum = { version = "0.8", default-features = false, features = ["http1", "json", "original-uri", "query", "tokio", "ws"] }
+axum = { version = "0.8", default-features = false, features = ["http1", "original-uri", "query", "tokio", "ws"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "timeout"] }
-clap = { version = "4", features = ["derive", "env"] }
 toml = { version = "1", default-features = false, features = ["parse", "serde", "std"] }
 subtle = "2"
 getrandom = "0.3"

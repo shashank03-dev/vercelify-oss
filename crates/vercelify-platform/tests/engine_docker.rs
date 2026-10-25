@@ -148,6 +148,9 @@ async fn deploy_redeploy_rollback_recover() {
     proxy::ensure(&docker, &proxy_cfg, vec![]).await.expect("proxy");
 
     let store_ = Arc::new(Store::open(&dir.path().join("platform.db")).unwrap());
+    store_
+        .tx(|c| vercelify_platform::nodes::ensure_main(c, "test", "http://127.0.0.1:7420", std::env::consts::ARCH))
+        .unwrap();
     let key = Arc::new(MasterKey::from_bytes(&[5u8; 32]).unwrap());
     store_
         .with(|c| {

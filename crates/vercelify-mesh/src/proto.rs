@@ -132,6 +132,10 @@ pub struct Peer {
     /// For a server's view of a device: the ports it may reach. None: all.
     #[serde(default)]
     pub allowed_ports: Option<Vec<String>>,
+    /// For a server's view of a server: the ports its containers may reach
+    /// there (its proxy, public databases; design §13.8). None: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub container_ports: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -221,6 +225,8 @@ pub struct NodeRecord {
     pub endpoints: Vec<String>,
     /// Extra ports devices may reach on this server (databases made public).
     pub extra_device_ports: Vec<String>,
+    /// Ports other servers' containers may reach on this server.
+    pub container_ports: Vec<String>,
     pub revoked: bool,
 }
 
@@ -235,6 +241,7 @@ fn peer_of(n: &NodeRecord, a: &Addressing) -> Peer {
         ipv6: a.ipv6(n.ip_index).to_string(),
         endpoints: n.endpoints.clone(),
         allowed_ports: None,
+        container_ports: None,
     }
 }
 
@@ -265,6 +272,9 @@ pub fn build_map(
             let mut ports: Vec<String> = DEVICE_PORTS.iter().map(|s| s.to_string()).collect();
             ports.extend(node.extra_device_ports.iter().cloned());
             p.allowed_ports = Some(ports);
+        }
+        if node.kind == NodeKind::Server && n.kind == NodeKind::Server && !n.container_ports.is_empty() {
+            p.container_ports = Some(n.container_ports.clone());
         }
         peers.push(p);
     }
@@ -314,6 +324,7 @@ mod tests {
             ip_index: idx,
             endpoints: vec![format!("192.168.1.{idx}:51820")],
             extra_device_ports: vec![],
+            container_ports: vec![],
             revoked: false,
         }
     }
@@ -338,7 +349,10 @@ mod tests {
     #[test]
     fn visibility() {
         let a = Addressing::default();
-        let main = rec("mn_main", "main", NodeKind::Server, 1);
+        let main = NodeRecord {
+            container_ports: vec!["80/tcp".into()],
+            ..rec("mn_main", "main", NodeKind::Server, 1)
+        };
         let pi = rec("mn_pi", "pi", NodeKind::Server, 2);
         let mac = NodeRecord {
             role: "deployer".into(),
@@ -370,6 +384,9 @@ mod tests {
             .unwrap()
             .allowed_ports
             .is_none());
+        let main_view = m.peers.iter().find(|p| p.name == "main").unwrap();
+        assert_eq!(main_view.container_ports.as_deref(), Some(&["80/tcp".to_string()][..]));
+        assert!(mac_view.container_ports.is_none(), "containers never reach devices");
         assert_eq!(m.dns.records.get("main").map(String::as_str), Some("10.77.0.1"));
         assert!(!m.dns.records.contains_key("mac"), "devices have no names in the zone");
         assert!(!m.dns.records.contains_key("gone"));
@@ -377,6 +394,10 @@ mod tests {
         let m = build_map(&all, &mac, &a, 7, 1, 100);
         let names: Vec<&str> = m.peers.iter().map(|p| p.name.as_str()).collect();
         assert_eq!(names, ["main", "pi"], "devices see servers only");
+        assert!(
+            m.peers.iter().all(|p| p.container_ports.is_none()),
+            "devices run no containers"
+        );
         assert_eq!(
             m.dns.records.get("mac").map(String::as_str),
             Some("10.77.0.3"),

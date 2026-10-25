@@ -104,7 +104,7 @@ pub fn common_dynamic() -> String {
     "# Written by vercelify-agent.\nhttp:\n  middlewares:\n    vfy-https-redirect:\n      redirectScheme:\n        scheme: https\n        permanent: true\n".into()
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct RouteHost {
     pub host: String,
     pub https: bool,
@@ -112,7 +112,7 @@ pub struct RouteHost {
     pub redirect_to: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Route {
     /// File and router key: `blog`, `blog-pr-7`.
     pub key: String,

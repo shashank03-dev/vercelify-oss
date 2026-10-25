@@ -408,6 +408,19 @@ pub fn patch(c: &Connection, id: &str, p: &AppPatch) -> Result<App> {
     }
     if let Some(n) = &p.node_id {
         let node = check_node(c, Some(n))?;
+        // Volumes live on the server the app runs on (design §8.3).
+        let before = get(c, id)?;
+        if before.node_id.is_some()
+            && node.is_some()
+            && node != before.node_id
+            && before.current_deployment_id.is_some()
+            && !crate::volumes::list(c, vercelify_core::platform::VolumeOwner::App, id)?.is_empty()
+        {
+            return Err(Error::Conflict(format!(
+                "{} keeps volumes on its server: it can't move to another one (copy the data, then recreate the app there)",
+                before.name
+            )));
+        }
         c.execute(
             "UPDATE apps SET node_id = ?2, updated_at = ?3 WHERE id = ?1",
             params![id, node, now()],

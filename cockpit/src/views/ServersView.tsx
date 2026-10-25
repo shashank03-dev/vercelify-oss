@@ -2,6 +2,7 @@ import { ArrowRightLeft, ArrowUpCircle, Battery, BrainCircuit, Cpu, Layers, Plus
 import { useEffect, useRef, useState } from "react";
 import { HealthChecks } from "../components/HealthChecks";
 import { MeshNetwork } from "../components/MeshNetwork";
+import { PlatformServers } from "../components/PlatformServers";
 import { useToast } from "../components/Toast";
 import { Button, Callout, Card, EmptyState, ErrorNote, IconButton, Meter, Modal, PageHeader, PixelWave, Select, ShimmerText, StatusDot, StatusText } from "../components/ui";
 import { agentOn, coolifyOn, isWorker } from "../lib/api";
@@ -87,6 +88,7 @@ export function ServersView() {
         </button>
       </div>
 
+      <PlatformServers />
       <MeshNetwork />
 
       {attach && <AttachWorker worker={attach} mains={mains.filter((m) => m.agent_url !== attach.agent_url)} onClose={() => setAttach(null)} />}

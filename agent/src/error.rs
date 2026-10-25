@@ -1,6 +1,6 @@
+use crate::json::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use vercelify_core::ApiError;
 
 #[derive(Debug)]
@@ -34,6 +34,12 @@ impl AppError {
             message: msg.into(),
         }
     }
+    pub fn forbidden(msg: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            message: msg.into(),
+        }
+    }
     pub fn unavailable(msg: impl Into<String>) -> Self {
         Self {
             status: StatusCode::SERVICE_UNAVAILABLE,
@@ -60,4 +66,4 @@ impl IntoResponse for AppError {
     }
 }
 
-pub type ApiResult<T> = Result<axum::Json<T>, AppError>;
+pub type ApiResult<T> = Result<Json<T>, AppError>;

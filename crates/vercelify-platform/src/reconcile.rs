@@ -1,21 +1,27 @@
-//! Converge Docker and the proxy files on what the database says (design §8.1).
+//! Converge every server's Docker and proxy files on what the database
+//! says (design §8.1).
 //!
-//! The decision is a pure function ([`plan`]) of the desired state, the
-//! containers Docker reports and the route files on disk, so it is tested
-//! without Docker. The reconciler never builds and never changes which
-//! deployment is current: a missing container comes back as a `recover`
-//! deployment of the same image, through the normal health-checked path.
+//! The decision is a pure function ([`plan`]) of one server's desired
+//! state, the containers its Docker reports and the route files it has, so
+//! it is tested without Docker. The reconciler never builds and never
+//! changes which deployment is current: a missing container comes back as
+//! a `recover` deployment of the same image, through the normal
+//! health-checked path. A server that can't be reached is left alone (its
+//! containers keep running); stateless apps that may fail over
+//! (`runtime.failover`) are redeployed elsewhere when it is offline.
 
 use crate::apps::domain_settings;
 use crate::deploy::{self, LABEL_DEPLOYMENT};
 use crate::docker::ContainerState;
 use crate::engine::{hosts_for, Engine, Enqueue};
-use crate::proxy::{self, Route};
-use crate::{apps, deployments, previews, Result};
+use crate::fleet::{self, Placed, RouteBase};
+use crate::proxy::Route;
+use crate::runtime::Apply;
+use crate::{apps, deployments, nodes, previews, volumes, Result};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use vercelify_core::platform::{Deployment, DeploymentTrigger, Desired};
+use vercelify_core::platform::{Deployment, DeploymentTrigger, Desired, PlatformNode, VolumeOwner};
 
 /// Containers we don't recognise are removed only after this long, so a
 /// deployment that is still being set up or drained isn't touched.
@@ -23,17 +29,19 @@ pub const ORPHAN_GRACE: Duration = Duration::from_secs(10 * 60);
 /// Recovering one app is tried at most this often.
 pub const RECOVER_BACKOFF: Duration = Duration::from_secs(5 * 60);
 
+/// One desired container.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Want {
     pub app_id: String,
     pub app_name: String,
     pub deployment_id: String,
     pub container: String,
+    pub node_id: String,
     pub desired: Desired,
-    /// Present when it should be routed.
-    pub route: Option<Route>,
     /// Production (false) or a preview (true).
     pub preview: bool,
+    /// May be redeployed elsewhere when its server is offline.
+    pub failover: bool,
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]
@@ -60,10 +68,13 @@ fn age(created: &str, now: chrono::DateTime<chrono::Utc>) -> Option<Duration> {
     (now - t.with_timezone(&chrono::Utc)).to_std().ok()
 }
 
-/// Decide what to do. `active` = deployments in flight (their containers are
-/// the engine's business); `route_keys` = base files on disk.
+/// Decide what to do on one server. `wants` = its desired containers;
+/// `routes` = the routes it should have (running apps only); `active` =
+/// deployments in flight (their containers are the engine's business);
+/// `route_keys` = base files it has.
 pub fn plan(
     wants: &[Want],
+    routes: &[Route],
     actual: &[ContainerState],
     active: &HashSet<String>,
     route_keys: &[String],
@@ -77,7 +88,12 @@ pub fn plan(
     let wanted_deployments: HashSet<&str> = wants.iter().map(|w| w.deployment_id.as_str()).collect();
     for w in wants {
         match (by_name.get(w.container.as_str()), w.desired) {
-            (None, Desired::Running) => p.recover.push((w.app_id.clone(), w.deployment_id.clone())),
+            (None, Desired::Running) => {
+                let r = (w.app_id.clone(), w.deployment_id.clone());
+                if !p.recover.contains(&r) {
+                    p.recover.push(r);
+                }
+            }
             (None, _) => {}
             // The power guard froze it on purpose; leave it frozen.
             (Some(c), _) if c.state == "paused" => {}
@@ -107,21 +123,16 @@ pub fn plan(
             p.remove.push(c.name.clone());
         }
     }
-    let mut keep: HashSet<String> = HashSet::new();
-    for w in wants {
-        if let Some(r) = &w.route {
-            // Stopped or asleep: no route, so the wake page (or a clean 404)
-            // answers instead of a 502 from a dead upstream.
-            if w.desired == Desired::Running {
-                keep.insert(r.key.clone());
-                p.write_routes.push(r.clone());
-            }
+    // Stopped or asleep apps have no route here (the caller leaves them
+    // out), so the wake page (or a clean 404) answers instead of a 502.
+    let mut keep: HashSet<&str> = HashSet::new();
+    for r in routes {
+        if keep.insert(r.key.as_str()) {
+            p.write_routes.push(r.clone());
         }
     }
-    // Routes of deployments in flight are the engine's (it writes them at the
-    // switch); everything else not wanted goes.
     for k in route_keys {
-        if !keep.contains(k) {
+        if !keep.contains(k.as_str()) {
             p.remove_routes.push(k.clone());
         }
     }
@@ -139,6 +150,19 @@ pub struct Report {
     pub errors: Vec<String>,
 }
 
+/// What the database wants everywhere.
+#[derive(Debug, Default)]
+pub struct Desire {
+    pub wants: Vec<Want>,
+    /// Routes per server (node id), for running apps.
+    pub routes: BTreeMap<String, Vec<Route>>,
+    /// Deployments in flight.
+    pub active: HashSet<String>,
+    /// Route keys of apps with a deployment in flight (the engine's).
+    pub busy_keys: HashSet<String>,
+    pub busy_apps: HashSet<String>,
+}
+
 pub struct Reconciler {
     pub engine: Arc<Engine>,
     last_recover: Mutex<HashMap<String, Instant>>,
@@ -153,26 +177,31 @@ impl Reconciler {
     }
 
     /// The desired containers and routes, from the database.
-    pub fn wants(&self) -> Result<(Vec<Want>, HashSet<String>)> {
-        self.engine.store.with(|c| {
+    pub fn desire(&self) -> Result<Desire> {
+        let e = &self.engine;
+        let (deps, active, main) = e.store.with(|c| {
             let settings = domain_settings(c)?;
-            let mut out = vec![];
+            let main = nodes::main(c)?.id;
+            let mut deps: Vec<(String, Desired, bool, RouteBase, bool)> = vec![];
             for app in apps::list(c, None)? {
+                let stateless = volumes::list(c, VolumeOwner::App, &app.id)?.is_empty();
                 let mut push = |d: &Deployment, preview: bool, desired: Desired| -> Result<()> {
-                    let container = deployments::container(c, &d.id)?;
-                    if container.is_empty() {
-                        return Ok(());
-                    }
-                    let route = route_for(c, &settings, &app, d, &container)?;
-                    out.push(Want {
-                        app_id: app.id.clone(),
-                        app_name: app.name.clone(),
-                        deployment_id: d.id.clone(),
-                        container,
+                    let (port, _) = deployments::built_info(c, &d.id)?;
+                    let (hosts, _) = hosts_for(&settings, &app, d.pr_number);
+                    let base = RouteBase {
+                        key: deploy::route_key(&app.name, d.pr_number),
+                        hosts,
+                        port: app.runtime.port.or(port).unwrap_or(3000),
+                        basic_auth: apps::basic_auth(c, &app.id)?,
+                        dns_challenge: false,
+                    };
+                    deps.push((
+                        d.id.clone(),
                         desired,
-                        route,
                         preview,
-                    });
+                        base,
+                        app.runtime.failover && stateless && app.kind != vercelify_core::platform::AppKind::Compose,
+                    ));
                     Ok(())
                 };
                 if let Some(cur) = &app.current_deployment_id {
@@ -194,67 +223,125 @@ impl Reconciler {
                     }
                 }
             }
-            let active: HashSet<String> = deployments::active(c)?.into_iter().map(|d| d.id).collect();
-            Ok((out, active))
-        })
+            let active: Vec<Deployment> = deployments::active(c)?;
+            Ok((deps, active, main))
+        })?;
+        let mut out = Desire {
+            active: active.iter().map(|d| d.id.clone()).collect(),
+            busy_apps: active.iter().map(|d| d.app_id.clone()).collect(),
+            ..Desire::default()
+        };
+        for (dep, desired, preview, base, failover) in deps {
+            let placed: Vec<Placed> = e.placed(&dep)?;
+            let d = e.store.with(|c| deployments::get(c, &dep))?;
+            if out.busy_apps.contains(&d.app_id) {
+                out.busy_keys.insert(base.key.clone());
+            }
+            for p in &placed {
+                out.wants.push(Want {
+                    app_id: d.app_id.clone(),
+                    app_name: base.key.clone(),
+                    deployment_id: dep.clone(),
+                    container: p.instance.container.clone(),
+                    node_id: p.node.id.clone(),
+                    desired,
+                    preview,
+                    failover,
+                });
+            }
+            if desired == Desired::Running {
+                for (node, r) in fleet::routes(&base, &placed, &main) {
+                    out.routes.entry(node).or_default().push(r);
+                }
+            }
+        }
+        Ok(out)
     }
 
     pub async fn once(&self) -> Result<Report> {
-        let (wants, active) = self.wants()?;
-        let docker = &self.engine.deployer.docker;
-        let actual = docker.list_managed().await?;
-        let cfg = &self.engine.deployer.proxy;
-        let keys = proxy::route_keys(cfg);
-        // Apps with a deployment in flight keep their routes untouched.
-        let busy_apps: HashSet<String> = self
-            .engine
-            .store
-            .with(deployments::active)?
-            .into_iter()
-            .map(|d| d.app_id)
-            .collect();
-        let busy_keys: HashSet<String> = wants
-            .iter()
-            .filter(|w| busy_apps.contains(&w.app_id))
-            .filter_map(|w| w.route.as_ref().map(|r| r.key.clone()))
-            .collect();
-        let keys: Vec<String> = keys.into_iter().filter(|k| !busy_keys.contains(k)).collect();
-        let p = plan(&wants, &actual, &active, &keys, chrono::Utc::now());
+        let desire = self.desire()?;
+        let servers: Vec<PlatformNode> = self.engine.store.with(nodes::list)?;
         let mut r = Report::default();
-        for name in &p.start {
-            match docker.start(name).await {
-                Ok(()) => r.started.push(name.clone()),
-                Err(e) => r.errors.push(format!("start {name}: {e}")),
+        let mut recover: Vec<(String, String)> = vec![];
+        for n in &servers {
+            let wants: Vec<Want> = desire.wants.iter().filter(|w| w.node_id == n.id).cloned().collect();
+            if n.role != "main" && !n.online {
+                // Offline: its containers keep running if it is just cut
+                // off; apps that may fail over move.
+                for w in wants.iter().filter(|w| w.failover && w.desired == Desired::Running) {
+                    let x = (w.app_id.clone(), w.deployment_id.clone());
+                    if !recover.contains(&x) {
+                        recover.push(x);
+                    }
+                }
+                continue;
             }
-        }
-        for name in &p.stop {
-            match docker.stop(name, 20).await {
-                Ok(()) => r.stopped.push(name.clone()),
-                Err(e) => r.errors.push(format!("stop {name}: {e}")),
+            let rt = match self.engine.node_runtime(n) {
+                Ok(rt) => rt,
+                Err(e) => {
+                    r.errors.push(e.to_string());
+                    continue;
+                }
+            };
+            let (actual, keys) = match (rt.list().await, rt.route_keys().await) {
+                (Ok(a), Ok(k)) => (a, k),
+                (Err(e), _) | (_, Err(e)) => {
+                    r.errors.push(e.to_string());
+                    continue;
+                }
+            };
+            // Apps with a deployment in flight keep their routes untouched.
+            let keys: Vec<String> = keys.into_iter().filter(|k| !desire.busy_keys.contains(k)).collect();
+            let routes: Vec<Route> = desire
+                .routes
+                .get(&n.id)
+                .map(|v| {
+                    v.iter()
+                        .filter(|r| !desire.busy_keys.contains(&r.key))
+                        .cloned()
+                        .collect()
+                })
+                .unwrap_or_default();
+            let p = plan(&wants, &routes, &actual, &desire.active, &keys, chrono::Utc::now());
+            for x in &p.recover {
+                if !recover.contains(x) {
+                    recover.push(x.clone());
+                }
             }
-        }
-        for name in &p.remove {
-            match docker.remove(name).await {
-                Ok(()) => r.removed.push(name.clone()),
-                Err(e) => r.errors.push(format!("remove {name}: {e}")),
+            let batch = Apply {
+                start: p.start.clone(),
+                stop: p.stop.clone(),
+                remove: p.remove.clone(),
+                write_routes: p.write_routes.clone(),
+                remove_routes: p.remove_routes.clone(),
+                ..Apply::default()
+            };
+            if batch == Apply::default() {
+                continue;
             }
-        }
-        for route in p.write_routes.iter().filter(|r| !busy_keys.contains(&r.key)) {
-            match proxy::write_route(cfg, route) {
-                Ok(true) => r.routes_written += 1,
-                Ok(false) => {}
-                Err(e) => r.errors.push(format!("route {}: {e}", route.key)),
-            }
-        }
-        for key in &p.remove_routes {
-            match proxy::remove_route(cfg, key) {
-                Ok(()) => r.routes_removed += 1,
-                Err(e) => r.errors.push(format!("route {key}: {e}")),
+            let label = |x: &String| {
+                if rt.is_local() {
+                    x.clone()
+                } else {
+                    format!("{x}@{}", n.name)
+                }
+            };
+            match rt.apply(&batch).await {
+                Ok(done) => {
+                    let failed = |x: &String| done.errors.iter().any(|e| e.contains(x.as_str()));
+                    r.started.extend(p.start.iter().filter(|x| !failed(x)).map(label));
+                    r.stopped.extend(p.stop.iter().filter(|x| !failed(x)).map(label));
+                    r.removed.extend(p.remove.iter().filter(|x| !failed(x)).map(label));
+                    r.routes_written += done.routes_written;
+                    r.routes_removed += p.remove_routes.len();
+                    r.errors.extend(done.errors.iter().map(|e| format!("{}: {e}", n.name)));
+                }
+                Err(e) => r.errors.push(e.to_string()),
             }
         }
         r.errors.extend(self.engine.reconcile_databases().await);
-        for (app_id, dep) in &p.recover {
-            if busy_apps.contains(app_id) {
+        for (app_id, dep) in &recover {
+            if desire.busy_apps.contains(app_id) {
                 continue;
             }
             {
@@ -264,7 +351,7 @@ impl Reconciler {
                 }
                 last.insert(app_id.clone(), Instant::now());
             }
-            let want = wants.iter().find(|w| &w.deployment_id == dep);
+            let want = desire.wants.iter().find(|w| &w.deployment_id == dep);
             let res = match want {
                 Some(w) if w.preview => {
                     // A preview's container is gone: redeploy its head.
@@ -352,25 +439,30 @@ mod tests {
     use super::*;
     use crate::proxy::RouteHost;
 
-    fn want(name: &str, desired: Desired, routed: bool) -> Want {
+    fn want(name: &str, desired: Desired) -> Want {
         Want {
             app_id: format!("app_{name}"),
             app_name: name.into(),
             deployment_id: format!("dpl_{name}"),
             container: format!("vfy-{name}-1"),
+            node_id: "node_main".into(),
             desired,
-            route: routed.then(|| Route {
-                key: name.into(),
-                hosts: vec![RouteHost {
-                    host: format!("{name}.example.com"),
-                    https: true,
-                    redirect_to: None,
-                }],
-                upstreams: vec![format!("http://vfy-{name}-1:3000")],
-                basic_auth: vec![],
-                dns_challenge: false,
-            }),
             preview: false,
+            failover: false,
+        }
+    }
+
+    fn route(name: &str) -> Route {
+        Route {
+            key: name.into(),
+            hosts: vec![RouteHost {
+                host: format!("{name}.example.com"),
+                https: true,
+                redirect_to: None,
+            }],
+            upstreams: vec![format!("http://vfy-{name}-1:3000")],
+            basic_auth: vec![],
+            dns_challenge: false,
         }
     }
 
@@ -393,12 +485,26 @@ mod tests {
         let old = "2026-10-25 10:00:00 +0000 UTC";
         let fresh = "2026-10-25 11:58:00 +0000 UTC";
         let wants = vec![
-            want("crashed", Desired::Running, true),
-            want("gone", Desired::Running, true),
-            want("off", Desired::Stopped, true),
-            want("asleep", Desired::Sleeping, true),
-            want("frozen", Desired::Running, true),
-            want("fine", Desired::Running, true),
+            want("crashed", Desired::Running),
+            want("gone", Desired::Running),
+            want("off", Desired::Stopped),
+            want("asleep", Desired::Sleeping),
+            want("frozen", Desired::Running),
+            want("fine", Desired::Running),
+            // A second replica of the gone one: one recovery, not two.
+            Want {
+                container: "vfy-gone-1-r1".into(),
+                ..want("gone", Desired::Running)
+            },
+        ];
+        // Running apps are routed (the caller leaves the others out); two
+        // replicas share one route.
+        let routes = vec![
+            route("crashed"),
+            route("gone"),
+            route("frozen"),
+            route("fine"),
+            route("fine"),
         ];
         let actual = vec![
             c("vfy-crashed-1", "exited", old, "dpl_crashed"),
@@ -417,7 +523,7 @@ mod tests {
         ];
         let active: HashSet<String> = ["dpl_inflight".to_string()].into();
         let keys = vec!["fine".into(), "off".into(), "deleted-app".into()];
-        let p = plan(&wants, &actual, &active, &keys, now);
+        let p = plan(&wants, &routes, &actual, &active, &keys, now);
         assert_eq!(p.start, ["vfy-crashed-1"]);
         assert_eq!(p.stop, ["vfy-off-1"]);
         assert_eq!(p.recover, [("app_gone".to_string(), "dpl_gone".to_string())]);
@@ -438,7 +544,7 @@ mod tests {
     #[test]
     fn nothing_to_do() {
         let now = chrono::Utc::now();
-        let p = plan(&[], &[], &HashSet::new(), &[], now);
+        let p = plan(&[], &[], &[], &HashSet::new(), &[], now);
         assert!(p.is_empty());
         assert_eq!(
             age(

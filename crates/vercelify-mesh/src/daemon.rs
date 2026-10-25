@@ -181,7 +181,19 @@ pub fn acl_json(map: &PeerMap, interface: &str) -> serde_json::Value {
             })
         })
         .collect();
-    serde_json::json!({ "interface": interface, "version": map.version, "servers": servers, "devices": devices })
+    // What this server's containers may reach on other servers.
+    let container: Vec<serde_json::Value> = map
+        .peers
+        .iter()
+        .filter_map(|p| {
+            let ports = p.container_ports.as_ref().filter(|c| !c.is_empty())?;
+            Some(serde_json::json!({ "name": p.name, "ipv4": p.ipv4, "ipv6": p.ipv6, "ports": ports }))
+        })
+        .collect();
+    serde_json::json!({
+        "interface": interface, "version": map.version, "servers": servers, "devices": devices,
+        "container": container,
+    })
 }
 
 /// The path to a peer as the status file shows it: `relay`, `none`, or
@@ -771,6 +783,7 @@ mod tests {
             ip_index: idx,
             endpoints: vec![format!("192.168.1.{idx}:51820"), "bad endpoint".into()],
             extra_device_ports: vec!["5432/tcp".into()],
+            container_ports: vec!["80/tcp".into(), "5432/tcp".into()],
             revoked: false,
         }
     }
@@ -804,6 +817,8 @@ mod tests {
         assert_eq!(acl["devices"][0]["ipv4"], "10.77.0.3");
         let ports = acl["devices"][0]["ports"].as_array().unwrap();
         assert!(ports.contains(&serde_json::json!("7420/tcp")) && ports.contains(&serde_json::json!("5432/tcp")));
+        assert_eq!(acl["container"][0]["ipv4"], "10.77.0.1");
+        assert_eq!(acl["container"][0]["ports"], serde_json::json!(["80/tcp", "5432/tcp"]));
 
         let local = [Ipv4Addr::new(192, 168, 1, 9)];
         assert_eq!(path_of("direct", Some("192.168.1.31:51820"), &local), "lan");

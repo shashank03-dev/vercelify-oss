@@ -27,6 +27,7 @@ import {
   RotateCcw,
   RotateCw,
   ScrollText,
+  Server,
   Search,
   Settings2,
   Square,
@@ -54,11 +55,12 @@ import {
   Modal,
   Segmented,
   Select,
+  StatusDot,
   StatusText,
   Tabs,
   TextInput,
 } from "../components/ui";
-import { ago, bytes, hostOf, shortSha } from "../lib/format";
+import { ago, bytes, hostOf, shortSha, type Health } from "../lib/format";
 import { usePoll } from "../lib/hooks";
 import { useLiveTopic } from "../lib/live";
 import { useNav } from "../lib/nav";
@@ -1365,6 +1367,8 @@ function SettingsTab({ app, client, onChanged, onDeleted }: { app: App; client: 
         </div>
       </Card>
 
+      <PlacementCard app={app} client={client} onChanged={onChanged} />
+
       <VolumesCard app={app} client={client} />
 
       <Card title="Danger zone">
@@ -1409,6 +1413,102 @@ function SettingsTab({ app, client, onChanged, onDeleted }: { app: App; client: 
         </div>
       </Card>
     </div>
+  );
+}
+
+const instanceHealth = (state: string): Health => (state === "running" ? "ok" : state === "unknown" ? "idle" : "bad");
+
+/**
+ * Which servers run the app (design §8.3): its server (or automatic: the
+ * one with the most memory to spare), replicas, and failover. Takes effect
+ * with the next deployment.
+ */
+function PlacementCard({ app, client, onChanged }: { app: App; client: PlatformClient; onChanged: () => void }) {
+  const { busy, act } = useAct();
+  const nodes = usePoll(() => client.nodes(), 30_000, [client]);
+  const instances = usePoll(() => client.instances(app.id), 15_000, [app.id, app.current_deployment_id, client]);
+  const [nodeId, setNodeId] = useState(app.node_id ?? "");
+  const [replicas, setReplicas] = useState(String(app.runtime.replicas));
+  const [failover, setFailover] = useState(app.runtime.failover);
+  useEffect(() => {
+    setNodeId(app.node_id ?? "");
+    setReplicas(String(app.runtime.replicas));
+    setFailover(app.runtime.failover);
+  }, [app.node_id, app.runtime.replicas, app.runtime.failover]);
+  const servers = nodes.data ?? [];
+  const n = Number(replicas);
+  const validReplicas = Number.isInteger(n) && n >= 1 && n <= 16;
+  const dirty = nodeId !== (app.node_id ?? "") || n !== app.runtime.replicas || failover !== app.runtime.failover;
+  const compose = app.kind === "compose";
+
+  return (
+    <Card
+      icon={<Server />}
+      title="Where it runs"
+      description={
+        servers.length > 1
+          ? "Its server, and how many copies run. Replicas spread over your servers; the main server balances visitors between them."
+          : "On this server. Add one with sudo vercelify mesh invite (then join it) to run apps on more machines."
+      }
+      testId="placement-card"
+    >
+      <div className="space-y-3">
+        {!!instances.data?.length && (
+          <ul className="space-y-1" data-testid="instances">
+            {instances.data.map((i) => (
+              <li key={i.container} className="flex items-center gap-2 text-[13px]" data-testid={`instance-${i.container}`}>
+                <StatusDot health={instanceHealth(i.state)} />
+                <span className="font-medium text-fg">{i.node}</span>
+                <span className="font-mono text-[12px] text-fg-dim">{i.container}</span>
+                <span className="text-[12px] text-fg-muted">{i.state}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+        {servers.length > 1 && !compose && (
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="w-56">
+              <Field label="Server">
+                <Select value={nodeId} onChange={(e) => setNodeId(e.target.value)} data-testid="placement-node">
+                  <option value="">Automatic</option>
+                  {servers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                      {s.role === "main" ? " (main)" : ""}
+                      {!s.online ? " — offline" : s.drained ? " — drained" : ""}
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+            </div>
+            <div className="w-24">
+              <Field label="Replicas">
+                <TextInput type="number" min={1} max={16} value={replicas} onChange={(e) => setReplicas(e.target.value)} data-testid="placement-replicas" />
+              </Field>
+            </div>
+            <label className="flex h-9 items-center gap-2 text-[13px] text-fg-muted">
+              <input type="checkbox" checked={failover} onChange={(e) => setFailover(e.target.checked)} data-testid="placement-failover" />
+              Move it when its server is offline
+            </label>
+            <Button
+              busy={busy === "placement"}
+              disabled={!dirty || !validReplicas}
+              data-testid="placement-save"
+              onClick={() =>
+                void act(
+                  "placement",
+                  () => client.patchApp(app.id, { node_id: nodeId, runtime: { ...app.runtime, replicas: n, failover } }),
+                  "Saved: the next deployment uses it",
+                ).then((ok) => ok && onChanged())
+              }
+            >
+              Save
+            </Button>
+          </div>
+        )}
+        {compose && servers.length > 1 && <p className="text-xs text-fg-muted">Compose apps run on the main server.</p>}
+      </div>
+    </Card>
   );
 }
 

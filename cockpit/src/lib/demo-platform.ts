@@ -21,7 +21,9 @@ import type {
   GitSource,
   GitWatchStatus,
   Job,
+  AppInstance,
   PlatformDomain,
+  PlatformNode,
   Project,
   ScheduledTask,
   ScheduledTaskRequest,
@@ -106,7 +108,12 @@ function newApp(name: string, kind: App["kind"], over: Partial<App> = {}): App {
 const git = (repo: string) => ({ repository: `https://github.com/shashank03-dev/${repo}`, branch: "main", git_source_id: null, image: null, compose_file: null, compose_content: null, pinned_sha: null });
 const apps: App[] = [
   newApp("shop", "git", { source: git("shop") }),
-  newApp("api", "git", { source: git("notes-api"), build: { pack: "dockerfile", dockerfile: "Dockerfile", context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] } }),
+  newApp("api", "git", {
+    source: git("notes-api"),
+    build: { pack: "dockerfile", dockerfile: "Dockerfile", context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] },
+    node_id: "node_demopi5000000000",
+    runtime: { port: null, command: null, replicas: 2, memory_mb: 256, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, service: null, failover: true },
+  }),
   newApp("umami", "image", { source: { repository: null, branch: null, git_source_id: null, image: "ghcr.io/umami-software/umami:postgresql-latest", compose_file: null, compose_content: null, pinned_sha: null } }),
   newApp("wiki", "git", { source: git("wiki"), desired: "sleeping" }),
 ];
@@ -455,6 +462,56 @@ function job(kind: string, title: string, target: string, detail: string, then?:
   return j;
 }
 
+/** The demo fleet: the main server and a Raspberry Pi worker on the mesh. */
+const nodes: PlatformNode[] = [
+  {
+    id: "node_demomain00000000",
+    name: "optiplex-7050",
+    role: "main",
+    agent_url: "http://127.0.0.1:7420",
+    arch: "x86_64",
+    builds: true,
+    last_seen_at: null,
+    created_at: iso(60 * 24 * 40),
+    mesh_ip: "10.77.0.1",
+    online: true,
+    drained: false,
+    status: { cpus: 4, memory_total_mb: 7840, memory_available_mb: 3920, on_battery: false, battery_percent: null, thermal_paused: false, docker_ok: true, http_port: 80, agent_version: "0.2.0" },
+    instances: 0,
+  },
+  {
+    id: "node_demopi5000000000",
+    name: "pi-5",
+    role: "worker",
+    agent_url: "http://10.77.0.2:7420",
+    arch: "aarch64",
+    builds: false,
+    last_seen_at: null,
+    created_at: iso(60 * 24 * 9),
+    mesh_ip: "10.77.0.2",
+    online: true,
+    drained: false,
+    status: { cpus: 4, memory_total_mb: 7900, memory_available_mb: 6100, on_battery: false, battery_percent: null, thermal_paused: false, docker_ok: true, http_port: 80, agent_version: "0.2.0" },
+    instances: 0,
+  },
+];
+
+/** Where an app's live deployment runs: its server first, replicas spread. */
+function demoInstances(a: App): AppInstance[] {
+  if (!a.current_deployment_id) return [];
+  const first = nodes.find((n) => n.id === a.node_id) ?? nodes[0]!;
+  const order = [first, ...nodes.filter((n) => n.id !== first.id && !n.drained)];
+  const base = `vfy-${a.name}-${a.current_deployment_id.slice(-8).toLowerCase()}`;
+  return Array.from({ length: Math.max(1, a.runtime.replicas) }, (_, r) => {
+    const n = order[r % order.length]!;
+    return { node_id: n.id, node: n.name, container: r ? `${base}-r${r}` : base, state: a.desired === "running" ? "running" : "exited" };
+  });
+}
+
+function instanceCount(nodeId: string): number {
+  return apps.flatMap(demoInstances).filter((i) => i.node_id === nodeId).length;
+}
+
 /** `/v1/platform/…` on the demo platform server. */
 export function platformRoute(req: HttpRequest): unknown {
   const [path, query = ""] = req.path.replace(/^\/v1\/platform/, "").split("?");
@@ -469,7 +526,23 @@ export function platformRoute(req: HttpRequest): unknown {
     return [{ ...project, app_count: apps.length, database_count: databases.length }];
   }
   if (seg[0] === "nodes") {
-    return [{ id: "node_demomain00000000", name: "optiplex-7050", role: "main", agent_url: "http://optiplex-7050.tail1234.ts.net:7420", arch: "x86_64", builds: true, last_seen_at: isoNow(), created_at: iso(60 * 24 * 40) }];
+    if (seg[1] && m === "PATCH") {
+      const n = nodes.find((x) => x.id === seg[1] || x.name === seg[1]);
+      if (!n) throw new Error(`server ${seg[1]} not found`);
+      if (typeof body.drained === "boolean") n.drained = body.drained;
+      if (typeof body.builds === "boolean") n.builds = body.builds;
+      return clone(n);
+    }
+    if (seg[1] && m === "DELETE") {
+      const n = nodes.find((x) => x.id === seg[1] || x.name === seg[1]);
+      if (!n) throw new Error(`server ${seg[1]} not found`);
+      if (n.role === "main") throw new Error("the main server can't be removed");
+      const running = instanceCount(n.id);
+      if (running > 0) throw new Error(`${n.name} still runs ${running} instance(s): drain it and redeploy them first`);
+      nodes.splice(nodes.indexOf(n), 1);
+      return { removed: true };
+    }
+    return clone(nodes.map((n) => ({ ...n, last_seen_at: isoNow(), instances: instanceCount(n.id) })));
   }
   if (seg[0] === "settings" && seg[1] === "domain") {
     if (m === "PUT") domainSetting = body as unknown as PlatformDomain;
@@ -514,6 +587,8 @@ export function platformRoute(req: HttpRequest): unknown {
     if (!sub) {
       if (m === "PATCH") {
         Object.assign(app, body as AppPatch, { updated_at: isoNow() });
+        // An empty server means "place it automatically".
+        if (body.node_id === "") app.node_id = null;
         changed("apps");
       }
       if (m === "DELETE") {
@@ -906,6 +981,11 @@ function runtimeRoute(seg: string[], m: string, body: Record<string, unknown>, p
   if (seg[0] === "databases" && seg[2] === "terminal") {
     const d = findDb(seg[1]!);
     return openTerm(d.container, body.console !== false);
+  }
+  if (seg[0] === "apps" && seg[1] && seg[2] === "instances") {
+    const a = apps.find((x) => x.id === seg[1] || x.name === seg[1]);
+    if (!a) throw new Error(`app ${seg[1]} not found`);
+    return demoInstances(a);
   }
   if (seg[0] === "apps" && seg[1] && ["logs", "restart", "terminal"].includes(seg[2] ?? "")) {
     const a = findApp(seg[1]);

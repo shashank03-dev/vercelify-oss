@@ -2,6 +2,7 @@ use crate::autodeploy::AutoDeploy;
 use crate::config::Config;
 use crate::display::{self, Receiver};
 use crate::error::{ApiResult, AppError};
+use crate::json::Json;
 use crate::llm::{self, Llm};
 use crate::pairing::{self, Claims};
 use crate::tokens::Actor;
@@ -10,7 +11,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderValue, Method};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
-use axum::{middleware, Extension, Json, Router};
+use axum::{middleware, Extension, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -45,6 +46,10 @@ pub struct AppState {
     pub terminals: Arc<crate::terminal::Terminals>,
     /// The mesh coordinator (main server, `mesh_coordinator = true`).
     pub mesh: Option<Arc<crate::mesh::Coordinator>>,
+    /// A worker of the platform engine: what the main server runs here.
+    pub worker: Option<Arc<crate::worker::Worker>>,
+    /// Terminals on other servers this one relays.
+    pub remote_terminals: Arc<std::sync::Mutex<std::collections::HashMap<String, crate::platform_api::RemoteTerminal>>>,
 }
 
 impl AppState {
@@ -115,6 +120,8 @@ impl AppState {
             platform_git,
             terminals: Arc::default(),
             mesh,
+            worker: crate::worker::Worker::open(&config),
+            remote_terminals: Arc::default(),
             events,
             jobs,
             claims: Arc::new(Claims::default()),
@@ -192,6 +199,8 @@ pub fn router(state: AppState) -> Router {
     let api = api
         .merge(long)
         .merge(stream)
+        // Instance starts and health waits outlast the usual timeout.
+        .merge(crate::runtime_api::router())
         .merge(crate::mesh::owner_routes())
         .route_layer(middleware::from_fn_with_state(state.clone(), auth::require_token));
 

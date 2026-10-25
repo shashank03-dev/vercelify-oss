@@ -3,6 +3,7 @@
 
 mod auth;
 mod autodeploy;
+mod cli;
 mod config;
 mod coolify;
 mod cron;
@@ -14,6 +15,7 @@ mod events;
 mod exec;
 mod github;
 mod http;
+mod json;
 mod llm;
 mod mdns;
 mod mesh;
@@ -27,6 +29,7 @@ mod project;
 mod projects;
 mod routes;
 mod routing;
+mod runtime_api;
 mod services;
 mod sleep;
 mod ssh;
@@ -36,78 +39,12 @@ mod tokens;
 mod update;
 mod volumes;
 mod watch;
+mod worker;
 
-use clap::{Parser, Subcommand};
+use cli::Cmd;
 use config::Config;
 use std::net::{IpAddr, SocketAddr};
-use std::path::PathBuf;
 use std::time::Duration;
-
-#[derive(Parser)]
-#[command(name = "vercelify-agent", version, about)]
-struct Cli {
-    /// Config file
-    #[arg(long, short, env = "VERCELIFY_CONFIG", default_value = "/etc/vercelify/agent.toml")]
-    config: PathBuf,
-    #[command(subcommand)]
-    cmd: Option<Cmd>,
-}
-
-#[derive(Subcommand)]
-enum Cmd {
-    /// Run the HTTP API (default)
-    Serve,
-    /// Generate a random token; with --write, store it in the configured token file
-    Token {
-        #[arg(long)]
-        write: bool,
-        /// Overwrite an existing token file
-        #[arg(long)]
-        force: bool,
-    },
-    /// Print a pairing code for the cockpit
-    Pair {
-        /// Host name or IP the Mac should use (defaults to MagicDNS name)
-        #[arg(long)]
-        host: Option<String>,
-        /// Coolify dashboard port
-        #[arg(long, default_value_t = 8000)]
-        coolify_port: u16,
-        /// Coolify URL (overrides host + port, e.g. https://coolify.example.com)
-        #[arg(long)]
-        coolify_url: Option<String>,
-        /// File containing a Coolify API token to embed (default: from agent.toml)
-        #[arg(long)]
-        coolify_token_file: Option<PathBuf>,
-        /// Also create a one-time short code (printed instead of the full code)
-        #[arg(long)]
-        short: bool,
-        /// With --short: print the full code on a second line too. Both use
-        /// the same device token (two calls would mint two).
-        #[arg(long, requires = "short")]
-        with_code: bool,
-        /// Lifetime of the short code in seconds
-        #[arg(long, default_value_t = vercelify_core::pairing::SHORT_CODE_TTL_SECS)]
-        ttl: u64,
-        /// Name of the device token minted for this pairing
-        #[arg(long)]
-        name: Option<String>,
-        /// Pair over Tailscale even on a mesh coordinator
-        #[arg(long)]
-        tailscale: bool,
-    },
-    /// Device tokens: list, or revoke one so that device can no longer connect
-    Tokens {
-        #[command(subcommand)]
-        cmd: Option<TokensCmd>,
-    },
-}
-
-#[derive(Subcommand)]
-enum TokensCmd {
-    List,
-    Revoke { id: String },
-}
 
 /// RUST_LOG's `target=level` directives (`info,tower_http=warn`), or the default.
 fn log_filter(default: &str) -> tracing_subscriber::filter::Targets {
@@ -177,13 +114,28 @@ async fn main() {
             .init();
     }
 
-    let cli = Cli::parse();
+    let cli = match cli::parse(std::env::args().skip(1), std::env::var("VERCELIFY_CONFIG").ok()) {
+        Ok(c) => c,
+        Err(e) => fatal(&e),
+    };
+    match cli.cmd {
+        Cmd::Version => {
+            println!("vercelify-agent {}", env!("CARGO_PKG_VERSION"));
+            return;
+        }
+        Cmd::Help => {
+            println!("vercelify-agent {}\n{}", env!("CARGO_PKG_VERSION"), cli::USAGE);
+            return;
+        }
+        _ => {}
+    }
     let cfg = match Config::load(Some(&cli.config)) {
         Ok(c) => c,
         Err(e) => fatal(&e.to_string()),
     };
 
-    match cli.cmd.unwrap_or(Cmd::Serve) {
+    match cli.cmd {
+        Cmd::Version | Cmd::Help => {}
         Cmd::Serve => serve(cfg).await,
         Cmd::Token { write, force } => {
             let token = random_token();
@@ -287,21 +239,19 @@ async fn main() {
                 println!("{code}");
             }
         }
-        Cmd::Tokens { cmd } => match cmd.unwrap_or(TokensCmd::List) {
-            TokensCmd::List => {
-                let all = tokens::list(&cfg);
-                if all.is_empty() {
-                    println!("no device tokens (pair a device with: sudo vercelify pair)");
-                }
-                for t in all {
-                    println!("{}", t.line());
-                }
+        Cmd::TokensList => {
+            let all = tokens::list(&cfg);
+            if all.is_empty() {
+                println!("no device tokens (pair a device with: sudo vercelify pair)");
             }
-            TokensCmd::Revoke { id } => match tokens::revoke(&cfg, &id) {
-                Ok(true) => eprintln!("revoked {id}: that device can no longer connect"),
-                Ok(false) => fatal(&format!("no token {id} (see: vercelify tokens)")),
-                Err(e) => fatal(&e.to_string()),
-            },
+            for t in all {
+                println!("{}", t.line());
+            }
+        }
+        Cmd::TokensRevoke { id } => match tokens::revoke(&cfg, &id) {
+            Ok(true) => eprintln!("revoked {id}: that device can no longer connect"),
+            Ok(false) => fatal(&format!("no token {id} (see: vercelify tokens)")),
+            Err(e) => fatal(&e.to_string()),
         },
     }
 }
@@ -354,8 +304,11 @@ async fn serve(cfg: Config) {
     tokio::spawn(update::resume_update_job(state.config.clone(), state.jobs.clone()));
     if let Some(p) = &state.platform {
         // Databases' public ports listen on the private network only.
-        p.engine
-            .set_private_ip(tailscale::ipv4(state.config.tailscale_bin.as_deref()).await);
+        let private = match mesh::own_ipv4(&state.config) {
+            Some(ip) => Some(ip.to_string()),
+            None => tailscale::ipv4(state.config.tailscale_bin.as_deref()).await,
+        };
+        p.engine.set_private_ip(private);
         // Tests run with the background loops off (watch interval 0).
         let every = if state.config.watch_interval_secs == 0 { 0 } else { 30 };
         p.spawn(Duration::from_secs(every));
@@ -368,6 +321,20 @@ async fn serve(cfg: Config) {
                     terminals.reap();
                 }
             });
+        }
+    }
+    if let Some(w) = &state.worker {
+        if state.config.watch_interval_secs > 0 {
+            w.spawn(state.config.clone(), state.collector.clone());
+        }
+    }
+    if let Some(p) = &state.platform {
+        if state.config.watch_interval_secs > 0 {
+            tokio::spawn(platform_api::run_fleet(
+                p.clone(),
+                state.config.clone(),
+                state.collector.clone(),
+            ));
         }
     }
     if let Some(g) = &state.platform_git {

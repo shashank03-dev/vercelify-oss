@@ -526,6 +526,13 @@ pub fn delete(c: &Connection, key: &MasterKey, id: &str) -> Result<Database> {
 /// `.database`) in variable values. Unknown names are an error: deploying
 /// an app that points at a deleted database should fail loudly.
 pub fn resolve_references(c: &Connection, key: &MasterKey, value: &str) -> Result<String> {
+    resolve_references_at(c, key, value, None)
+}
+
+/// [`resolve_references`] for an app on another server than its databases
+/// (they run on the main server): host and port are `main_ip` (its mesh
+/// address) and the database's public port, which it then needs.
+pub fn resolve_references_at(c: &Connection, key: &MasterKey, value: &str, main_ip: Option<&str>) -> Result<String> {
     let mut out = String::with_capacity(value.len());
     let mut rest = value;
     while let Some(i) = rest.find("${{db.") {
@@ -542,10 +549,21 @@ pub fn resolve_references(c: &Connection, key: &MasterKey, value: &str) -> Resul
         let d = get(c, key, name, false)
             .map_err(|_| Error::Invalid(format!("a variable refers to the database {name}, which doesn't exist")))?;
         let cred = credentials(c, key, &d.id)?;
-        let port = template(d.kind).port;
+        let (host, port) = match main_ip {
+            None => (d.name.clone(), template(d.kind).port),
+            Some(ip) => {
+                let p = d.public_port.ok_or_else(|| {
+                    Error::Invalid(format!(
+                        "the app runs on another server than the database {name}: give {name} a public port \
+                         (it listens on the mesh only), or run the app on the main server"
+                    ))
+                })?;
+                (ip.to_string(), p)
+            }
+        };
         let v = match field {
-            "url" => url(d.kind, &d.name, port, &cred),
-            "host" => d.name.clone(),
+            "url" => url(d.kind, &host, port, &cred),
+            "host" => host.clone(),
             "port" => port.to_string(),
             "user" => cred.user.clone(),
             "password" => cred.password.clone(),
@@ -665,6 +683,18 @@ mod tests {
             "h=blog-db:5432"
         );
         assert!(s.with(|c| resolve_references(c, &k, "${{db.gone.url}}")).is_err());
+        let far = s.with(|c| resolve_references_at(c, &k, "${{db.blog-db.host}}", Some("10.77.0.1")));
+        assert!(far.unwrap_err().to_string().contains("public port"));
+        s.tx(|c| {
+            c.execute("UPDATE databases SET public_port = 15432", [])?;
+            Ok(())
+        })
+        .unwrap();
+        assert_eq!(
+            s.with(|c| resolve_references_at(c, &k, "${{db.blog-db.host}}:${{db.blog-db.port}}", Some("10.77.0.1")))
+                .unwrap(),
+            "10.77.0.1:15432"
+        );
         assert!(s.with(|c| resolve_references(c, &k, "${{db.blog-db.nope}}")).is_err());
         assert_eq!(
             s.with(|c| resolve_references(c, &k, "plain $HOME")).unwrap(),

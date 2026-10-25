@@ -73,9 +73,28 @@ JSON
   [ "${lines[0]}" = "-s fd76:6679:6d65::1 -j RETURN" ]
   [[ "$output" == *"-s fd76:6679:6d65::4 -p ipv6-icmp -j RETURN"* ]]
   [[ "$output" != *"10.77"* ]]
+  run env MESH_ACL="$T/acl.json" FIREWALL_CONF=/nonexistent bash "$BATS_TEST_DIRNAME/../firewall.sh" out-rules 4
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
   run env MESH_ACL="$T/missing.json" FIREWALL_CONF=/nonexistent bash "$BATS_TEST_DIRNAME/../firewall.sh" mesh
   [ "$status" -ne 0 ]
   [[ "$output" == *"is vercelify-mesh running?"* ]]
+}
+
+@test "firewall: containers reach other servers only on the ports the map lists" {
+  cat >"$T/acl.json" <<'JSON'
+{"interface":"vfy0","version":4,"servers":["10.77.0.1"],"devices":[],
+ "container":[{"name":"main","ipv4":"10.77.0.1","ipv6":"fd76:6679:6d65::1","ports":["80/tcp","15432/tcp","bad"]},
+              {"name":"pi","ipv4":"10.77.0.5","ipv6":"fd76:6679:6d65::5","ports":["80/tcp"]}]}
+JSON
+  run env MESH_ACL="$T/acl.json" FIREWALL_CONF=/nonexistent bash "$BATS_TEST_DIRNAME/../firewall.sh" out-rules 4
+  [ "$status" -eq 0 ]
+  [ "${#lines[@]}" -eq 3 ]
+  [ "${lines[0]}" = "-d 10.77.0.1 -p tcp --dport 80 -j ACCEPT" ]
+  [ "${lines[1]}" = "-d 10.77.0.1 -p tcp --dport 15432 -j ACCEPT" ]
+  [ "${lines[2]}" = "-d 10.77.0.5 -p tcp --dport 80 -j ACCEPT" ]
+  run env MESH_ACL="$T/acl.json" FIREWALL_CONF=/nonexistent bash "$BATS_TEST_DIRNAME/../firewall.sh" out-rules 6
+  [ "${lines[2]}" = "-d fd76:6679:6d65::5 -p tcp --dport 80 -j ACCEPT" ]
 }
 
 @test "mesh invite, nodes and revoke through the agent" {
@@ -106,4 +125,16 @@ JSON
   run "$CLI" mesh join not-a-token
   [ "$status" -ne 0 ]
   [[ "$output" == *"usage: vercelify mesh join vfyj1."* ]]
+  run "$CLI" mesh join vfyj1.x --bogus
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"[--platform]"* ]]
+}
+
+@test "a platform main server's invite makes servers its workers" {
+  printf 'engine = "platform"\n' >"$T/etc/agent.toml"
+  run "$CLI" mesh invite
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sudo vercelify mesh join vfyj1.server-owner-60 --platform"* ]]
+  run "$CLI" mesh invite --device
+  [[ "$output" != *"--platform"* ]]
 }

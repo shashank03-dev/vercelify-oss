@@ -5,12 +5,13 @@
 
 use crate::config::Config;
 use crate::error::{ApiResult, AppError};
+use crate::json::Json;
 use crate::routes::AppState;
 use axum::extract::{ConnectInfo, Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use axum::{Json, Router};
+use axum::Router;
 use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
@@ -229,7 +230,7 @@ impl Coordinator {
 
     /// The node behind a token, if the request comes from its own mesh
     /// address (or, for the coordinator's own daemon, from this machine).
-    fn authenticate(&self, headers: &HeaderMap, from: IpAddr) -> Result<Node, AppError> {
+    pub(crate) fn authenticate(&self, headers: &HeaderMap, from: IpAddr) -> Result<Node, AppError> {
         let token = headers
             .get(axum::http::header::AUTHORIZATION)
             .and_then(|v| v.to_str().ok())
@@ -386,6 +387,10 @@ pub fn node_router() -> Router<AppState> {
         .route("/v1/mesh/map", get(map_stream))
         .route("/v1/mesh/endpoints", post(endpoints))
         .route("/v1/mesh/renew", post(renew))
+        .route(
+            "/v1/platform/nodes/heartbeat",
+            post(crate::platform_api::node_heartbeat),
+        )
 }
 
 /// The node's map now and after every change; a ping every 25 s keeps NAT

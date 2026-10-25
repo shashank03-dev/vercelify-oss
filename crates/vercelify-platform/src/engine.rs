@@ -7,22 +7,28 @@
 
 use crate::apps::{self, domain_settings};
 use crate::build::{BuildRequest, Builder};
-use crate::deploy::{self, DeployInput, Deployer};
+use crate::deploy::{self, Deployer};
 use crate::detect::PlanKind;
+use crate::fleet::{self, Placed, RouteBase};
 use crate::gate::BuildGate;
 use crate::git::GitAuth;
+use crate::instances::{self, Instance};
 use crate::logs::{LogHub, LogWriter};
 use crate::proc::{cancel_pair, CancelHandle};
 use crate::proxy::RouteHost;
+use crate::runtime::{Apply, StartSpec};
 use crate::secrets::MasterKey;
-use crate::{compose, deployments, env, git_sources, previews, volumes, Error, Result, Store};
+use crate::{
+    compose, deployments, env, git_sources, nodes, placement, previews, registry, volumes, Error, Result, Store,
+};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Notify;
 use vercelify_core::platform::{
-    App, AppKind, AppPatch, AppSource, CertStatus, Deployment, DeploymentStatus, DeploymentTrigger, VolumeOwner,
+    App, AppKind, AppPatch, AppSource, CertStatus, Deployment, DeploymentStatus, DeploymentTrigger, PlatformNode,
+    VolumeOwner,
 };
 
 /// What happened, for the agent's events, alerts and GitHub statuses.
@@ -58,6 +64,9 @@ pub struct Engine {
     /// This server's private address (mesh/Tailscale): where databases'
     /// public ports listen unless opened to everyone.
     private_ip: Mutex<Option<String>>,
+    /// Where the image registry keeps its data, and the addresses it is
+    /// published on (the mesh one): set once there are other servers.
+    registry: Mutex<Option<(PathBuf, Vec<String>)>>,
 }
 
 /// A request to deploy.
@@ -99,6 +108,7 @@ impl Engine {
             busy: Mutex::default(),
             listener: Mutex::default(),
             private_ip: Mutex::default(),
+            registry: Mutex::default(),
         })
     }
 
@@ -108,6 +118,19 @@ impl Engine {
 
     pub fn private_ip(&self) -> Option<String> {
         lock(&self.private_ip).clone()
+    }
+
+    pub fn set_registry(&self, dir: PathBuf, binds: Vec<String>) {
+        *lock(&self.registry) = Some((dir, binds));
+    }
+
+    /// The registry, running and answering, before a push.
+    pub async fn ensure_registry(&self) -> Result<()> {
+        let (dir, binds) = lock(&self.registry)
+            .clone()
+            .ok_or_else(|| Error::Unavailable("the image registry isn't set up on this server yet".into()))?;
+        registry::ensure(&self.deployer.docker, &dir, &binds).await?;
+        registry::wait_ready(Duration::from_secs(20)).await
     }
 
     pub fn set_listener(&self, l: Listener) {
@@ -331,6 +354,34 @@ impl Engine {
             .with(|c| git_sources::auth(c, &self.key, app.source.git_source_id.as_deref(), &tmp, &known_hosts))
     }
 
+    /// Where a deployment's instances go (design §8.3): the main server,
+    /// and (server, replica) for each instance.
+    fn choose(&self, app: &App, d: &Deployment) -> Result<(PlatformNode, Vec<(PlatformNode, u8)>)> {
+        self.store.with(|c| {
+            let all = nodes::list(c)?;
+            let main = all
+                .iter()
+                .find(|n| n.role == "main")
+                .cloned()
+                .ok_or_else(|| Error::Unavailable("the main server isn't registered yet".into()))?;
+            let vols = volumes::list(c, VolumeOwner::App, &app.id)?;
+            let need = placement::Need {
+                pinned: app.node_id.clone(),
+                replicas: if d.pr_number.is_some() { 1 } else { app.runtime.replicas },
+                memory_mb: app.runtime.memory_mb,
+                main_only: app.kind == AppKind::Compose,
+                one_node: !vols.is_empty(),
+                failover: app.runtime.failover,
+            };
+            let slots = placement::place(&all, &need)?;
+            let targets = slots
+                .into_iter()
+                .filter_map(|s| all.iter().find(|n| n.id == s.node_id).map(|n| (n.clone(), s.replica)))
+                .collect();
+            Ok((main, targets))
+        })
+    }
+
     async fn steps(
         self: &Arc<Self>,
         app: &App,
@@ -339,13 +390,40 @@ impl Engine {
         log: &mut LogWriter,
     ) -> Result<(Deployment, Option<String>, Option<String>)> {
         let preview = d.pr_number.is_some();
+        let (main, targets) = self.choose(app, d)?;
+        let remote = targets.iter().any(|(n, _)| n.role != "main");
+        if remote || targets.len() > 1 {
+            let names: Vec<&str> = targets.iter().map(|(n, _)| n.name.as_str()).collect();
+            log.info(&format!("runs on: {}", names.join(", ")));
+        }
+        let main_ip = if remote {
+            Some(main.mesh_ip.clone()).filter(|ip| !ip.is_empty()).ok_or_else(|| {
+                Error::Unavailable("the main server has no mesh address yet (is vercelify-mesh up?)".into())
+            })?
+        } else {
+            String::new()
+        };
         let vars = {
             let key = self.key.clone();
             let id = app.id.clone();
+            let ip = main_ip.clone();
             self.store
-                .call(move |c| env::resolve_for_deploy(c, &key, &id, preview))
+                .call(move |c| {
+                    env::resolve_for_deploy(c, &key, &id, preview, Some(ip.as_str()).filter(|i| !i.is_empty()))
+                })
                 .await?
         };
+        let native = main.arch.clone();
+        // Builds happen here; other architectures are built too (emulated).
+        let mut extra_archs: Vec<String> = vec![];
+        if app.kind == AppKind::Git {
+            for (n, _) in &targets {
+                let a = registry::docker_arch(&n.arch);
+                if a != registry::docker_arch(&native) && !extra_archs.iter().any(|x| registry::docker_arch(x) == a) {
+                    extra_archs.push(n.arch.clone());
+                }
+            }
+        }
         // Image: reuse (rollback, image apps) or build. Compose apps keep
         // their checkout for `docker compose up`.
         let mut image = d.image.clone();
@@ -361,8 +439,21 @@ impl Engine {
             port = port.or(p);
             framework = if framework.is_empty() { f } else { framework };
         }
-        let reusable = !image.is_empty()
-            && (app.kind == AppKind::Image || self.deployer.docker.image_exists(&image).await.unwrap_or(false));
+        let docker = &self.deployer.docker;
+        let mut reusable =
+            !image.is_empty() && (app.kind == AppKind::Image || docker.image_exists(&image).await.unwrap_or(false));
+        if reusable && app.kind != AppKind::Image {
+            for a in &extra_archs {
+                if !docker
+                    .image_exists(&registry::arch_tag(&image, a, &native))
+                    .await
+                    .unwrap_or(false)
+                {
+                    log.info(&format!("no {a} image of it is left: rebuilding"));
+                    reusable = false;
+                }
+            }
+        }
         let inline_compose = app.kind == AppKind::Compose && app.source.repository.is_none();
         if inline_compose {
             // A catalogue service: the compose file is part of the app.
@@ -419,6 +510,8 @@ impl Engine {
                         rev: &rev,
                         auth,
                         build_env,
+                        extra_archs: extra_archs.clone(),
+                        native_arch: native.clone(),
                     },
                     cancel.clone(),
                     log,
@@ -485,36 +578,24 @@ impl Engine {
         } else {
             app.current_deployment_id.clone()
         };
-        let previous_container = match &previous {
-            Some(p) if *p != d.id => self.store.with(|c| deployments::container(c, p)).ok(),
-            _ => None,
-        }
-        .filter(|c| !c.is_empty());
-
-        let basic_auth = self.store.with(|c| apps::basic_auth(c, &app.id))?;
-        let input = DeployInput {
-            app,
-            deployment: &d,
-            image: &image,
-            env: runtime_env,
-            volumes: &vols,
-            port,
-            hosts,
-            basic_auth,
-            dns_challenge: false,
+        let previous_placed = match &previous {
+            Some(p) if *p != d.id => self.placed(p).unwrap_or_default(),
+            _ => vec![],
         };
-        let container = match &compose_job {
+        let basic_auth = self.store.with(|c| apps::basic_auth(c, &app.id))?;
+
+        let started: Vec<Placed> = match &compose_job {
             Some((file, checkout)) => {
                 let _cleanup = CheckoutGuard(checkout.parent().map(PathBuf::from).unwrap_or_else(|| checkout.clone()));
                 let project = compose::project_name(&app.name, d.pr_number);
                 let res = compose::up(
                     compose::Up {
-                        docker: &self.deployer.docker,
+                        docker,
                         dir: checkout,
                         file,
                         project: &project,
                         service: app.runtime.service.as_deref(),
-                        env: &input.env,
+                        env: &runtime_env,
                         labels: compose::Labels {
                             app_id: &app.id,
                             app_name: &app.name,
@@ -533,7 +614,7 @@ impl Engine {
                 log.info(&format!("waiting for {res} to be healthy"));
                 crate::health::wait_healthy(
                     crate::health::Wait {
-                        docker: &self.deployer.docker,
+                        docker,
                         container: &res,
                         network: crate::docker::PROXY_NETWORK,
                         port,
@@ -545,24 +626,74 @@ impl Engine {
                 )
                 .await
                 .map_err(|e| Error::Invalid(format!("{e} (the compose project stays up; fix it and deploy again)")))?;
-                res
+                vec![Placed {
+                    node: main.clone(),
+                    instance: Instance {
+                        node_id: main.id.clone(),
+                        container: res,
+                        replica: 0,
+                    },
+                }]
             }
-            None => self.deployer.start(&input, &mut |m| log.info(m)).await?,
+            None => {
+                let mut started: Vec<Placed> = vec![];
+                let mut pushed: HashMap<String, String> = HashMap::new();
+                for (node, replica) in &targets {
+                    let res = self
+                        .start_one(
+                            app,
+                            &d,
+                            node,
+                            *replica,
+                            StartArgs {
+                                image: &image,
+                                native: &native,
+                                env: &runtime_env,
+                                volumes: &vols,
+                                port,
+                            },
+                            &mut pushed,
+                            log,
+                        )
+                        .await;
+                    let res = match res {
+                        Ok(_) if cancel.is_cancelled() => Err(Error::Conflict("cancelled".into())),
+                        other => other,
+                    };
+                    match res {
+                        Ok(p) => started.push(p),
+                        Err(e) => {
+                            self.remove_placed(&started).await;
+                            return Err(e);
+                        }
+                    }
+                }
+                started
+            }
         };
         if cancel.is_cancelled() {
-            let _ = self.deployer.docker.remove(&container).await;
+            self.remove_placed(&started).await;
             return Err(Error::Conflict("cancelled".into()));
         }
         // Commit point: route, then record. A crash in between leaves the
-        // route on a healthy container; the reconciler adopts it.
-        if let Err(e) = self.deployer.switch(&input, &container) {
-            let _ = self.deployer.docker.remove(&container).await;
+        // route on healthy containers; the reconciler adopts them.
+        let base = RouteBase {
+            key: deploy::route_key(&app.name, d.pr_number),
+            hosts,
+            port,
+            basic_auth,
+            dns_challenge: false,
+        };
+        if let Err(e) = self.switch_routes(&base, &started, &previous_placed, &main.id).await {
+            self.remove_placed(&started).await;
             return Err(e);
         }
-        let (id, app_id, c2, url2) = (d.id.clone(), app.id.clone(), container.clone(), url.clone());
+        let (id, app_id, url2) = (d.id.clone(), app.id.clone(), url.clone());
         let pr = d.pr_number;
+        let list: Vec<Instance> = started.iter().map(|p| p.instance.clone()).collect();
+        let primary = targets.first().map(|(n, _)| n.id.clone());
         let done = self.store.tx(move |c| {
-            deployments::set_container(c, &id, &c2, None)?;
+            instances::set(c, &id, &list)?;
             deployments::transition(c, &id, DeploymentStatus::Healthy, None)?;
             match pr {
                 Some(n) => {
@@ -579,30 +710,273 @@ impl Engine {
                 }
                 None => {
                     deployments::promote(c, &app_id, &id)?;
+                    // Placed once: later deploys go to the same server (volumes stay put).
+                    if let Some(node) = &primary {
+                        c.execute(
+                            "UPDATE apps SET node_id = ?2 WHERE id = ?1 AND node_id IS NULL",
+                            rusqlite::params![app_id, node],
+                        )?;
+                    }
                 }
             }
             deployments::get(c, &id)
         })?;
-        if let Some(old) = previous_container.filter(|o| *o != container) {
-            let deployer = self.deployer.clone();
-            let drain = Duration::from_secs(app.runtime.drain_secs as u64);
-            log.info(&format!(
-                "draining the previous version ({old}) for {}s",
-                drain.as_secs()
-            ));
-            tokio::spawn(async move { deployer.retire(&old, drain).await });
-        }
+        self.retire_previous(
+            &base.key,
+            &previous_placed,
+            &started,
+            Duration::from_secs(app.runtime.drain_secs as u64),
+            log,
+        );
         if !preview {
-            let keep = vec![image.clone()];
-            if let Err(e) = self.deployer.prune_images(&app.name, &keep).await {
-                log.info(&format!("image cleanup skipped: {e}"));
-            }
+            self.prune_after(&app.name, &image, &native, &started).await;
         }
         if !framework.is_empty() {
             tracing::debug!("{} deployed ({framework})", app.name);
         }
         Ok((done, url, previous.filter(|p| *p != d.id)))
     }
+
+    /// Start one instance on `node` (its image pushed to the registry first
+    /// when it runs elsewhere), healthy, or an error.
+    #[allow(clippy::too_many_arguments)]
+    async fn start_one(
+        &self,
+        app: &App,
+        d: &Deployment,
+        node: &PlatformNode,
+        replica: u8,
+        a: StartArgs<'_>,
+        pushed: &mut HashMap<String, String>,
+        log: &mut LogWriter,
+    ) -> Result<Placed> {
+        let rt = self.node_runtime(node)?;
+        let img = if app.kind == AppKind::Image && rt.is_local() {
+            a.image.to_string()
+        } else {
+            // Image apps elsewhere get the image through this server too:
+            // pulled once here (for the server's architecture), so workers
+            // need no internet access or registry credentials of their own.
+            let source = if app.kind == AppKind::Image {
+                let base = crate::build::image_tag(&app.name, &d.id);
+                let tag = registry::arch_tag(&base, &node.arch, a.native);
+                registry::stage(&self.deployer.docker, a.image, &node.arch, a.native, &tag, &mut |m| {
+                    log.info(m)
+                })
+                .await?;
+                tag
+            } else {
+                a.image.to_string()
+            };
+            let variant = if app.kind == AppKind::Image {
+                source
+            } else {
+                registry::arch_tag(&source, &node.arch, a.native)
+            };
+            if rt.is_local() {
+                variant
+            } else if let Some(r) = pushed.get(&variant) {
+                r.clone()
+            } else {
+                if pushed.is_empty() {
+                    self.ensure_registry().await?;
+                }
+                let r = registry::push(&self.deployer.docker, &variant, &mut |m| log.info(m)).await?;
+                pushed.insert(variant, r.clone());
+                r
+            }
+        };
+        if replica > 0 || !rt.is_local() {
+            log.info(&format!("starting replica {} on {}", replica + 1, node.name));
+        }
+        let spec = StartSpec {
+            app: app.clone(),
+            deployment: d.clone(),
+            image: img,
+            env: a.env.to_vec(),
+            volumes: a.volumes.to_vec(),
+            port: a.port,
+            replica,
+        };
+        let container = rt.start_instance(&spec, &mut |m| log.info(m)).await?;
+        Ok(Placed {
+            node: node.clone(),
+            instance: Instance {
+                node_id: node.id.clone(),
+                container,
+                replica,
+            },
+        })
+    }
+
+    /// Remove instances (a failed or cancelled deployment's).
+    pub(crate) async fn remove_placed(&self, placed: &[Placed]) {
+        for p in placed {
+            match self.node_runtime(&p.node) {
+                Ok(rt) => {
+                    if let Err(e) = rt.remove(&p.instance.container).await {
+                        tracing::warn!("removing {}: {e}", p.instance.container);
+                    }
+                }
+                Err(e) => tracing::warn!("removing {}: {e}", p.instance.container),
+            }
+        }
+    }
+
+    /// Point every server's proxy at the new instances: the other servers
+    /// first, so the main server never forwards to a server without the
+    /// route. Without hosts the routes go everywhere they were.
+    pub(crate) async fn switch_routes(
+        &self,
+        base: &RouteBase,
+        placed: &[Placed],
+        previous: &[Placed],
+        main_id: &str,
+    ) -> Result<()> {
+        let routes = fleet::routes(base, placed, main_id);
+        if routes.is_empty() {
+            let mut seen: HashSet<String> = HashSet::new();
+            for p in placed.iter().chain(previous) {
+                if p.node.id != main_id && seen.insert(p.node.id.clone()) {
+                    let rt = self.node_runtime(&p.node)?;
+                    rt.apply_ok(&Apply {
+                        remove_routes: vec![base.key.clone()],
+                        ..Apply::default()
+                    })
+                    .await?;
+                }
+            }
+            return crate::proxy::remove_route(&self.deployer.proxy, &base.key);
+        }
+        for (node_id, route) in routes.iter().filter(|(id, _)| id.as_str() != main_id) {
+            let node = placed
+                .iter()
+                .find(|p| &p.node.id == node_id)
+                .map(|p| p.node.clone())
+                .ok_or_else(|| Error::Internal(format!("no server {node_id}")))?;
+            self.node_runtime(&node)?
+                .apply_ok(&Apply {
+                    write_routes: vec![route.clone()],
+                    ..Apply::default()
+                })
+                .await?;
+        }
+        if let Some(r) = routes.get(main_id) {
+            crate::proxy::write_route(&self.deployer.proxy, r)?;
+        }
+        Ok(())
+    }
+
+    /// After the switch: the previous instances drain, then go; servers
+    /// that served them and don't serve the new ones drop the route.
+    fn retire_previous(
+        self: &Arc<Self>,
+        key: &str,
+        previous: &[Placed],
+        started: &[Placed],
+        drain: Duration,
+        log: &mut LogWriter,
+    ) {
+        let new: HashSet<&str> = started.iter().map(|p| p.instance.container.as_str()).collect();
+        let new_nodes: HashSet<&str> = started.iter().map(|p| p.node.id.as_str()).collect();
+        let old: Vec<Placed> = previous
+            .iter()
+            .filter(|p| !new.contains(p.instance.container.as_str()))
+            .cloned()
+            .collect();
+        if old.is_empty() {
+            return;
+        }
+        let names: Vec<&str> = old.iter().map(|p| p.instance.container.as_str()).collect();
+        log.info(&format!(
+            "draining the previous version ({}) for {}s",
+            names.join(", "),
+            drain.as_secs()
+        ));
+        let mut leave: Vec<PlatformNode> = vec![];
+        for p in &old {
+            if p.node.role != "main"
+                && !new_nodes.contains(p.node.id.as_str())
+                && !leave.iter().any(|n| n.id == p.node.id)
+            {
+                leave.push(p.node.clone());
+            }
+        }
+        let me = self.clone();
+        let key = key.to_string();
+        tokio::spawn(async move {
+            tokio::time::sleep(drain).await;
+            for p in &old {
+                match me.node_runtime(&p.node) {
+                    Ok(rt) => rt.retire(&p.instance.container, Duration::ZERO).await,
+                    Err(e) => tracing::warn!("retiring {}: {e}", p.instance.container),
+                }
+            }
+            for n in &leave {
+                if let Ok(rt) = me.node_runtime(n) {
+                    let _ = rt
+                        .apply(&Apply {
+                            remove_routes: vec![key.clone()],
+                            ..Apply::default()
+                        })
+                        .await;
+                }
+            }
+        });
+    }
+
+    /// Keep the 5 newest images of the app on every server it runs on
+    /// (and in the registry: what this server no longer keeps).
+    async fn prune_after(&self, app: &str, image: &str, native: &str, started: &[Placed]) {
+        let mut done: HashSet<String> = HashSet::new();
+        let mut keep: Vec<String> = vec![image.to_string()];
+        for p in started {
+            keep.push(registry::arch_tag(image, &p.node.arch, native));
+        }
+        let mut remote = false;
+        for p in started {
+            if !done.insert(p.node.id.clone()) {
+                continue;
+            }
+            let Ok(rt) = self.node_runtime(&p.node) else { continue };
+            remote |= !rt.is_local();
+            let keep: Vec<String> = if rt.is_local() {
+                keep.clone()
+            } else {
+                keep.iter().map(|k| registry::reference(k)).collect()
+            };
+            match rt
+                .apply(&Apply {
+                    prune: Some((app.to_string(), keep)),
+                    ..Apply::default()
+                })
+                .await
+            {
+                Ok(a) => {
+                    for e in a.errors {
+                        tracing::info!("image cleanup on {}: {e}", p.node.name);
+                    }
+                }
+                Err(e) => tracing::info!("image cleanup on {}: {e}", p.node.name),
+            }
+        }
+        if !started.iter().any(|p| p.node.role == "main") {
+            let _ = self.deployer.prune_images(app, &keep).await;
+        }
+        if remote {
+            if let Err(e) = registry::prune(&self.deployer.docker, app).await {
+                tracing::info!("registry cleanup for {app}: {e}");
+            }
+        }
+    }
+}
+
+pub(crate) struct StartArgs<'a> {
+    image: &'a str,
+    native: &'a str,
+    env: &'a [(String, String)],
+    volumes: &'a [vercelify_core::platform::AppVolume],
+    port: u16,
 }
 
 /// Removes a compose checkout when the deployment step ends.
@@ -623,12 +997,12 @@ impl Engine {
     /// Automatic rollback (design §7.2): a deployment that crashes or keeps
     /// restarting within 3 minutes of going live is replaced by the one before.
     async fn watch_after_deploy(self: Arc<Self>, app: App, d: Deployment, previous: String) {
-        let container = match self.store.with(|c| deployments::container(c, &d.id)) {
-            Ok(c) if !c.is_empty() => c,
+        let placed = match self.placed(&d.id) {
+            Ok(p) if !p.is_empty() => p,
             _ => return,
         };
         let start = std::time::Instant::now();
-        let mut base_restarts = None;
+        let mut base_restarts: HashMap<String, u64> = HashMap::new();
         while start.elapsed() < WATCH_AFTER_DEPLOY {
             tokio::time::sleep(Duration::from_secs(10)).await;
             // Something else took over (a newer deploy, a manual rollback, a stop).
@@ -641,19 +1015,26 @@ impl Engine {
             if current.as_deref() != Some(d.id.as_str()) {
                 return;
             }
-            let i = match self.deployer.docker.inspect(&container).await {
-                Ok(Some(i)) => i,
-                Ok(None) => return, // removed: the reconciler's business
-                Err(_) => continue,
-            };
-            if i.paused {
-                continue;
+            let mut crashed = None;
+            for p in &placed {
+                let Ok(rt) = self.node_runtime(&p.node) else { continue };
+                let i = match rt.inspect(&p.instance.container).await {
+                    Ok(Some(i)) => i,
+                    Ok(None) => return, // removed: the reconciler's business
+                    Err(_) => continue, // its server is unreachable: not the app's fault
+                };
+                if i.paused {
+                    continue;
+                }
+                let base = *base_restarts
+                    .entry(p.instance.container.clone())
+                    .or_insert(i.restart_count);
+                if !i.running || i.restart_count >= base + 2 {
+                    crashed = Some((i, base));
+                    break;
+                }
             }
-            let base = *base_restarts.get_or_insert(i.restart_count);
-            let crashing = !i.running || i.restart_count >= base + 2;
-            if !crashing {
-                continue;
-            }
+            let Some((i, base)) = crashed else { continue };
             let why = if i.oom_killed {
                 "ran out of memory".to_string()
             } else if !i.running {
@@ -695,21 +1076,32 @@ impl Engine {
             ))
         })?;
         let docker = &self.deployer.docker;
+        let key = deploy::route_key(&app.name, Some(pr));
+        let vol_names: Vec<String> = vols
+            .iter()
+            .map(|v| volumes::docker_name(&format!("{}-pr{pr}", app.name), &v.name))
+            .collect();
         if let Some(dep) = preview.as_ref().and_then(|p| p.deployment_id.clone()) {
-            let container = self.store.with(|c| deployments::container(c, &dep)).unwrap_or_default();
-            if !container.is_empty() {
-                docker.stop(&container, 10).await?;
-                docker.remove(&container).await?;
+            for p in self.placed(&dep)? {
+                let rt = self.node_runtime(&p.node)?;
+                rt.apply_ok(&Apply {
+                    stop: vec![p.instance.container.clone()],
+                    remove: vec![p.instance.container.clone()],
+                    grace_secs: Some(10),
+                    remove_routes: if rt.is_local() { vec![] } else { vec![key.clone()] },
+                    remove_volumes: if rt.is_local() { vec![] } else { vol_names.clone() },
+                    ..Apply::default()
+                })
+                .await?;
             }
         }
         if app.kind == AppKind::Compose {
             compose::down(docker, &compose::project_name(&app.name, Some(pr))).await?;
         }
-        crate::proxy::remove_route(&self.deployer.proxy, &deploy::route_key(&app.name, Some(pr)))?;
-        for v in &vols {
-            let name = volumes::docker_name(&format!("{}-pr{pr}", app.name), &v.name);
-            let _ = docker.volume_remove(&name).await;
-            let _ = std::fs::remove_dir_all(self.deployer.hdd_root.join(&name));
+        crate::proxy::remove_route(&self.deployer.proxy, &key)?;
+        for name in &vol_names {
+            let _ = docker.volume_remove(name).await;
+            let _ = std::fs::remove_dir_all(self.deployer.hdd_root.join(name));
         }
         self.store.tx(|c| {
             previews::close(c, app_id, pr)?;
@@ -729,6 +1121,40 @@ impl Engine {
     /// Docker and on disk. Volumes are removed only with `purge_volumes`.
     pub async fn cleanup_app(&self, app: &App, purge_volumes: bool, vols: &[vercelify_core::platform::AppVolume]) {
         let docker = &self.deployer.docker;
+        // Other servers: its containers, routes, images (and volumes).
+        let workers: Vec<PlatformNode> = self
+            .store
+            .with(nodes::list)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|n| n.role != "main" && n.online)
+            .collect();
+        for n in &workers {
+            let Ok(rt) = self.node_runtime(n) else { continue };
+            let mut a = Apply {
+                prune: Some((app.name.clone(), vec![])),
+                ..Apply::default()
+            };
+            if let Ok(all) = rt.list().await {
+                a.remove = all
+                    .iter()
+                    .filter(|c| c.labels.get(deploy::LABEL_APP) == Some(&app.id))
+                    .map(|c| c.name.clone())
+                    .collect();
+            }
+            if let Ok(keys) = rt.route_keys().await {
+                a.remove_routes = keys
+                    .into_iter()
+                    .filter(|k| *k == app.name || k.starts_with(&format!("{}-pr-", app.name)))
+                    .collect();
+            }
+            if purge_volumes {
+                a.remove_volumes = vols.iter().map(|v| volumes::docker_name(&app.name, &v.name)).collect();
+            }
+            if let Err(e) = rt.apply(&a).await {
+                tracing::warn!("cleaning {} up on {}: {e}", app.name, n.name);
+            }
+        }
         if let Ok(all) = docker.list_managed().await {
             for c in all.iter().filter(|c| c.labels.get(deploy::LABEL_APP) == Some(&app.id)) {
                 let _ = docker.remove(&c.name).await;

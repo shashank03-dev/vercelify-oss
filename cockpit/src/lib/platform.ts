@@ -7,6 +7,7 @@ import { call, streamLines, type HttpRequest } from "./transport";
 import type {
   App,
   AppCreate,
+  AppInstance,
   AppDomain,
   AppPatch,
   AppVolume,
@@ -26,6 +27,7 @@ import type {
   GitWatchStatus,
   Job,
   PlatformDomain,
+  NodePatch,
   PlatformNode,
   Project,
   ProjectRequest,
@@ -205,6 +207,9 @@ export function platformOn(server?: string) {
     domain: () => req<PlatformDomain>("GET", "/settings/domain"),
     setDomain: (d: PlatformDomain) => req<PlatformDomain>("PUT", "/settings/domain", d),
     nodes: () => req<PlatformNode[]>("GET", "/nodes"),
+    patchNode: (id: string, p: NodePatch) => req<PlatformNode>("PATCH", `/nodes/${q(id)}`, p),
+    removeNode: (id: string) => req<unknown>("DELETE", `/nodes/${q(id)}`),
+    instances: (app: string) => req<AppInstance[]>("GET", `/apps/${q(app)}/instances`),
   };
 }
 

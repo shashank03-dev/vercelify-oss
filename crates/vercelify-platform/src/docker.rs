@@ -56,7 +56,7 @@ pub struct ContainerSpec {
     pub extra_hosts: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ContainerState {
     pub id: String,
     pub name: String,
@@ -67,7 +67,7 @@ pub struct ContainerState {
     pub created: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Inspect {
     pub running: bool,
     pub paused: bool,

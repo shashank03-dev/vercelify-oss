@@ -63,6 +63,11 @@ pub struct BuildRequest<'a> {
     pub auth: GitAuth,
     /// Variables marked "build" (resolved and decrypted).
     pub build_env: Vec<(String, String)>,
+    /// Architectures (`uname -m` names) other servers need besides this
+    /// one's: each is built too, emulated, as `<image>-<arch>`.
+    pub extra_archs: Vec<String>,
+    /// This server's architecture.
+    pub native_arch: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,6 +166,23 @@ struct BuildxArgs<'a> {
     build_args: Vec<String>,
     env: Vec<(String, String)>,
     pull: bool,
+    /// `linux/arm64` for a foreign architecture.
+    platform: Option<String>,
+}
+
+/// The binfmt handler QEMU registers for an architecture.
+fn binfmt_name(docker_arch: &str) -> &str {
+    match docker_arch {
+        "arm64" => "qemu-aarch64",
+        "amd64" => "qemu-x86_64",
+        "arm/v7" => "qemu-arm",
+        other => other,
+    }
+}
+
+/// Whether this machine can run (so build) `docker_arch` binaries.
+pub fn can_emulate(docker_arch: &str, binfmt_dir: &Path) -> bool {
+    binfmt_dir.join(binfmt_name(docker_arch)).exists()
 }
 
 impl Builder {
@@ -216,6 +238,9 @@ impl Builder {
             args.extend(proc::args(&["--builder", BUILDER]));
         }
         args.extend(proc::args(&["--load", "--progress", "plain"]));
+        if let Some(p) = &a.platform {
+            args.extend(["--platform".to_string(), p.clone()]);
+        }
         if a.pull {
             args.push("--pull".into());
         }
@@ -365,11 +390,48 @@ impl Builder {
                 build_args,
                 env: req.build_env.clone(),
                 pull: true,
+                platform: None,
             },
-            cancel,
+            cancel.clone(),
             log,
         )
         .await?;
+        for arch in &req.extra_archs {
+            let da = crate::registry::docker_arch(arch);
+            if !can_emulate(da, Path::new("/proc/sys/fs/binfmt_misc")) {
+                return Err(Error::Invalid(format!(
+                    "a server here runs {arch}: building for it on this {} server needs QEMU \
+                     (run: sudo vercelify registry multiarch), or pin the app to a {} server",
+                    req.native_arch, req.native_arch
+                )));
+            }
+            let tag = crate::registry::arch_tag(&image, arch, &req.native_arch);
+            log.info(&format!("building for linux/{da} too (emulated, slower)"));
+            self.buildx(
+                BuildxArgs {
+                    image: &tag,
+                    dockerfile: &dockerfile,
+                    context: &context,
+                    labels: vec![
+                        format!("vercelify.app={}", req.app_name),
+                        format!("vercelify.deployment={}", req.deployment_id),
+                        format!("vercelify.commit={}", fetched.sha),
+                    ],
+                    env_file: &env_file.0,
+                    build_args: if matches!(plan.kind, PlanKind::Dockerfile(_)) {
+                        req.build_env.iter().map(|(k, _)| k.clone()).collect()
+                    } else {
+                        vec![]
+                    },
+                    env: req.build_env.clone(),
+                    pull: true,
+                    platform: Some(format!("linux/{da}")),
+                },
+                cancel.clone(),
+                log,
+            )
+            .await?;
+        }
         Ok(Built {
             image,
             commit_sha: fetched.sha,
@@ -420,6 +482,7 @@ impl Builder {
                 build_args: vec![],
                 env: vec![],
                 pull: false,
+                platform: None,
             },
             cancel,
             log,
@@ -460,6 +523,15 @@ mod tests {
         assert_eq!(image_tag("blog", "dpl_7k2m9q4w1x8z3c5v"), "vfy/blog:7k2m9q4w1x8z3c5v");
         assert_eq!(Driver::parse("docker"), Driver::Docker);
         assert_eq!(Driver::parse(""), Driver::Container);
+    }
+
+    #[test]
+    fn emulation_needs_binfmt() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!can_emulate("arm64", dir.path()));
+        std::fs::write(dir.path().join("qemu-aarch64"), "enabled").unwrap();
+        assert!(can_emulate("arm64", dir.path()));
+        assert!(!can_emulate("arm/v7", dir.path()));
     }
 
     /// Real builds with the daemon's BuildKit. Opt in with

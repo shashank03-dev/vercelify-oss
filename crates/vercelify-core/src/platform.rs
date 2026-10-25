@@ -735,6 +735,84 @@ pub struct PlatformNode {
     pub builds: bool,
     pub last_seen_at: Option<String>,
     pub created_at: String,
+    /// Its mesh address (workers; the main server's own is its tunnel's).
+    #[serde(default)]
+    pub mesh_ip: String,
+    /// Heard from in the last 2 minutes (the main server always is).
+    #[serde(default)]
+    pub online: bool,
+    /// No new apps are placed here; what runs keeps running.
+    #[serde(default)]
+    pub drained: bool,
+    /// What it reported last.
+    #[serde(default)]
+    pub status: NodeStatus,
+    /// App instances (containers) placed here.
+    #[serde(default)]
+    pub instances: u32,
+}
+
+/// A server's resources and condition, from its heartbeat (design §8.3).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct NodeStatus {
+    pub cpus: u32,
+    pub memory_total_mb: u64,
+    pub memory_available_mb: u64,
+    pub on_battery: bool,
+    /// Battery charge, when it has one.
+    pub battery_percent: Option<u8>,
+    /// The power guard paused builds and apps because it runs hot.
+    pub thermal_paused: bool,
+    pub docker_ok: bool,
+    /// Port its proxy answers plain HTTP on (the main server forwards there).
+    pub http_port: u16,
+    pub agent_version: String,
+}
+
+/// `POST /v1/platform/nodes/heartbeat`: a worker, every minute, over the
+/// mesh with its node token.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct NodeHeartbeat {
+    pub arch: String,
+    pub agent_port: u16,
+    /// The token the main server calls this worker's runtime API with.
+    pub runtime_token: String,
+    pub status: NodeStatus,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct NodeHeartbeatReply {
+    pub node_id: String,
+    /// Where images come from (`<main mesh ip>:<port>`).
+    pub registry: String,
+}
+
+/// `PATCH /v1/platform/nodes/{id}`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct NodePatch {
+    #[serde(default)]
+    #[ts(optional)]
+    pub drained: Option<bool>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub builds: Option<bool>,
+}
+
+/// One container of an app's live deployment, and where it runs.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct AppInstance {
+    pub node_id: String,
+    pub node: String,
+    pub container: String,
+    /// Docker's state (`running`, `exited`…), or `unknown` when the server
+    /// can't be reached.
+    pub state: String,
 }
 
 // ----- git sources, hooks, auth, tasks ------------------------------------------

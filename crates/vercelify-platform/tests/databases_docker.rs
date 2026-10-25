@@ -51,6 +51,9 @@ async fn databases_end_to_end() {
     image("valkey/valkey:8-alpine");
     let dir = tempfile::tempdir().unwrap();
     let store = Arc::new(Store::open(&dir.path().join("platform.db")).unwrap());
+    store
+        .tx(|c| vercelify_platform::nodes::ensure_main(c, "test", "http://127.0.0.1:7420", std::env::consts::ARCH))
+        .unwrap();
     let key = Arc::new(MasterKey::from_bytes(&[6u8; 32]).unwrap());
     let docker = Docker::default();
     let engine = Engine::new(

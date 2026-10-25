@@ -47,6 +47,7 @@ FWD=VERCELIFY-FWD
 INP=VERCELIFY-IN
 MESH=VERCELIFY-MESH
 MESH_FWD=VERCELIFY-MESH-FWD
+MESH_OUT=VERCELIFY-MESH-OUT
 
 ipt() { "$IPT" -w "$@"; }
 
@@ -103,6 +104,19 @@ mesh_rules() {
   ' "$MESH_ACL"
 }
 
+# mesh_out_rules FAMILY — what containers may reach on other servers
+# (their proxy for the main server's forwarding, public databases; the
+# coordinator decides, design §13.8), as iptables arguments.
+mesh_out_rules() {
+  local fam=$1 addr=ipv4
+  [[ "$fam" == 6 ]] && addr=ipv6
+  jq -r --arg a "$addr" '
+    (.container // [])[] | .[$a] as $ip | select($ip != null and $ip != "") |
+      (.ports[] | capture("^(?<p>[0-9]+(-[0-9]+)?)/(?<proto>tcp|udp)$") |
+        "-d \($ip) -p \(.proto) --dport \(.p | sub("-"; ":")) -j ACCEPT")
+  ' "$MESH_ACL"
+}
+
 apply_mesh_family() {
   IPT=$1
   local fam=4 rule
@@ -130,6 +144,17 @@ apply_mesh_family() {
     done < <(mesh_rules "$fam")
     ipt -A "$MESH_FWD" -j DROP
     ipt -C DOCKER-USER -i "$MESH_IFACE" -j "$MESH_FWD" 2>/dev/null || ipt -I DOCKER-USER 1 -i "$MESH_IFACE" -j "$MESH_FWD"
+    # Containers out to other servers: only what the map lists; the rest
+    # falls through to the tailnet/mesh block in VERCELIFY-FWD.
+    ipt -n -L "$MESH_OUT" >/dev/null 2>&1 || ipt -N "$MESH_OUT"
+    ipt -F "$MESH_OUT"
+    while IFS= read -r rule; do
+      [[ -n "$rule" ]] || continue
+      # shellcheck disable=SC2086
+      ipt -A "$MESH_OUT" $rule
+    done < <(mesh_out_rules "$fam")
+    ipt -A "$MESH_OUT" -j RETURN
+    ipt -C DOCKER-USER -o "$MESH_IFACE" -j "$MESH_OUT" 2>/dev/null || ipt -I DOCKER-USER 1 -o "$MESH_IFACE" -j "$MESH_OUT"
   fi
 }
 
@@ -139,7 +164,8 @@ remove_family() {
   ipt -D INPUT -j "$INP" 2>/dev/null || true
   ipt -D INPUT -i "$MESH_IFACE" -j "$MESH" 2>/dev/null || true
   ipt -D DOCKER-USER -i "$MESH_IFACE" -j "$MESH_FWD" 2>/dev/null || true
-  for c in "$FWD" "$INP" "$MESH" "$MESH_FWD"; do ipt -F "$c" 2>/dev/null || true; ipt -X "$c" 2>/dev/null || true; done
+  ipt -D DOCKER-USER -o "$MESH_IFACE" -j "$MESH_OUT" 2>/dev/null || true
+  for c in "$FWD" "$INP" "$MESH" "$MESH_FWD" "$MESH_OUT"; do ipt -F "$c" 2>/dev/null || true; ipt -X "$c" 2>/dev/null || true; done
 }
 
 case "${1:-}" in
@@ -161,6 +187,10 @@ case "${1:-}" in
   rules)
     # Print the mesh rules for FAMILY (4|6) without applying them.
     mesh_rules "${2:-4}"
+    ;;
+  out-rules)
+    # Print what containers may reach on other servers, for FAMILY (4|6).
+    mesh_out_rules "${2:-4}"
     ;;
   remove)
     remove_family iptables

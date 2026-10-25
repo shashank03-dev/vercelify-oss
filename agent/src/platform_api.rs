@@ -5,12 +5,13 @@
 //! nudge the cockpit through a `changed` event.
 
 use crate::error::{ApiResult, AppError};
+use crate::json::Json;
 use crate::platform::Platform;
 use crate::routes::AppState;
 use crate::tokens::Actor;
 use axum::extract::{Path, Query, State};
 use axum::routing::{delete, get, post};
-use axum::{Extension, Json, Router};
+use axum::{Extension, Router};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -67,6 +68,11 @@ pub fn router() -> Router<AppState> {
         .route("/platform/deployments/{id}/cancel", post(deployment_cancel))
         .route("/platform/deployments/{id}/logs", get(deployment_logs))
         .route("/platform/nodes", get(node_list))
+        .route(
+            "/platform/nodes/{id}",
+            axum::routing::patch(node_patch).delete(node_remove),
+        )
+        .route("/platform/apps/{app}/instances", get(app_instances))
         .route("/platform/apps/{app}/previews/{pr}", delete(app_preview_remove))
         .route("/platform/apps/{app}/git", get(app_git).put(app_git_set))
         .route("/platform/apps/{app}/git/check", post(app_git_check))
@@ -136,6 +142,14 @@ where
 
 fn changed(s: &AppState, topic: &str) {
     s.events.changed(topic);
+    // Databases' public ports are in the mesh maps (who may reach them).
+    if topic == "databases" {
+        if let Some(co) = &s.mesh {
+            if co.store.tx(|c| vercelify_platform::mesh_registry::bump(c)).is_ok() {
+                co.changed();
+            }
+        }
+    }
 }
 
 // ----- projects -------------------------------------------------------------
@@ -499,6 +513,140 @@ async fn deployment_get(State(s): State<AppState>, Path(id): Path<String>) -> Ap
 
 async fn node_list(State(s): State<AppState>) -> ApiResult<Vec<PlatformNode>> {
     Ok(Json(tx(&s, |c, _| nodes::list(c)).await?))
+}
+
+/// A worker's heartbeat (`vercelify-agent` on it, every minute): over the
+/// mesh, with its node token, from its own mesh address.
+pub async fn node_heartbeat(
+    State(s): State<AppState>,
+    axum::extract::ConnectInfo(from): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    headers: axum::http::HeaderMap,
+    b: bytes::Bytes,
+) -> ApiResult<NodeHeartbeatReply> {
+    let hb: NodeHeartbeat = serde_json::from_slice(&b).map_err(|e| AppError::bad_request(e.to_string()))?;
+    let co = crate::mesh::coordinator(&s)?;
+    let node = co.authenticate(&headers, from.ip())?;
+    if node.kind != vercelify_mesh::cert::NodeKind::Server {
+        return Err(AppError::forbidden("only servers run apps"));
+    }
+    let mesh_ip = co.addressing.ipv4(node.ip_index).to_string();
+    let main_ip = co.addressing.ipv4(vercelify_mesh::addr::COORDINATOR_INDEX).to_string();
+    let first = tx(&s, {
+        let id = node.id.clone();
+        move |c, _| {
+            Ok(
+                c.query_row("SELECT count(*) FROM nodes WHERE mesh_node_id = ?1", [&id], |r| {
+                    r.get::<_, i64>(0)
+                })? == 0,
+            )
+        }
+    })
+    .await?;
+    let n = tx(&s, move |c, k| {
+        nodes::heartbeat(
+            c,
+            k,
+            &nodes::Heartbeat {
+                mesh_node_id: &node.id,
+                name: &node.name,
+                mesh_ip: &mesh_ip,
+                agent_port: hb.agent_port,
+                arch: &hb.arch,
+                runtime_token: &hb.runtime_token,
+                status: &hb.status,
+            },
+        )
+    })
+    .await?;
+    if first {
+        tracing::info!("{} joined the platform as a worker ({})", n.name, n.arch);
+        changed(&s, "nodes");
+    }
+    Ok(Json(NodeHeartbeatReply {
+        node_id: n.id,
+        registry: format!("{main_ip}:{}", vercelify_platform::registry::PORT),
+    }))
+}
+
+/// The main server's side of the fleet: its own condition every minute
+/// (placement compares it with the workers'), and the image registry while
+/// it has workers (its layers collected once a day).
+pub async fn run_fleet(
+    p: Arc<crate::platform::Platform>,
+    cfg: Arc<crate::config::Config>,
+    collector: Arc<vercelify_core::collect::Collector>,
+) {
+    let mut last_gc = std::time::Instant::now();
+    loop {
+        let status = crate::worker::node_status(&cfg, &collector).await;
+        let ip = crate::mesh::own_ipv4(&cfg).map(|i| i.to_string()).unwrap_or_default();
+        let workers = p
+            .store
+            .with(|c| {
+                nodes::set_main_status(c, &ip, &status)?;
+                Ok(nodes::list(c)?.iter().filter(|n| n.role == "worker").count())
+            })
+            .unwrap_or(0);
+        if !ip.is_empty() {
+            p.engine.set_registry(cfg.state_dir.join("registry"), vec![ip.clone()]);
+        }
+        if workers > 0 && !ip.is_empty() {
+            let docker = &p.engine.deployer.docker;
+            match vercelify_platform::registry::ensure(docker, &cfg.state_dir.join("registry"), &[ip]).await {
+                Ok(()) if last_gc.elapsed() > std::time::Duration::from_secs(86_400) => {
+                    last_gc = std::time::Instant::now();
+                    if let Err(e) = vercelify_platform::registry::collect_garbage(docker).await {
+                        tracing::warn!("{e}");
+                    }
+                }
+                Ok(()) => {}
+                Err(e) => tracing::warn!("image registry: {e}"),
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    }
+}
+
+async fn node_patch(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Json(p): Json<NodePatch>,
+) -> ApiResult<PlatformNode> {
+    let n = tx(&s, move |c, _| nodes::patch(c, &id, &p)).await?;
+    changed(&s, "nodes");
+    Ok(Json(n))
+}
+
+async fn node_remove(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
+    tx(&s, move |c, _| nodes::remove(c, &id)).await?;
+    changed(&s, "nodes");
+    Ok(Json(json!({ "removed": true })))
+}
+
+/// Where the live deployment's containers run, and their state there.
+async fn app_instances(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<Vec<AppInstance>> {
+    let p = platform(&s)?;
+    let dep = tx(&s, move |c, _| Ok(apps::find(c, &app)?.current_deployment_id)).await?;
+    let Some(dep) = dep else { return Ok(Json(vec![])) };
+    let mut out = vec![];
+    for pl in p.engine.placed(&dep)? {
+        let state = match p.engine.node_runtime(&pl.node) {
+            Ok(rt) => match rt.inspect(&pl.instance.container).await {
+                Ok(Some(i)) if i.paused => "paused".to_string(),
+                Ok(Some(i)) => i.status,
+                Ok(None) => "missing".into(),
+                Err(_) => "unknown".into(),
+            },
+            Err(_) => "unknown".into(),
+        };
+        out.push(AppInstance {
+            node_id: pl.node.id.clone(),
+            node: pl.node.name.clone(),
+            container: pl.instance.container.clone(),
+            state,
+        });
+    }
+    Ok(Json(out))
 }
 
 // ----- deploying ------------------------------------------------------------------
@@ -1274,22 +1422,55 @@ struct RuntimeLogQuery {
 
 /// The live container's output (`docker logs`) as JSON lines
 /// `{at, stream, text}`; with `follow=true` it stays open for new lines.
+/// From another server's container it comes through that server's agent.
 async fn app_runtime_logs(
     State(s): State<AppState>,
     Path(app): Path<String>,
     Query(q): Query<RuntimeLogQuery>,
 ) -> Result<axum::response::Response, AppError> {
-    use axum::response::IntoResponse;
     let p = platform(&s)?;
     let id = tx(&s, move |c, _| Ok(apps::find(c, &app)?.id)).await?;
-    let container = p.engine.live_container(&id)?;
-    let tail = q.tail.unwrap_or(200).clamp(1, 5000).to_string();
+    let (rt, container) = p.engine.live_instance(&id)?;
+    let tail = q.tail.unwrap_or(200).clamp(1, 5000);
+    match rt {
+        vercelify_platform::runtime::NodeRuntime::Remote(r) => {
+            let path = format!(
+                "/v1/runtime/containers/{container}/logs?tail={tail}&follow={}",
+                q.follow
+            );
+            passthrough(r.stream(&path).await?)
+        }
+        vercelify_platform::runtime::NodeRuntime::Local(_) => {
+            docker_logs(&p.engine.deployer.docker.bin, &container, tail, q.follow)
+        }
+    }
+}
+
+/// A streamed answer from another server's agent, passed on as it is.
+fn passthrough(resp: hyper::Response<hyper::body::Incoming>) -> Result<axum::response::Response, AppError> {
+    use axum::response::IntoResponse;
+    let headers = [
+        (axum::http::header::CONTENT_TYPE, "application/x-ndjson"),
+        (axum::http::header::CACHE_CONTROL, "no-store"),
+    ];
+    Ok((headers, axum::body::Body::new(resp.into_body())).into_response())
+}
+
+/// `docker logs` of a container as JSON lines `{at, stream, text}`.
+pub(crate) fn docker_logs(
+    docker_bin: &str,
+    container: &str,
+    tail: u32,
+    follow: bool,
+) -> Result<axum::response::Response, AppError> {
+    use axum::response::IntoResponse;
+    let tail = tail.clamp(1, 5000).to_string();
     let mut args = vec!["logs", "--timestamps", "--tail", &tail];
-    if q.follow {
+    if follow {
         args.push("--follow");
     }
-    args.push(&container);
-    let mut child = tokio::process::Command::new(&p.engine.deployer.docker.bin)
+    args.push(container);
+    let mut child = tokio::process::Command::new(docker_bin)
         .args(&args)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
@@ -1395,8 +1576,45 @@ async fn app_terminal(
     let req = body.map(|b| b.0).unwrap_or_default();
     let p = platform(&s)?;
     let id = tx(&s, move |c, _| Ok(apps::find(c, &app)?.id)).await?;
-    let container = p.engine.live_container(&id)?;
-    open_terminal(&s, &actor, container, None, &req)
+    let (rt, container) = p.engine.live_instance(&id)?;
+    match rt {
+        vercelify_platform::runtime::NodeRuntime::Remote(r) => {
+            // Opened on that server; this one relays it under its own id,
+            // owned by the token that opened it.
+            let mut body = serde_json::to_value(&req).unwrap_or(json!({}));
+            body["container"] = json!(container);
+            let t: TerminalSession = r.post("/v1/runtime/terminals", &body).await?;
+            let id = format!("term_r{}", vercelify_platform::secrets::random_token(20).to_lowercase());
+            s.remote_terminals.lock().unwrap_or_else(|e| e.into_inner()).insert(
+                id.clone(),
+                RemoteTerminal {
+                    owner: actor.id.clone(),
+                    remote: r,
+                    id: t.id,
+                },
+            );
+            Ok(Json(TerminalSession { id, target: t.target }))
+        }
+        vercelify_platform::runtime::NodeRuntime::Local(_) => open_terminal(&s, &actor, container, None, &req),
+    }
+}
+
+/// A terminal on another server, relayed.
+#[derive(Clone)]
+pub struct RemoteTerminal {
+    owner: String,
+    remote: vercelify_platform::runtime::Remote,
+    /// Its id there.
+    id: String,
+}
+
+fn remote_terminal(s: &AppState, actor: &Actor, id: &str) -> Option<RemoteTerminal> {
+    s.remote_terminals
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(id)
+        .filter(|t| t.owner == actor.id)
+        .cloned()
 }
 
 async fn db_terminal(
@@ -1419,7 +1637,7 @@ fn session(s: &AppState, actor: &Actor, id: &str) -> Result<Arc<crate::terminal:
 
 /// The terminal's output as JSON lines: `{"data": "<base64>"}`, then
 /// `{"exit": code}` when its shell ends. Starts with recent output.
-async fn terminal_output(
+pub(crate) async fn terminal_output(
     State(s): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path(id): Path<String>,
@@ -1427,6 +1645,13 @@ async fn terminal_output(
     use crate::terminal::Chunk;
     use axum::response::IntoResponse;
     use base64::Engine as _;
+    if let Some(r) = remote_terminal(&s, &actor, &id) {
+        return passthrough(
+            r.remote
+                .stream(&format!("/v1/runtime/terminals/{}/output", r.id))
+                .await?,
+        );
+    }
     let t = session(&s, &actor, &id)?;
     let (backlog, mut live, exit, reader) = t.attach();
     let (tx_, rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(64);
@@ -1469,18 +1694,28 @@ async fn terminal_output(
 }
 
 #[derive(Deserialize)]
-struct TerminalInput {
+pub(crate) struct TerminalInput {
     /// Base64 of the bytes typed.
     data: String,
 }
 
-async fn terminal_input(
+pub(crate) async fn terminal_input(
     State(s): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path(id): Path<String>,
     Json(req): Json<TerminalInput>,
 ) -> ApiResult<Value> {
     use base64::Engine as _;
+    if let Some(r) = remote_terminal(&s, &actor, &id) {
+        let v: Value = r
+            .remote
+            .post(
+                &format!("/v1/runtime/terminals/{}/input", r.id),
+                &json!({ "data": req.data }),
+            )
+            .await?;
+        return Ok(Json(v));
+    }
     let t = session(&s, &actor, &id)?;
     let data = base64::engine::general_purpose::STANDARD
         .decode(req.data.as_bytes())
@@ -1496,28 +1731,43 @@ async fn terminal_input(
 }
 
 #[derive(Deserialize)]
-struct TerminalSize {
+pub(crate) struct TerminalSize {
     cols: u16,
     rows: u16,
 }
 
-async fn terminal_resize(
+pub(crate) async fn terminal_resize(
     State(s): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path(id): Path<String>,
     Json(req): Json<TerminalSize>,
 ) -> ApiResult<Value> {
+    if let Some(r) = remote_terminal(&s, &actor, &id) {
+        let v: Value = r
+            .remote
+            .post(
+                &format!("/v1/runtime/terminals/{}/resize", r.id),
+                &json!({ "cols": req.cols, "rows": req.rows }),
+            )
+            .await?;
+        return Ok(Json(v));
+    }
     let t = session(&s, &actor, &id)?;
     t.resize(req.cols.min(1000), req.rows.min(500))
         .map_err(|e| AppError::conflict(e.to_string()))?;
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn terminal_close(
+pub(crate) async fn terminal_close(
     State(s): State<AppState>,
     Extension(actor): Extension<Actor>,
     Path(id): Path<String>,
 ) -> ApiResult<Value> {
+    if let Some(r) = remote_terminal(&s, &actor, &id) {
+        s.remote_terminals.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+        let _ = r.remote.delete(&format!("/v1/runtime/terminals/{}", r.id)).await;
+        return Ok(Json(json!({ "closed": true })));
+    }
     if !s.terminals.close(&id, &actor.id) {
         return Err(AppError::not_found(format!("no terminal {id}")));
     }

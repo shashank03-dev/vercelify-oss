@@ -9,6 +9,7 @@ const ALPHABET: &[u8; 32] = b"0123456789abcdefghjkmnpqrstvwxyz";
 
 pub const PREFIXES: &[&str] = &[
     "prj", "env", "app", "dom", "var", "dpl", "prv", "db", "bak", "vol", "node", "mn", "git", "hook", "task", "tok",
+    "ins",
 ];
 
 /// A new random id with this prefix.

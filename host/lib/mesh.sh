@@ -104,19 +104,35 @@ mesh_invite() {
   done
   [[ "$ttl" =~ ^[0-9]+$ ]] || die "--ttl must be a number of minutes"
   out=$(agent_api POST /v1/mesh/invites "$(jq -nc --arg k "$kind" --arg r "$role" --argjson t "$ttl" '{kind: $k, role: $r, ttl_minutes: $t}')")
-  printf 'On the new machine (valid until %s, once):\n\n  sudo vercelify mesh join %s\n\n' \
-    "$(jq -r .expires_at <<<"$out")" "$(jq -r .token <<<"$out")"
+  # A server joining a platform main server runs its apps too (design §8.2).
+  local extra=""
+  [[ "$kind" == server ]] && platform_engine && extra=" --platform"
+  printf 'On the new machine (valid until %s, once):\n\n  sudo vercelify mesh join %s%s\n\n' \
+    "$(jq -r .expires_at <<<"$out")" "$(jq -r .token <<<"$out")" "$extra"
 }
 
-# mesh join TOKEN [--name NAME] — put this machine on the mesh.
+# mesh join TOKEN [--name NAME] [--platform] — put this machine on the
+# mesh; --platform (printed by a platform main server's invite) also makes
+# it a worker of the platform engine: the main server places apps here.
 mesh_join() {
-  local token=${1:-} name=() cfg="$VERCELIFY_ETC/agent.toml" ip
-  [[ "$token" == vfyj1.* ]] || die "usage: vercelify mesh join vfyj1.… [--name NAME]  (from: sudo vercelify mesh invite)"
+  local token=${1:-} name=() cfg="$VERCELIFY_ETC/agent.toml" ip platform=0
+  [[ "$token" == vfyj1.* ]] || die "usage: vercelify mesh join vfyj1.… [--name NAME] [--platform]  (from: sudo vercelify mesh invite)"
   shift
-  if [[ "${1:-}" == --name ]]; then name=(--name "${2:?--name needs a name}"); fi
+  while (( $# )); do
+    case "$1" in
+      --name) name=(--name "${2:?--name needs a name}"); shift ;;
+      --platform) platform=1 ;;
+      *) die "usage: vercelify mesh join vfyj1.… [--name NAME] [--platform]" ;;
+    esac
+    shift
+  done
   [[ -x "$MESH_BIN" ]] || die "$MESH_BIN is missing (re-run the installer)"
   run_cmd "$MESH_BIN" --dir "$MESH_DIR" join "$token" "${name[@]}"
   [[ -f "$cfg" ]] && toml_list_add listen mesh "$cfg"
+  if [[ "$platform" == 1 && -f "$cfg" ]]; then
+    [[ "$ROLE" == worker ]] || warn "this server isn't installed as a worker (setup-host.sh --worker); its agent runs no apps for the main server"
+    toml_set engine '"platform"' "$cfg"
+  fi
   mesh_install_unit
   ip=$(jq -r .ipv4 "$MESH_DIR/state.json" 2>/dev/null || true)
   [[ -n "$ip" ]] && mesh_wait_up "$ip" && ok "on the mesh as $ip"
