@@ -16,6 +16,7 @@ mod github;
 mod http;
 mod llm;
 mod pairing;
+mod platform;
 mod powerguard;
 mod project;
 mod projects;

@@ -36,6 +36,9 @@ pub struct AppState {
     pub jobs: Arc<crate::events::Jobs>,
     pub sleep: Arc<crate::sleep::Sleep>,
     pub projects: Arc<crate::projects::Projects>,
+    /// Vercelify's own engine (main server, `engine = "platform"`).
+    pub platform: Option<Arc<crate::platform::Platform>>,
+    pub platform_error: Option<crate::platform::OpenError>,
 }
 
 impl AppState {
@@ -66,6 +69,7 @@ impl AppState {
         ));
         projects.set_watcher(watcher.clone());
         autodeploy.set_projects(projects.clone());
+        let (platform, platform_error) = crate::platform::Platform::open_if_enabled(&config);
         let llm = Arc::new(Llm::new(config.clone()));
         llm.set_jobs(jobs.clone());
         Self {
@@ -74,6 +78,8 @@ impl AppState {
             llm,
             sleep: Arc::new(crate::sleep::Sleep::load(config.clone(), events.clone(), jobs.clone())),
             projects,
+            platform,
+            platform_error,
             events,
             jobs,
             claims: Arc::new(Claims::default()),

@@ -121,6 +121,16 @@ pub struct Config {
     /// Let `vercel.json` rewrites proxy to this machine or private networks
     /// (off: they could publish Ollama, Coolify or a database).
     pub rewrite_private_targets: bool,
+    /// What builds and runs apps on a main server: `coolify` (today) or
+    /// `platform` (Vercelify's own engine, docs/design/SYSTEM-DESIGN.md).
+    pub engine: String,
+    /// The platform's state (main server, engine = platform).
+    pub platform_db: PathBuf,
+    /// Seals secrets in the platform database. Lose it and stored variables
+    /// and passwords can't be read: it is part of every backup.
+    pub master_key_file: PathBuf,
+    /// Mesh keys, certificate and the last peer map.
+    pub mesh_dir: PathBuf,
 }
 
 impl Default for Config {
@@ -201,6 +211,10 @@ impl Default for Config {
             proxy_http_port: 80,
             proxy_https_port: 443,
             rewrite_private_targets: false,
+            engine: "coolify".into(),
+            platform_db: "/var/lib/vercelify/platform.db".into(),
+            master_key_file: "/var/lib/vercelify/master.key".into(),
+            mesh_dir: "/var/lib/vercelify/mesh".into(),
         }
     }
 }
@@ -246,6 +260,9 @@ impl Config {
 
     fn apply_env(&mut self) {
         let var = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
+        if let Some(v) = var("VERCELIFY_ENGINE") {
+            self.engine = v;
+        }
         if let Some(v) = var("VERCELIFY_LISTEN") {
             self.listen = v.split(',').map(|s| s.trim().to_string()).collect();
         }
@@ -444,6 +461,11 @@ impl Config {
     /// KEY=VALUE pairs of power-guard.conf (shell syntax, comments ignored).
     /// The power guard's settings: its config file, then what was changed
     /// from the cockpit (the guard reads them in the same order).
+    /// Whether this server runs Vercelify's own platform engine.
+    pub fn platform_engine(&self) -> bool {
+        self.engine == "platform" && self.role() != "worker"
+    }
+
     pub fn power_guard_values(&self) -> BTreeMap<String, String> {
         let mut v = env_file_values(&self.power_guard_conf);
         v.extend(env_file_values(&self.power_guard_overrides));

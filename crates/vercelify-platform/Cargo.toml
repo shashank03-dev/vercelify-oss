@@ -1,0 +1,23 @@
+[package]
+name = "vercelify-platform"
+description = "Vercelify's control plane: state, secrets, builds, deployments and the runtime reconciler"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+vercelify-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+rusqlite = { version = "0.37", features = ["bundled", "backup"] }
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+getrandom = "0.3"
+tokio = { workspace = true }
+zeroize = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 vercelify-core = { workspace = true, features = ["collect"] }
+vercelify-platform.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

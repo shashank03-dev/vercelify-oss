@@ -15,6 +15,8 @@ running several deployments on a weak machine more reliable.
 | Path | What it is |
 | --- | --- |
 | `crates/vercelify-core` | Shared Rust library: system collection (disks, power, thermal, Tailscale), models, pairing codes, volume/stream helpers. Models export TS types via `ts-rs`. |
+| `crates/vercelify-platform` | Vercelify's own PaaS engine (replacing Coolify): SQLite state + migrations, sealed secrets, builds, deployments, reconciler. A library the agent mounts. |
+| `crates/vercelify-mesh` | Vercelify's own private network (replacing Tailscale): addressing, keys, coordinator certificates and peer maps, and the `vercelify-mesh` daemon. |
 | `agent/` | `vercelify-agent`, the small Rust daemon on the host (`:7420`, bearer token). Reports system state, manages containers/services/volumes and the display receiver. |
 | `cockpit/` | Tauri v2 desktop app (React 19, TypeScript, Tailwind v4, Framer Motion). `src/` = UI, `src-tauri/` = Rust command layer. |
 | `cockpit/src/types/generated` | **Generated** by `cargo test` from Rust models. Never edit by hand. |
@@ -25,15 +27,24 @@ running several deployments on a weak machine more reliable.
 | `website/` | Open-source launch site (Vite, React 19, Tailwind v4, same tokens and fonts as the cockpit). `npm run dev` serves it on `:5180`. |
 | `docs/` | Architecture, Coolify notes, development, display streaming, troubleshooting, Vercel parity, `vercel.json` support (PROJECT-CONFIG). |
 
-The stack is **Coolify v4** as the PaaS engine (builds, Traefik, Let's Encrypt,
+The stack today is **Coolify v4** as the PaaS engine (builds, Traefik, Let's Encrypt,
 previews, DBs), plus **Tailscale** for private access with no open ports, plus an
 optional **Cloudflare Tunnel** for public HTTPS behind CGNAT. The cockpit talks
 to the agent and to Coolify's API over Tailscale.
+
+**Both are being replaced** by our own engine (`vercelify-platform`, selected per
+server with `engine = "platform"` in `agent.toml`) and our own WireGuard mesh
+(`vercelify-mesh`). The plan and milestones are in `docs/PLAN-NATIVE-PLATFORM.md`;
+the binding engineering design is `docs/design/SYSTEM-DESIGN.md`. Change the
+design doc in the same commit as code that departs from it. Until milestone M10,
+Coolify and Tailscale stay the default and must keep working; new features go
+into the platform engine, not into Coolify integration.
 
 ## Commands
 
 ```bash
 cargo test --workspace --all-features            # also regenerates cockpit/src/types/generated
+cargo test -p vercelify-platform -p vercelify-mesh   # the new engine and mesh alone (no Tauri libraries needed)
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 bats host/tests
@@ -62,9 +73,11 @@ suites.
   commits or PRs.
 - **Think before building.** Before implementing a feature, check that it fits the
   goal above, works on low-end hardware (8 GB RAM, HDD, possibly on battery), and
-  doesn't add a recurring cost or a required cloud service. Prefer extending
-  Coolify over re-implementing it.
-- **Low-end first:** keep the agent tiny (static musl binary, ~3 MB). Keep cockpit
+  doesn't add a recurring cost or a required cloud service. Keep Docker, BuildKit,
+  Traefik and WireGuard (`boringtun`) as dependencies; build everything Coolify and
+  Tailscale did for us on top of them (design doc §17).
+- **Low-end first:** keep the agent small (static musl binary, ≤ 8 MB, gated in CI;
+  `vercelify-mesh` ≤ 6 MB). Keep cockpit
   polling intervals modest. Avoid canvas/WebGL or heavy always-on animation in
   the UI.
 - **UI:** reuse primitives from `cockpit/src/components/ui.tsx` and the semantic

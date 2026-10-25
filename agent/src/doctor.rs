@@ -81,6 +81,9 @@ pub struct Facts {
     pub power_guard_active: bool,
     /// Main only: Coolify answers `/api/health`.
     pub coolify_healthy: Option<bool>,
+    /// The platform engine's database: Ok(schema version) or why it failed.
+    /// None = this server doesn't run the platform engine.
+    pub platform: Option<Result<u32, String>>,
     /// Main only: the stored API token is accepted (None = no token).
     pub coolify_token_ok: Option<bool>,
     /// Main only: required columns missing from Coolify's database.
@@ -185,6 +188,23 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
                 None,
             )
         });
+    }
+    match &f.platform {
+        Some(Ok(v)) => out.push(check(
+            "platform",
+            "Platform",
+            Fine,
+            format!("state database ready (schema {v})"),
+            None,
+        )),
+        Some(Err(e)) => out.push(check(
+            "platform",
+            "Platform",
+            Bad,
+            e.clone(),
+            Some("journalctl -u vercelify-agent -n 50; sudo vercelify restore-state restores the last good copy"),
+        )),
+        None => {}
     }
     if main {
         out.push(match f.coolify_healthy {
@@ -906,6 +926,11 @@ pub async fn gather(s: &AppState) -> Facts {
         firewall_active: active(services::status(&cfg.systemctl_bin, "vercelify-firewall").await),
         power_guard_active: active(services::status(&cfg.systemctl_bin, "vercelify-power-guard").await),
         coolify_healthy,
+        platform: match (&s.platform, &s.platform_error) {
+            (Some(p), _) => Some(p.store.schema_version().map_err(|e| e.to_string())),
+            (None, Some(e)) => Some(Err(e.0.clone())),
+            (None, None) => None,
+        },
         coolify_token_ok,
         coolify_schema_missing: slow.schema_missing,
         coolify_auto_update: slow.auto_update,
@@ -1036,6 +1061,7 @@ mod tests {
             firewall_active: true,
             power_guard_active: true,
             coolify_healthy: Some(true),
+            platform: None,
             coolify_token_ok: Some(true),
             coolify_schema_missing: Some(vec![]),
             coolify_auto_update: Some(false),
@@ -1083,6 +1109,28 @@ mod tests {
         assert!(c.iter().all(|c| c.fix.is_none()));
         assert_eq!(status_of(&c, "ollama"), None, "no AI check when Ollama isn't installed");
         assert_eq!(status_of(&c, "smart-sda"), Some(Fine));
+    }
+
+    #[test]
+    fn platform_database_check() {
+        let none = evaluate(&healthy_main());
+        assert!(
+            !none.iter().any(|c| c.id == "platform"),
+            "not shown on the Coolify engine"
+        );
+        let ok = evaluate(&Facts {
+            platform: Some(Ok(1)),
+            ..healthy_main()
+        });
+        let c = ok.iter().find(|c| c.id == "platform").unwrap();
+        assert_eq!(c.status, CheckStatus::Ok);
+        let bad = evaluate(&Facts {
+            platform: Some(Err("the platform database is damaged".into())),
+            ..healthy_main()
+        });
+        let c = bad.iter().find(|c| c.id == "platform").unwrap();
+        assert_eq!(c.status, CheckStatus::Bad);
+        assert!(c.fix.as_deref().unwrap().contains("restore-state"));
     }
 
     #[test]

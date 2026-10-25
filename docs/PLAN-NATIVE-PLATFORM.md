@@ -1,6 +1,6 @@
 # Plan: replace Coolify and Tailscale with our own platform
 
-Status: **proposal**, October 2026. Nothing here is built yet.
+Status: **accepted**, October 2026. Engineering design: [design/SYSTEM-DESIGN.md](design/SYSTEM-DESIGN.md).
 
 Goal: Vercelify keeps everything it does today (push-to-deploy, PR previews,
 rollbacks, databases, custom domains with HTTPS, pools of servers, private
@@ -46,7 +46,7 @@ that would be unwise to rewrite:
 | --- | --- |
 | **Docker Engine + BuildKit (`docker buildx`)** | The container runtime. Rewriting it is out of scope |
 | **Traefik** (pinned, run by us, not by Coolify) | We already generate Traefik dynamic files (`routing.rs`) and contract-test them on 3.4/3.7. ACME/Let's Encrypt, HTTP/2, WebSockets and the metrics we use for sleeping apps all come with it. A homemade TLS-terminating proxy would be the riskiest part of the whole system |
-| **WireGuard** (Linux kernel module; `boringtun` userspace on the Mac) | The crypto and the protocol. We build the coordination, NAT traversal, relay, DNS and ACLs |
+| **WireGuard** (the protocol, via the `boringtun` userspace implementation) | The crypto and the protocol. We build the coordination, NAT traversal, relay, DNS and ACLs |
 | **Cloudflare Tunnel** (optional, as today) | Public HTTPS behind CGNAT, and the carrier for our mesh relay |
 | **restic**, official database images, `git` | As today |
 
@@ -64,7 +64,7 @@ recommend against it.
                  │ agent (coordinator role)             │
                  │  /v1/mesh/*  node registry, ACLs,    │
                  │              key signing, peer maps  │
-                 │ vercelify-mesh  (kernel WG: vfy0)    │
+                 │ vercelify-mesh  (WireGuard: vfy0)    │
                  │  relay  :443 via tunnel / :7443      │
                  └──────▲───────────────▲───────────────┘
            WireGuard UDP│ or relay       │ WireGuard UDP or relay
@@ -91,7 +91,7 @@ recommend against it.
 
 | Platform | How |
 | --- | --- |
-| Linux servers (x86, Pi) | Kernel WireGuard interface `vfy0`, configured over netlink (generic netlink `wireguard` family + rtnetlink for addresses/routes), no `wireguard-tools` dependency. Fallback when the module is missing: `boringtun` on `/dev/net/tun` |
+| Linux servers (x86, Pi) | Userspace WireGuard (`boringtun`) on a tun device `vfy0`. One UDP socket carries WireGuard, NAT probing and STUN, which kernel WireGuard can't share (design decision D4 in [design/SYSTEM-DESIGN.md](design/SYSTEM-DESIGN.md)). A few hundred Mbit/s on a Pi is far more than a home uplink |
 | macOS, default "app mode" (no root) | `boringtun` + `smoltcp` userspace TCP/IP stack in the daemon, run as a per-user LaunchAgent. It exposes a SOCKS5 proxy and fixed port forwards on `127.0.0.1`. The cockpit (`reqwest` proxy) and `vfy` (`curl --socks5-hostname`) use it. No kernel extension, no admin password |
 | macOS, optional "system mode" | A privileged LaunchDaemon (installed by `install-mac.sh --system-network` or the app via `SMAppService`) that creates a `utun` interface, so a browser can open private app URLs directly. `/etc/resolver/vfy` points `*.vfy` at the mesh DNS |
 | Display streaming (UDP 5600–5610) | System mode: direct. App mode: a UDP forward on `127.0.0.1` that ffmpeg sends to |
@@ -151,9 +151,7 @@ In order, per peer pair, re-tried every 30 s while a worse path is in use:
    persistent keepalive 25 s. Works for most home routers that aren't symmetric NAT.
 3. **Relay:** `vercelify-mesh relay` on the main server forwards opaque WireGuard
    packets keyed by public key, over WebSocket/HTTPS. Traffic stays end-to-end
-   encrypted by WireGuard, so the relay can't read it. Kernel WireGuard points the
-   peer endpoint at a local UDP socket that the daemon bridges to the relay.
-   The relay is reachable:
+   encrypted by WireGuard, so the relay can't read it.    The relay is reachable:
    - through the **Cloudflare tunnel** at `relay.<domain>` (works behind CGNAT, free),
    - on a **public IP** (`:7443/tcp`, opened by the firewall when the user chooses it),
    - on **any node with a public IP** (a cheap VPS is optional, never required).
@@ -183,8 +181,8 @@ explains this, and the Servers page shows the path per peer (LAN / direct / rela
   deployer, proxy configuration, database templates, secrets. The agent mounts its
   routes. Models stay in `vercelify-core` so `ts-rs` keeps the cockpit types generated.
 - Size budget: the agent is about 3 MB. SQLite (`rusqlite` bundled), ChaCha20-Poly1305,
-  Ed25519 and the netlink code add an estimated 2–3 MB. Target ≤ 7 MB static musl. CI
-  fails above 8 MB.
+  Ed25519, TLS and the WebSocket relay add an estimated 2–4 MB. Target ≤ 8 MB static musl. CI
+  fails above 8 MB (the mesh daemon is a separate binary, ≤ 6 MB).
 
 ### 4.2 State: SQLite
 
@@ -387,7 +385,7 @@ during the transition.
 | Area | Change |
 | --- | --- |
 | `crates/vercelify-core` | New models (App, Deployment, Database, Node, MeshNode, MeshStatus, EnvVar…), exported with `ts-rs`. `tailscale.rs` stays until M10 for the migration, then goes. `Pairing` v2 |
-| `crates/vercelify-mesh` (new) | WireGuard netlink control, boringtun/smoltcp userspace, STUN, relay client/server, DNS responder, mDNS, map client |
+| `crates/vercelify-mesh` (new) | boringtun WireGuard on a tun device (Linux) or smoltcp (Mac app mode), STUN, relay client/server, DNS responder, mDNS, map client |
 | `crates/vercelify-platform` (new) | Store, migrations, secrets, builder, detector, deployer, reconciler, scheduler, templates |
 | `agent/` | Mount platform and mesh routes; `autodeploy.rs`, `sleep.rs`, `projects.rs`, `routing.rs`, `doctor.rs`, `watch.rs`, `ssh.rs`, `coolify.rs` move off Coolify; `coolify.rs` and `ssh.rs` deleted at the end; binds to the mesh IP |
 | `cockpit/src-tauri` | Remove `coolify_request` and `open_coolify`; mesh client (talks to the local `vercelify-mesh` SOCKS5); discovery via mDNS + mesh map instead of `tailscale status`; `local_tailscale` → `local_mesh` |
@@ -432,7 +430,7 @@ The cockpit shows the migration as a job with steps and a per-app result.
 | --- | --- |
 | Unit (Rust) | Store migrations up/down, secrets round-trip, detector against fixture repos (one per framework in `crates/vercelify-platform/tests/fixtures`), deploy state machine with a fake Docker, reconciler decisions, scheduler placement, pairing v2, mesh map diffing, STUN/relay framing, DNS answers, ACL generation, Laravel decryption against Coolify fixtures |
 | Platform contract test (`host/tests/contract/platform.sh`, real Docker + Traefik) | Create app from a sample repo → build → deploy → HTTP 200; push → zero-downtime redeploy (no failed request during the switch); rollback instant; preview up and torn down; Postgres + Redis created and reachable; volume tier move; sleep/wake; `vercel.json` routing (today's routing test); deploy hook; compose app |
-| Mesh test (`host/tests/contract/mesh.sh`, network namespaces) | Three namespaces behind simulated NAT (iptables MASQUERADE, one symmetric): LAN path, direct path after hole punching, relay fallback; revoke drops traffic; coordinator restart keeps traffic; userspace mode (boringtun/smoltcp) talking to kernel WG |
+| Mesh test (`host/tests/contract/mesh.sh`, network namespaces) | Three namespaces behind simulated NAT (iptables MASQUERADE, one symmetric): LAN path, direct path after hole punching, relay fallback; revoke drops traffic; coordinator restart keeps traffic; app mode (smoltcp, no tun) talking to a server (tun) |
 | Migration test | Real Coolify 4.4.6 with two apps, a database and a preview → `vercelify migrate` → everything serves from our stack → `--rollback` restores Coolify |
 | Cockpit | Vitest for the new API layer and views; Playwright demo flows (`e2e-demo`) updated; desktop e2e |
 | Hosts | bats for new CLI commands; installer e2e in the systemd container; arm64 under QEMU; real Pi run before release |
@@ -455,7 +453,7 @@ default until M10, so nothing is half-replaced at any point.
 | M4 | Existing features off Coolify | autodeploy + previews, sleep, `vercel.json` projects, crons, domains + TLS, doctor, watch, uptime, alerts, scheduled tasks, terminal, deploy hooks | Every current feature runs with `platform` and no Coolify |
 | M5 | Databases | Templates, credentials, tier moves, backups/restore, public ports | Contract test creates, backs up and restores each kind |
 | M6 | Cockpit on the new API | Remove Coolify paths behind the capability, New app / New database / terminal, demo data, e2e | Demo e2e passes; a Coolify-free server is fully usable from the app |
-| M7 | Mesh: servers | `vercelify-mesh` on Linux, kernel WG over netlink, coordinator, enrollment, peer maps, DNS, ACL firewall, rotation, revocation | Mesh test: LAN + direct paths, revoke |
+| M7 | Mesh: servers | `vercelify-mesh` on Linux (boringtun + tun), coordinator, enrollment, peer maps, DNS, ACL firewall, rotation, revocation | Mesh test: LAN + direct paths, revoke |
 | M8 | Mesh: NAT + Mac | STUN, hole punching, relay (tunnel/public), userspace boringtun+smoltcp, SOCKS5 + forwards, LaunchAgent, system mode, mDNS discovery, pairing v2, cockpit and `vfy` over the mesh, display over the mesh | Mesh test incl. symmetric NAT → relay; cockpit talks to a server with Tailscale off |
 | M9 | Multi-node | Worker runtime API, placement, mesh registry, multi-arch builds, replicas, tunnel routes for workers, warm standby + `promote`, GitHub App + webhooks | Two-node contract test; promote test |
 | M10 | Migration + switch default | `vercelify migrate` (+rollback/finish), installer without Coolify/Tailscale, docs/website/README, remove `coolify.rs`, `ssh.rs`, `tailscale.rs`, `types/coolify.ts` | Migration test passes; fresh install has neither |

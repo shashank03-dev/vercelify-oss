@@ -63,11 +63,21 @@ jobs:
         with:
           key: aarch64
       - run: sudo apt-get update && sudo apt-get install -y qemu-user-static
-      - name: Agent and core tests as arm64 binaries
+      - name: C compiler for arm64 musl (bundled SQLite)
+        run: |
+          pip install ziglang
+          mkdir -p "$HOME/.local/bin"
+          printf '#!/bin/sh\nexec python3 -m ziglang cc -target aarch64-linux-musl "$@"\n' >"$HOME/.local/bin/aarch64-musl-cc"
+          printf '#!/bin/sh\nexec python3 -m ziglang ar "$@"\n' >"$HOME/.local/bin/aarch64-musl-ar"
+          chmod +x "$HOME/.local/bin/aarch64-musl-cc" "$HOME/.local/bin/aarch64-musl-ar"
+          echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+      - name: Agent, core, platform and mesh tests as arm64 binaries
         env:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER: rust-lld
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER: qemu-aarch64-static
-        run: cargo test -p vercelify-core -p vercelify-agent --target aarch64-unknown-linux-musl
+          CC_aarch64_unknown_linux_musl: aarch64-musl-cc
+          AR_aarch64_unknown_linux_musl: aarch64-musl-ar
+        run: cargo test -p vercelify-core -p vercelify-platform -p vercelify-mesh -p vercelify-agent --target aarch64-unknown-linux-musl
       - name: Host scripts on arm64 Debian 12 (what Raspberry Pi OS is built on)
         run: |
           docker run --rm --platform linux/arm64 -v "$PWD":/src:ro debian:12 bash -ec '
@@ -123,6 +133,11 @@ jobs:
           key: ${{ matrix.target }}
       - run: pip install cargo-zigbuild
       - run: cargo zigbuild --release --locked -p vercelify-agent --target ${{ matrix.target }}
+      - name: Size budget (docs/design/SYSTEM-DESIGN.md §16)
+        run: |
+          size=$(stat -c %s target/${{ matrix.target }}/release/vercelify-agent)
+          echo "vercelify-agent: $((size / 1024)) KiB"
+          [ "$size" -le $((8 * 1024 * 1024)) ] || { echo "::error::vercelify-agent is over the 8 MiB budget"; exit 1; }
       - uses: actions/upload-artifact@v7
         with:
           name: vercelify-agent-${{ matrix.target }}
