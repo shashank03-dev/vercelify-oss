@@ -27,4 +27,13 @@ describe("pairing codes", () => {
       /agent_url/,
     );
   });
+
+  it("vfy2. codes carry a mesh join token, and only they do", () => {
+    const p = { agent_url: "http://10.77.0.1:7420", agent_token: "0123456789abcdef", coolify_url: "", hostname: "main", mesh_join: "vfyj1.abc" };
+    const code = encodePairing(p);
+    expect(code.startsWith("vfy2.")).toBe(true);
+    expect(decodePairing(code)).toEqual(p);
+    expect(() => decodePairing(code.replace("vfy2.", "vfy1."))).toThrow(/join token/);
+    expect(() => decodePairing(encodePairing({ ...p, mesh_join: "nope" }))).toThrow(/vfyj1/);
+  });
 });

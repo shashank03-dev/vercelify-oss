@@ -1,8 +1,8 @@
-import { ArrowRight, KeyRound, Laptop, RefreshCw } from "lucide-react";
+import { ArrowRight, KeyRound, Laptop, RefreshCw, Wifi } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { pairingToSettings, servers as serversApi, settings as settingsApi } from "../lib/api";
+import { mesh, pairingToSettings, servers as serversApi, settings as settingsApi } from "../lib/api";
 import { toCockpitError, type CockpitError } from "../lib/transport";
-import type { CockpitSettings, DiscoveredServer } from "../types";
+import type { CockpitSettings, DiscoveredServer, LanServer } from "../types";
 import { Button, cx, ErrorNote, Field, IconButton, InlineCode, PixelWave, ShimmerText, Spinner, StatusDot, TextInput } from "./ui";
 
 /** Swap the host of a URL, keeping scheme and port. */
@@ -35,6 +35,9 @@ export function PairForm({
   hidePaste?: boolean;
 }) {
   const [found, setFound] = useState<DiscoveredServer[]>();
+  /** Servers on this LAN (mDNS, Vercelify's own network). */
+  const [lan, setLan] = useState<LanServer[]>([]);
+  const [lanPicked, setLanPicked] = useState<string | null>(null);
   const [scanError, setScanError] = useState<string>();
   const [scanning, setScanning] = useState(false);
   const [picked, setPicked] = useState<DiscoveredServer | null>(null);
@@ -56,6 +59,7 @@ export function PairForm({
   const scan = useCallback(async () => {
     setScanning(true);
     setScanError(undefined);
+    void mesh.discover().then(setLan, () => setLan([]));
     try {
       setFound(await serversApi.discover());
     } catch (e) {
@@ -137,11 +141,30 @@ export function PairForm({
     }
   }
 
-  async function pairWithCode() {
+  /** A server found on the LAN: the code is checked with SPAKE2, then this computer joins the mesh. */
+  async function claimLan(s: LanServer) {
+    setBusy(true);
+    setError(undefined);
     try {
-      await connect(pairingToSettings(await settingsApi.decodePairing(code)));
+      const p = await mesh.pair(short, s.control[0]);
+      setBusy(false);
+      await connect(pairingToSettings(p));
     } catch (e) {
       setError(toCockpitError(e));
+      setBusy(false);
+    }
+  }
+
+  async function pairWithCode() {
+    try {
+      // A vfy2. code also puts this computer on the server's mesh.
+      setBusy(true);
+      const p = await settingsApi.joinPairing(code);
+      setBusy(false);
+      await connect(pairingToSettings(p));
+    } catch (e) {
+      setError(toCockpitError(e));
+      setBusy(false);
     }
   }
 
@@ -151,11 +174,12 @@ export function PairForm({
     return { agent_url: `http://${a.includes(":") && !a.startsWith("[") ? a : `${a}:7420`}` };
   };
 
-  const shortForm = (target: () => { agent_url: string; ip?: string } | null, hostname: string) => (
+  const shortForm = (target: () => { agent_url: string; ip?: string } | null, hostname: string, onCode?: () => void) => (
     <form
       className="mt-2.5 flex gap-2"
       onSubmit={(e) => {
         e.preventDefault();
+        if (onCode) return void onCode();
         const t = target();
         if (t) void claim(t);
       }}
@@ -179,6 +203,55 @@ export function PairForm({
 
   return (
     <div className="space-y-5">
+      {lan.length > 0 && (
+        <section data-testid="lan-servers">
+          <div className="mb-2 flex items-center gap-2 text-[13px] font-medium">
+            <Wifi className="size-3.5 text-fg-dim" /> Servers on this network
+          </div>
+          <ul className="divide-y divide-line overflow-hidden rounded-lg border border-line bg-surface">
+            {lan.map((d) => {
+              const already = paired.includes(d.name);
+              const open = lanPicked === d.name;
+              return (
+                <li key={d.name} className="px-3.5 py-2.5" data-testid={`lan-${d.name}`}>
+                  <div className="flex items-center gap-3">
+                    <Laptop className="size-4 shrink-0 text-fg-dim" />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-baseline gap-2 text-[13px] font-medium">
+                        {d.name}
+                        {d.pairing_open && !already && (
+                          <span className="inline-flex items-center gap-1.5 self-center text-[11px] font-normal text-accent-fg">
+                            <StatusDot health="ok" /> code ready
+                          </span>
+                        )}
+                      </div>
+                      <div className="truncate font-mono text-[11px] text-fg-dim">{d.control[0]} · Vercelify network</div>
+                    </div>
+                    {already ? (
+                      <span className="flex items-center gap-1.5 text-xs text-fg-muted">
+                        <StatusDot health="ok" /> Paired
+                      </span>
+                    ) : (
+                      <Button size="sm" variant={open ? "ghost" : "subtle"} onClick={() => (setLanPicked(open ? null : d.name), setPicked(null), setByAddress(false), setShort(""), setError(undefined))}>
+                        {open ? "Cancel" : "Connect"}
+                      </Button>
+                    )}
+                  </div>
+                  {open && (
+                    <div className="mt-2 pl-7">
+                      <p className="text-xs text-fg-muted">
+                        On {d.name} run <InlineCode>sudo vercelify pair</InlineCode> and type the 8-character code it shows. This computer joins its
+                        network; no Tailscale needed.
+                      </p>
+                      {shortForm(() => null, d.name, () => void claimLan(d))}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
       <section data-testid="discovered">
         <div className="mb-2 flex items-center justify-between">
           <div className="text-[13px] font-medium">Servers on your tailnet</div>
@@ -221,7 +294,7 @@ export function PairForm({
                           <StatusDot health="ok" /> Paired
                         </span>
                       ) : (
-                        <Button size="sm" variant={open ? "ghost" : "subtle"} onClick={() => (setPicked(open ? null : d), setByAddress(false), setShort(""), setError(undefined))}>
+                        <Button size="sm" variant={open ? "ghost" : "subtle"} onClick={() => (setPicked(open ? null : d), setLanPicked(null), setByAddress(false), setShort(""), setError(undefined))}>
                           {open ? "Cancel" : "Connect"}
                         </Button>
                       )}
@@ -276,7 +349,7 @@ export function PairForm({
           >
             <TextInput
               data-testid="pairing-code"
-              placeholder="vfy1.eyJhZ2VudF91cmwiOi…"
+              placeholder="vfy2.eyJhZ2VudF91cmwiOi…"
               value={code}
               onChange={(e) => setCode(e.target.value)}
               spellCheck={false}

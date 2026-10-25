@@ -4,40 +4,43 @@
 
 import type {
   AgentEvent,
-  Job,
-  PowerGuardSettings,
-  ProjectInfo,
-  ProjectSummary,
-  SleepSetting,
   Alert,
   AuditEntry,
   AutoDeployWatch,
   BackupStatus,
-  DeviceToken,
-  MetricPoint,
-  UptimeCheck,
-  DoctorCheck,
-  DoctorReport,
-  UpdateStatus,
   ContainerInfo,
-  CoolifyServer,
-  DiscoveredServer,
-  LlmModel,
-  LlmStatus,
-  LlmTask,
   CoolifyApplication,
   CoolifyDatabase,
   CoolifyDeployment,
   CoolifyEnv,
+  CoolifyServer,
   CoolifyVolume,
+  DeviceToken,
+  DiscoveredServer,
+  DoctorCheck,
+  DoctorReport,
+  Job,
+  LlmChatMessage,
+  LlmModel,
+  LlmStatus,
+  LlmTask,
+  MeshLocal,
+  MeshNode,
+  MetricPoint,
+  PowerGuardSettings,
+  ProjectInfo,
+  ProjectSummary,
   ServiceStatus,
+  SleepSetting,
   SystemSnapshot,
   TailscaleStatus,
+  UpdateStatus,
+  UptimeCheck,
   VolumeEntry,
-  LlmChatMessage,
 } from "../types";
 import type { HttpRequest } from "./transport";
 import { isExplainChat } from "./explain";
+import { decodePairing } from "./pairing";
 import { followPlatformLogs, platformRoute, wirePlatformDemo } from "./demo-platform";
 import failedBuildLog from "../../../cli/examples/failed-build.log?raw";
 
@@ -541,8 +544,83 @@ function update(server: unknown, start: boolean): UpdateStatus {
   return { running: n < steps.length, started_at: iso(0), exit_code: n < steps.length ? null : 0, log_tail: steps.slice(0, n) };
 }
 
+// --- Vercelify's own network (vercelify-mesh) -----------------------------------
+
+const meshNodes: MeshNode[] = [
+  meshNode("mn_1", "thinkpad-t470", "server", 1, { coordinator: true, endpoints: ["192.168.1.20:51820", "81.2.3.4:51820"] }),
+  meshNode("mn_2", "optiplex-7050", "server", 2, { endpoints: ["192.168.1.31:51820"] }),
+  meshNode("mn_3", "pi5-worker", "server", 3, { arch: "aarch64", endpoints: ["100.64.9.2:41641"], relay_connected: true, relayed_bytes: 3_400_000 }),
+  meshNode("mn_4", "macbook-air", "device", 4, { os: "macos", arch: "aarch64", role: "owner" }),
+  meshNode("mn_5", "old-ipad", "device", 5, { os: "ios", role: "viewer", last_seen_at: iso(60 * 24 * 9) }),
+];
+
+function meshNode(id: string, name: string, kind: string, n: number, extra: Partial<MeshNode> = {}): MeshNode {
+  return {
+    id,
+    name,
+    kind,
+    role: "owner",
+    ipv4: `10.77.0.${n}`,
+    ipv6: `fd76:6679:6d65::${n}`,
+    public_key: `demo-key-${n}`,
+    endpoints: [],
+    os: "linux",
+    arch: "x86_64",
+    coordinator: false,
+    last_seen_at: iso(1),
+    cert_expires_at: new Date(now + 21 * 86_400_000).toISOString(),
+    revoked_at: null,
+    created_at: iso(60 * 24 * 30),
+    relay_connected: false,
+    relayed_bytes: 0,
+    ...extra,
+  };
+}
+
+function meshLocal(): MeshLocal {
+  return {
+    installed: true,
+    running: true,
+    userspace: true,
+    name: "macbook-air",
+    ipv4: "10.77.0.4",
+    revoked: false,
+    coordinator_seen_secs: 3,
+    peers: [
+      { name: "thinkpad-t470", kind: "server", addresses: ["10.77.0.1"], path: "lan", endpoint: "192.168.1.20:51820", rtt_ms: 1.8, handshake_secs: 12 },
+      { name: "optiplex-7050", kind: "server", addresses: ["10.77.0.2"], path: "lan", endpoint: "192.168.1.31:51820", rtt_ms: 2.4, handshake_secs: 40 },
+      { name: "pi5-worker", kind: "server", addresses: ["10.77.0.3"], path: "relay", endpoint: undefined, rtt_ms: undefined, handshake_secs: 25 },
+    ],
+  };
+}
+
+function meshRoute(req: HttpRequest, p: string): unknown {
+  if (p === "/v1/mesh/nodes" && req.method === "GET") return meshNodes.map((n) => ({ ...n }));
+  if (p.startsWith("/v1/mesh/nodes/") && req.method === "DELETE") {
+    const id = decodeURIComponent(p.slice("/v1/mesh/nodes/".length));
+    const n = meshNodes.find((x) => x.id === id || x.name === id);
+    if (!n) throw new Error(`mesh node ${id} not found`);
+    if (n.coordinator) throw new Error("the coordinator can't be revoked");
+    n.revoked_at = new Date().toISOString();
+    n.relay_connected = false;
+    return { revoked: n.name };
+  }
+  if (p === "/v1/mesh/invites") {
+    const kind = (req.body as { kind?: string } | undefined)?.kind ?? "server";
+    return { token: `vfyj1.demo-${kind}-${Math.random().toString(36).slice(2, 10)}`, expires_at: new Date(now + 3_600_000).toISOString() };
+  }
+  if (p === "/v1/mesh/status") {
+    return {
+      daemon: { name: "thinkpad-t470", ipv4: "10.77.0.1", interface: "vfy0" },
+      coordinator: { nodes: meshNodes.filter((n) => !n.revoked_at).length, revoked: meshNodes.filter((n) => n.revoked_at).length, map_version: 42, control: ["192.168.1.20:7443"] },
+    };
+  }
+  return undefined;
+}
+
 function agentRoute(req: HttpRequest, server?: unknown): unknown {
   const p = req.path.split("?")[0]!;
+  if (p.startsWith("/v1/mesh/")) return meshRoute(req, p);
   if (p === "/v1/health") {
     const h = hostFor(server);
     return {
@@ -801,6 +879,23 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
     }
     case "test_connection":
       return { hostname: "thinkpad-t470", coolify: { ok: true, version: "4.0.0" } };
+    case "pair_join":
+      return decodePairing(String(args.code ?? ""));
+    case "mesh_local":
+      return meshLocal();
+    case "mesh_discover":
+      return [{ name: "hp-elitebook", control: ["192.168.1.40:7443"], pairing_open: true }];
+    case "mesh_pair": {
+      if (String(args.code).replace(/[\s-]/g, "").length !== 8) throw new Error("wrong code (or not the server that printed it)");
+      return {
+        agent_url: "http://10.77.0.6:7420",
+        agent_token: "demo-token-0123456789",
+        coolify_url: "",
+        hostname: "hp-elitebook",
+        role: "main",
+        mesh_join: "vfyj1.demo",
+      };
+    }
     case "tools_status":
       return [
         { name: "ffmpeg", installed: true, path: "/opt/homebrew/bin/ffmpeg", install_hint: "brew install ffmpeg" },

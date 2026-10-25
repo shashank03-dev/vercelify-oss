@@ -502,6 +502,64 @@ pub struct DiscoveredServer {
     pub pairing_open: bool,
 }
 
+/// A Vercelify server found on the LAN by mDNS (design §13.3): pair with
+/// its short code, no address needed.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct LanServer {
+    pub name: String,
+    /// Its mesh control listener, best first (`192.168.1.20:7443`).
+    pub control: Vec<String>,
+    pub pairing_open: bool,
+}
+
+/// One peer in this computer's view of the mesh (`vercelify-mesh status`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct MeshPeer {
+    pub name: String,
+    /// server / device
+    #[serde(default)]
+    #[ts(optional)]
+    pub kind: Option<String>,
+    #[serde(default)]
+    pub addresses: Vec<String>,
+    /// `lan`, `direct`, `relay` or `none`.
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    #[ts(optional)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub rtt_ms: Option<f64>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub handshake_secs: Option<u64>,
+}
+
+/// This computer on Vercelify's mesh, for the app's network panel.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct MeshLocal {
+    /// `vercelify-mesh` is installed here.
+    pub installed: bool,
+    /// Its daemon is running (its status file is fresh).
+    pub running: bool,
+    /// App mode: servers are reached through its SOCKS proxy.
+    pub userspace: bool,
+    /// This device's mesh name and address, once joined.
+    #[ts(optional)]
+    pub name: Option<String>,
+    #[ts(optional)]
+    pub ipv4: Option<String>,
+    pub revoked: bool,
+    /// Seconds since the coordinator was last heard.
+    #[ts(optional)]
+    pub coordinator_seen_secs: Option<u64>,
+    pub peers: Vec<MeshPeer>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct PairClaimRequest {

@@ -509,3 +509,39 @@ test("platform engine: live output, a terminal, restart, services and a database
   await page.keyboard.press("Enter");
   await expect(psql).toContainText("(1 row)", { timeout: 10_000 });
 });
+
+test("Vercelify network: pair on the LAN, see each path, invite a server, revoke a device", async ({ page }) => {
+  await page.goto("/");
+  // Found by mDNS: no Tailscale, no address to type.
+  const lan = page.getByTestId("lan-hp-elitebook");
+  await expect(lan).toContainText("code ready");
+  await lan.getByRole("button", { name: "Connect" }).click();
+  await lan.getByTestId("short-code").fill("k7qf-m2xd");
+  await lan.getByTestId("short-submit").click();
+  await expect(page.getByTestId("nav-apps")).toBeVisible();
+
+  await page.getByTestId("nav-servers").click();
+  const net = page.getByTestId("mesh-network");
+  await expect(net.getByTestId("mesh-local")).toContainText("This computer: macbook-air");
+  await expect(net.getByTestId("mesh-local")).toContainText("app mode");
+  // How this Mac reaches each node: the LAN, or the relay for the Pi behind CGNAT.
+  await expect(net.getByTestId("mesh-node-thinkpad-t470")).toContainText("coordinator");
+  await expect(net.getByTestId("mesh-node-thinkpad-t470")).toContainText("LAN");
+  await expect(net.getByTestId("mesh-node-pi5-worker")).toContainText("relay");
+  await expect(net.getByTestId("mesh-node-pi5-worker")).toContainText("on the relay");
+  await expect(net.getByTestId("mesh-node-macbook-air")).toContainText("this computer");
+  await expect(net.getByTestId("mesh-revoke-thinkpad-t470")).toHaveCount(0);
+
+  // Invite a server: a join command to run on it.
+  await net.getByTestId("mesh-invite-open").click();
+  await page.getByTestId("mesh-invite-create").click();
+  await expect(page.getByTestId("mesh-invite-command")).toContainText("sudo vercelify mesh join vfyj1.");
+  await page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).first().click();
+
+  // Revoke the old iPad, after a confirmation.
+  await net.getByTestId("mesh-revoke-old-ipad").click();
+  await page.getByTestId("mesh-revoke-yes").click();
+  await expect(page.getByText("old-ipad is off the network")).toBeVisible();
+  await expect(net.getByTestId("mesh-node-old-ipad")).toContainText("revoked");
+  await expect(net.getByTestId("mesh-revoke-old-ipad")).toHaveCount(0);
+});

@@ -25,6 +25,16 @@ pub fn client() -> reqwest::Client {
         .expect("http client")
 }
 
+/// The same, through `vercelify-mesh`'s SOCKS proxy (app mode on the Mac).
+pub fn mesh_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(8))
+        .user_agent(concat!("vercelify-cockpit/", env!("CARGO_PKG_VERSION")))
+        .proxy(reqwest::Proxy::all(crate::mesh::SOCKS).expect("a valid proxy URL"))
+        .build()
+        .expect("http client")
+}
+
 fn build(
     client: &reqwest::Client,
     base: &str,
@@ -54,7 +64,9 @@ fn build(
 }
 
 fn unreachable(base: &str, e: reqwest::Error) -> String {
-    if e.is_connect() || e.is_timeout() {
+    if (e.is_connect() || e.is_timeout()) && crate::mesh::on_mesh(base) {
+        format!("HTTP 0: cannot reach {base} over Vercelify's network — is vercelify-mesh running on this Mac?")
+    } else if e.is_connect() || e.is_timeout() {
         format!("HTTP 0: cannot reach {base} — is Tailscale connected on both machines?")
     } else {
         format!("HTTP 0: {e}")

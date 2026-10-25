@@ -688,6 +688,14 @@ daemon checks it with the webpki roots).
   hole punching, the relay and revocation on it. The first also pairs a device the way the
   Mac app does (mDNS, short code, SPAKE2, join) and runs it in app mode: SOCKS, forwards,
   4 MB through the userspace stack, UDP, and the firewall still applying.
+- **The app.** The cockpit drives the installed `vercelify-mesh` (app mode, a
+  LaunchAgent): the pairing form lists servers from `discover` and claims one with the
+  short code (`pair --join`), or joins with a pasted `vfy2.` code's `mesh_join`, then waits
+  for the first handshake. Requests to mesh hosts (`10.77.*`, `fd76:6679:6d65:*`, `*.vfy`)
+  go through the daemon's SOCKS proxy (`socks5h://127.0.0.1:7480`); everything else
+  directly. The Servers page's network panel reads the daemon's status file for this
+  computer's path to each node and, from the coordinator, lists nodes with invite and
+  revoke (`/v1/mesh/nodes`, `/v1/mesh/invites`, `DELETE /v1/mesh/nodes/{id}`).
 
 ## 14. Security model
 

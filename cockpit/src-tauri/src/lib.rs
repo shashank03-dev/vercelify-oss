@@ -6,6 +6,7 @@
 mod discover;
 mod http;
 mod local;
+mod mesh;
 mod procs;
 mod tray;
 
@@ -20,8 +21,8 @@ use vercelify_core::collect::{Collector, SysPaths};
 use vercelify_core::pairing::{self, Pairing};
 use vercelify_core::stream::{moonlight_args, sender_args, MoonlightLaunch, SenderConfig};
 use vercelify_core::{
-    avfoundation::CaptureScreen, CockpitConfig, CockpitSettings, DiscoveredServer, ProcessStatus, SystemSnapshot,
-    TailscaleStatus, ToolStatus,
+    avfoundation::CaptureScreen, CockpitConfig, CockpitSettings, DiscoveredServer, LanServer, MeshLocal, ProcessStatus,
+    SystemSnapshot, TailscaleStatus, ToolStatus,
 };
 
 const SENDER: &str = "sender";
@@ -33,11 +34,26 @@ struct AppState {
     /// Open NDJSON streams (LLM chats), by id, so the UI can cancel them.
     streams: Mutex<HashMap<String, tokio::sync::oneshot::Sender<()>>>,
     http: reqwest::Client,
+    /// Through vercelify-mesh's SOCKS proxy (servers on the mesh, app mode).
+    mesh_http: reqwest::Client,
     procs: Processes,
     collector: Collector,
 }
 
 type CmdResult<T> = Result<T, String>;
+
+impl AppState {
+    /// The client for `url`: through the mesh daemon's proxy when the server
+    /// is on the mesh and the daemon runs in app mode (as root or on Linux
+    /// the mesh is routed and needs no proxy).
+    fn client_for(&self, url: &str) -> &reqwest::Client {
+        if mesh::on_mesh(url) && mesh::status().userspace {
+            &self.mesh_http
+        } else {
+            &self.http
+        }
+    }
+}
 
 // --- settings ---------------------------------------------------------------
 
@@ -180,6 +196,50 @@ async fn pair_claim(state: State<'_, AppState>, agent_url: String, code: String)
     pairing::decode(full).map_err(|e| e.to_string())
 }
 
+/// Join the mesh with a pasted `vfy2.` code (a `vfy1.` code needs nothing).
+#[tauri::command]
+async fn pair_join(code: String) -> CmdResult<Pairing> {
+    let p = pairing::decode(&code).map_err(|e| e.to_string())?;
+    if let Some(token) = p.mesh_join.clone() {
+        tauri::async_runtime::spawn_blocking(move || {
+            mesh::join(&token)?;
+            mesh::wait_connected(std::time::Duration::from_secs(30))
+        })
+        .await
+        .map_err(|e| e.to_string())??;
+    }
+    Ok(p)
+}
+
+/// Vercelify servers on this LAN (mDNS), to pair with a short code.
+#[tauri::command]
+async fn mesh_discover() -> CmdResult<Vec<LanServer>> {
+    tauri::async_runtime::spawn_blocking(mesh::discover)
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Short code → pairing, over the LAN (SPAKE2), then join the mesh.
+#[tauri::command]
+async fn mesh_pair(code: String, server: Option<String>) -> CmdResult<Pairing> {
+    let full = tauri::async_runtime::spawn_blocking(move || {
+        let full = mesh::pair(&code, server.as_deref())?;
+        mesh::wait_connected(std::time::Duration::from_secs(30))?;
+        Ok::<_, String>(full)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    pairing::decode(&full).map_err(|e| e.to_string())
+}
+
+/// This computer on the mesh (the network panel).
+#[tauri::command]
+async fn mesh_local() -> MeshLocal {
+    tauri::async_runtime::spawn_blocking(mesh::status)
+        .await
+        .unwrap_or_default()
+}
+
 /// Vercelify hosts on the tailnet.
 #[tauri::command]
 async fn discover_servers(state: State<'_, AppState>) -> CmdResult<Vec<DiscoveredServer>> {
@@ -200,7 +260,13 @@ async fn discover_servers(state: State<'_, AppState>) -> CmdResult<Vec<Discovere
 #[tauri::command]
 async fn agent_request(state: State<'_, AppState>, request: http::Request, server: Option<String>) -> CmdResult<Value> {
     let s = self::server(&state, server.as_deref())?;
-    http::send(&state.http, &s.agent_url, Some(&s.agent_token), request).await
+    http::send(
+        state.client_for(&s.agent_url),
+        &s.agent_url,
+        Some(&s.agent_token),
+        request,
+    )
+    .await
 }
 
 fn coolify_base(s: &CockpitSettings) -> CmdResult<(String, String)> {
@@ -226,7 +292,7 @@ async fn coolify_request(
 ) -> CmdResult<Value> {
     let s = self::server(&state, server.as_deref())?;
     let (base, token) = coolify_base(&s)?;
-    http::send(&state.http, &base, Some(&token), request).await
+    http::send(state.client_for(&base), &base, Some(&token), request).await
 }
 
 /// An agent request whose NDJSON response is delivered line by line.
@@ -245,9 +311,14 @@ async fn agent_stream(
         .lock()
         .map_err(|e| e.to_string())?
         .insert(stream_id.clone(), tx);
-    let result = http::send_lines(&state.http, &s.agent_url, Some(&s.agent_token), request, rx, |line| {
-        on_line.send(line).is_ok()
-    })
+    let result = http::send_lines(
+        state.client_for(&s.agent_url),
+        &s.agent_url,
+        Some(&s.agent_token),
+        request,
+        rx,
+        |line| on_line.send(line).is_ok(),
+    )
     .await;
     if let Ok(mut m) = state.streams.lock() {
         m.remove(&stream_id);
@@ -266,7 +337,7 @@ fn stream_cancel(state: State<'_, AppState>, stream_id: String) {
 #[tauri::command]
 async fn test_connection(state: State<'_, AppState>, settings: CockpitSettings) -> CmdResult<Value> {
     let health = http::send(
-        &state.http,
+        state.client_for(&settings.agent_url),
         &settings.agent_url,
         Some(&settings.agent_token),
         http::Request {
@@ -283,7 +354,7 @@ async fn test_connection(state: State<'_, AppState>, settings: CockpitSettings) 
         match coolify_base(&settings) {
             Err(e) => serde_json::json!({ "ok": false, "error": e }),
             Ok((base, token)) => http::send(
-                &state.http,
+                state.client_for(&base),
                 &base,
                 Some(&token),
                 http::Request {
@@ -452,6 +523,7 @@ pub fn run() {
                 config: Mutex::new(config),
                 streams: Mutex::new(HashMap::new()),
                 http: http::client(),
+                mesh_http: http::mesh_client(),
                 procs: Processes::default(),
                 collector: Collector::new(SysPaths::default(), env!("CARGO_PKG_VERSION")),
             });
@@ -466,6 +538,10 @@ pub fn run() {
             server_remove,
             pair_decode,
             pair_claim,
+            pair_join,
+            mesh_discover,
+            mesh_pair,
+            mesh_local,
             discover_servers,
             agent_request,
             coolify_request,

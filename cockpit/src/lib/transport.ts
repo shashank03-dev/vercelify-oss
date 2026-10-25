@@ -279,6 +279,17 @@ async function webCall<T>(cmd: string, args: Record<string, unknown>): Promise<T
     }
     case "discover_servers":
       throw new CockpitError("Finding servers on your tailnet needs the desktop app — paste a pairing code instead");
+    case "pair_join": {
+      const p = decodePairing(String(args.code ?? ""));
+      if (p.mesh_join) throw new CockpitError("Joining Vercelify's network needs the desktop app (it runs vercelify-mesh)");
+      return r(p);
+    }
+    case "mesh_local":
+      return r({ installed: false, running: false, userspace: false, revoked: false, peers: [] });
+    case "mesh_discover":
+      return r([]);
+    case "mesh_pair":
+      throw new CockpitError("Pairing over the LAN needs the desktop app — paste a pairing code instead");
     case "tools_status":
       return r([]);
     case "capture_screens":

@@ -557,15 +557,21 @@ async fn configure_resolver(interface: &str, ip: &str) {
 pub async fn up(opts: UpOptions) -> Result<()> {
     let opts = Arc::new(opts);
     std::fs::create_dir_all(&opts.run_dir)?;
+    // Not joined yet (a fresh LaunchAgent on a Mac): wait, and start as soon
+    // as the app joins, so pairing doesn't wait on us.
+    let mut said = false;
     let state = loop {
         match State::load(&opts.dir)? {
             Some(s) => break s,
             None => {
-                tracing::warn!(
-                    "not on a mesh yet ({}): waiting for `vercelify-mesh join`",
-                    opts.dir.display()
-                );
-                tokio::time::sleep(Duration::from_secs(10)).await;
+                if !said {
+                    tracing::info!(
+                        "not on a mesh yet ({}): waiting for `vercelify-mesh join`",
+                        opts.dir.display()
+                    );
+                    said = true;
+                }
+                tokio::time::sleep(Duration::from_secs(2)).await;
             }
         }
     };
