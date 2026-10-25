@@ -701,7 +701,7 @@ pub struct ScheduledTask {
     pub id: String,
     pub app_id: String,
     pub name: String,
-    /// Cron syntax, UTC (`*/15 * * * *`).
+    /// Cron syntax, UTC (`0 3 * * *` = 03:00 every day).
     pub schedule: String,
     /// Run in the app's container (`sh -c`).
     pub command: String,

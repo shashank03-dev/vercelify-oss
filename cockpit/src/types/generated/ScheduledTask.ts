@@ -2,7 +2,7 @@
 
 export type ScheduledTask = { id: string, app_id: string, name: string, 
 /**
- * Cron syntax, UTC (`*/15 * * * *`).
+ * Cron syntax, UTC (`0 3 * * *` = 03:00 every day).
  */
 schedule: string, 
 /**

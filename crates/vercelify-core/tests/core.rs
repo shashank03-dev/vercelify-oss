@@ -292,3 +292,24 @@ fn doctor_overall() {
     r.checks.push(check(CheckStatus::Bad));
     assert_eq!(r.overall(), CheckStatus::Bad);
 }
+
+/// Doc comments become JSDoc in the generated TypeScript: a `*/` in one
+/// would end the comment early and break the cockpit's build.
+#[test]
+fn doc_comments_survive_typescript_generation() {
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    for entry in std::fs::read_dir(&dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().is_some_and(|e| e == "rs") {
+            for (i, line) in std::fs::read_to_string(&path).unwrap().lines().enumerate() {
+                let l = line.trim_start();
+                assert!(
+                    !(l.starts_with("///") && l.contains("*/")),
+                    "{}:{}: `*/` in a doc comment breaks the generated TypeScript",
+                    path.display(),
+                    i + 1
+                );
+            }
+        }
+    }
+}
