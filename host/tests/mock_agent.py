@@ -130,6 +130,25 @@ class H(BaseHTTPRequestHandler):
             if body["enabled"]:
                 state["sleep"].append({"app_uuid": uuid, "enabled": True, "idle_minutes": body.get("idle_minutes", 30), "previews": body.get("previews", False)})
             return self.reply(200, {"proxy_metrics": True, "settings": state["sleep"], "targets": [], "error": None})
+        if method == "POST" and p == "/v1/mesh/invites":
+            if body.get("role") not in (None, "owner", "deployer", "viewer"):
+                return self.reply(400, {"error": f"unknown role `{body['role']}`"})
+            return self.reply(200, {"token": f"vfyj1.{body.get('kind', 'server')}-{body.get('role', 'owner')}-{body.get('ttl_minutes', 60)}",
+                                    "expires_at": "2026-10-25T13:00:00Z"})
+        if method == "GET" and p == "/v1/mesh/nodes":
+            return self.reply(200, [
+                {"id": "mn_1", "name": "main", "kind": "server", "role": "owner", "ipv4": "10.77.0.1", "ipv6": "fd76:6679:6d65::1",
+                 "public_key": "k1", "endpoints": ["192.168.1.20:51820"], "os": "linux", "arch": "x86_64", "coordinator": True,
+                 "last_seen_at": "2026-10-25T11:00:00Z", "cert_expires_at": None, "revoked_at": None, "created_at": "t"},
+                {"id": "mn_2", "name": "pi5", "kind": "server", "role": "owner", "ipv4": "10.77.0.2", "ipv6": "fd76:6679:6d65::2",
+                 "public_key": "k2", "endpoints": [], "os": "linux", "arch": "aarch64", "coordinator": False,
+                 "last_seen_at": None, "cert_expires_at": None, "revoked_at": "2026-10-25T10:00:00Z", "created_at": "t"},
+            ])
+        if method == "DELETE" and p.startswith("/v1/mesh/nodes/"):
+            name = p.split("/")[4]
+            if name not in ("pi5", "mn_2"):
+                return self.reply(404, {"error": f"mesh node {name} not found"})
+            return self.reply(200, {"revoked": "pi5"})
         return self.reply(404, {"error": "not found"})
 
     def do_PUT(self):

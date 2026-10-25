@@ -43,6 +43,8 @@ pub struct AppState {
     pub platform_git: Option<Arc<crate::platform_git::PlatformGit>>,
     /// Open web terminals (`docker exec -it`).
     pub terminals: Arc<crate::terminal::Terminals>,
+    /// The mesh coordinator (main server, `mesh_coordinator = true`).
+    pub mesh: Option<Arc<crate::mesh::Coordinator>>,
 }
 
 impl AppState {
@@ -87,6 +89,13 @@ impl AppState {
             }));
             platform_git = Some(git);
         }
+        let mesh = match crate::mesh::Coordinator::open(&config, platform.as_ref().map(|p| p.store.clone())) {
+            Ok(m) => m,
+            Err(e) => {
+                tracing::error!("mesh coordinator unavailable: {e}");
+                None
+            }
+        };
         let llm = Arc::new(Llm::new(config.clone()));
         llm.set_jobs(jobs.clone());
         Self {
@@ -105,6 +114,7 @@ impl AppState {
             platform_error,
             platform_git,
             terminals: Arc::default(),
+            mesh,
             events,
             jobs,
             claims: Arc::new(Claims::default()),
@@ -182,6 +192,7 @@ pub fn router(state: AppState) -> Router {
     let api = api
         .merge(long)
         .merge(stream)
+        .merge(crate::mesh::owner_routes())
         .route_layer(middleware::from_fn_with_state(state.clone(), auth::require_token));
 
     let public = Router::new()
@@ -190,6 +201,8 @@ pub fn router(state: AppState) -> Router {
         .route("/v1/hooks/deploy/{secret}", post(crate::platform_api::deploy_hook))
         .layer(timeout(Duration::from_secs(30)));
 
+    // Mesh nodes authenticate with their own tokens; the map is a stream.
+    let public = public.merge(crate::mesh::node_router());
     let mut app = public.nest("/v1", api).layer(TraceLayer::new_for_http());
 
     if !state.config.cors_origins.is_empty() {
@@ -229,6 +242,9 @@ async fn health(State(s): State<AppState>) -> Json<Health> {
 /// engine and it opened.
 pub fn capabilities(s: &AppState) -> Vec<String> {
     let mut caps: Vec<String> = CAPABILITIES.iter().map(|c| c.to_string()).collect();
+    if s.mesh.is_some() || s.config.mesh_dir.join("state.json").exists() {
+        caps.push("mesh".into());
+    }
     if s.platform.is_some() {
         caps.push("platform".into());
     }

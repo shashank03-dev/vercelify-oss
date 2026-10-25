@@ -15,7 +15,9 @@ serde_json = "1"
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# No `env-filter`: `filter::Targets` reads RUST_LOG's `target=level` directives
+# without a regex engine (keeps the agent inside its size budget).
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std", "ansi"] }
 sysinfo = "0.39"
 ts-rs = "12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

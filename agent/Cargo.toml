@@ -13,6 +13,7 @@ path = "src/main.rs"
 [dependencies]
 vercelify-core = { workspace = true, features = ["collect"] }
 vercelify-platform.workspace = true
+vercelify-mesh.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
@@ -35,10 +36,11 @@ http-body = "1"
 bytes = "1"
 base64 = "0.22"
 sha2 = "0.10"
-# Validates rule regexes as RE2 (what Traefik/Go accepts); already linked via tracing-subscriber.
+# Validates rule regexes as RE2 (what Traefik/Go accepts).
 regex-syntax = "0.8"
 
 [dev-dependencies]
+vercelify-mesh = { workspace = true, features = ["daemon"] }
 tokio = { workspace = true, features = ["test-util"] }
 tower = { version = "0.5", features = ["util"] }
 tempfile = "3"

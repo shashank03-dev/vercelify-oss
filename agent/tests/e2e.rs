@@ -2044,3 +2044,128 @@ fn platform_api() {
         .unwrap();
     assert_eq!(check["status"], "ok", "{check}");
 }
+
+/// The mesh coordinator: invitations, a sealed join (the daemon's own code),
+/// single-use tokens, node tokens only from the node's own mesh address,
+/// maps pushed on revocation, and the coordinator's own node.
+#[test]
+fn mesh_coordinator() {
+    let control = free_port();
+    let a = start_with(&[
+        ("VERCELIFY_MESH_COORDINATOR", "1".into()),
+        ("VERCELIFY_MESH_CONTROL_LISTEN", format!("127.0.0.1:{control}")),
+    ]);
+    let (_, h, _) = req(&a, "GET", "/v1/health", None, None);
+    assert!(h["capabilities"].as_array().unwrap().iter().any(|c| c == "mesh"), "{h}");
+    // The coordinator is node 1, and its own daemon's state is written.
+    let mesh_dir = a.root.join("state/mesh");
+    let own: Value = serde_json::from_str(&std::fs::read_to_string(mesh_dir.join("state.json")).unwrap()).unwrap();
+    assert_eq!(own["ipv4"], "10.77.0.1");
+    assert_eq!(own["api_url"], format!("http://127.0.0.1:{}", a.port));
+
+    // Owners invite; deployers can't.
+    let (s, t) = post(&a, "/v1/tokens", json!({"name": "ci", "role": "deployer"}));
+    assert_eq!(s, 200, "{t}");
+    let deployer = t["secret"].as_str().unwrap().to_string();
+    let (s, _) = send(&a, "POST", "/v1/mesh/invites", &deployer, Some(json!({})));
+    assert_eq!(s, 403);
+    let (s, inv) = post(&a, "/v1/mesh/invites", json!({"kind": "server"}));
+    assert_eq!(s, 200, "{inv}");
+    let token = inv["token"].as_str().unwrap().to_string();
+    assert!(token.starts_with("vfyj1."));
+    let jt = vercelify_mesh::proto::JoinToken::decode(&token).unwrap();
+    assert_eq!(jt.control, vec![format!("127.0.0.1:{control}")]);
+
+    // A machine joins with it.
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    let node_dir = tempfile::tempdir().unwrap();
+    let st = rt
+        .block_on(vercelify_mesh::daemon::join(
+            node_dir.path(),
+            &token,
+            "pi5",
+            vec!["192.168.1.31:51820".into()],
+        ))
+        .expect("joined");
+    assert_eq!((st.name.as_str(), st.ipv4.as_str()), ("pi5", "10.77.0.2"));
+    assert_eq!(st.api_url, format!("http://10.77.0.1:{}", a.port));
+    let vk = vercelify_mesh::keys::VerifyingKey::from_base64(&st.coordinator_key).unwrap();
+    let map = vercelify_mesh::proto::PeerMap::verify(&vk, st.map.as_ref().unwrap()).unwrap();
+    assert_eq!(map.peers.len(), 1);
+    assert_eq!(map.peers[0].ipv4, "10.77.0.1", "the coordinator is its first peer");
+    assert_eq!(map.dns.records.get("pi5").map(String::as_str), Some("10.77.0.2"));
+
+    // Single use.
+    let other = tempfile::tempdir().unwrap();
+    let err = rt
+        .block_on(vercelify_mesh::daemon::join(other.path(), &token, "pi6", vec![]))
+        .unwrap_err();
+    assert!(err.to_string().contains("used already"), "{err}");
+
+    let (s, nodes) = get(&a, "/v1/mesh/nodes");
+    assert_eq!(s, 200);
+    let names: Vec<&str> = nodes
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| n["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(names.len(), 2, "{nodes}");
+    assert!(names.contains(&"pi5"));
+    let pi = nodes.as_array().unwrap().iter().find(|n| n["name"] == "pi5").unwrap();
+    assert_eq!(pi["endpoints"], json!(["192.168.1.31:51820"]));
+    assert!(pi["cert_expires_at"].is_string());
+
+    // A node token works only from the node's own mesh address.
+    let (s, v, _) = req(
+        &a,
+        "POST",
+        "/v1/mesh/endpoints",
+        Some(&st.node_token),
+        Some(json!({"endpoints": []})),
+    );
+    assert_eq!(s, 403, "{v}");
+    assert!(v["error"].as_str().unwrap().contains("own mesh address"), "{v}");
+    let (s, _, _) = req(&a, "GET", "/v1/mesh/map", Some("vfyn_nope"), None);
+    assert_eq!(s, 401);
+
+    // The coordinator's own daemon (from this machine) gets its map stream,
+    // and a new map when a node is revoked.
+    let own_token = own["node_token"].as_str().unwrap().to_string();
+    let mut sock = TcpStream::connect(("127.0.0.1", a.port)).unwrap();
+    sock.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    sock.write_all(
+        format!("GET /v1/mesh/map HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {own_token}\r\n\r\n").as_bytes(),
+    )
+    .unwrap();
+    let mut seen = String::new();
+    let mut buf = [0u8; 65536];
+    fn read_until(sock: &mut TcpStream, buf: &mut [u8], seen: &mut String, maps: usize) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while seen.matches("\"type\":\"map\"").count() < maps {
+            assert!(std::time::Instant::now() < deadline, "stream so far: {seen}");
+            let n = sock.read(buf).unwrap();
+            seen.push_str(&String::from_utf8_lossy(&buf[..n]));
+        }
+    }
+    read_until(&mut sock, &mut buf, &mut seen, 1);
+    assert!(seen.starts_with("HTTP/1.1 200"), "{seen}");
+    let (s, v) = send(&a, "DELETE", "/v1/mesh/nodes/pi5", TOKEN, None);
+    assert_eq!(s, 200, "{v}");
+    read_until(&mut sock, &mut buf, &mut seen, 2);
+    let last = seen
+        .lines()
+        .rfind(|l| l.contains("\"type\":\"map\""))
+        .unwrap()
+        .to_string();
+    let ev: Value = serde_json::from_str(last.trim()).unwrap();
+    let m = vercelify_mesh::proto::PeerMap::verify(&vk, ev["signed"].as_str().unwrap()).unwrap();
+    assert!(m.peers.is_empty(), "the revoked node left every map: {m:?}");
+    // …and its token no longer works anywhere.
+    let (s, _, _) = req(&a, "GET", "/v1/mesh/map", Some(&st.node_token), None);
+    assert_eq!(s, 401);
+    let (s, status) = get(&a, "/v1/mesh/status");
+    assert_eq!(s, 200);
+    assert_eq!(status["coordinator"]["nodes"], 1);
+    assert_eq!(status["coordinator"]["revoked"], 1);
+}

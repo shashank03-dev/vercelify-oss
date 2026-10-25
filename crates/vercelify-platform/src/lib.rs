@@ -25,6 +25,7 @@ pub mod health;
 pub mod hooks;
 pub mod ids;
 pub mod logs;
+pub mod mesh_registry;
 pub mod nodes;
 pub mod previews;
 pub mod proc;

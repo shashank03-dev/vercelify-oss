@@ -44,13 +44,16 @@ into the platform engine, not into Coolify integration.
 
 ```bash
 cargo test --workspace --all-features            # also regenerates cockpit/src/types/generated
-cargo test -p vercelify-platform -p vercelify-mesh   # the new engine and mesh alone (no Tauri libraries needed)
+cargo test -p vercelify-platform -p vercelify-mesh --features vercelify-mesh/daemon   # the new engine and mesh alone (no Tauri libraries needed)
+cargo clippy -p vercelify-mesh --all-targets --features daemon -- -D warnings
+cargo build -p vercelify-mesh --features daemon  # the vercelify-mesh daemon binary
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 bats host/tests
 shellcheck -x -S warning install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/contract/*.sh
 sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/coolify.sh   # real Coolify (Docker)
 sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/routing.sh   # vercel.json rules on a real Traefik
+sudo host/tests/contract/mesh.sh                 # four mesh nodes in network namespaces (debug agent + vercelify-mesh)
 
 cd cockpit
 npm ci && npm run typecheck && npm test && npx vite build

@@ -142,6 +142,19 @@ pub struct Config {
     pub acme_email: Option<String>,
     /// Metrics/ping port of the platform's proxy (127.0.0.1 only).
     pub proxy_metrics_port: u16,
+    /// This server coordinates the mesh (the main server): node registry,
+    /// enrollment, signed maps (design §13).
+    pub mesh_coordinator: bool,
+    /// Where joining nodes enroll (sealed requests only; everything else
+    /// runs inside the mesh).
+    pub mesh_control_listen: String,
+    /// UDP port of the mesh on this server.
+    pub mesh_port: u16,
+    /// This server's name on the mesh (default: its hostname).
+    pub mesh_name: Option<String>,
+    /// Addresses peers reach the coordinator at, besides what nodes report
+    /// (`203.0.113.7:51820` behind a port forward).
+    pub mesh_public_endpoints: Vec<String>,
 }
 
 impl Default for Config {
@@ -231,6 +244,11 @@ impl Default for Config {
             build_concurrency: 1,
             acme_email: None,
             proxy_metrics_port: 8082,
+            mesh_coordinator: false,
+            mesh_control_listen: "0.0.0.0:7443".into(),
+            mesh_port: 51820,
+            mesh_name: None,
+            mesh_public_endpoints: vec![],
         }
     }
 }
@@ -288,6 +306,18 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_MESH_DIR") {
             self.mesh_dir = v.into();
+        }
+        if let Some(v) = var("VERCELIFY_MESH_COORDINATOR") {
+            self.mesh_coordinator = matches!(v.as_str(), "1" | "true" | "yes");
+        }
+        if let Some(v) = var("VERCELIFY_MESH_CONTROL_LISTEN") {
+            self.mesh_control_listen = v;
+        }
+        if let Some(v) = var("VERCELIFY_MESH_PORT").and_then(|v| v.parse().ok()) {
+            self.mesh_port = v;
+        }
+        if let Some(v) = var("VERCELIFY_MESH_NAME") {
+            self.mesh_name = Some(v);
         }
         if let Some(v) = var("VERCELIFY_BUILD_DRIVER") {
             self.build_driver = v;

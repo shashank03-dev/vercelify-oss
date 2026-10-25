@@ -6,6 +6,17 @@ edition.workspace = true
 license.workspace = true
 repository.workspace = true
 
+[[bin]]
+name = "vercelify-mesh"
+path = "src/main.rs"
+required-features = ["daemon"]
+
+[features]
+default = []
+# The data plane and the daemon (`vercelify-mesh`): WireGuard, tun, DNS, the
+# map client. The agent uses the protocol types only and leaves this off.
+daemon = ["dep:boringtun", "dep:tokio", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes", "dep:clap", "dep:tracing", "dep:tracing-subscriber"]
+
 [dependencies]
 serde.workspace = true
 serde_json.workspace = true
@@ -16,6 +27,21 @@ x25519-dalek = { version = "2", features = ["static_secrets"] }
 ed25519-dalek = { version = "2", features = ["rand_core"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 zeroize = "1"
+chacha20poly1305 = { version = "0.10", default-features = false, features = ["alloc"] }
+hkdf = "0.12"
+sha2 = "0.10"
+libc = "0.2"
+
+boringtun = { version = "0.7.1", default-features = false, optional = true }
+tokio = { workspace = true, optional = true }
+hyper = { version = "1", features = ["client", "http1"], optional = true }
+hyper-util = { version = "0.1", features = ["tokio"], optional = true }
+http-body-util = { version = "0.1", optional = true }
+bytes = { version = "1", optional = true }
+clap = { version = "4", features = ["derive", "env"], optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { workspace = true }

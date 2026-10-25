@@ -9,6 +9,8 @@ name: Integration
 #   - project rules (vercel.json) against a real Traefik: redirects,
 #     rewrites, headers, firewall and cron jobs through the agent, on apps
 #     labelled the way Coolify labels them
+#   - the mesh: four nodes in network namespaces with the real agent and
+#     vercelify-mesh (joining, paths, DNS, firewall, rotation, revocation)
 #   - the real installer in a systemd container (Docker, Tailscale, Coolify,
 #     agent, guard, firewall), twice, to prove it is idempotent
 on:
@@ -27,6 +29,10 @@ on:
       - agent/src/projects.rs
       - agent/src/routing.rs
       - agent/src/cron.rs
+      - agent/src/mesh.rs
+      - crates/vercelify-mesh/**
+      - crates/vercelify-platform/src/mesh_registry.rs
+      - host/firewall.sh
       - .github/workflows/integration.yml
   schedule:
     - cron: "17 5 * * 1"
@@ -79,6 +85,19 @@ jobs:
       - run: cargo build -p vercelify-agent
       - name: Contract
         run: sudo -E env "PATH=$PATH" TRAEFIK_IMAGE="${{ matrix.traefik }}" AGENT_BIN="$PWD/target/debug/vercelify-agent" host/tests/contract/routing.sh
+
+  mesh-contract:
+    name: Mesh in network namespaces
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p vercelify-agent && cargo build -p vercelify-mesh --features daemon
+      - run: sudo apt-get update && sudo apt-get install -y iputils-ping jq
+      - name: Contract
+        run: sudo -E env "PATH=$PATH" host/tests/contract/mesh.sh
 
   installer:
     name: Installer on Debian 12 (systemd, real Coolify)

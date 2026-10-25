@@ -7,6 +7,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+vercelify-mesh.workspace = true
 vercelify-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

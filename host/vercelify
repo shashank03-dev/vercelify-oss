@@ -5,7 +5,7 @@ set -Eeuo pipefail
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 HOST_DIR=$(dirname "$SELF")
 VERCELIFY_SRC=$(dirname "$HOST_DIR")
-for lib in common system hardware storage docker tailscale coolify platform cloudflare agent backup registry maintenance; do
+for lib in common system hardware storage docker tailscale coolify platform mesh cloudflare agent backup registry maintenance; do
   # shellcheck source=/dev/null
   . "$HOST_DIR/lib/$lib.sh"
 done
@@ -41,6 +41,9 @@ Usage: sudo vercelify <command> [args]
   registry [install|trust HOST:PORT|multiarch]
                          Private image registry on the tailnet: build on the strongest
                          machine, let small ones (a Pi) just pull
+  mesh [status|init|invite [--device] [--role R]|join TOKEN [--name N]|nodes|revoke NAME|rotate]
+                         Vercelify's own private network (WireGuard, vfy0): make this main
+                         server its coordinator, invite and join machines, revoke them
   tokens [list|revoke ID]
                          Devices paired with this server; revoke a lost one
   sleep [list|on APP_UUID [MINUTES] [--previews]|off APP_UUID]
@@ -561,7 +564,7 @@ cmd_uninstall() {
     docker inspect "$c" >/dev/null 2>&1 || continue
     docker rm -f "$c" >/dev/null && info "removed the $c container (its data stays)"
   done
-  for u in vercelify-agent vercelify-power-guard vercelify-firewall; do
+  for u in vercelify-agent vercelify-mesh vercelify-power-guard vercelify-firewall; do
     systemctl disable --now "$u" >/dev/null 2>&1 || true
     rm -f "$SYSTEMD_DIR/$u.service"
   done
@@ -570,7 +573,7 @@ cmd_uninstall() {
     rm -f "$SYSTEMD_DIR/$u.timer" "$SYSTEMD_DIR/$u.service"
   done
   systemctl daemon-reload
-  rm -f "$AGENT_BIN" "${CLI_LINK:-/usr/local/bin/vercelify}"
+  rm -f "$AGENT_BIN" "${MESH_BIN:-/usr/local/bin/vercelify-mesh}" "${CLI_LINK:-/usr/local/bin/vercelify}"
   rm -rf "$VERCELIFY_LIB"
   ok "removed. Config kept in $VERCELIFY_ETC (delete it yourself if you like)."
   info "Coolify itself: see https://coolify.io/docs/get-started/uninstallation"
@@ -594,6 +597,7 @@ main() {
     routes) need_root routes; [[ $ROLE == main ]] || die "run this on the main host"; routes_sync ;;
     maintenance) need_root maintenance; maintenance_cli "$@" ;;
     sleep) cmd_sleep "$@" ;;
+    mesh) mesh_cli "$@" ;;
     tokens) need_root tokens; "$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" tokens "$@" ;;
     update) cmd_update "$@" ;;
     rollback) cmd_rollback ;;

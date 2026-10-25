@@ -107,6 +107,11 @@ impl NodeKey {
         PublicKey(x25519_dalek::PublicKey::from(&self.secret).to_bytes())
     }
 
+    /// Replace the key file (0600, atomically): a rotated key.
+    pub fn save(&self, path: &Path) -> std::io::Result<()> {
+        crate::state::write_private(path, &*self.secret_bytes())
+    }
+
     /// The raw private key, for handing to the WireGuard implementation.
     pub fn secret_bytes(&self) -> Zeroizing<[u8; 32]> {
         Zeroizing::new(self.secret.to_bytes())

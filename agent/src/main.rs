@@ -15,6 +15,7 @@ mod exec;
 mod github;
 mod http;
 mod llm;
+mod mesh;
 mod pairing;
 mod platform;
 mod platform_api;
@@ -39,7 +40,6 @@ use config::Config;
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
-use tracing_subscriber::EnvFilter;
 
 #[derive(Parser)]
 #[command(name = "vercelify-agent", version, about)]
@@ -104,6 +104,14 @@ enum TokensCmd {
     Revoke { id: String },
 }
 
+/// RUST_LOG's `target=level` directives (`info,tower_http=warn`), or the default.
+fn log_filter(default: &str) -> tracing_subscriber::filter::Targets {
+    std::env::var("RUST_LOG")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or_else(|| default.parse().expect("valid directives"))
+}
+
 fn random_token() -> String {
     let mut buf = [0u8; 32];
     getrandom::fill(&mut buf).expect("OS RNG available");
@@ -112,10 +120,16 @@ fn random_token() -> String {
 
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,tower_http=warn".into()))
-        .with_target(false)
-        .init();
+    {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::util::SubscriberInitExt;
+        tracing_subscriber::fmt()
+            .with_max_level(tracing::Level::TRACE)
+            .with_target(false)
+            .finish()
+            .with(log_filter("info,tower_http=warn"))
+            .init();
+    }
 
     let cli = Cli::parse();
     let cfg = match Config::load(Some(&cli.config)) {
@@ -240,6 +254,11 @@ async fn main() {
 
 /// The local IPv4 used for outbound traffic (no packet is sent: connecting a
 /// UDP socket only selects a route).
+/// Every LAN IPv4 of this machine (join tokens list them all).
+pub fn lan_ipv4s() -> Vec<std::net::Ipv4Addr> {
+    vercelify_mesh::net::local_ipv4s(Some(std::net::Ipv4Addr::new(10, 77, 0, 0)))
+}
+
 fn lan_ipv4() -> Option<String> {
     let sock = std::net::UdpSocket::bind("0.0.0.0:0").ok()?;
     sock.connect("192.0.2.1:9").ok()?;
@@ -323,11 +342,37 @@ async fn serve(cfg: Config) {
             Err(_) => tracing::warn!("invalid wake_listen `{wake}`; sleeping apps won't wake"),
         }
     }
+    // Mesh enrollment: sealed requests from machines joining.
+    if let Some(co) = state.mesh.clone() {
+        match state.config.mesh_control_listen.parse::<SocketAddr>() {
+            Ok(addr) => {
+                let router = mesh::control_router(co);
+                tasks.spawn(async move {
+                    let listener = loop {
+                        match tokio::net::TcpListener::bind(addr).await {
+                            Ok(l) => break l,
+                            Err(e) => {
+                                tracing::warn!("mesh control: bind {addr} failed: {e}; retrying in 5s");
+                                tokio::time::sleep(Duration::from_secs(5)).await;
+                            }
+                        }
+                    };
+                    tracing::info!("mesh enrollment on http://{addr}");
+                    let svc = router.into_make_service_with_connect_info::<SocketAddr>();
+                    if let Err(e) = axum::serve(listener, svc).with_graceful_shutdown(shutdown()).await {
+                        tracing::error!("mesh control listener failed: {e}");
+                    }
+                });
+            }
+            Err(_) => tracing::warn!("invalid mesh_control_listen `{}`", state.config.mesh_control_listen),
+        }
+    }
     for spec in listen {
         let app = app.clone();
         let ts_bin = tailscale_bin.clone();
+        let cfg = state.config.clone();
         tasks.spawn(async move {
-            let ip = resolve_listen(&spec, ts_bin.as_deref()).await;
+            let ip = resolve_listen(&spec, ts_bin.as_deref(), &cfg).await;
             let addr = SocketAddr::new(ip, port);
             // tailscaled may hold the address briefly after (re)start; retry.
             let listener = loop {
@@ -340,7 +385,9 @@ async fn serve(cfg: Config) {
                 }
             };
             tracing::info!("listening on http://{addr}");
-            if let Err(e) = axum::serve(listener, app).with_graceful_shutdown(shutdown()).await {
+            // Peer addresses: mesh nodes are accepted from their own mesh address.
+            let svc = app.into_make_service_with_connect_info::<SocketAddr>();
+            if let Err(e) = axum::serve(listener, svc).with_graceful_shutdown(shutdown()).await {
                 tracing::error!("server on {addr} failed: {e}");
             }
         });
@@ -356,7 +403,22 @@ async fn serve(cfg: Config) {
     .await;
 }
 
-async fn resolve_listen(spec: &str, ts_bin: Option<&str>) -> IpAddr {
+async fn resolve_listen(spec: &str, ts_bin: Option<&str>, cfg: &config::Config) -> IpAddr {
+    if spec == "mesh" {
+        // The mesh address, once this node has joined (the bind retries
+        // until vercelify-mesh has put it on vfy0).
+        let mut warned = false;
+        loop {
+            if let Some(ip) = mesh::own_ipv4(cfg) {
+                return ip;
+            }
+            if !warned {
+                tracing::warn!("waiting to join the mesh (sudo vercelify mesh join …)");
+                warned = true;
+            }
+            tokio::time::sleep(Duration::from_secs(5)).await;
+        }
+    }
     if spec != "tailscale" {
         return spec
             .parse()

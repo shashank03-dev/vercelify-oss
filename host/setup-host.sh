@@ -387,6 +387,7 @@ main() {
   fi
 
   install_agent
+  install_mesh_binary || warn "the mesh daemon isn't installed yet — the next update brings it"
   (( WITH_POWER_GUARD )) && install_power_guard
   (( WITH_FIREWALL )) && install_firewall
   install_cli

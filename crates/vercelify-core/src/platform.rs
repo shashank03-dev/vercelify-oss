@@ -665,6 +665,57 @@ pub struct AppVolumeRequest {
 
 // ----- servers ----------------------------------------------------------------
 
+/// A machine on the mesh (`GET /v1/mesh/nodes`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct MeshNode {
+    pub id: String,
+    pub name: String,
+    /// server / device
+    pub kind: String,
+    /// owner / deployer / viewer (what a device may do)
+    pub role: String,
+    pub ipv4: String,
+    pub ipv6: String,
+    pub public_key: String,
+    /// Where it said it can be reached (`192.168.1.31:51820`).
+    pub endpoints: Vec<String>,
+    pub os: String,
+    pub arch: String,
+    /// The coordinator itself.
+    pub coordinator: bool,
+    pub last_seen_at: Option<String>,
+    pub cert_expires_at: Option<String>,
+    pub revoked_at: Option<String>,
+    pub created_at: String,
+}
+
+/// `POST /v1/mesh/invites`: a single-use token to join the mesh.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct MeshInviteRequest {
+    /// server (default) or device
+    #[serde(default)]
+    #[ts(optional)]
+    pub kind: Option<String>,
+    /// For devices: owner (default), deployer or viewer.
+    #[serde(default)]
+    #[ts(optional)]
+    pub role: Option<String>,
+    /// Minutes it stays valid (default 60, at most 7 days).
+    #[serde(default)]
+    #[ts(optional)]
+    pub ttl_minutes: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct MeshInvite {
+    /// `vfyj1.…`, for `sudo vercelify mesh join`.
+    pub token: String,
+    pub expires_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct PlatformNode {

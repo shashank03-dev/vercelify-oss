@@ -449,41 +449,66 @@ Apps page, ⌘K and the sidebar use `/v1/platform`; everything else is shared.
   leaves it (`/var/lib/vercelify/mesh/node.key`, 0600; on the Mac in the app's data dir).
 - **Coordinator key**: Ed25519 (`/var/lib/vercelify/mesh/coordinator.key`), signs node
   certificates and peer maps.
-- **TLS for the control listener**: self-signed certificate generated from a separate P-256
-  key; its SHA-256 fingerprint is pinned in pairing codes and in each node's state.
+- **No TLS anywhere.** The coordinator also has an X25519 key: its own node key (the
+  coordinator is mesh node 1). Join tokens and pairing codes carry that public key, so a
+  joining node seals its enrollment to it (§13.2); everything after enrollment runs inside
+  the mesh. No certificate to pin, rotate or explain.
 
 ### 13.2 Enrollment
 
+The control listener (`mesh_control_listen`, default `0.0.0.0:7443`, plain HTTP) has only
+two routes: `GET /v1/mesh/hello` (the coordinator's public key and mesh address, for
+diagnostics) and `POST /v1/mesh/enroll`. Everything else a node does goes to the agent at
+the coordinator's mesh address once its tunnel is up.
+
 ```
-installer / app                       coordinator (:7443, TLS pinned)
-   │  POST /v1/mesh/enroll                │
-   │  { claim: <short code | enroll secret>, name, kind, os, arch, public_key }
-   │─────────────────────────────────────▶│ verify claim (single use, TTL, 5 tries)
-   │                                      │ allocate ip_index, mint node token (vfyn_…),
-   │                                      │ for devices also a device token (vfyd_…) with role
-   │◀─────────────────────────────────────│ { node_id, ipv4, ipv6, certificate, node_token,
-   │                                      │   agent_token?, coordinator_key, control_urls, map }
+joining node                                     coordinator (:7443)
+   │ join token vfyj1.<b64url {v, control[], coordinator_wg, claim, kind}>
+   │ POST /v1/mesh/enroll  Sealed{v:1, public_key, nonce, data}
+   │   data = seal_req({ claim, name, kind, os, arch, endpoints[] })
+   │──────────────────────────────────────────────▶│ open with its node key; claim:
+   │                                               │ single use, TTL (1 min–7 days),
+   │                                               │ 10 tries/min per source address
+   │                                               │ allocate ip_index, sign certificate,
+   │                                               │ mint node token (vfyn_…)
+   │◀──────────────────────────────────────────────│ Sealed: seal_resp({ node_id, ipv4,
+   │                                               │   ipv6, certificate, node_token,
+   │                                               │   coordinator_key, coordinator, api_url })
 ```
+
+Sealing (`vercelify-mesh::seal`): `X25519(node, coordinator_wg)` → HKDF-SHA256 (salt
+`vercelify-enroll-v1`, info = node public key ‖ coordinator public key) → 64 bytes, one
+ChaCha20-Poly1305 key per direction (a request can't be replayed as an answer), random
+nonces, low-order keys refused. Someone on the path can't read the claim, can't swap the
+key being enrolled (the request is bound to it), and can't read the node token. The answer
+is only accepted if it opens under the coordinator key the token named.
+
+A node token (`vfyn_…`, stored hashed) is accepted only from the node's own mesh address
+(IPv4 or IPv6), or from loopback for the coordinator's own daemon: a stolen token is useless
+outside the tunnel that proves the node's key. Node routes on the agent (`:7420`, over the
+mesh): `GET /v1/mesh/map`, `POST /v1/mesh/endpoints`, `POST /v1/mesh/renew`.
 
 Certificate: `vfyc1.<base64url(payload JSON)>.<base64url(ed25519 sig)>`, payload
 `{v:1, node_id, name, kind, role, public_key, ipv4, ipv6, not_before, not_after, epoch}`;
-lifetime 30 days, renewed at day 20 via `POST /v1/mesh/renew` (authenticated by node token +
-proof: the request is made over the mesh from the node's own IP).
+lifetime 30 days, renewed after day 20 (§13.9). Checked with 5 min clock skew.
 
 ### 13.3 Pairing code v2
 
-`vfy2.<base64url JSON>`: `{v:2, hostname, role, control_urls: ["https://192.168.1.20:7443",
-"https://mesh.example.com"], tls_sha256, coordinator_key, enroll_secret, expires_at}`. The
+`vfy2.<base64url JSON>`: `{v:2, hostname, role, control: ["192.168.1.20:7443",
+"mesh.example.com:7443"], coordinator_wg, coordinator_key, claim, expires_at}`, a join
+token for a device plus what the app shows before joining. The
 8-symbol short code still works: the app finds the server on the LAN (mDNS) or the user
 types the address, then claims with the code. `vfy1.` codes keep working during migration.
 
 ### 13.4 Peer map
 
-`GET /v1/mesh/map` on the control listener, `Authorization: Bearer vfyn_…`, NDJSON stream:
+`GET /v1/mesh/map` on the coordinator's agent over the mesh, `Authorization: Bearer vfyn_…`,
+NDJSON stream (a `ping` every 25 s; the node reconnects with backoff when it goes quiet):
 
 ```json
 {"type":"map","signed":"vfym1.<base64url payload>.<base64url ed25519 signature>"}
 {"type":"ping"}
+{"type":"revoked"}
 ```
 
 The payload (`PeerMap`) is
@@ -503,7 +528,8 @@ depends on re-serialising JSON (`vercelify-mesh::cert`).
 - Peers visible to a node: servers see all servers and all devices; devices see servers only.
 - `allowed_ports`: for a server's view of a device, the ports the device may reach (enforced
   by the server's firewall, §13.8).
-- The map is persisted by the node (`map.json`) and used at start before the stream connects.
+- The map is persisted by the node (in `state.json`, 0600) and used at start before the
+  stream connects, so a reboot brings the mesh back while the coordinator is away.
 - `epoch` increases when a standby is promoted; nodes ignore maps with a lower epoch.
 - Endpoint reports: `POST /v1/mesh/endpoints { local: [...], stun: [...] }` whenever they
   change; the coordinator adds the source address it observed.
@@ -561,18 +587,50 @@ the relay sees only ciphertext.
 - DNS server on `<mesh ipv4>:53` and `[<mesh ipv6>]:53` (servers and system-mode Macs), zone
   `vfy`: `A`/`AAAA` for `<node>.vfy` and `*.<node>.vfy`; everything else `REFUSED`. Linux
   hosts with `systemd-resolved` get `resolvectl dns vfy0 10.77.0.x; resolvectl domain vfy0 ~vfy`.
-- Firewall (`host/firewall.sh` + a generated `vercelify-mesh` chain): input on `vfy0` from
-  device addresses allowed only to `allowed_ports` (7420, 80, 443, 11434, 5600–5610/udp and
-  enabled database ports); from server addresses everything. The daemon writes the device
-  address set to `/run/vercelify/mesh-acl.json`; `vercelify-firewall` renders it with `ipset`
-  (or nftables sets when available) and is reloaded on change.
+- Firewall: the daemon writes `/run/vercelify/mesh-acl.json` (`{servers: [ip], devices:
+  [{ip, ports}]}`) whenever the map changes and runs its ACL hook, `firewall.sh mesh`, which
+  rebuilds two chains for both address families: `VERCELIFY-MESH` (jumped to from INPUT for
+  `vfy0`) and `VERCELIFY-MESH-FWD` (from `DOCKER-USER`, matching published ports with
+  `conntrack --ctorigdstport`). Servers: accept all. Devices: accept only their
+  `allowed_ports` (`DEVICE_PORTS`: 7420, 80, 443, 11434/tcp, 5600–5610/udp). Anything else
+  from the mesh: drop. Plain iptables rules, no ipset: a mesh has tens of devices, not
+  thousands. `vfy0` joins `tailscale0` in the container isolation rules (containers can't
+  reach the mesh).
+
+### 13.9 Rotation and revocation
+
+- **Renewal** (hourly check, day 20 of 30, or `vercelify-mesh rotate` → SIGUSR1): the node
+  generates `node.key.next`, asks `POST /v1/mesh/renew {public_key}` over its current
+  tunnel, and on the answer saves the new certificate, swaps the key in, and rekeys its
+  WireGuard state. The coordinator answers first and pushes the changed maps 800 ms later,
+  so the answer isn't lost to the tunnel it is about to replace. If the answer is lost
+  anyway, the next attempt finds the pending key already registered and treats it as
+  done (a rekey to the same key is a no-op). 4 tries, then the next hourly check.
+- **Revocation** (`DELETE /mesh/nodes/{id}`, the cockpit or `vercelify mesh revoke`): the
+  node's map stream gets `{"type":"revoked"}` first; 1.5 s later the node is deleted and the
+  other maps change, so peers drop it within one push. The revoked node clears its peers,
+  marks itself revoked in its status and stops retrying.
+
+### 13.10 Operating it
+
+- `agent.toml`: `mesh_coordinator = true` on the main server; `mesh_control_listen`,
+  `mesh_port` (51820), `mesh_name`, `mesh_public_endpoints` (addresses behind port
+  forwards); `listen = "mesh"` binds the agent to its mesh address.
+- `vercelify mesh init | invite [--device] | join TOKEN | nodes | revoke NAME`; on
+  workers the installer installs `vercelify-mesh` and `vercelify-mesh.service`.
+- `vercelify-mesh join TOKEN [--name] | up | status [--json] | rotate | pubkey`;
+  `up` writes `/run/vercelify/mesh-status.json` (peers, endpoint, path, last handshake)
+  every few seconds.
+- `host/tests/contract/mesh.sh` runs four nodes in network namespaces (a LAN, a router, a
+  network behind it) with the real binaries and checks joining, paths, DNS, the firewall,
+  rotation, revocation and restart on the saved map.
 
 ## 14. Security model
 
 | Asset | Protection |
 | --- | --- |
 | Agent API | Only on mesh IP + loopback; bearer token (host / device / node), role check per route, audit of every non-GET |
-| Control listener `:7443` | TLS with a pinned self-signed certificate; only `enroll`, `renew`, `map`, `endpoints`, `relay`, `webhooks`, `hooks/deploy` exist there; enrollment rate-limited and claim-protected (single use, TTL, 5 tries, 1 s penalty) |
+| Control listener `:7443` | Plain HTTP carrying sealed enrollment (§13.2) and a hello; only `enroll`, `hello` (later `relay`, `webhooks`, `hooks/deploy`) exist there; enrollment rate-limited (10/min per address) and claim-protected (single use, TTL); node tokens work only from the node's own mesh address |
 | Mesh traffic | WireGuard; keys generated on each node; certificates signed by the coordinator; map signed; revocation within one map push |
 | Secrets at rest | XChaCha20-Poly1305 with AAD per cell; master key 0600 root; backups encrypted by restic |
 | Containers | No Docker socket mounted into apps; containers can't reach the mesh except DNS and replies (existing isolation); Docker provider in Traefik off |
@@ -610,7 +668,10 @@ the user chose to deploy.
 
 The release profile uses fat LTO and `opt-level = "z"` for the whole workspace (per-crate
 levels measured larger under fat LTO): with thin LTO and `"s"` the agent measured 8.9 MiB
-after M6, over budget; this way 7.6 MiB. CI builds the binaries of every pull request with
+after M6, over budget; this way 7.6 MiB. M7 (the coordinator, `vercelify-mesh` as a library)
+brought it to 8.0 MiB; logging filters with `tracing_subscriber::filter::Targets` instead of
+`EnvFilter` (which pulls in a regex engine) brought it back to 7.75 MiB. `vercelify-mesh`
+measures 1.8 MiB. CI builds the binaries of every pull request with
 `cargo zigbuild` and fails over budget, so growth shows up the commit it happens.
 
 ## 17. Decisions log
@@ -625,4 +686,4 @@ after M6, over budget; this way 7.6 MiB. CI builds the binaries of every pull re
 | D6 | Coordinator in the agent, data plane in its own daemon | Both in the agent (network dies on agent restart), both in the daemon (two stores, two token systems) |
 | D7 | Our own build detection with generated Dockerfiles | Nixpacks/Railpack as a dependency (the request is to own the stack; Dockerfiles stay inspectable) |
 | D8 | Single main + warm standby | Raft cluster (needs 3 always-on machines) |
-| D9 | Self-signed TLS pinned by fingerprint on `:7443` | Plain HTTP on the LAN (tokens in the clear), ACME for the control listener (needs a public name) |
+| D9 | Enrollment sealed to the coordinator's WireGuard key, everything else inside the mesh (changed in M7) | Self-signed TLS pinned by fingerprint (a second key and certificate to rotate, a TLS stack in a 6 MB daemon), plain HTTP (tokens in the clear), ACME (needs a public name) |

@@ -38,6 +38,18 @@ CREATE TABLE mesh_nodes (
   created_at      TEXT NOT NULL
 );
 
+-- Single-use invitations to join the mesh (`vercelify mesh invite`). Only a
+-- hash of the secret is kept.
+CREATE TABLE mesh_claims (
+  hash       TEXT PRIMARY KEY,
+  kind       TEXT NOT NULL CHECK (kind IN ('server', 'device')),
+  role       TEXT NOT NULL DEFAULT 'owner' CHECK (role IN ('owner', 'deployer', 'viewer')),
+  expires_at TEXT NOT NULL,
+  used_at    TEXT,
+  used_by    TEXT,
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE projects (
   id          TEXT PRIMARY KEY,
   name        TEXT NOT NULL UNIQUE CHECK (length(name) BETWEEN 1 AND 80),

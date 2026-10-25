@@ -4,46 +4,72 @@
 : "${VERCELIFY_REPO:=shashank03-dev/vercelify-oss}"
 : "${AGENT_BIN:=/usr/local/bin/vercelify-agent}"
 
-# Locate or obtain an agent binary for this architecture; prints its path.
-obtain_agent_binary() {
-  local arch target tmp url
+# obtain_binary NAME OVERRIDE_VAR "CARGO ARGS" — locate or obtain a release
+# binary (vercelify-agent, vercelify-mesh) for this architecture; prints its path.
+obtain_binary() {
+  local name=$1 override=$2 cargo_args=$3 arch target tmp url
   arch=$(detect_arch)
   target=$(rust_target "$arch") || die "unsupported architecture $(uname -m) (need x86_64 or aarch64)"
 
   # 1. Explicit binary (offline installs, CI)
-  if [[ -n "${VERCELIFY_AGENT_BINARY:-}" ]]; then
-    [[ -x "$VERCELIFY_AGENT_BINARY" ]] || die "VERCELIFY_AGENT_BINARY=$VERCELIFY_AGENT_BINARY is not executable"
-    echo "$VERCELIFY_AGENT_BINARY"; return
+  if [[ -n "${!override:-}" ]]; then
+    [[ -x "${!override}" ]] || die "$override=${!override} is not executable"
+    echo "${!override}"; return
   fi
   # 2. Shipped inside a release tarball next to this script
-  if [[ -x "$VERCELIFY_SRC/dist/vercelify-agent-$target" ]]; then
-    echo "$VERCELIFY_SRC/dist/vercelify-agent-$target"; return
+  if [[ -x "$VERCELIFY_SRC/dist/$name-$target" ]]; then
+    echo "$VERCELIFY_SRC/dist/$name-$target"; return
   fi
-  # 3. The release asset of *this* version, so scripts and agent always match
-  #    (checksum verified). Edge installs from main fall through to a build.
+  # 3. The release asset of *this* version, so scripts and binaries always
+  #    match (checksum verified). Edge installs from main fall through to a build.
   tmp=$(mktemp -d)
   local tag="v${VERSION:-0}"
-  url="https://github.com/$VERCELIFY_REPO/releases/download/$tag/vercelify-agent-$target"
+  url="https://github.com/$VERCELIFY_REPO/releases/download/$tag/$name-$target"
   if [[ "${VERSION:-dev}" != dev ]] &&
-     curl -fsSL --connect-timeout 15 -o "$tmp/agent" "$url" 2>/dev/null &&
-     curl -fsSL --connect-timeout 15 -o "$tmp/agent.sha256" "$url.sha256" 2>/dev/null; then
-    if (cd "$tmp" && echo "$(awk '{print $1}' agent.sha256)  agent" | sha256sum -c --quiet -); then
-      chmod +x "$tmp/agent"
-      info "downloaded agent $tag" >&2
-      echo "$tmp/agent"; return
+     curl -fsSL --connect-timeout 15 -o "$tmp/bin" "$url" 2>/dev/null &&
+     curl -fsSL --connect-timeout 15 -o "$tmp/bin.sha256" "$url.sha256" 2>/dev/null; then
+    if (cd "$tmp" && echo "$(awk '{print $1}' bin.sha256)  bin" | sha256sum -c --quiet -); then
+      chmod +x "$tmp/bin"
+      info "downloaded $name $tag" >&2
+      echo "$tmp/bin"; return
     fi
-    warn "checksum mismatch for downloaded agent — ignoring it" >&2
+    warn "checksum mismatch for downloaded $name — ignoring it" >&2
   fi
   # 4. Build from source in a throwaway Rust container (a few minutes)
-  [[ -f "$VERCELIFY_SRC/Cargo.toml" ]] || die "no agent binary available and no source tree to build from"
-  have docker || die "Docker is required to build the agent from source"
-  info "building the agent from source in Docker (one-time, ~5 min on a laptop CPU)…" >&2
-  run_cmd docker run --rm -v "$VERCELIFY_SRC":/src:ro -v "$tmp":/out -w /tmp rust:1-alpine sh -ec '
+  [[ -f "$VERCELIFY_SRC/Cargo.toml" ]] || die "no $name binary available and no source tree to build from"
+  have docker || die "Docker is required to build $name from source"
+  info "building $name from source in Docker (one-time, ~5 min on a laptop CPU)…" >&2
+  run_cmd docker run --rm -v "$VERCELIFY_SRC":/src:ro -v "$tmp":/out -w /tmp -e NAME="$name" -e ARGS="$cargo_args" \
+    rust:1-alpine sh -ec '
       apk add --no-cache musl-dev >/dev/null
       cp -r /src /tmp/build && cd /tmp/build
-      cargo build --release --locked -p vercelify-agent
-      cp target/release/vercelify-agent /out/agent' >&2 || die "building the agent failed"
-  echo "$tmp/agent"
+      # shellcheck disable=SC2086
+      cargo build --release --locked $ARGS
+      cp "target/release/$NAME" /out/bin' >&2 || die "building $name failed"
+  echo "$tmp/bin"
+}
+
+# Locate or obtain an agent binary for this architecture; prints its path.
+obtain_agent_binary() {
+  obtain_binary vercelify-agent VERCELIFY_AGENT_BINARY "-p vercelify-agent"
+}
+
+# The mesh daemon (design §13): installed with the agent; it runs once this
+# machine is on a mesh (`vercelify mesh init` / `vercelify mesh join`).
+install_mesh_binary() {
+  : "${MESH_BIN:=/usr/local/bin/vercelify-mesh}"
+  local bin
+  if [[ "$VERCELIFY_DRY_RUN" == 1 ]]; then
+    info "[dry-run] would install $MESH_BIN"
+    return 0
+  fi
+  bin=$(obtain_binary vercelify-mesh VERCELIFY_MESH_BINARY "-p vercelify-mesh --features daemon") || return 1
+  if [[ ! -x "$MESH_BIN" ]] || ! cmp -s "$bin" "$MESH_BIN"; then
+    run_cmd install -m 0755 "$bin" "$MESH_BIN"
+  fi
+  # A running mesh picks up a new binary.
+  systemctl is-active --quiet vercelify-mesh 2>/dev/null && run_cmd systemctl restart vercelify-mesh
+  return 0
 }
 
 install_agent() {
