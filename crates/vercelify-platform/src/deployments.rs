@@ -160,6 +160,41 @@ pub fn set_image(c: &Connection, id: &str, image: &str) -> Result<()> {
     Ok(())
 }
 
+/// What the build found out: the commit, the image, its port and framework.
+pub fn set_built(
+    c: &Connection,
+    id: &str,
+    commit_sha: &str,
+    commit_message: &str,
+    image: &str,
+    port: u16,
+    framework: &str,
+) -> Result<()> {
+    c.execute(
+        "UPDATE deployments SET commit_sha = CASE WHEN ?2 = '' THEN commit_sha ELSE ?2 END,
+           commit_message = CASE WHEN ?3 = '' THEN commit_message ELSE ?3 END,
+           image = ?4, port = ?5, framework = ?6 WHERE id = ?1",
+        params![
+            id,
+            commit_sha,
+            commit_message.chars().take(500).collect::<String>(),
+            image,
+            port,
+            framework
+        ],
+    )?;
+    Ok(())
+}
+
+/// The port and framework recorded at build time.
+pub fn built_info(c: &Connection, id: &str) -> Result<(Option<u16>, String)> {
+    Ok(
+        c.query_row("SELECT port, framework FROM deployments WHERE id = ?1", [id], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?,
+    )
+}
+
 pub fn set_container(c: &Connection, id: &str, container: &str, node_id: Option<&str>) -> Result<()> {
     c.execute(
         "UPDATE deployments SET container = ?2, node_id = coalesce(?3, node_id) WHERE id = ?1",

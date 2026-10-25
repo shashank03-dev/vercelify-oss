@@ -14,6 +14,9 @@ pub const MAX_LOG_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct LogLine {
+    /// Position in the deployment's log (0, 1, 2…), so a follower can tell
+    /// which live lines it already read from the file.
+    pub seq: u64,
     pub at: String,
     /// stdout / stderr / info / error
     pub stream: String,
@@ -44,6 +47,9 @@ impl LogHub {
         if let Some(d) = path.parent() {
             let _ = std::fs::create_dir_all(d);
         }
+        let existing = std::fs::read_to_string(&path)
+            .map(|r| r.lines().count() as u64)
+            .unwrap_or(0);
         let file = std::fs::OpenOptions::new().create(true).append(true).open(&path).ok();
         let tx = self
             .live
@@ -59,6 +65,7 @@ impl LogHub {
             written: 0,
             tx,
             truncated: false,
+            seq: existing,
         }
     }
 
@@ -74,7 +81,11 @@ impl LogHub {
     /// Lines written so far (the whole file, or the last `tail`).
     pub fn read(&self, app: &str, deployment: &str, tail: Option<usize>) -> Vec<LogLine> {
         let raw = std::fs::read_to_string(self.path(app, deployment)).unwrap_or_default();
-        let lines: Vec<LogLine> = raw.lines().filter_map(parse_line).collect();
+        let lines: Vec<LogLine> = raw
+            .lines()
+            .enumerate()
+            .filter_map(|(i, l)| parse_line(i as u64, l))
+            .collect();
         match tail {
             Some(n) if lines.len() > n => lines[lines.len() - n..].to_vec(),
             _ => lines,
@@ -105,9 +116,10 @@ fn prune_dir(dir: &Path, keep: usize) {
     }
 }
 
-fn parse_line(l: &str) -> Option<LogLine> {
+fn parse_line(seq: u64, l: &str) -> Option<LogLine> {
     let mut it = l.splitn(3, ' ');
     Some(LogLine {
+        seq,
         at: it.next()?.to_string(),
         stream: it.next()?.to_string(),
         text: it.next().unwrap_or("").to_string(),
@@ -121,6 +133,7 @@ pub struct LogWriter {
     written: u64,
     tx: broadcast::Sender<LogLine>,
     truncated: bool,
+    seq: u64,
 }
 
 impl LogWriter {
@@ -128,23 +141,26 @@ impl LogWriter {
         // BuildKit and ANSI colours: keep the text, drop the escapes.
         let text = strip_ansi(text);
         let line = LogLine {
+            seq: self.seq,
             at: crate::now(),
             stream: stream.to_string(),
             text,
         };
         if self.written < MAX_LOG_BYTES {
+            self.seq += 1;
             if let Some(f) = self.file.as_mut() {
                 let s = format!("{} {} {}\n", line.at, line.stream, line.text);
                 self.written += s.len() as u64;
                 let _ = f.write_all(s.as_bytes());
             }
+            let _ = self.tx.send(line);
         } else if !self.truncated {
             self.truncated = true;
+            self.seq += 1;
             if let Some(f) = self.file.as_mut() {
                 let _ = writeln!(f, "{} info (log truncated at 16 MiB)", line.at);
             }
         }
-        let _ = self.tx.send(line);
     }
 
     pub fn info(&mut self, text: &str) {
@@ -209,7 +225,13 @@ mod tests {
         let lines = hub.read("blog", "dpl_1", None);
         assert_eq!(lines.len(), 2);
         assert_eq!(lines[1].stream, "stderr");
-        assert_eq!(hub.read("blog", "dpl_1", Some(1))[0].text, "#1 DONE 0.1s");
+        assert_eq!((lines[0].seq, lines[1].seq), (0, 1));
+        let mut again = hub.writer("blog", "dpl_1");
+        let mut rx = hub.follow("dpl_1").unwrap();
+        again.info("more");
+        assert_eq!(rx.recv().await.unwrap().seq, 2, "numbering continues after the file");
+        drop(again);
+        assert_eq!(hub.read("blog", "dpl_1", Some(1))[0].text, "more");
 
         for i in 2..6 {
             hub.writer("blog", &format!("dpl_{i}")).info("x");

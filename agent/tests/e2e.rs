@@ -1747,6 +1747,38 @@ fn platform_api() {
     let (s, v) = get(&a, "/v1/platform/apps/blog/deployments");
     assert_eq!((s, v.as_array().unwrap().len()), (200, 0));
 
+    // Deploying queues a deployment (the queue itself waits for the proxy,
+    // which the stub Docker never starts); it can be cancelled.
+    let (s, d) = post(&a, "/v1/platform/apps/blog/deploy", json!({}));
+    assert_eq!(s, 200, "{d}");
+    assert_eq!(
+        (d["status"].as_str(), d["number"].as_u64(), d["trigger"].as_str()),
+        (Some("queued"), Some(1), Some("manual"))
+    );
+    let did = d["id"].as_str().unwrap().to_string();
+    let (s, v) = post(&a, "/v1/platform/apps/blog/deploy", json!({"commit_sha": "not-a-sha"}));
+    assert_eq!(s, 400, "{v}");
+    let (s, v) = post(
+        &a,
+        "/v1/platform/apps/blog/rollback",
+        json!({"deployment_id": "dpl_missing"}),
+    );
+    assert_eq!(s, 404, "{v}");
+    let (s, v) = post(&a, &format!("/v1/platform/deployments/{did}/cancel"), json!({}));
+    assert_eq!((s, v["status"].as_str()), (200, Some("cancelled")), "{v}");
+    let (s, v) = post(&a, &format!("/v1/platform/deployments/{did}/cancel"), json!({}));
+    assert_eq!(s, 409, "already cancelled: {v}");
+    let (s, _, _) = req(
+        &a,
+        "GET",
+        &format!("/v1/platform/deployments/{did}/logs"),
+        Some(TOKEN),
+        None,
+    );
+    assert_eq!(s, 200);
+    let (s, v) = get(&a, "/v1/platform/apps/blog/previews");
+    assert_eq!((s, v.as_array().unwrap().len()), (200, 0));
+
     // Roles: a deployer ships but doesn't delete; a viewer only reads.
     let (s, t) = post(&a, "/v1/tokens", json!({"name": "ci", "role": "deployer"}));
     assert_eq!(s, 200, "{t}");

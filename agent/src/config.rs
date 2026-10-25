@@ -131,6 +131,17 @@ pub struct Config {
     pub master_key_file: PathBuf,
     /// Mesh keys, certificate and the last peer map.
     pub mesh_dir: PathBuf,
+    /// Platform builds: `container` (dedicated BuildKit container the power
+    /// guard can pause) or `docker` (the daemon's BuildKit).
+    pub build_driver: String,
+    /// Memory cap of the BuildKit container ("3g"); unset = none.
+    pub build_memory: Option<String>,
+    /// Builds at once (default 1; 0 = this server doesn't build).
+    pub build_concurrency: u32,
+    /// Let's Encrypt account e-mail (optional).
+    pub acme_email: Option<String>,
+    /// Metrics/ping port of the platform's proxy (127.0.0.1 only).
+    pub proxy_metrics_port: u16,
 }
 
 impl Default for Config {
@@ -215,6 +226,11 @@ impl Default for Config {
             platform_db: "/var/lib/vercelify/platform.db".into(),
             master_key_file: "/var/lib/vercelify/master.key".into(),
             mesh_dir: "/var/lib/vercelify/mesh".into(),
+            build_driver: "container".into(),
+            build_memory: None,
+            build_concurrency: 1,
+            acme_email: None,
+            proxy_metrics_port: 8082,
         }
     }
 }
@@ -255,6 +271,7 @@ impl Config {
             _ => Config::default(),
         };
         cfg.apply_env();
+        cfg.apply_engine_defaults();
         Ok(cfg)
     }
 
@@ -271,6 +288,12 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_MESH_DIR") {
             self.mesh_dir = v.into();
+        }
+        if let Some(v) = var("VERCELIFY_BUILD_DRIVER") {
+            self.build_driver = v;
+        }
+        if let Some(v) = var("VERCELIFY_PROXY_METRICS_PORT").and_then(|v| v.parse().ok()) {
+            self.proxy_metrics_port = v;
         }
         if let Some(v) = var("VERCELIFY_LISTEN") {
             self.listen = v.split(',').map(|s| s.trim().to_string()).collect();
@@ -470,6 +493,24 @@ impl Config {
     /// KEY=VALUE pairs of power-guard.conf (shell syntax, comments ignored).
     /// The power guard's settings: its config file, then what was changed
     /// from the cockpit (the guard reads them in the same order).
+    /// The platform engine runs its own proxy: where Coolify's defaults are
+    /// still in place, point at ours instead.
+    pub fn apply_engine_defaults(&mut self) {
+        if self.engine != "platform" {
+            return;
+        }
+        let d = Config::default();
+        if self.proxy_dir == d.proxy_dir {
+            self.proxy_dir = self.state_dir.join("proxy");
+        }
+        if self.proxy_container == d.proxy_container {
+            self.proxy_container = vercelify_platform::proxy::CONTAINER.into();
+        }
+        if self.traefik_metrics_url == d.traefik_metrics_url {
+            self.traefik_metrics_url = format!("http://127.0.0.1:{}/metrics", self.proxy_metrics_port);
+        }
+    }
+
     /// Whether this server runs Vercelify's own platform engine.
     pub fn platform_engine(&self) -> bool {
         self.engine == "platform" && self.role() != "worker"

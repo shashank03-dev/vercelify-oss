@@ -275,6 +275,11 @@ async fn serve(cfg: Config) {
     tokio::spawn(state.projects.clone().run_crons());
     tokio::spawn(state.watcher.clone().run(state.clone()));
     tokio::spawn(update::resume_update_job(state.config.clone(), state.jobs.clone()));
+    if let Some(p) = &state.platform {
+        // Tests run with the background loops off (watch interval 0).
+        let every = if state.config.watch_interval_secs == 0 { 0 } else { 30 };
+        p.spawn(Duration::from_secs(every));
+    }
 
     let mut tasks = tokio::task::JoinSet::new();
     // Sleeping apps: Coolify's proxy forwards their requests here.

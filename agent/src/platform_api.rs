@@ -15,7 +15,8 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::Arc;
 use vercelify_core::platform::*;
-use vercelify_platform::{apps, deployments, env, nodes, projects, volumes};
+use vercelify_platform::engine::{EngineEvent, Enqueue};
+use vercelify_platform::{apps, deployments, env, nodes, previews, projects, volumes};
 
 impl From<vercelify_platform::Error> for AppError {
     fn from(e: vercelify_platform::Error) -> Self {
@@ -56,7 +57,12 @@ pub fn router() -> Router<AppState> {
         .route("/platform/apps/{app}/volumes", get(app_volumes).post(app_volume_create))
         .route("/platform/apps/{app}/volumes/{name}", delete(app_volume_delete))
         .route("/platform/apps/{app}/deployments", get(app_deployments))
+        .route("/platform/apps/{app}/deploy", post(app_deploy))
+        .route("/platform/apps/{app}/rollback", post(app_rollback))
+        .route("/platform/apps/{app}/previews", get(app_previews))
         .route("/platform/deployments/{id}", get(deployment_get))
+        .route("/platform/deployments/{id}/cancel", post(deployment_cancel))
+        .route("/platform/deployments/{id}/logs", get(deployment_logs))
         .route("/platform/nodes", get(node_list))
 }
 
@@ -437,4 +443,176 @@ async fn deployment_get(State(s): State<AppState>, Path(id): Path<String>) -> Ap
 
 async fn node_list(State(s): State<AppState>) -> ApiResult<Vec<PlatformNode>> {
     Ok(Json(tx(&s, |c, _| nodes::list(c)).await?))
+}
+
+// ----- deploying ------------------------------------------------------------------
+
+/// Engine events → the cockpit's event stream and the alerts.
+pub fn on_engine_event(events: &Arc<crate::events::Events>, watcher: &Arc<crate::watch::Watcher>, e: EngineEvent) {
+    events.changed("deployments");
+    let (source, status, title, detail) = match e {
+        EngineEvent::Changed => return,
+        EngineEvent::Succeeded { app, deployment, url } => (
+            format!("deploy:{app}"),
+            vercelify_core::CheckStatus::Ok,
+            format!("{app} deployed"),
+            format!(
+                "deployment #{} is live{}",
+                deployment.number,
+                url.map(|u| format!(" at {u}")).unwrap_or_default()
+            ),
+        ),
+        EngineEvent::Failed { app, deployment, error } => (
+            format!("deploy:{app}"),
+            vercelify_core::CheckStatus::Bad,
+            format!("{app}: deployment #{} failed", deployment.number),
+            error.lines().next().unwrap_or("").chars().take(300).collect(),
+        ),
+    };
+    let w = watcher.clone();
+    tokio::spawn(async move {
+        w.raise(crate::watch::Change {
+            resolved: status == vercelify_core::CheckStatus::Ok,
+            source,
+            status,
+            title,
+            detail,
+        })
+        .await;
+    });
+}
+
+async fn engine_call<T: Send + 'static>(
+    s: &AppState,
+    f: impl FnOnce(&vercelify_platform::engine::Engine) -> vercelify_platform::Result<T> + Send + 'static,
+) -> Result<T, AppError> {
+    let p = platform(s)?;
+    let engine = p.engine.clone();
+    tokio::task::spawn_blocking(move || f(&engine))
+        .await
+        .map_err(|e| AppError::internal(e.to_string()))?
+        .map_err(AppError::from)
+}
+
+async fn app_deploy(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+    body: Option<Json<DeployRequest>>,
+) -> ApiResult<Deployment> {
+    let req = body.map(|b| b.0).unwrap_or_default();
+    let d = engine_call(&s, move |e| {
+        e.enqueue(
+            &app,
+            Enqueue {
+                trigger: Some(DeploymentTrigger::Manual),
+                commit_sha: req.commit_sha,
+                force_rebuild: req.force_rebuild,
+                ..Enqueue::default()
+            },
+        )
+    })
+    .await?;
+    Ok(Json(d))
+}
+
+async fn app_rollback(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+    Json(req): Json<RollbackRequest>,
+) -> ApiResult<Deployment> {
+    let d = engine_call(&s, move |e| {
+        e.enqueue(
+            &app,
+            Enqueue {
+                trigger: Some(DeploymentTrigger::Rollback),
+                rollback_of: Some(req.deployment_id),
+                ..Enqueue::default()
+            },
+        )
+    })
+    .await?;
+    Ok(Json(d))
+}
+
+async fn deployment_cancel(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Deployment> {
+    Ok(Json(engine_call(&s, move |e| e.cancel(&id)).await?))
+}
+
+async fn app_previews(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<Vec<previews::Preview>> {
+    Ok(Json(
+        tx(&s, move |c, _| {
+            let id = apps::find(c, &app)?.id;
+            previews::list(c, &id, false)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize, Default)]
+struct LogQuery {
+    #[serde(default)]
+    follow: bool,
+    tail: Option<usize>,
+}
+
+/// A deployment's log: JSON lines. With `follow=true` the response stays
+/// open and streams new lines until the deployment's log is complete.
+async fn deployment_logs(
+    State(s): State<AppState>,
+    Path(id): Path<String>,
+    Query(q): Query<LogQuery>,
+) -> Result<axum::response::Response, AppError> {
+    use axum::response::IntoResponse;
+    let p = platform(&s)?;
+    let (d, app_name) = {
+        let id = id.clone();
+        tx(&s, move |c, _| {
+            let d = deployments::get(c, &id)?;
+            let name = apps::get(c, &d.app_id)?.name;
+            Ok((d, name))
+        })
+        .await?
+    };
+    let logs = p.engine.logs.clone();
+    // Subscribe before reading the file, so no line falls between the two.
+    let live = if q.follow { logs.follow(&d.id) } else { None };
+    let lines = logs.read(&app_name, &d.id, q.tail);
+    let headers = [
+        (axum::http::header::CONTENT_TYPE, "application/x-ndjson"),
+        (axum::http::header::CACHE_CONTROL, "no-store"),
+    ];
+    let encode = |l: &vercelify_platform::logs::LogLine| {
+        let mut v = serde_json::to_vec(l).unwrap_or_default();
+        v.push(b'\n');
+        bytes::Bytes::from(v)
+    };
+    let Some(mut live) = live else {
+        let body: Vec<u8> = lines.iter().flat_map(|l| encode(l).to_vec()).collect();
+        return Ok((headers, body).into_response());
+    };
+    let (tx_, rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(256);
+    tokio::spawn(async move {
+        // The file may end with lines that also arrive live: skip by position.
+        let next = lines.last().map(|l| l.seq + 1).unwrap_or(0);
+        for l in &lines {
+            if tx_.send(encode(l)).await.is_err() {
+                return;
+            }
+        }
+        loop {
+            match live.recv().await {
+                Ok(l) => {
+                    if l.seq < next {
+                        continue;
+                    }
+                    if tx_.send(encode(&l)).await.is_err() {
+                        return;
+                    }
+                }
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(_) => return,
+            }
+        }
+    });
+    Ok((headers, axum::body::Body::new(crate::routes::LineBody(rx))).into_response())
 }

@@ -72,6 +72,9 @@ impl AppState {
         let (platform, platform_error) = crate::platform::Platform::open_if_enabled(&config);
         if let Some(p) = &platform {
             p.on_start(&config, &collector.host());
+            let (ev, w) = (events.clone(), watcher.clone());
+            p.engine
+                .set_listener(Box::new(move |e| crate::platform_api::on_engine_event(&ev, &w, e)));
         }
         let llm = Arc::new(Llm::new(config.clone()));
         llm.set_jobs(jobs.clone());
@@ -698,7 +701,7 @@ async fn events_stream(State(s): State<AppState>) -> Response {
 }
 
 /// A response body fed line by line from a channel.
-struct LineBody(tokio::sync::mpsc::Receiver<bytes::Bytes>);
+pub struct LineBody(pub tokio::sync::mpsc::Receiver<bytes::Bytes>);
 
 impl http_body::Body for LineBody {
     type Data = bytes::Bytes;

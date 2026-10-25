@@ -117,9 +117,12 @@ CREATE TABLE deployments (
   branch         TEXT NOT NULL DEFAULT '',
   commit_sha     TEXT NOT NULL DEFAULT '',
   commit_message TEXT NOT NULL DEFAULT '',
-  trigger        TEXT NOT NULL CHECK (trigger IN ('push', 'manual', 'hook', 'webhook', 'rollback', 'auto-rollback', 'migration')),
+  trigger        TEXT NOT NULL CHECK (trigger IN ('push', 'manual', 'hook', 'webhook', 'rollback', 'auto-rollback', 'migration', 'recover')),
   rollback_of    TEXT REFERENCES deployments(id) ON DELETE SET NULL,
   image          TEXT NOT NULL DEFAULT '',
+  -- Port the image listens on (detected at build), so a rollback needs no build.
+  port           INTEGER CHECK (port IS NULL OR port BETWEEN 1 AND 65535),
+  framework      TEXT NOT NULL DEFAULT '',
   node_id        TEXT REFERENCES nodes(id) ON DELETE SET NULL,
   status         TEXT NOT NULL CHECK (status IN ('queued', 'building', 'deploying', 'healthy', 'failed', 'cancelled', 'superseded')),
   error          TEXT NOT NULL DEFAULT '',

@@ -481,6 +481,8 @@ pub enum DeploymentTrigger {
     Rollback,
     AutoRollback,
     Migration,
+    /// The reconciler re-created a missing container from its image.
+    Recover,
 }
 
 impl DeploymentTrigger {
@@ -493,6 +495,7 @@ impl DeploymentTrigger {
             Self::Rollback => "rollback",
             Self::AutoRollback => "auto-rollback",
             Self::Migration => "migration",
+            Self::Recover => "recover",
         }
     }
 
@@ -505,6 +508,7 @@ impl DeploymentTrigger {
             "rollback" => Self::Rollback,
             "auto-rollback" => Self::AutoRollback,
             "migration" => Self::Migration,
+            "recover" => Self::Recover,
             _ => return None,
         })
     }
@@ -629,6 +633,7 @@ mod tests {
             DeploymentTrigger::Rollback,
             DeploymentTrigger::AutoRollback,
             DeploymentTrigger::Migration,
+            DeploymentTrigger::Recover,
         ] {
             assert_eq!(serde_json::to_value(t).unwrap(), t.as_str());
             assert_eq!(DeploymentTrigger::parse(t.as_str()), Some(t));

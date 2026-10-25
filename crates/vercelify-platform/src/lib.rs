@@ -7,17 +7,24 @@
 
 pub mod apps;
 pub mod build;
+pub mod deploy;
 pub mod deployments;
 pub mod detect;
+pub mod docker;
+pub mod engine;
 pub mod env;
 pub mod error;
 pub mod gate;
 pub mod git;
+pub mod health;
 pub mod ids;
 pub mod logs;
 pub mod nodes;
+pub mod previews;
 pub mod proc;
 pub mod projects;
+pub mod proxy;
+pub mod reconcile;
 pub mod secrets;
 pub mod store;
 pub mod validate;

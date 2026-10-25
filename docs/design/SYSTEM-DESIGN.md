@@ -267,13 +267,17 @@ for each node:
    actual  = runtime.list(node)            // docker ps --filter label=vercelify.managed=platform
    desired = store.desired_containers(node) // current deployments of running apps, previews, databases
    diff →  start (stopped but desired running, not asleep, not frozen by the power guard)
-           recreate (missing; from the deployment's image, no build)
+           recreate (missing; a `recover` deployment of the same image, no build,
+                     through the normal health-checked path, at most every 5 min per app)
            remove (labelled ours, belongs to no current deployment, older than 2 min)
            report (crash loop: restarted > 5 times in 10 min → alert, back off to 5 min)
 regenerate route files for the node; write only files whose content changed
 ```
 
-The reconciler never builds and never changes `current_deployment_id`. Sleeping apps
+Stopped and sleeping apps lose their base route, so visitors get the wake page
+(sleeping) or a 404 instead of a 502 from a dead upstream; routes of apps with a
+deployment in flight are left to the engine. The reconciler never builds and never
+changes `current_deployment_id` itself. Sleeping apps
 (`sleep.rs`) are "desired asleep" while the sleep module says so; the wake listener starts
 them, and the reconciler leaves them alone.
 

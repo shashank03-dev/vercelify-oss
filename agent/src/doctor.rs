@@ -206,7 +206,8 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
         )),
         None => {}
     }
-    if main {
+    let platform = f.platform.is_some();
+    if main && !platform {
         out.push(match f.coolify_healthy {
             Some(true) => check("coolify", "Coolify", Fine, "dashboard and API are up", None),
             _ => check(
@@ -271,17 +272,18 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
                 Some("re-run the installer (sets it to root)"),
             ));
         }
+    }
+    if main {
         if let Some(h) = &f.proxy_health {
+            let fix = if platform {
+                "docker logs vercelify-proxy --tail 50; the agent recreates it: sudo systemctl restart vercelify-agent"
+            } else {
+                "Coolify → Servers → localhost → Proxy → Restart"
+            };
             out.push(if h == "healthy" || h == "running" {
                 check("proxy", "Traefik proxy", Fine, h.clone(), None)
             } else {
-                check(
-                    "proxy",
-                    "Traefik proxy",
-                    Bad,
-                    h.clone(),
-                    Some("Coolify → Servers → localhost → Proxy → Restart"),
-                )
+                check("proxy", "Traefik proxy", Bad, h.clone(), Some(fix))
             });
         }
         if f.wildcard_set == Some(false) {
@@ -798,7 +800,15 @@ async fn slow_facts(s: &AppState, role: &str, snap: Option<&SystemSnapshot>) -> 
         smart: smart_facts(cfg, snap).await,
         ..Default::default()
     };
-    if role != "worker" {
+    if role != "worker" && cfg.platform_engine() {
+        // The platform engine keeps its domain setting itself.
+        f.wildcard_set = s.platform.as_ref().and_then(|p| {
+            p.store
+                .with(vercelify_platform::apps::domain_settings)
+                .ok()
+                .map(|d| d.wildcard.is_some_and(|w| !w.is_empty()))
+        });
+    } else if role != "worker" {
         f.schema_missing = coolify::schema_missing(cfg).await.ok();
         f.auto_update = coolify::auto_update_enabled(cfg).await;
         f.ssh_user_ok = psql_value(cfg, "select coalesce(\"user\",'') from servers where id=0")
@@ -849,7 +859,12 @@ pub async fn gather(s: &AppState) -> Facts {
     };
     let ts = tailscale::status(cfg.tailscale_bin.as_deref()).await;
     let main = role != "worker";
-    let (coolify_healthy, coolify_token_ok) = if main { coolify_facts(cfg).await } else { (None, None) };
+    let coolify_engine = main && !cfg.platform_engine();
+    let (coolify_healthy, coolify_token_ok) = if coolify_engine {
+        coolify_facts(cfg).await
+    } else {
+        (None, None)
+    };
     let slow = slow_facts(s, &role, snap.as_ref()).await;
     let proxy_health = if main {
         run(
@@ -858,7 +873,7 @@ pub async fn gather(s: &AppState) -> Facts {
                 "inspect",
                 "-f",
                 "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
-                "coolify-proxy",
+                &cfg.proxy_container,
             ],
             Duration::from_secs(10),
         )
@@ -1109,6 +1124,25 @@ mod tests {
         assert!(c.iter().all(|c| c.fix.is_none()));
         assert_eq!(status_of(&c, "ollama"), None, "no AI check when Ollama isn't installed");
         assert_eq!(status_of(&c, "smart-sda"), Some(Fine));
+    }
+
+    #[test]
+    fn platform_engine_skips_coolify_checks() {
+        let f = Facts {
+            platform: Some(Ok(1)),
+            coolify_healthy: None,
+            coolify_token_ok: None,
+            proxy_health: Some("exited".into()),
+            ..healthy_main()
+        };
+        let checks = evaluate(&f);
+        assert!(
+            !checks.iter().any(|c| c.id.starts_with("coolify")),
+            "no Coolify on this engine"
+        );
+        let proxy = checks.iter().find(|c| c.id == "proxy").unwrap();
+        assert_eq!(proxy.status, CheckStatus::Bad);
+        assert!(proxy.fix.as_deref().unwrap().contains("vercelify-proxy"));
     }
 
     #[test]

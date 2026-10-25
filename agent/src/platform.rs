@@ -1,28 +1,86 @@
 //! The agent's handle on Vercelify's own platform engine (design doc §2):
-//! the state database and the master key, opened once at start on a main
-//! server whose `engine` is `platform`.
+//! the state database, the master key, the deployment engine and the
+//! reconciler, opened once at start on a main server whose `engine` is
+//! `platform`.
 
 use crate::config::Config;
 use std::sync::Arc;
+use std::time::Duration;
+use vercelify_platform::build::{Builder, Driver};
+use vercelify_platform::deploy::Deployer;
+use vercelify_platform::docker::Docker;
+use vercelify_platform::engine::Engine;
+use vercelify_platform::gate::BuildGate;
+use vercelify_platform::logs::LogHub;
+use vercelify_platform::proxy::{ProxyConfig, TRAEFIK_IMAGE};
+use vercelify_platform::reconcile::Reconciler;
 use vercelify_platform::secrets::MasterKey;
 use vercelify_platform::Store;
 
 pub struct Platform {
     pub store: Arc<Store>,
     pub key: Arc<MasterKey>,
+    pub engine: Arc<Engine>,
+    pub reconciler: Arc<Reconciler>,
+    pub proxy: ProxyConfig,
 }
 
 /// What the doctor reports when the platform couldn't be opened.
 #[derive(Debug, Clone, Default)]
 pub struct OpenError(pub String);
 
+pub fn proxy_config(cfg: &Config) -> ProxyConfig {
+    ProxyConfig {
+        dir: cfg.proxy_dir.clone(),
+        http_port: cfg.proxy_http_port,
+        https_port: cfg.proxy_https_port,
+        metrics_port: cfg.proxy_metrics_port,
+        acme_email: cfg.acme_email.clone(),
+        dns_challenge: false,
+        image: TRAEFIK_IMAGE.into(),
+    }
+}
+
 impl Platform {
     pub fn open(cfg: &Config) -> Result<Self, OpenError> {
-        let key = MasterKey::load_or_create(&cfg.master_key_file).map_err(|e| OpenError(format!("master key: {e}")))?;
-        let store = Store::open(&cfg.platform_db).map_err(|e| OpenError(e.to_string()))?;
+        let key = Arc::new(
+            MasterKey::load_or_create(&cfg.master_key_file).map_err(|e| OpenError(format!("master key: {e}")))?,
+        );
+        let store = Arc::new(Store::open(&cfg.platform_db).map_err(|e| OpenError(e.to_string()))?);
+        let docker = Docker {
+            bin: cfg.docker_bin.clone(),
+        };
+        let proxy = proxy_config(cfg);
+        let builder = Builder {
+            docker: cfg.docker_bin.clone(),
+            git: cfg.git_bin.clone(),
+            work_dir: cfg.state_dir.join("builds"),
+            driver: Driver::parse(&cfg.build_driver),
+            memory: cfg.build_memory.clone(),
+            timeout: Duration::from_secs(45 * 60),
+        };
+        let deployer = Deployer {
+            docker,
+            proxy: proxy.clone(),
+            hdd_root: cfg.hdd_volume_root.clone(),
+            // The installer's memory-capped slice for apps, when present.
+            cgroup_parent: cfg
+                .systemd_dir
+                .join("vercelify.slice")
+                .exists()
+                .then(|| "vercelify.slice".to_string()),
+            health_interval: Duration::from_secs(2),
+        };
+        let gate = BuildGate::new(cfg.build_concurrency.max(1) as usize, cfg.power_guard_state.clone());
+        let logs = LogHub::new(cfg.state_dir.join("logs"));
+        let engine = Engine::new(store.clone(), key.clone(), builder, deployer, gate, logs);
+        let reconciler = Reconciler::new(engine.clone());
         Ok(Self {
-            store: Arc::new(store),
-            key: Arc::new(key),
+            store,
+            key,
+            engine,
+            reconciler,
+            proxy,
         })
     }
 
@@ -40,6 +98,30 @@ impl Platform {
             Ok(n) => tracing::warn!("platform: {n} deployment(s) were interrupted by the restart"),
             Err(e) => tracing::error!("platform: start-up bookkeeping failed: {e}"),
         }
+    }
+
+    /// Start the proxy, the deployment queue and the reconciler.
+    pub fn spawn(self: &Arc<Self>, reconcile_every: Duration) {
+        let me = self.clone();
+        tokio::spawn(async move {
+            // The proxy first: deployments write routes for it. Docker may
+            // still be starting at boot, so retry.
+            let mut wait = Duration::from_secs(5);
+            loop {
+                match vercelify_platform::proxy::ensure(&me.engine.deployer.docker, &me.proxy, vec![]).await {
+                    Ok(_) => break,
+                    Err(e) => {
+                        tracing::warn!("platform proxy: {e}; retrying in {}s", wait.as_secs());
+                        tokio::time::sleep(wait).await;
+                        wait = (wait * 2).min(Duration::from_secs(300));
+                    }
+                }
+            }
+            tokio::spawn(me.engine.clone().run());
+            if !reconcile_every.is_zero() {
+                me.reconciler.clone().run(reconcile_every).await;
+            }
+        });
     }
 
     /// Open when this server runs the platform engine. A failure is logged and
@@ -67,13 +149,16 @@ mod tests {
     use super::*;
 
     fn cfg(dir: &std::path::Path, engine: &str) -> Config {
-        Config {
+        let mut c = Config {
             engine: engine.into(),
             role: Some("main".into()),
+            state_dir: dir.into(),
             platform_db: dir.join("platform.db"),
             master_key_file: dir.join("master.key"),
             ..Config::default()
-        }
+        };
+        c.apply_engine_defaults();
+        c
     }
 
     #[test]
@@ -83,7 +168,11 @@ mod tests {
         assert!(p.is_none() && e.is_none());
         assert!(!dir.path().join("platform.db").exists());
 
-        let (p, e) = Platform::open_if_enabled(&cfg(dir.path(), "platform"));
+        let c = cfg(dir.path(), "platform");
+        assert_eq!(c.proxy_dir, dir.path().join("proxy"), "our proxy, not Coolify's");
+        assert_eq!(c.proxy_container, "vercelify-proxy");
+        assert_eq!(c.traefik_metrics_url, "http://127.0.0.1:8082/metrics");
+        let (p, e) = Platform::open_if_enabled(&c);
         assert!(e.is_none(), "{e:?}");
         let p = p.unwrap();
         assert_eq!(
