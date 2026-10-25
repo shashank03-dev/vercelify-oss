@@ -72,6 +72,9 @@ pub fn plan(
     let mut p = Plan::default();
     let by_name: HashMap<&str, &ContainerState> = actual.iter().map(|c| (c.name.as_str(), c)).collect();
     let wanted: HashSet<&str> = wants.iter().map(|w| w.container.as_str()).collect();
+    // Compose apps run more containers than the routed one; they carry the
+    // wanted deployment's label.
+    let wanted_deployments: HashSet<&str> = wants.iter().map(|w| w.deployment_id.as_str()).collect();
     for w in wants {
         match (by_name.get(w.container.as_str()), w.desired) {
             (None, Desired::Running) => p.recover.push((w.app_id.clone(), w.deployment_id.clone())),
@@ -93,7 +96,7 @@ pub fn plan(
             continue;
         }
         let dep = c.labels.get(LABEL_DEPLOYMENT).map(String::as_str).unwrap_or("");
-        if active.contains(dep) {
+        if active.contains(dep) || wanted_deployments.contains(dep) {
             continue;
         }
         if age(&c.created, now).is_some_and(|a| a >= ORPHAN_GRACE) {
@@ -156,16 +159,7 @@ impl Reconciler {
                     if container.is_empty() {
                         return Ok(());
                     }
-                    let (port, _) = deployments::built_info(c, &d.id)?;
-                    let port = app.runtime.port.or(port).unwrap_or(3000);
-                    let (hosts, _) = hosts_for(&settings, &app, d.pr_number);
-                    let route = (!hosts.is_empty()).then(|| Route {
-                        key: deploy::route_key(&app.name, d.pr_number),
-                        hosts,
-                        upstreams: vec![format!("http://{container}:{port}")],
-                        basic_auth: vec![],
-                        dns_challenge: false,
-                    });
+                    let route = route_for(c, &settings, &app, d, &container)?;
                     out.push(Want {
                         app_id: app.id.clone(),
                         app_name: app.name.clone(),
@@ -187,6 +181,8 @@ impl Reconciler {
                         // Previews follow the app: a stopped app's previews stop too.
                         let desired = if app.desired == Desired::Stopped {
                             Desired::Stopped
+                        } else if p.asleep {
+                            Desired::Sleeping
                         } else {
                             Desired::Running
                         };
@@ -312,6 +308,29 @@ impl Reconciler {
     }
 }
 
+/// The route of a deployment served by `container`, if it has hosts.
+pub fn route_for(
+    c: &rusqlite::Connection,
+    settings: &apps::DomainSettings,
+    app: &vercelify_core::platform::App,
+    d: &Deployment,
+    container: &str,
+) -> Result<Option<Route>> {
+    let (port, _) = deployments::built_info(c, &d.id)?;
+    let port = app.runtime.port.or(port).unwrap_or(3000);
+    let (hosts, _) = hosts_for(settings, app, d.pr_number);
+    if hosts.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(Route {
+        key: deploy::route_key(&app.name, d.pr_number),
+        hosts,
+        upstreams: vec![format!("http://{container}:{port}")],
+        basic_auth: apps::basic_auth(c, &app.id)?,
+        dns_challenge: false,
+    }))
+}
+
 /// For the UI: what runs where, by app id.
 pub fn containers_by_app(actual: &[ContainerState]) -> BTreeMap<String, Vec<ContainerState>> {
     let mut m: BTreeMap<String, Vec<ContainerState>> = BTreeMap::new();
@@ -385,6 +404,7 @@ mod tests {
             c("vfy-orphan-1", "running", old, "dpl_old"),
             c("vfy-new-1", "running", fresh, "dpl_other"),
             c("vfy-building-1", "running", old, "dpl_inflight"),
+            c("vfy-fine-worker-1", "running", old, "dpl_fine"),
         ];
         let active: HashSet<String> = ["dpl_inflight".to_string()].into();
         let keys = vec!["fine".into(), "off".into(), "deleted-app".into()];

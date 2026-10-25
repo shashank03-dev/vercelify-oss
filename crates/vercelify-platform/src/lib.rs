@@ -7,6 +7,7 @@
 
 pub mod apps;
 pub mod build;
+pub mod compose;
 pub mod deploy;
 pub mod deployments;
 pub mod detect;
@@ -16,6 +17,7 @@ pub mod env;
 pub mod error;
 pub mod gate;
 pub mod git;
+pub mod git_sources;
 pub mod health;
 pub mod ids;
 pub mod logs;
@@ -26,6 +28,7 @@ pub mod projects;
 pub mod proxy;
 pub mod reconcile;
 pub mod secrets;
+pub mod sleeping;
 pub mod store;
 pub mod validate;
 pub mod volumes;

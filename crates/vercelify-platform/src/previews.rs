@@ -15,6 +15,8 @@ pub struct Preview {
     pub url: String,
     pub deployment_id: Option<String>,
     pub status: String,
+    /// Stopped by the sleep module.
+    pub asleep: bool,
     pub created_at: String,
     pub closed_at: Option<String>,
 }
@@ -29,9 +31,18 @@ fn row(r: &Row) -> rusqlite::Result<Preview> {
         url: r.get("url")?,
         deployment_id: r.get("deployment_id")?,
         status: r.get("status")?,
+        asleep: r.get("asleep")?,
         created_at: r.get("created_at")?,
         closed_at: r.get("closed_at")?,
     })
+}
+
+pub fn set_asleep(c: &Connection, app_id: &str, pr: u32, asleep: bool) -> Result<()> {
+    c.execute(
+        "UPDATE previews SET asleep = ?3 WHERE app_id = ?1 AND pr_number = ?2",
+        params![app_id, pr, asleep],
+    )?;
+    Ok(())
 }
 
 pub fn list(c: &Connection, app_id: &str, active_only: bool) -> Result<Vec<Preview>> {
@@ -73,7 +84,7 @@ pub fn upsert(c: &Connection, app_id: &str, pr: u32, head_sha: &str, title: &str
 /// The deployment now serving a preview, and its URL.
 pub fn set_serving(c: &Connection, app_id: &str, pr: u32, deployment_id: &str, url: &str) -> Result<()> {
     c.execute(
-        "UPDATE previews SET deployment_id = ?3, url = ?4 WHERE app_id = ?1 AND pr_number = ?2",
+        "UPDATE previews SET deployment_id = ?3, url = ?4, asleep = 0 WHERE app_id = ?1 AND pr_number = ?2",
         params![app_id, pr, deployment_id, url],
     )?;
     Ok(())

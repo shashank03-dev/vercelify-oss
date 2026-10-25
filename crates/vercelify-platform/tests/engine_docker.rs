@@ -334,10 +334,227 @@ async fn deploy_redeploy_rollback_recover() {
     let again = rec.once().await.unwrap();
     assert!(again.stopped.is_empty() && again.errors.is_empty(), "{again:?}");
 
+    // 6. Basic Auth in front of the app.
+    store_
+        .tx(|c| {
+            apps::patch(
+                c,
+                &app.id,
+                &AppPatch {
+                    desired: Some(Desired::Running),
+                    ..AppPatch::default()
+                },
+            )?;
+            apps::set_basic_auth(c, &app.id, Some(("me", "a long password")))
+        })
+        .unwrap();
+    rec.once().await.unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while get("web.test.localhost").await.map(|r| r.0) != Ok(401) {
+        assert!(
+            Instant::now() < deadline,
+            "no password asked: {:?}",
+            get("web.test.localhost").await
+        );
+        tokio::time::sleep(Duration::from_millis(300)).await;
+    }
+    store_.tx(|c| apps::set_basic_auth(c, &app.id, None)).unwrap();
+    rec.once().await.unwrap();
+    body_of("web.test.localhost", "version two").await;
+
+    // 7. A release that crashes after going live is rolled back by itself.
+    let crash_src = dir.path().join("crash");
+    std::fs::create_dir_all(&crash_src).unwrap();
+    std::fs::write(
+        crash_src.join("package.json"),
+        r#"{"name":"web","scripts":{"start":"node server.js"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        crash_src.join("server.js"),
+        "require('http').createServer((q,s)=>s.end('crashy')).listen(process.env.PORT); setTimeout(()=>process.exit(1), 1500)",
+    )
+    .unwrap();
+    let mut w = logs.writer("fixture", "dpl_crash");
+    let crash = engine
+        .builder
+        .build_dir(
+            DirBuild {
+                dir: &crash_src,
+                app_name: "fixture",
+                deployment_id: "dpl_fixturecrash",
+                build: &AppBuild::default(),
+                build_env: &[],
+            },
+            Cancel::never(),
+            &mut w,
+        )
+        .await
+        .unwrap();
+    drop(w);
+    let good = store_
+        .with(|c| apps::get(c, &app.id))
+        .unwrap()
+        .current_deployment_id
+        .unwrap();
+    store_
+        .tx(|c| {
+            apps::patch(
+                c,
+                &app.id,
+                &AppPatch {
+                    source: Some(AppSource {
+                        image: Some(crash.image.clone()),
+                        ..AppSource::default()
+                    }),
+                    ..AppPatch::default()
+                },
+            )
+        })
+        .unwrap();
+    let bad = engine.enqueue("web", Enqueue::default()).unwrap();
+    wait_for(&engine, &bad.id, DeploymentStatus::Healthy).await;
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let rolled = loop {
+        let latest = store_.with(|c| deployments::list(c, &app.id, 1)).unwrap().remove(0);
+        if latest.trigger == DeploymentTrigger::AutoRollback {
+            break latest;
+        }
+        assert!(Instant::now() < deadline, "no automatic rollback");
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    assert_eq!(rolled.rollback_of.as_deref(), Some(good.as_str()));
+    wait_for(&engine, &rolled.id, DeploymentStatus::Healthy).await;
+    body_of("web.test.localhost", "version two").await;
+
+    // 8. A Docker Compose app from a git repository over HTTPS.
+    let repo = dir.path().join("git/shop.git");
+    let work = dir.path().join("shop-src");
+    std::fs::create_dir_all(&work).unwrap();
+    std::fs::write(
+        work.join("docker-compose.yml"),
+        "services:\n  web:\n    image: node:22-slim\n    command: [\"node\", \"-e\", \"require('http').createServer((q,s)=>s.end('compose-'+process.env.GREETING)).listen(8080)\"]\n  worker:\n    image: alpine:3.20\n    command: [\"sleep\", \"600\"]\n",
+    )
+    .unwrap();
+    let sh = |cmd: &str, cwd: &std::path::Path| {
+        let o = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(cmd)
+            .current_dir(cwd)
+            .output()
+            .unwrap();
+        assert!(o.status.success(), "{cmd}: {}", String::from_utf8_lossy(&o.stderr));
+    };
+    sh("git init -q -b main . && git -c user.email=t@t -c user.name=t add . && git -c user.email=t@t -c user.name=t commit -qm init", &work);
+    std::fs::create_dir_all(repo.parent().unwrap()).unwrap();
+    sh(
+        &format!(
+            "git clone -q --bare . {} && git -C {} update-server-info",
+            repo.display(),
+            repo.display()
+        ),
+        &work,
+    );
+    let certs = dir.path().join("certs");
+    std::fs::create_dir_all(&certs).unwrap();
+    sh("openssl req -x509 -newkey rsa:2048 -nodes -keyout key.pem -out cert.pem -days 1 -subj /CN=127.0.0.1 -addext subjectAltName=IP:127.0.0.1 2>/dev/null", &certs);
+    let port = std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port();
+    let server = std::process::Command::new("python3")
+        .arg("-c")
+        .arg(format!(
+            "import http.server,ssl,functools\nh=functools.partial(http.server.SimpleHTTPRequestHandler,directory='{}')\ns=http.server.HTTPServer(('127.0.0.1',{port}),h)\nc=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);c.load_cert_chain('{}','{}')\ns.socket=c.wrap_socket(s.socket,server_side=True)\ns.serve_forever()",
+            dir.path().join("git").display(),
+            certs.join("cert.pem").display(),
+            certs.join("key.pem").display()
+        ))
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    struct Kill(std::process::Child);
+    impl Drop for Kill {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+        }
+    }
+    let _server = Kill(server);
+    std::env::set_var("GIT_SSL_CAINFO", certs.join("cert.pem"));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let shop = store_
+        .tx(|c| {
+            apps::create(
+                c,
+                &AppCreate {
+                    name: "shop".into(),
+                    kind: AppKind::Compose,
+                    environment_id: None,
+                    project_id: None,
+                    source: AppSource {
+                        repository: Some(format!("https://127.0.0.1:{port}/shop.git")),
+                        branch: Some("main".into()),
+                        ..AppSource::default()
+                    },
+                    build: None,
+                    runtime: Some(AppRuntime {
+                        port: Some(8080),
+                        health_timeout_secs: 60,
+                        ..AppRuntime::default()
+                    }),
+                    previews: None,
+                    node_id: None,
+                    domains: vec![],
+                },
+            )
+        })
+        .unwrap();
+    store_
+        .tx(|c| {
+            env::put(
+                c,
+                &key,
+                VarScope::App,
+                &shop.id,
+                &EnvVarsPut {
+                    vars: vec![EnvVarInput {
+                        key: "GREETING".into(),
+                        value: "ok".into(),
+                        build: None,
+                        preview_only: None,
+                        secret: None,
+                    }],
+                    replace: false,
+                },
+            )
+        })
+        .unwrap();
+    let cd = engine.enqueue("shop", Enqueue::default()).unwrap();
+    let cd = wait_for(&engine, &cd.id, DeploymentStatus::Healthy).await;
+    assert_eq!(cd.commit_message, "init");
+    body_of("shop.test.localhost", "compose-ok").await;
+    let report = rec.once().await.unwrap();
+    assert!(
+        report.removed.is_empty(),
+        "the compose worker is not an orphan: {report:?}"
+    );
+
+    // Deleting the app cleans up after it.
+    let shop_app = store_.tx(|c| apps::delete(c, &shop.id)).unwrap();
+    engine.cleanup_app(&shop_app, true, &[]).await;
+    assert!(!docker
+        .list_managed()
+        .await
+        .unwrap()
+        .iter()
+        .any(|c| c.name.starts_with("vfy-shop-")));
+
     // Clean up.
     for c in docker.list_managed().await.unwrap() {
         let _ = docker.remove(&c.name).await;
     }
     let _ = docker.remove(proxy::CONTAINER).await;
     let _ = docker.remove_image(&built.image).await;
+    let _ = docker.remove_image(&crash.image).await;
 }

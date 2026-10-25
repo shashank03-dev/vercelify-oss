@@ -607,6 +607,136 @@ pub struct PlatformNode {
     pub created_at: String,
 }
 
+// ----- git sources, hooks, auth, tasks ------------------------------------------
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum GitProvider {
+    Github,
+    Gitlab,
+    Gitea,
+    Generic,
+}
+
+impl GitProvider {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Github => "github",
+            Self::Gitlab => "gitlab",
+            Self::Gitea => "gitea",
+            Self::Generic => "generic",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum GitAuthKind {
+    None,
+    Token,
+    DeployKey,
+}
+
+/// Credentials for private repositories. The secret is never returned.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct GitSource {
+    pub id: String,
+    pub name: String,
+    pub provider: GitProvider,
+    pub auth: GitAuthKind,
+    /// Deploy keys: the public key to add to the repository (read-only).
+    pub public_key: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct GitSourceRequest {
+    pub name: String,
+    pub provider: GitProvider,
+    pub auth: GitAuthKind,
+    /// A personal access token (auth = token).
+    #[ts(optional)]
+    pub token: Option<String>,
+}
+
+/// Auto-deploy state of an app (its branch head as last seen).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct GitWatchStatus {
+    pub app_id: String,
+    pub enabled: bool,
+    pub last_head: String,
+    pub last_checked_at: Option<String>,
+    pub last_error: String,
+    pub skipped: u32,
+    pub last_skip: String,
+}
+
+/// A deploy hook URL (`POST /v1/hooks/deploy/<secret>`); shown once.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct DeployHook {
+    pub id: String,
+    pub created_at: String,
+    pub last_used_at: Option<String>,
+    /// Only in the response that created it.
+    pub secret: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct BasicAuthRequest {
+    /// Empty user removes the password protection.
+    pub user: String,
+    pub password: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct ScheduledTask {
+    pub id: String,
+    pub app_id: String,
+    pub name: String,
+    /// Cron syntax, UTC (`*/15 * * * *`).
+    pub schedule: String,
+    /// Run in the app's container (`sh -c`).
+    pub command: String,
+    pub enabled: bool,
+    pub last_run_at: Option<String>,
+    pub last_status: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct ScheduledTaskRequest {
+    pub name: String,
+    pub schedule: String,
+    pub command: String,
+    #[serde(default = "yes")]
+    pub enabled: bool,
+}
+
+fn yes() -> bool {
+    true
+}
+
+/// The server's domain setting for new apps and previews.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct PlatformDomain {
+    /// `example.com` (apps get `<name>.example.com`), or `<ip>.sslip.io`.
+    pub wildcard: Option<String>,
+    /// Let's Encrypt certificates on this server.
+    pub https: bool,
+    /// HTTPS ends at Cloudflare (tunnel mode).
+    pub edge_tls: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

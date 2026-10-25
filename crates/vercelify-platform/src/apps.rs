@@ -498,6 +498,39 @@ pub fn remove_domain(c: &Connection, app_id: &str, host_or_id: &str) -> Result<(
     Ok(())
 }
 
+/// HTTP Basic Auth in front of the app: `Some((user, password))` sets it,
+/// `None` removes it. Stored as an htpasswd line with a bcrypt hash.
+pub fn set_basic_auth(c: &Connection, id: &str, cred: Option<(&str, &str)>) -> Result<()> {
+    get(c, id)?;
+    let line = match cred {
+        None => String::new(),
+        Some((user, password)) => {
+            let user = user.trim();
+            if user.is_empty() || user.len() > 64 || user.contains([':', ' ', '\n']) {
+                return Err(Error::Invalid(
+                    "the user name must be 1–64 characters without : or spaces".into(),
+                ));
+            }
+            if password.len() < 8 || password.len() > 72 {
+                return Err(Error::Invalid("the password must be 8–72 characters".into()));
+            }
+            let hash = bcrypt::hash(password, 10).map_err(|e| Error::Internal(format!("bcrypt: {e}")))?;
+            format!("{user}:{hash}")
+        }
+    };
+    c.execute(
+        "UPDATE apps SET basic_auth = ?2, updated_at = ?3 WHERE id = ?1",
+        params![id, line, now()],
+    )?;
+    Ok(())
+}
+
+/// The htpasswd lines of an app (empty: no password).
+pub fn basic_auth(c: &Connection, id: &str) -> Result<Vec<String>> {
+    let line: String = c.query_row("SELECT basic_auth FROM apps WHERE id = ?1", [id], |r| r.get(0))?;
+    Ok(if line.is_empty() { vec![] } else { vec![line] })
+}
+
 pub fn set_cert_status(c: &Connection, host: &str, status: CertStatus) -> Result<()> {
     let s = match status {
         CertStatus::Pending => "pending",
@@ -728,6 +761,25 @@ pub(crate) mod tests {
             s.tx(|c| remove_domain(c, &a.id, "gone.example.com")),
             Err(Error::NotFound(_))
         ));
+    }
+
+    #[test]
+    fn basic_auth_is_hashed() {
+        let s = Store::open_in_memory().unwrap();
+        let a = s.tx(|c| create(c, &git_app("blog"))).unwrap();
+        s.tx(|c| set_basic_auth(c, &a.id, Some(("me", "correct horse"))))
+            .unwrap();
+        let lines = s.with(|c| basic_auth(c, &a.id)).unwrap();
+        let (user, hash) = lines[0].split_once(':').unwrap();
+        assert_eq!(user, "me");
+        assert!(bcrypt::verify("correct horse", hash).unwrap());
+        assert!(!lines[0].contains("correct horse"));
+        assert!(s.tx(|c| set_basic_auth(c, &a.id, Some(("me", "short")))).is_err());
+        assert!(s
+            .tx(|c| set_basic_auth(c, &a.id, Some(("a:b", "long enough"))))
+            .is_err());
+        s.tx(|c| set_basic_auth(c, &a.id, None)).unwrap();
+        assert!(s.with(|c| basic_auth(c, &a.id)).unwrap().is_empty());
     }
 
     #[test]

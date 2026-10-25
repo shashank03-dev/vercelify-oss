@@ -78,8 +78,16 @@ pub fn router_counts(metrics: &str) -> HashMap<String, f64> {
     out
 }
 
-/// `https-0-<key>@docker` → `<key>` (an app uuid, or `<uuid>-pr-<n>`).
+/// `https-0-<key>@docker` (Coolify) → `<key>` (an app uuid, or
+/// `<uuid>-pr-<n>`); `vfy-<key>-<n>[-secure]@file` (platform engine) →
+/// `<key>` (an app name, or `<name>-pr-<n>`).
 pub fn router_key(router: &str) -> Option<&str> {
+    if let Some(name) = router.strip_suffix("@file") {
+        let rest = name.strip_prefix("vfy-")?;
+        let rest = rest.strip_suffix("-secure").unwrap_or(rest);
+        let (key, n) = rest.rsplit_once('-')?;
+        return (!n.is_empty() && n.chars().all(|c| c.is_ascii_digit()) && !key.is_empty()).then_some(key);
+    }
     let name = router.strip_suffix("@docker")?;
     let rest = name.strip_prefix("https-").or_else(|| name.strip_prefix("http-"))?;
     let (n, key) = rest.split_once('-')?;
@@ -116,7 +124,26 @@ pub fn hosts_of(fqdn: &str) -> Vec<(bool, String)> {
 
 /// Traefik dynamic configuration: requests for these hosts reach the wake
 /// listener when the app's own (higher priority) route is gone.
-pub fn dynamic_config(hosts: &[(bool, String)], wake_url: &str) -> Option<String> {
+/// Entry points and certificate resolver of the proxy the routes are for.
+pub struct ProxyNames {
+    pub http: &'static str,
+    pub https: &'static str,
+    pub resolver: &'static str,
+}
+
+pub const COOLIFY_PROXY_NAMES: ProxyNames = ProxyNames {
+    http: "http",
+    https: "https",
+    resolver: "letsencrypt",
+};
+
+pub const PLATFORM_PROXY_NAMES: ProxyNames = ProxyNames {
+    http: "web",
+    https: "websecure",
+    resolver: vercelify_platform::proxy::RESOLVER,
+};
+
+pub fn dynamic_config_for(hosts: &[(bool, String)], wake_url: &str, names: &ProxyNames) -> Option<String> {
     if hosts.is_empty() {
         return None;
     }
@@ -135,13 +162,16 @@ pub fn dynamic_config(hosts: &[(bool, String)], wake_url: &str) -> Option<String
     };
     let mut y = String::from("# Written by vercelify-agent (sleeping apps). Do not edit.\nhttp:\n  routers:\n");
     y.push_str(&format!(
-        "    vercelify-wake-http:\n      rule: \"{}\"\n      entryPoints: [http]\n      service: vercelify-wake\n      priority: 1\n",
-        rule(false)
+        "    vercelify-wake-http:\n      rule: \"{}\"\n      entryPoints: [{}]\n      service: vercelify-wake\n      priority: 1\n",
+        rule(false),
+        names.http
     ));
     if hosts.iter().any(|(https, _)| *https) {
         y.push_str(&format!(
-            "    vercelify-wake-https:\n      rule: \"{}\"\n      entryPoints: [https]\n      service: vercelify-wake\n      priority: 1\n      tls:\n        certResolver: letsencrypt\n",
-            rule(true)
+            "    vercelify-wake-https:\n      rule: \"{}\"\n      entryPoints: [{}]\n      service: vercelify-wake\n      priority: 1\n      tls:\n        certResolver: {}\n",
+            rule(true),
+            names.https,
+            names.resolver
         ));
     }
     y.push_str(&format!(
@@ -252,6 +282,8 @@ pub struct Sleep {
     reloaded: Mutex<Option<Instant>>,
     events: Arc<Events>,
     jobs: Arc<Jobs>,
+    /// The platform engine, when this server runs it instead of Coolify.
+    engine: std::sync::OnceLock<Arc<vercelify_platform::engine::Engine>>,
 }
 
 /// One row of `docker ps -a` for Coolify's containers.
@@ -312,7 +344,70 @@ impl Sleep {
             reloaded: Mutex::new(None),
             events,
             jobs,
+            engine: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Sleep the platform engine's apps instead of Coolify's.
+    pub fn set_engine(&self, e: Arc<vercelify_platform::engine::Engine>) {
+        let _ = self.engine.set(e);
+    }
+
+    fn names(&self) -> &'static ProxyNames {
+        if self.engine.get().is_some() {
+            &PLATFORM_PROXY_NAMES
+        } else {
+            &COOLIFY_PROXY_NAMES
+        }
+    }
+
+    /// Platform apps and previews with sleep on, with their hosts.
+    fn platform_targets(&self, engine: &vercelify_platform::engine::Engine, settings: &[SleepSetting]) -> Vec<Target> {
+        let by_id: HashMap<&str, &SleepSetting> = settings.iter().map(|s| (s.app_uuid.as_str(), s)).collect();
+        let res = engine.store.with(|c| {
+            let domain = vercelify_platform::apps::domain_settings(c)?;
+            let mut out = vec![];
+            for app in vercelify_platform::apps::list(c, None)? {
+                let Some(s) = by_id.get(app.id.as_str()) else { continue };
+                let idle = Duration::from_secs(u64::from(s.idle_minutes) * minute());
+                let hosts_of_route = |pr: Option<u32>| -> Vec<(bool, String)> {
+                    vercelify_platform::engine::hosts_for(&domain, &app, pr)
+                        .0
+                        .into_iter()
+                        .filter(|h| h.redirect_to.is_none())
+                        .map(|h| (h.https, h.host))
+                        .collect()
+                };
+                if app.current_deployment_id.is_some() && app.desired != vercelify_core::platform::Desired::Stopped {
+                    out.push(Target {
+                        key: vercelify_platform::deploy::route_key(&app.name, None),
+                        app_uuid: app.id.clone(),
+                        pr: 0,
+                        hosts: hosts_of_route(None),
+                        idle,
+                    });
+                }
+                if s.previews {
+                    for p in vercelify_platform::previews::list(c, &app.id, true)? {
+                        if p.deployment_id.is_none() {
+                            continue;
+                        }
+                        out.push(Target {
+                            key: vercelify_platform::deploy::route_key(&app.name, Some(p.pr_number)),
+                            app_uuid: app.id.clone(),
+                            pr: u64::from(p.pr_number),
+                            hosts: hosts_of_route(Some(p.pr_number)),
+                            idle,
+                        });
+                    }
+                }
+            }
+            Ok(out)
+        });
+        res.unwrap_or_else(|e| {
+            tracing::warn!("sleep: reading platform apps: {e}");
+            vec![]
+        })
     }
 
     fn save(&self, store: &Store) {
@@ -418,6 +513,14 @@ impl Sleep {
 
     /// Make sure Traefik counts requests per app; restarts the proxy once.
     pub async fn ensure_proxy_metrics(&self) -> Result<ProxyMetricsResult, AppError> {
+        if self.engine.get().is_some() {
+            // The platform's proxy always counts requests per router.
+            *self.metrics_on.lock().await = true;
+            return Ok(ProxyMetricsResult {
+                metrics: true,
+                restarted: false,
+            });
+        }
         let cfg = &self.cfg;
         let file = cfg.proxy_dir.join("docker-compose.yml");
         // Coolify reads its proxy configuration from its database first.
@@ -510,6 +613,9 @@ impl Sleep {
         if settings.is_empty() {
             return vec![];
         }
+        if let Some(engine) = self.engine.get() {
+            return self.platform_targets(engine, settings);
+        }
         let list = settings
             .iter()
             .filter(|s| crate::autodeploy::valid_app_uuid(&s.app_uuid))
@@ -567,7 +673,8 @@ impl Sleep {
                 "ps",
                 "-a",
                 "--format",
-                "{{.ID}}\t{{.Names}}\t{{.State}}\t{{.Label \"coolify.pullRequestId\"}}\t{{.Label \"coolify.applicationUuid\"}}\t{{.Image}}",
+                // Coolify's labels, or the platform's (one of each pair is empty).
+                "{{.ID}}\t{{.Names}}\t{{.State}}\t{{.Label \"coolify.pullRequestId\"}}{{.Label \"vercelify.pr\"}}\t{{.Label \"coolify.applicationUuid\"}}{{.Label \"vercelify.app\"}}\t{{.Image}}",
             ],
             Duration::from_secs(20),
         )
@@ -582,7 +689,11 @@ impl Sleep {
         let path = dir.join(DYNAMIC_FILE);
         let wake_port = self.cfg.wake_listen.rsplit(':').next().unwrap_or("7421");
         let hosts: Vec<(bool, String)> = targets.iter().flat_map(|t| t.hosts.clone()).collect();
-        match dynamic_config(&hosts, &format!("http://host.docker.internal:{wake_port}")) {
+        match dynamic_config_for(
+            &hosts,
+            &format!("http://host.docker.internal:{wake_port}"),
+            self.names(),
+        ) {
             Some(y) => {
                 if std::fs::read_to_string(&path).ok().as_deref() != Some(y.as_str()) && dir.is_dir() {
                     if let Err(e) = std::fs::write(&path, y) {
@@ -630,7 +741,10 @@ impl Sleep {
         };
         let Some(rows) = self.docker_rows().await else { return };
         // A build is running: memory is tight and deploys restart containers.
-        let building = rows.iter().any(|r| r.running && r.image.contains("coolify-helper"));
+        let building = match self.engine.get() {
+            Some(e) => e.building(),
+            None => rows.iter().any(|r| r.running && r.image.contains("coolify-helper")),
+        };
         for t in &targets {
             let containers = containers_for(&rows, &t.app_uuid, t.pr);
             let running: Vec<String> = containers
@@ -686,10 +800,24 @@ impl Sleep {
             ),
             Some(&t.app_uuid),
         );
-        let mut args = vec!["stop", "-t", "20"];
-        args.extend(containers.iter().map(String::as_str));
-        match run(&self.cfg.docker_bin, &args, Duration::from_secs(90)).await {
-            Ok(o) if o.success() => {
+        let stopped: Result<(), String> = match self.engine.get() {
+            // The engine records it first, so its reconciler keeps it stopped.
+            Some(e) => {
+                let pr = (t.pr > 0).then_some(t.pr as u32);
+                e.sleep(&t.app_uuid, pr).await.map_err(|e| e.to_string())
+            }
+            None => {
+                let mut args = vec!["stop", "-t", "20"];
+                args.extend(containers.iter().map(String::as_str));
+                match run(&self.cfg.docker_bin, &args, Duration::from_secs(90)).await {
+                    Ok(o) if o.success() => Ok(()),
+                    Ok(o) => Err(format!("docker stop failed: {}", o.stderr.trim())),
+                    Err(e) => Err(e.to_string()),
+                }
+            }
+        };
+        match stopped {
+            Ok(()) => {
                 let mut store = self.store.lock().await;
                 store.asleep.insert(
                     t.key.clone(),
@@ -706,8 +834,7 @@ impl Sleep {
                 ));
                 self.events.changed("sleep");
             }
-            Ok(o) => job.fail(format!("docker stop failed: {}", o.stderr.trim())),
-            Err(e) => job.fail(e.to_string()),
+            Err(e) => job.fail(e),
         }
     }
 
@@ -720,12 +847,30 @@ impl Sleep {
             return true; // already starting
         }
         self.events.changed("sleep");
-        let app = key.split("-pr-").next().unwrap_or(key).to_string();
+        let target = self.targets.lock().await.iter().find(|t| t.key == key).cloned();
+        let app = match &target {
+            Some(t) => t.app_uuid.clone(),
+            None => key.split("-pr-").next().unwrap_or(key).to_string(),
+        };
         let job = self.jobs.start("wake", format!("Waking {key}"), Some(&app));
-        let mut args = vec!["start"];
-        args.extend(asleep.containers.iter().map(String::as_str));
-        let result = run(&self.cfg.docker_bin, &args, Duration::from_secs(90)).await;
-        let ok = matches!(&result, Ok(o) if o.success());
+        let result: Result<(), String> = match (self.engine.get(), &target) {
+            // Starts it, waits until it answers, then routes it again.
+            (Some(e), Some(t)) => {
+                let pr = (t.pr > 0).then_some(t.pr as u32);
+                e.wake(&t.app_uuid, pr).await.map_err(|e| e.to_string())
+            }
+            (Some(_), None) => Err(format!("{key} is not a sleeping app any more")),
+            (None, _) => {
+                let mut args = vec!["start"];
+                args.extend(asleep.containers.iter().map(String::as_str));
+                match run(&self.cfg.docker_bin, &args, Duration::from_secs(90)).await {
+                    Ok(o) if o.success() => Ok(()),
+                    Ok(o) => Err(format!("docker start failed: {}", o.stderr.trim())),
+                    Err(e) => Err(e.to_string()),
+                }
+            }
+        };
+        let ok = result.is_ok();
         if ok {
             let mut store = self.store.lock().await;
             store.asleep.remove(key);
@@ -737,11 +882,8 @@ impl Sleep {
                 s.at = now();
             }
             job.done(why.to_string());
-        } else {
-            job.fail(match result {
-                Ok(o) => format!("docker start failed: {}", o.stderr.trim()),
-                Err(e) => e.to_string(),
-            });
+        } else if let Err(e) = result {
+            job.fail(e);
         }
         self.waking.lock().await.remove(key);
         self.events.changed("sleep");
@@ -857,6 +999,18 @@ traefik_entrypoint_requests_total{code="200",entrypoint="http"} 99
 "#;
 
     #[test]
+    fn platform_router_names() {
+        assert_eq!(router_key("vfy-blog-0@file"), Some("blog"));
+        assert_eq!(router_key("vfy-my-blog-1-secure@file"), Some("my-blog"));
+        assert_eq!(router_key("vfy-blog-pr-7-0-secure@file"), Some("blog-pr-7"));
+        assert_eq!(router_key("vercelify-wake-http@file"), None);
+        assert_eq!(router_key("vfy-blog@file"), None);
+        let y = dynamic_config_for(&[(true, "a.test".into())], "http://h:1", &PLATFORM_PROXY_NAMES).unwrap();
+        assert!(y.contains("entryPoints: [web]") && y.contains("entryPoints: [websecure]"));
+        assert!(y.contains("certResolver: le\n"));
+    }
+
+    #[test]
     fn counts_requests_per_app_and_preview() {
         let per = requests_per_key(&router_counts(METRICS));
         assert_eq!(per.get("abc123"), Some(&5.0));
@@ -878,13 +1032,23 @@ traefik_entrypoint_requests_total{code="200",entrypoint="http"} 99
 
     #[test]
     fn wake_routes_only_add_https_where_used() {
-        assert_eq!(dynamic_config(&[], "http://h:7421"), None);
-        let y = dynamic_config(&[(false, "a.test".into())], "http://host.docker.internal:7421").unwrap();
+        assert_eq!(dynamic_config_for(&[], "http://h:7421", &COOLIFY_PROXY_NAMES), None);
+        let y = dynamic_config_for(
+            &[(false, "a.test".into())],
+            "http://host.docker.internal:7421",
+            &COOLIFY_PROXY_NAMES,
+        )
+        .unwrap();
         assert!(y.contains("rule: \"Host(`a.test`)\""));
         assert!(y.contains("priority: 1"));
         assert!(!y.contains("vercelify-wake-https"));
         assert!(y.contains("url: \"http://host.docker.internal:7421\""));
-        let y = dynamic_config(&[(true, "b.test".into()), (false, "a.test".into())], "http://h:1").unwrap();
+        let y = dynamic_config_for(
+            &[(true, "b.test".into()), (false, "a.test".into())],
+            "http://h:1",
+            &COOLIFY_PROXY_NAMES,
+        )
+        .unwrap();
         // http serves both (Cloudflare tunnels arrive on http); https only the https one.
         assert!(y.contains("rule: \"Host(`a.test`) || Host(`b.test`)\""));
         assert!(y.contains("vercelify-wake-https:\n      rule: \"Host(`b.test`)\""));

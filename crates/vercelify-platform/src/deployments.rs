@@ -214,8 +214,11 @@ pub fn promote(c: &Connection, app_id: &str, id: &str) -> Result<Option<String>>
         c.query_row("SELECT current_deployment_id FROM apps WHERE id = ?1", [app_id], |r| {
             r.get(0)
         })?;
+    // A deploy wakes a sleeping app: it just started, and is routed.
     c.execute(
-        "UPDATE apps SET current_deployment_id = ?2, updated_at = ?3 WHERE id = ?1",
+        "UPDATE apps SET current_deployment_id = ?2, updated_at = ?3,
+           desired = CASE desired WHEN 'sleeping' THEN 'running' ELSE desired END
+         WHERE id = ?1",
         params![app_id, id, now()],
     )?;
     if let Some(p) = previous.as_deref().filter(|p| *p != id) {

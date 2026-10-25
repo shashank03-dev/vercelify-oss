@@ -207,6 +207,24 @@ impl Git {
             },
         )
         .await?;
+        let out = if !out.success() && out.tail(5).to_ascii_lowercase().contains("shallow") {
+            // Servers without shallow support (dumb HTTP, some mirrors): fetch it all.
+            log(
+                "info",
+                "the server can't fetch one commit only; fetching the full history",
+            );
+            let args = proc::args(&["fetch", "--no-tags", "--recurse-submodules=no", "origin", "--", rev]);
+            proc::run(Spec {
+                bin: &self.bin,
+                args: &args,
+                env: &env,
+                cwd: d,
+                timeout: self.timeout,
+            })
+            .await?
+        } else {
+            out
+        };
         if !out.success() {
             return Err(Error::Unavailable(explain(&out, repo)));
         }

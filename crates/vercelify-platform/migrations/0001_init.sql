@@ -77,6 +77,8 @@ CREATE TABLE apps (
   node_id               TEXT REFERENCES nodes(id) ON DELETE SET NULL,
   desired               TEXT NOT NULL DEFAULT 'running' CHECK (desired IN ('running', 'stopped', 'sleeping')),
   current_deployment_id TEXT,
+  -- htpasswd line (user:bcrypt hash) for HTTP Basic Auth; empty = off.
+  basic_auth            TEXT NOT NULL DEFAULT '',
   created_at            TEXT NOT NULL,
   updated_at            TEXT NOT NULL
 );
@@ -145,6 +147,8 @@ CREATE TABLE previews (
   url           TEXT NOT NULL DEFAULT '',
   deployment_id TEXT REFERENCES deployments(id) ON DELETE SET NULL,
   status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
+  -- Stopped by the sleep module; the reconciler leaves it stopped.
+  asleep        INTEGER NOT NULL DEFAULT 0 CHECK (asleep IN (0, 1)),
   created_at    TEXT NOT NULL,
   closed_at     TEXT,
   UNIQUE (app_id, pr_number)
@@ -222,4 +226,16 @@ CREATE TABLE scheduled_tasks (
   last_status TEXT NOT NULL DEFAULT '',
   created_at  TEXT NOT NULL,
   UNIQUE (app_id, name)
+);
+
+-- Auto-deploy bookkeeping per app (design §11): what the branch pointed at
+-- when last checked, and why a push was not built.
+CREATE TABLE git_watch (
+  app_id          TEXT PRIMARY KEY REFERENCES apps(id) ON DELETE CASCADE,
+  enabled         INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+  last_head       TEXT NOT NULL DEFAULT '',
+  last_checked_at TEXT,
+  last_error      TEXT NOT NULL DEFAULT '',
+  skipped         INTEGER NOT NULL DEFAULT 0,
+  last_skip       TEXT NOT NULL DEFAULT ''
 );

@@ -15,8 +15,9 @@ use crate::logs::{LogHub, LogWriter};
 use crate::proc::{cancel_pair, CancelHandle};
 use crate::proxy::RouteHost;
 use crate::secrets::MasterKey;
-use crate::{deployments, env, previews, volumes, Error, Result, Store};
+use crate::{compose, deployments, env, git_sources, previews, volumes, Error, Result, Store};
 use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Notify;
@@ -101,7 +102,7 @@ impl Engine {
         *lock(&self.listener) = Some(l);
     }
 
-    fn emit(&self, e: EngineEvent) {
+    pub(crate) fn emit(&self, e: EngineEvent) {
         if let Some(l) = lock(&self.listener).as_ref() {
             l(e);
         }
@@ -167,7 +168,9 @@ impl Engine {
                     _ => {}
                 }
             }
-            if a.kind == AppKind::Image {
+            // Image apps deploy their configured image, except a rollback,
+            // which goes back to the image the target ran.
+            if a.kind == AppKind::Image && req.rollback_of.is_none() {
                 image = a.source.image.clone().unwrap_or_default();
             }
             if let Some(pr) = req.pr_number {
@@ -260,11 +263,21 @@ impl Engine {
         let res = self.steps(&app, &d, cancel, &mut log).await;
         lock(&self.running).remove(&d.id);
         match res {
-            Ok((done, url)) => {
+            Ok((done, url, previous)) => {
                 log.info(&format!(
                     "healthy{}",
                     url.as_deref().map(|u| format!(": {u}")).unwrap_or_default()
                 ));
+                let watched = matches!(
+                    done.trigger,
+                    DeploymentTrigger::Push
+                        | DeploymentTrigger::Manual
+                        | DeploymentTrigger::Hook
+                        | DeploymentTrigger::Webhook
+                );
+                if let (Some(prev), true, None) = (previous, watched, done.pr_number) {
+                    tokio::spawn(self.clone().watch_after_deploy(app.clone(), done.clone(), prev));
+                }
                 self.emit(EngineEvent::Succeeded {
                     app: app.name.clone(),
                     deployment: done,
@@ -297,9 +310,13 @@ impl Engine {
         self.emit(EngineEvent::Changed);
     }
 
-    fn auth(&self, _app: &App) -> GitAuth {
-        // Git sources (tokens, deploy keys) are resolved here from M4 on.
-        GitAuth::None
+    /// Credentials of the app's git source; the key file (deploy keys)
+    /// lives as long as the returned guard.
+    fn auth(&self, app: &App) -> Result<(GitAuth, Option<git_sources::KeyFile>)> {
+        let tmp = self.builder.work_dir.join(".keys");
+        let known_hosts = self.builder.work_dir.join("known_hosts");
+        self.store
+            .with(|c| git_sources::auth(c, &self.key, app.source.git_source_id.as_deref(), &tmp, &known_hosts))
     }
 
     async fn steps(
@@ -308,15 +325,17 @@ impl Engine {
         d: &Deployment,
         cancel: crate::proc::Cancel,
         log: &mut LogWriter,
-    ) -> Result<(Deployment, Option<String>)> {
+    ) -> Result<(Deployment, Option<String>, Option<String>)> {
         let preview = d.pr_number.is_some();
         let vars = {
             let key = self.key.clone();
             let id = app.id.clone();
             self.store.call(move |c| env::resolve(c, &key, &id, preview)).await?
         };
-        // Image: reuse (rollback, image apps) or build.
+        // Image: reuse (rollback, image apps) or build. Compose apps keep
+        // their checkout for `docker compose up`.
         let mut image = d.image.clone();
+        let mut compose_job: Option<(String, PathBuf)> = None;
         let (mut port, mut framework) = self.store.with(|c| deployments::built_info(c, &d.id))?;
         if let Some(target) = &d.rollback_of {
             let (p, f) = self.store.with(|c| deployments::built_info(c, target))?;
@@ -355,6 +374,7 @@ impl Engine {
                 .filter(|(_, v)| v.build)
                 .map(|(k, v)| (k.clone(), v.value.to_string()))
                 .collect();
+            let (auth, _key_file) = self.auth(app)?;
             let built = self
                 .builder
                 .build(
@@ -365,20 +385,15 @@ impl Engine {
                         source: &app.source,
                         build: &app.build,
                         rev: &rev,
-                        auth: self.auth(app),
+                        auth,
                         build_env,
                     },
                     cancel.clone(),
                     log,
                 )
                 .await?;
-            if matches!(built.plan.kind, PlanKind::Compose(_)) {
-                if let Some(dir) = &built.checkout {
-                    let _ = std::fs::remove_dir_all(dir.parent().unwrap_or(dir));
-                }
-                return Err(Error::Invalid(
-                    "Docker Compose apps deploy with the compose runner (not available yet on this engine)".into(),
-                ));
+            if let PlanKind::Compose(file) = &built.plan.kind {
+                compose_job = Some((file.clone(), built.checkout.clone().unwrap_or_default()));
             }
             image = built.image.clone();
             port = Some(built.plan.port);
@@ -442,6 +457,7 @@ impl Engine {
         }
         .filter(|c| !c.is_empty());
 
+        let basic_auth = self.store.with(|c| apps::basic_auth(c, &app.id))?;
         let input = DeployInput {
             app,
             deployment: &d,
@@ -450,10 +466,55 @@ impl Engine {
             volumes: &vols,
             port,
             hosts,
-            basic_auth: vec![],
+            basic_auth,
             dns_challenge: false,
         };
-        let container = self.deployer.start(&input, &mut |m| log.info(m)).await?;
+        let container = match &compose_job {
+            Some((file, checkout)) => {
+                let _cleanup = CheckoutGuard(checkout.parent().map(PathBuf::from).unwrap_or_else(|| checkout.clone()));
+                let project = compose::project_name(&app.name, d.pr_number);
+                let res = compose::up(
+                    compose::Up {
+                        docker: &self.deployer.docker,
+                        dir: checkout,
+                        file,
+                        project: &project,
+                        service: app.runtime.service.as_deref(),
+                        env: &input.env,
+                        labels: compose::Labels {
+                            app_id: &app.id,
+                            app_name: &app.name,
+                            deployment_id: &d.id,
+                            project_id: &app.project_id,
+                            pr: d.pr_number,
+                        },
+                        timeout: Duration::from_secs(app.runtime.health_timeout_secs as u64),
+                    },
+                    cancel.clone(),
+                    &mut |s, l| log.line(s, l),
+                )
+                .await?;
+                // `compose up --wait` only knows the services' own health
+                // checks: probe the routed one like any other deployment.
+                log.info(&format!("waiting for {res} to be healthy"));
+                crate::health::wait_healthy(
+                    crate::health::Wait {
+                        docker: &self.deployer.docker,
+                        container: &res,
+                        network: crate::docker::PROXY_NETWORK,
+                        port,
+                        probe: deploy::probe_for(app.runtime.health.as_ref()),
+                        timeout: Duration::from_secs(app.runtime.health_timeout_secs as u64),
+                        interval: self.deployer.health_interval,
+                    },
+                    &mut |m| log.info(m),
+                )
+                .await
+                .map_err(|e| Error::Invalid(format!("{e} (the compose project stays up; fix it and deploy again)")))?;
+                res
+            }
+            None => self.deployer.start(&input, &mut |m| log.info(m)).await?,
+        };
         if cancel.is_cancelled() {
             let _ = self.deployer.docker.remove(&container).await;
             return Err(Error::Conflict("cancelled".into()));
@@ -506,7 +567,164 @@ impl Engine {
         if !framework.is_empty() {
             tracing::debug!("{} deployed ({framework})", app.name);
         }
-        Ok((done, url))
+        Ok((done, url, previous.filter(|p| *p != d.id)))
+    }
+}
+
+/// Removes a compose checkout when the deployment step ends.
+struct CheckoutGuard(PathBuf);
+
+impl Drop for CheckoutGuard {
+    fn drop(&mut self) {
+        if !self.0.as_os_str().is_empty() {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+}
+
+/// How long a new production deployment is watched for automatic rollback.
+pub const WATCH_AFTER_DEPLOY: Duration = Duration::from_secs(180);
+
+impl Engine {
+    /// Automatic rollback (design §7.2): a deployment that crashes or keeps
+    /// restarting within 3 minutes of going live is replaced by the one before.
+    async fn watch_after_deploy(self: Arc<Self>, app: App, d: Deployment, previous: String) {
+        let container = match self.store.with(|c| deployments::container(c, &d.id)) {
+            Ok(c) if !c.is_empty() => c,
+            _ => return,
+        };
+        let start = std::time::Instant::now();
+        let mut base_restarts = None;
+        while start.elapsed() < WATCH_AFTER_DEPLOY {
+            tokio::time::sleep(Duration::from_secs(10)).await;
+            // Something else took over (a newer deploy, a manual rollback, a stop).
+            let current = self
+                .store
+                .with(|c| apps::get(c, &app.id))
+                .ok()
+                .filter(|a| a.desired == vercelify_core::platform::Desired::Running)
+                .and_then(|a| a.current_deployment_id);
+            if current.as_deref() != Some(d.id.as_str()) {
+                return;
+            }
+            let i = match self.deployer.docker.inspect(&container).await {
+                Ok(Some(i)) => i,
+                Ok(None) => return, // removed: the reconciler's business
+                Err(_) => continue,
+            };
+            if i.paused {
+                continue;
+            }
+            let base = *base_restarts.get_or_insert(i.restart_count);
+            let crashing = !i.running || i.restart_count >= base + 2;
+            if !crashing {
+                continue;
+            }
+            let why = if i.oom_killed {
+                "ran out of memory".to_string()
+            } else if !i.running {
+                format!("exited with code {}", i.exit_code)
+            } else {
+                format!("restarted {} times", i.restart_count - base)
+            };
+            tracing::warn!("{}: deployment #{} {why}; rolling back", app.name, d.number);
+            let mut log = self.logs.writer(&app.name, &d.id);
+            log.error(&format!("after going live the app {why}: rolling back automatically"));
+            drop(log);
+            match self.enqueue(
+                &app.id,
+                Enqueue {
+                    trigger: Some(DeploymentTrigger::AutoRollback),
+                    rollback_of: Some(previous.clone()),
+                    ..Enqueue::default()
+                },
+            ) {
+                Ok(rb) => self.emit(EngineEvent::Failed {
+                    app: app.name.clone(),
+                    deployment: d.clone(),
+                    error: format!("{why} after going live; rolled back (deployment #{})", rb.number),
+                }),
+                Err(e) => tracing::error!("{}: automatic rollback failed: {e}", app.name),
+            }
+            return;
+        }
+    }
+
+    /// Take a preview down: container(s), route, its own volumes, and the
+    /// preview record (closed).
+    pub async fn remove_preview(&self, app_id: &str, pr: u32) -> Result<()> {
+        let (app, preview, vols) = self.store.with(|c| {
+            Ok((
+                apps::get(c, app_id)?,
+                previews::get(c, app_id, pr)?,
+                volumes::list(c, VolumeOwner::App, app_id)?,
+            ))
+        })?;
+        let docker = &self.deployer.docker;
+        if let Some(dep) = preview.as_ref().and_then(|p| p.deployment_id.clone()) {
+            let container = self.store.with(|c| deployments::container(c, &dep)).unwrap_or_default();
+            if !container.is_empty() {
+                docker.stop(&container, 10).await?;
+                docker.remove(&container).await?;
+            }
+        }
+        if app.kind == AppKind::Compose {
+            compose::down(docker, &compose::project_name(&app.name, Some(pr))).await?;
+        }
+        crate::proxy::remove_route(&self.deployer.proxy, &deploy::route_key(&app.name, Some(pr)))?;
+        for v in &vols {
+            let name = volumes::docker_name(&format!("{}-pr{pr}", app.name), &v.name);
+            let _ = docker.volume_remove(&name).await;
+            let _ = std::fs::remove_dir_all(self.deployer.hdd_root.join(&name));
+        }
+        self.store.tx(|c| {
+            previews::close(c, app_id, pr)?;
+            // Queued deployments of a closed preview won't run.
+            for d in deployments::active(c)? {
+                if d.app_id == app_id && d.pr_number == Some(pr) && d.status == DeploymentStatus::Queued {
+                    deployments::transition(c, &d.id, DeploymentStatus::Cancelled, Some("the pull request closed"))?;
+                }
+            }
+            Ok(())
+        })?;
+        self.emit(EngineEvent::Changed);
+        Ok(())
+    }
+
+    /// After an app was deleted from the database: remove what it left in
+    /// Docker and on disk. Volumes are removed only with `purge_volumes`.
+    pub async fn cleanup_app(&self, app: &App, purge_volumes: bool, vols: &[vercelify_core::platform::AppVolume]) {
+        let docker = &self.deployer.docker;
+        if let Ok(all) = docker.list_managed().await {
+            for c in all.iter().filter(|c| c.labels.get(deploy::LABEL_APP) == Some(&app.id)) {
+                let _ = docker.remove(&c.name).await;
+            }
+        }
+        if app.kind == AppKind::Compose {
+            let _ = compose::down(docker, &compose::project_name(&app.name, None)).await;
+        }
+        for key in crate::proxy::route_keys(&self.deployer.proxy) {
+            if key == app.name || key.starts_with(&format!("{}-pr-", app.name)) {
+                let _ = crate::proxy::remove_route(&self.deployer.proxy, &key);
+            }
+        }
+        if let Ok(images) = docker.images(&format!("vfy/{}", app.name)).await {
+            for (tag, _) in images {
+                let _ = docker.remove_image(&format!("vfy/{}:{tag}", app.name)).await;
+            }
+        }
+        if purge_volumes {
+            for v in vols {
+                let name = volumes::docker_name(&app.name, &v.name);
+                let _ = docker.volume_remove(&name).await;
+                if let Some(p) = &v.host_path {
+                    let _ = std::fs::remove_dir_all(p);
+                }
+                let _ = std::fs::remove_dir_all(self.deployer.hdd_root.join(&name));
+            }
+        }
+        self.logs.remove_app(&app.name);
+        self.emit(EngineEvent::Changed);
     }
 }
 

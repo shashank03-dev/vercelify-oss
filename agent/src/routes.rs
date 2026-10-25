@@ -82,7 +82,13 @@ impl AppState {
             tokens: Arc::new(crate::tokens::Tokens::new(token.clone())),
             autodeploy,
             llm,
-            sleep: Arc::new(crate::sleep::Sleep::load(config.clone(), events.clone(), jobs.clone())),
+            sleep: {
+                let s = Arc::new(crate::sleep::Sleep::load(config.clone(), events.clone(), jobs.clone()));
+                if let Some(p) = &platform {
+                    s.set_engine(p.engine.clone());
+                }
+                s
+            },
             projects,
             platform,
             platform_error,
