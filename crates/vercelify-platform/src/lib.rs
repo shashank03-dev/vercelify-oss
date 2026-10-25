@@ -18,7 +18,9 @@ pub mod error;
 pub mod gate;
 pub mod git;
 pub mod git_sources;
+pub mod git_watch;
 pub mod health;
+pub mod hooks;
 pub mod ids;
 pub mod logs;
 pub mod nodes;
@@ -30,6 +32,7 @@ pub mod reconcile;
 pub mod secrets;
 pub mod sleeping;
 pub mod store;
+pub mod tasks;
 pub mod validate;
 pub mod volumes;
 

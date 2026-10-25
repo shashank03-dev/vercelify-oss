@@ -125,6 +125,8 @@ CREATE TABLE deployments (
   -- Port the image listens on (detected at build), so a rollback needs no build.
   port           INTEGER CHECK (port IS NULL OR port BETWEEN 1 AND 65535),
   framework      TEXT NOT NULL DEFAULT '',
+  -- vercel.json / vercelify.json at this commit: [[name, text], …]
+  project_files  TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(project_files)),
   node_id        TEXT REFERENCES nodes(id) ON DELETE SET NULL,
   status         TEXT NOT NULL CHECK (status IN ('queued', 'building', 'deploying', 'healthy', 'failed', 'cancelled', 'superseded')),
   error          TEXT NOT NULL DEFAULT '',
@@ -149,6 +151,8 @@ CREATE TABLE previews (
   status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'closed')),
   -- Stopped by the sleep module; the reconciler leaves it stopped.
   asleep        INTEGER NOT NULL DEFAULT 0 CHECK (asleep IN (0, 1)),
+  -- Our comment on the pull request (GitHub), updated on every deploy.
+  comment_id    INTEGER,
   created_at    TEXT NOT NULL,
   closed_at     TEXT,
   UNIQUE (app_id, pr_number)

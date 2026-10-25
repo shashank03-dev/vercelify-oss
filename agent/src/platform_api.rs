@@ -16,7 +16,9 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use vercelify_core::platform::*;
 use vercelify_platform::engine::{EngineEvent, Enqueue};
-use vercelify_platform::{apps, deployments, env, nodes, previews, projects, volumes};
+use vercelify_platform::{
+    apps, deployments, env, git_sources, git_watch, hooks, nodes, previews, projects, tasks, volumes,
+};
 
 impl From<vercelify_platform::Error> for AppError {
     fn from(e: vercelify_platform::Error) -> Self {
@@ -64,6 +66,18 @@ pub fn router() -> Router<AppState> {
         .route("/platform/deployments/{id}/cancel", post(deployment_cancel))
         .route("/platform/deployments/{id}/logs", get(deployment_logs))
         .route("/platform/nodes", get(node_list))
+        .route("/platform/apps/{app}/previews/{pr}", delete(app_preview_remove))
+        .route("/platform/apps/{app}/git", get(app_git).put(app_git_set))
+        .route("/platform/apps/{app}/git/check", post(app_git_check))
+        .route("/platform/apps/{app}/basic-auth", axum::routing::put(app_basic_auth))
+        .route("/platform/apps/{app}/hooks", get(app_hooks).post(app_hook_create))
+        .route("/platform/apps/{app}/hooks/{id}", delete(app_hook_delete))
+        .route("/platform/apps/{app}/tasks", get(app_tasks).post(app_task_create))
+        .route("/platform/apps/{app}/tasks/{id}", delete(app_task_delete))
+        .route("/platform/apps/{app}/tasks/{id}/run", post(app_task_run))
+        .route("/platform/git-sources", get(git_source_list).post(git_source_create))
+        .route("/platform/git-sources/{id}", delete(git_source_delete))
+        .route("/platform/settings/domain", get(domain_get).put(domain_set))
 }
 
 /// The platform of this server, or why there is none.
@@ -344,14 +358,34 @@ async fn app_patch(State(s): State<AppState>, Path(app): Path<String>, Json(req)
     Ok(Json(a))
 }
 
-async fn app_delete(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<Value> {
-    let a = tx(&s, move |c, _| {
+#[derive(Deserialize, Default)]
+struct DeleteQuery {
+    /// Also delete the app's volumes (its data).
+    #[serde(default)]
+    purge_volumes: bool,
+}
+
+async fn app_delete(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+    Query(q): Query<DeleteQuery>,
+) -> ApiResult<Value> {
+    let (a, vols) = tx(&s, move |c, _| {
         let id = apps::find(c, &app)?.id;
-        apps::delete(c, &id)
+        let vols = volumes::list(c, VolumeOwner::App, &id)?;
+        Ok((apps::delete(c, &id)?, vols))
     })
     .await?;
+    let p = platform(&s)?;
+    let projects = s.projects.clone();
+    let name = a.name.clone();
+    // Containers, routes, images and logs go in the background.
+    tokio::spawn(async move {
+        p.engine.cleanup_app(&a, q.purge_volumes, &vols).await;
+        projects.remove_app(&a.id).await;
+    });
     changed(&s, "apps");
-    Ok(Json(json!({ "deleted": a.name })))
+    Ok(Json(json!({ "deleted": name })))
 }
 
 async fn app_domains(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<Vec<AppDomain>> {
@@ -615,4 +649,331 @@ async fn deployment_logs(
         }
     });
     Ok((headers, axum::body::Body::new(crate::routes::LineBody(rx))).into_response())
+}
+
+// ----- previews, auto-deploy, protection, hooks, tasks ------------------------------
+
+async fn app_preview_remove(State(s): State<AppState>, Path((app, pr)): Path<(String, u32)>) -> ApiResult<Value> {
+    let p = platform(&s)?;
+    let id = app_id(&s, app).await?;
+    p.engine.remove_preview(&id, pr).await?;
+    s.projects.remove(&crate::projects::key_for(&id, u64::from(pr))).await;
+    Ok(Json(json!({ "removed": pr })))
+}
+
+async fn app_git(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<GitWatchStatus> {
+    Ok(Json(
+        tx(&s, move |c, _| {
+            let id = apps::find(c, &app)?.id;
+            git_watch::get(c, &id)
+        })
+        .await?,
+    ))
+}
+
+#[derive(Deserialize)]
+struct GitWatchSet {
+    enabled: bool,
+}
+
+async fn app_git_set(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+    Json(req): Json<GitWatchSet>,
+) -> ApiResult<GitWatchStatus> {
+    let w = tx(&s, move |c, _| {
+        let id = apps::find(c, &app)?.id;
+        git_watch::set_enabled(c, &id, req.enabled)
+    })
+    .await?;
+    changed(&s, "apps");
+    Ok(Json(w))
+}
+
+async fn app_git_check(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<GitWatchStatus> {
+    let git = s
+        .platform_git
+        .clone()
+        .ok_or_else(|| AppError::unavailable("the platform engine is off"))?;
+    let a = tx(&s, move |c, _| apps::find(c, &app)).await?;
+    if a.source.repository.is_none() {
+        return Err(AppError::bad_request(format!(
+            "{} isn't deployed from a repository",
+            a.name
+        )));
+    }
+    git.check(&a).await.map(Json).map_err(AppError::unavailable)
+}
+
+async fn app_basic_auth(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+    Json(req): Json<BasicAuthRequest>,
+) -> ApiResult<Value> {
+    let on = !req.user.trim().is_empty();
+    tx(&s, move |c, _| {
+        let id = apps::find(c, &app)?.id;
+        let cred = (!req.user.trim().is_empty()).then_some((req.user.as_str(), req.password.as_str()));
+        apps::set_basic_auth(c, &id, cred)
+    })
+    .await?;
+    // The routes change now, not at the next reconcile.
+    let p = platform(&s)?;
+    tokio::spawn(async move {
+        if let Err(e) = p.reconciler.once().await {
+            tracing::warn!("reconcile after a password change: {e}");
+        }
+    });
+    changed(&s, "apps");
+    Ok(Json(json!({ "protected": on })))
+}
+
+async fn app_hooks(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<Vec<DeployHook>> {
+    Ok(Json(
+        tx(&s, move |c, _| {
+            let id = apps::find(c, &app)?.id;
+            hooks::list(c, &id)
+        })
+        .await?,
+    ))
+}
+
+async fn app_hook_create(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<DeployHook> {
+    Ok(Json(
+        tx(&s, move |c, _| {
+            let id = apps::find(c, &app)?.id;
+            hooks::create(c, &id)
+        })
+        .await?,
+    ))
+}
+
+async fn app_hook_delete(State(s): State<AppState>, Path((app, id)): Path<(String, String)>) -> ApiResult<Value> {
+    tx(&s, move |c, _| {
+        let app_id = apps::find(c, &app)?.id;
+        hooks::delete(c, &app_id, &id)
+    })
+    .await?;
+    Ok(Json(json!({ "deleted": true })))
+}
+
+/// Calls per hook in the last minute (deploy hooks are public URLs).
+static HOOK_CALLS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Vec<std::time::Instant>>>> =
+    std::sync::LazyLock::new(Default::default);
+pub const HOOK_CALLS_PER_MINUTE: usize = 6;
+
+fn hook_rate_ok(hook: &str) -> bool {
+    let mut m = HOOK_CALLS.lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::Instant::now();
+    let calls = m.entry(hook.to_string()).or_default();
+    calls.retain(|t| now.duration_since(*t) < std::time::Duration::from_secs(60));
+    if calls.len() >= HOOK_CALLS_PER_MINUTE {
+        return false;
+    }
+    calls.push(now);
+    true
+}
+
+/// `POST /v1/hooks/deploy/{secret}` (no token: the secret is the credential).
+pub async fn deploy_hook(State(s): State<AppState>, Path(secret): Path<String>) -> ApiResult<Value> {
+    let p = platform(&s).map_err(|_| AppError::not_found("no such hook"))?;
+    let found = {
+        let store = p.store.clone();
+        tokio::task::spawn_blocking(move || store.tx(|c| hooks::resolve(c, &secret)))
+            .await
+            .map_err(|e| AppError::internal(e.to_string()))??
+    };
+    let Some((hook, app_id)) = found else {
+        // The same answer for every unknown secret.
+        return Err(AppError::not_found("no such hook"));
+    };
+    if !hook_rate_ok(&hook) {
+        return Err(AppError {
+            status: axum::http::StatusCode::TOO_MANY_REQUESTS,
+            message: format!("at most {HOOK_CALLS_PER_MINUTE} deploys a minute per hook"),
+        });
+    }
+    let d = engine_call(&s, move |e| {
+        e.enqueue(
+            &app_id,
+            Enqueue {
+                trigger: Some(DeploymentTrigger::Hook),
+                ..Enqueue::default()
+            },
+        )
+    })
+    .await?;
+    crate::tokens::audit(&s.config, &format!("hook:{hook}"), "POST", "/v1/hooks/deploy", 200);
+    Ok(Json(
+        json!({ "deployment": d.id, "number": d.number, "status": d.status }),
+    ))
+}
+
+async fn app_tasks(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<Vec<ScheduledTask>> {
+    Ok(Json(
+        tx(&s, move |c, _| {
+            let id = apps::find(c, &app)?.id;
+            tasks::list(c, Some(&id))
+        })
+        .await?,
+    ))
+}
+
+async fn app_task_create(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+    Json(req): Json<ScheduledTaskRequest>,
+) -> ApiResult<ScheduledTask> {
+    let t = tx(&s, move |c, _| {
+        let id = apps::find(c, &app)?.id;
+        tasks::create(c, &id, &req, |sch| crate::cron::parse(sch).map(|_| ()))
+    })
+    .await?;
+    changed(&s, "apps");
+    Ok(Json(t))
+}
+
+async fn app_task_delete(State(s): State<AppState>, Path((app, id)): Path<(String, String)>) -> ApiResult<Value> {
+    tx(&s, move |c, _| {
+        let app_id = apps::find(c, &app)?.id;
+        tasks::delete(c, &app_id, &id)
+    })
+    .await?;
+    changed(&s, "apps");
+    Ok(Json(json!({ "deleted": true })))
+}
+
+async fn app_task_run(State(s): State<AppState>, Path((app, id)): Path<(String, String)>) -> ApiResult<Value> {
+    let p = platform(&s)?;
+    let t = tx(&s, move |c, _| {
+        let app_id = apps::find(c, &app)?.id;
+        tasks::get(c, &app_id, &id)
+    })
+    .await?;
+    let status = run_task(&p, &t).await;
+    Ok(Json(json!({ "status": status })))
+}
+
+/// Run a scheduled task in the app's running container; records the result.
+pub async fn run_task(p: &crate::platform::Platform, t: &ScheduledTask) -> String {
+    let container = p
+        .store
+        .with(|c| {
+            let a = apps::get(c, &t.app_id)?;
+            match a.current_deployment_id {
+                Some(d) => deployments::container(c, &d),
+                None => Ok(String::new()),
+            }
+        })
+        .unwrap_or_default();
+    let status = if container.is_empty() {
+        "skipped: the app isn't deployed".to_string()
+    } else {
+        let cmd = vec!["sh".to_string(), "-c".to_string(), t.command.clone()];
+        match p
+            .engine
+            .deployer
+            .docker
+            .exec(&container, &cmd, std::time::Duration::from_secs(15 * 60))
+            .await
+        {
+            Ok(o) if o.success() => "ok".to_string(),
+            Ok(o) => format!("exit {}: {}", o.code.unwrap_or(-1), o.tail(2)),
+            Err(e) => format!("failed: {e}"),
+        }
+    };
+    let (store, id, st) = (p.store.clone(), t.id.clone(), status.clone());
+    let _ = tokio::task::spawn_blocking(move || store.with(|c| tasks::record_run(c, &id, &st))).await;
+    status
+}
+
+/// The minute loop for scheduled tasks.
+pub async fn run_tasks(p: Arc<crate::platform::Platform>) {
+    use chrono::Timelike;
+    let mut last = None;
+    loop {
+        let now = chrono::Utc::now();
+        tokio::time::sleep(std::time::Duration::from_secs(60 - u64::from(now.second()) + 1)).await;
+        let now = chrono::Utc::now();
+        let minute = now.timestamp() / 60;
+        if last == Some(minute) {
+            continue;
+        }
+        last = Some(minute);
+        let due: Vec<ScheduledTask> = p
+            .store
+            .with(|c| tasks::list(c, None))
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|t| t.enabled && crate::cron::parse(&t.schedule).is_ok_and(|s| s.matches(now)))
+            .collect();
+        for t in due {
+            let p = p.clone();
+            tokio::spawn(async move {
+                let st = run_task(&p, &t).await;
+                if st != "ok" {
+                    tracing::info!("scheduled task {} of {}: {st}", t.name, t.app_id);
+                }
+            });
+        }
+    }
+}
+
+// ----- git sources and settings ----------------------------------------------------
+
+async fn git_source_list(State(s): State<AppState>) -> ApiResult<Vec<GitSource>> {
+    Ok(Json(tx(&s, |c, _| git_sources::list(c)).await?))
+}
+
+async fn git_source_create(State(s): State<AppState>, Json(req): Json<GitSourceRequest>) -> ApiResult<GitSource> {
+    let pair = if req.auth == GitAuthKind::DeployKey {
+        let tmp = s.config.state_dir.join("builds/.keys");
+        Some(git_sources::generate_deploy_key(&s.config.ssh_keygen_bin, &tmp).await?)
+    } else {
+        None
+    };
+    Ok(Json(tx(&s, move |c, k| git_sources::create(c, k, &req, pair)).await?))
+}
+
+async fn git_source_delete(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
+    tx(&s, move |c, _| git_sources::delete(c, &id)).await?;
+    Ok(Json(json!({ "deleted": true })))
+}
+
+async fn domain_get(State(s): State<AppState>) -> ApiResult<PlatformDomain> {
+    let d = tx(&s, |c, _| apps::domain_settings(c)).await?;
+    Ok(Json(PlatformDomain {
+        wildcard: d.wildcard,
+        https: d.https,
+        edge_tls: d.edge_tls,
+    }))
+}
+
+/// The wildcard for new apps' and previews' names. Existing apps keep their
+/// domains (change them per app), as with Coolify.
+async fn domain_set(State(s): State<AppState>, Json(req): Json<PlatformDomain>) -> ApiResult<PlatformDomain> {
+    let wildcard = match req.wildcard.as_deref().map(str::trim).filter(|w| !w.is_empty()) {
+        Some(w) => Some(vercelify_platform::validate::host(w.trim_start_matches("*."))?),
+        None => None,
+    };
+    let settings = apps::DomainSettings {
+        wildcard: wildcard.clone(),
+        https: req.https && !req.edge_tls,
+        edge_tls: req.edge_tls,
+    };
+    tx(&s, move |c, _| {
+        vercelify_platform::store::put_setting(c, apps::DOMAIN_SETTING, &settings)
+    })
+    .await?;
+    let p = platform(&s)?;
+    // Previews' hosts follow the wildcard.
+    tokio::spawn(async move {
+        let _ = p.reconciler.once().await;
+    });
+    changed(&s, "apps");
+    Ok(Json(PlatformDomain {
+        wildcard,
+        https: req.https && !req.edge_tls,
+        edge_tls: req.edge_tls,
+    }))
 }

@@ -1814,6 +1814,110 @@ fn platform_api() {
     let audit = std::fs::read_to_string(a.root.join("state/audit.log")).unwrap();
     assert!(audit.contains("\"status\":403"), "refusals are audited");
 
+    // Server domain: owners only.
+    let (s, v) = send(
+        &a,
+        "PUT",
+        "/v1/platform/settings/domain",
+        TOKEN,
+        Some(json!({"wildcard": "*.example.org", "https": true, "edge_tls": false})),
+    );
+    assert_eq!((s, v["wildcard"].as_str()), (200, Some("example.org")), "{v}");
+    let (s, _) = send(
+        &a,
+        "PUT",
+        "/v1/platform/settings/domain",
+        &deployer,
+        Some(json!({"wildcard": null, "https": false, "edge_tls": false})),
+    );
+    assert_eq!(s, 403);
+    let (s, v) = get(&a, "/v1/platform/settings/domain");
+    assert_eq!((s, v["https"].as_bool()), (200, Some(true)));
+
+    // Git credentials (owners), auto-deploy state.
+    let (s, g) = post(
+        &a,
+        "/v1/platform/git-sources",
+        json!({"name": "gh", "provider": "github", "auth": "token", "token": "ghp_test"}),
+    );
+    assert_eq!(s, 200, "{g}");
+    assert!(!g.to_string().contains("ghp_test"), "the token is never returned");
+    let (s, _) = send(
+        &a,
+        "POST",
+        "/v1/platform/git-sources",
+        &deployer,
+        Some(json!({"name": "x", "provider": "github", "auth": "none"})),
+    );
+    assert_eq!(s, 403);
+    let (s, w) = get(&a, "/v1/platform/apps/blog/git");
+    assert_eq!((s, w["enabled"].as_bool()), (200, Some(true)), "{w}");
+    let (s, w) = send(
+        &a,
+        "PUT",
+        "/v1/platform/apps/blog/git",
+        &deployer,
+        Some(json!({"enabled": false})),
+    );
+    assert_eq!((s, w["enabled"].as_bool()), (200, Some(false)), "{w}");
+
+    // Basic Auth.
+    let (s, v) = send(
+        &a,
+        "PUT",
+        "/v1/platform/apps/blog/basic-auth",
+        &deployer,
+        Some(json!({"user": "me", "password": "short"})),
+    );
+    assert_eq!(s, 400, "{v}");
+    let (s, v) = send(
+        &a,
+        "PUT",
+        "/v1/platform/apps/blog/basic-auth",
+        &deployer,
+        Some(json!({"user": "me", "password": "long enough"})),
+    );
+    assert_eq!((s, v["protected"].as_bool()), (200, Some(true)), "{v}");
+
+    // Scheduled tasks.
+    let (s, v) = post(
+        &a,
+        "/v1/platform/apps/blog/tasks",
+        json!({"name": "cleanup", "schedule": "not cron", "command": "true"}),
+    );
+    assert_eq!(s, 400, "{v}");
+    let (s, t) = post(
+        &a,
+        "/v1/platform/apps/blog/tasks",
+        json!({"name": "cleanup", "schedule": "*/15 * * * *", "command": "rm -rf /tmp/cache"}),
+    );
+    assert_eq!(s, 200, "{t}");
+    let (s, v) = post(&a, "/v1/platform/apps/blog/tasks/cleanup/run", json!({}));
+    assert_eq!(
+        (s, v["status"].as_str()),
+        (200, Some("skipped: the app isn't deployed")),
+        "{v}"
+    );
+    let (s, v) = get(&a, "/v1/platform/apps/blog/tasks");
+    assert_eq!(v[0]["last_status"], "skipped: the app isn't deployed", "{s}");
+
+    // Deploy hooks: a public URL whose secret is the credential.
+    let (s, h) = post(&a, "/v1/platform/apps/blog/hooks", json!({}));
+    assert_eq!(s, 200, "{h}");
+    let secret = h["secret"].as_str().unwrap().to_string();
+    let (s, v, _) = req(&a, "POST", &format!("/v1/hooks/deploy/{secret}"), None, None);
+    assert_eq!((s, v["status"].as_str()), (200, Some("queued")), "{v}");
+    let (s, _, _) = req(&a, "POST", "/v1/hooks/deploy/vfyh_wrong", None, None);
+    assert_eq!(s, 404);
+    let codes: Vec<u16> = (0..6)
+        .map(|_| req(&a, "POST", &format!("/v1/hooks/deploy/{secret}"), None, None).0)
+        .collect();
+    assert_eq!(codes.last(), Some(&429), "rate limited: {codes:?}");
+    let (_, hooks) = get(&a, "/v1/platform/apps/blog/hooks");
+    assert!(hooks[0]["secret"].is_null() && hooks[0]["last_used_at"].is_string());
+    let (s, _) = send(&a, "DELETE", "/v1/platform/apps/blog/previews/9", TOKEN, None);
+    assert_eq!(s, 200, "removing a preview that isn't there is fine");
+
     // Delete.
     let (s, _) = send(&a, "DELETE", "/v1/platform/apps/blog", TOKEN, None);
     assert_eq!(s, 200);

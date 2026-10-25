@@ -338,6 +338,11 @@ impl Engine {
         let mut compose_job: Option<(String, PathBuf)> = None;
         let (mut port, mut framework) = self.store.with(|c| deployments::built_info(c, &d.id))?;
         if let Some(target) = &d.rollback_of {
+            // The rules of the commit rolled back to come back with it.
+            self.store.with(|c| {
+                let files = deployments::project_files(c, target)?;
+                deployments::set_project_files(c, &d.id, &files)
+            })?;
             let (p, f) = self.store.with(|c| deployments::built_info(c, target))?;
             port = port.or(p);
             framework = if framework.is_empty() { f } else { framework };
@@ -400,8 +405,10 @@ impl Engine {
             framework = built.plan.framework.clone();
             let (sha, msg) = (built.commit_sha.clone(), built.commit_message.clone());
             let (img, fw, p) = (image.clone(), framework.clone(), built.plan.port);
+            let files = built.project_files.clone();
             self.store.tx(|c| {
                 deployments::set_built(c, &d.id, &sha, &msg, &img, p, &fw)?;
+                deployments::set_project_files(c, &d.id, &files)?;
                 deployments::transition(c, &d.id, DeploymentStatus::Deploying, None)
             })?;
         }

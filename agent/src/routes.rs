@@ -39,6 +39,8 @@ pub struct AppState {
     /// Vercelify's own engine (main server, `engine = "platform"`).
     pub platform: Option<Arc<crate::platform::Platform>>,
     pub platform_error: Option<crate::platform::OpenError>,
+    /// Push-to-deploy and previews of the platform's apps.
+    pub platform_git: Option<Arc<crate::platform_git::PlatformGit>>,
 }
 
 impl AppState {
@@ -70,11 +72,18 @@ impl AppState {
         projects.set_watcher(watcher.clone());
         autodeploy.set_projects(projects.clone());
         let (platform, platform_error) = crate::platform::Platform::open_if_enabled(&config);
+        let mut platform_git = None;
         if let Some(p) = &platform {
+            projects.set_engine(p.engine.clone());
             p.on_start(&config, &collector.host());
-            let (ev, w) = (events.clone(), watcher.clone());
-            p.engine
-                .set_listener(Box::new(move |e| crate::platform_api::on_engine_event(&ev, &w, e)));
+            let git = crate::platform_git::PlatformGit::new(config.clone(), p.engine.clone(), projects.clone());
+            let (ev, w, g) = (events.clone(), watcher.clone(), git.clone());
+            p.engine.set_listener(Box::new(move |e| {
+                crate::platform_api::on_engine_event(&ev, &w, e.clone());
+                let g = g.clone();
+                tokio::spawn(async move { g.on_event(e).await });
+            }));
+            platform_git = Some(git);
         }
         let llm = Arc::new(Llm::new(config.clone()));
         llm.set_jobs(jobs.clone());
@@ -92,6 +101,7 @@ impl AppState {
             projects,
             platform,
             platform_error,
+            platform_git,
             events,
             jobs,
             claims: Arc::new(Claims::default()),
@@ -174,6 +184,7 @@ pub fn router(state: AppState) -> Router {
     let public = Router::new()
         .route("/v1/health", get(health))
         .route("/v1/pair/claim", post(pair_claim))
+        .route("/v1/hooks/deploy/{secret}", post(crate::platform_api::deploy_hook))
         .layer(timeout(Duration::from_secs(30)));
 
     let mut app = public.nest("/v1", api).layer(TraceLayer::new_for_http());

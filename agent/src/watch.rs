@@ -154,10 +154,10 @@ pub fn oom_score_for(name: &str, image: &str, pr_label: &str) -> Option<i32> {
         Some(-500)
     } else if matches!(
         name,
-        "coolify" | "coolify-proxy" | "coolify-realtime" | "coolify-sentinel"
+        "coolify" | "coolify-proxy" | "coolify-realtime" | "coolify-sentinel" | "vercelify-proxy"
     ) {
         Some(-300)
-    } else if image.contains("coolify-helper") {
+    } else if image.contains("coolify-helper") || image.contains("moby/buildkit") {
         Some(900)
     } else if !pr_label.is_empty() && pr_label != "0" {
         Some(600)
@@ -553,7 +553,13 @@ impl Watcher {
         let uptime = if self.cfg.uptime_checks && self.cfg.role() != "worker" {
             // A check is a visit: apps that sleep when idle aren't checked.
             let sleeping = s.sleep.enabled_apps().await;
-            let checks = check_uptime(&self.cfg, &self.uptime.lock().await.clone(), &sleeping).await;
+            let checks = check_uptime(
+                &self.cfg,
+                s.platform.as_deref(),
+                &self.uptime.lock().await.clone(),
+                &sleeping,
+            )
+            .await;
             *self.uptime.lock().await = checks.clone();
             checks
         } else {
@@ -647,7 +653,7 @@ async fn set_oom_priorities(cfg: &Config) {
         &[
             "ps",
             "--format",
-            "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Label \"coolify.pullRequestId\"}}",
+            "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Label \"coolify.pullRequestId\"}}{{.Label \"vercelify.pr\"}}",
         ],
         Duration::from_secs(15),
     )
@@ -760,6 +766,39 @@ async fn targets(cfg: &Config) -> Vec<Target> {
     out
 }
 
+/// Running platform apps (through this server's proxy) and pooled servers.
+fn platform_targets(p: &crate::platform::Platform) -> Vec<Target> {
+    use vercelify_core::platform::Desired;
+    let res = p.store.with(|c| {
+        let mut out = Vec::new();
+        for a in vercelify_platform::apps::list(c, None)? {
+            if a.desired != Desired::Running || a.current_deployment_id.is_none() {
+                continue;
+            }
+            if let Some(url) = &a.url {
+                out.push(Target {
+                    id: format!("app:{}", a.id),
+                    name: format!("App {}", a.name),
+                    url: url.clone(),
+                    resolve: Some("127.0.0.1".into()),
+                });
+            }
+        }
+        for n in vercelify_platform::nodes::list(c)? {
+            if n.role == "worker" {
+                out.push(Target {
+                    id: format!("server:{}", n.name),
+                    name: format!("Server {}", n.name),
+                    url: format!("{}/v1/health", n.agent_url.trim_end_matches('/')),
+                    resolve: None,
+                });
+            }
+        }
+        Ok(out)
+    });
+    res.unwrap_or_default()
+}
+
 /// (`host`, `port`) of an http(s) URL.
 pub fn host_port(url: &str) -> Option<(String, u16)> {
     let (scheme, rest) = url.split_once("://")?;
@@ -785,11 +824,16 @@ pub fn parse_curl_w(out: &str) -> Option<(u16, u32)> {
 
 async fn check_uptime(
     cfg: &Config,
+    platform: Option<&crate::platform::Platform>,
     previous: &[UptimeCheck],
     skip_apps: &std::collections::HashSet<String>,
 ) -> Vec<UptimeCheck> {
     let mut out = Vec::new();
-    for t in targets(cfg).await {
+    let targets = match platform {
+        Some(p) => platform_targets(p),
+        None => targets(cfg).await,
+    };
+    for t in targets {
         if t.id.strip_prefix("app:").is_some_and(|u| skip_apps.contains(u)) {
             continue;
         }
@@ -961,6 +1005,12 @@ mod tests {
         assert_eq!(oom_score_for("coolify-db", "postgres:15", ""), Some(-500));
         assert_eq!(oom_score_for("pg-abc", "postgres:16-alpine", ""), Some(-500));
         assert_eq!(oom_score_for("coolify-proxy", "traefik:v3", ""), Some(-300));
+        assert_eq!(oom_score_for("vercelify-proxy", "traefik:v3.7", ""), Some(-300));
+        assert_eq!(
+            oom_score_for("buildx_buildkit_vercelify0", "moby/buildkit:v0.18.2", ""),
+            Some(900)
+        );
+        assert_eq!(oom_score_for("vfy-blog-pr3-abc", "vfy/blog:abc", "3"), Some(600));
         assert_eq!(
             oom_score_for("x1y2", "ghcr.io/coollabsio/coolify-helper:1.0", ""),
             Some(900)

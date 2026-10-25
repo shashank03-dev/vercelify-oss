@@ -74,6 +74,28 @@ pub struct Built {
     pub plan: BuildPlan,
     /// Compose apps: the checkout, kept for the deployer, which removes it.
     pub checkout: Option<PathBuf>,
+    /// `vercel.json` / `vercelify.json` of the app's directory at this commit.
+    pub project_files: Vec<(String, String)>,
+}
+
+/// Project rule files the agent applies (`vercel.json` routing, crons, firewall).
+pub const PROJECT_FILES: [&str; 2] = ["vercel.json", "vercelify.json"];
+pub const MAX_PROJECT_FILE: u64 = 256 * 1024;
+
+/// Read the project rule files of a checkout directory.
+pub fn read_project_files(dir: &Path) -> Vec<(String, String)> {
+    PROJECT_FILES
+        .iter()
+        .filter_map(|name| {
+            let p = dir.join(name);
+            let meta = std::fs::symlink_metadata(&p).ok()?;
+            // A symlink could point anywhere on the host.
+            if !meta.is_file() || meta.len() > MAX_PROJECT_FILE {
+                return None;
+            }
+            Some((name.to_string(), std::fs::read_to_string(&p).ok()?))
+        })
+        .collect()
 }
 
 /// The tag of a deployment's image.
@@ -270,6 +292,7 @@ impl Builder {
                 commit_message: String::new(),
                 plan,
                 checkout: None,
+                project_files: vec![],
             });
         }
 
@@ -298,6 +321,12 @@ impl Builder {
         for n in &plan.notes {
             log.info(&format!("note: {n}"));
         }
+        let context = if plan.context == "." {
+            src.clone()
+        } else {
+            src.join(&plan.context)
+        };
+        let project_files = read_project_files(&context);
         if let PlanKind::Compose(_) = plan.kind {
             cleanup.keep = true;
             return Ok(Built {
@@ -306,14 +335,9 @@ impl Builder {
                 commit_message: fetched.message,
                 plan,
                 checkout: Some(src),
+                project_files,
             });
         }
-
-        let context = if plan.context == "." {
-            src.clone()
-        } else {
-            src.join(&plan.context)
-        };
         let dockerfile = Self::dockerfile_for(&plan, &context, &work, log)?;
         let env_file = PrivateFile::write(
             work.join("build.env"),
@@ -352,6 +376,7 @@ impl Builder {
             commit_message: fetched.message,
             plan,
             checkout: None,
+            project_files,
         })
     }
 
@@ -406,6 +431,7 @@ impl Builder {
             commit_message: String::new(),
             plan,
             checkout: None,
+            project_files: read_project_files(&context),
         })
     }
 }
@@ -414,6 +440,20 @@ impl Builder {
 mod tests {
     use super::*;
     use crate::logs::LogHub;
+
+    #[test]
+    fn project_files_skip_symlinks_and_big_files() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("vercel.json"), r#"{"cleanUrls":true}"#).unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", d.path().join("vercelify.json")).unwrap();
+        let files = read_project_files(d.path());
+        assert_eq!(
+            files,
+            vec![("vercel.json".to_string(), r#"{"cleanUrls":true}"#.to_string())]
+        );
+        std::fs::write(d.path().join("vercel.json"), "x".repeat(MAX_PROJECT_FILE as usize + 1)).unwrap();
+        assert!(read_project_files(d.path()).is_empty());
+    }
 
     #[test]
     fn tags() {

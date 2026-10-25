@@ -5,7 +5,7 @@ set -Eeuo pipefail
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 HOST_DIR=$(dirname "$SELF")
 VERCELIFY_SRC=$(dirname "$HOST_DIR")
-for lib in common system hardware storage docker tailscale coolify cloudflare agent backup registry maintenance; do
+for lib in common system hardware storage docker tailscale coolify platform cloudflare agent backup registry maintenance; do
   # shellcheck source=/dev/null
   . "$HOST_DIR/lib/$lib.sh"
 done
@@ -389,7 +389,13 @@ cmd_domain() {
     wildcard="https://$new"
     info "point A records for $new and *.$new to your public IP and forward TCP 80/443 to this machine"
   fi
-  configure_coolify "$wildcard"
+  if platform_engine; then
+    local edge=false
+    [[ -n "$token" && -n "$new" ]] && edge=true
+    platform_set_domain "$wildcard" "$edge"
+  else
+    configure_coolify "$wildcard"
+  fi
   local mode=''
   if [[ -n "$new" ]]; then [[ -n "$token" ]] && mode=cloudflare || mode=direct; fi
   sed -i '/^domain=/d; /^domain_mode=/d' "$VERCELIFY_ETC/install.env" 2>/dev/null || true

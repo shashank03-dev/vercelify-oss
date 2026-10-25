@@ -286,6 +286,32 @@ pub struct Projects {
     events: Arc<Events>,
     jobs: Arc<Jobs>,
     watcher: OnceLock<Arc<Watcher>>,
+    /// The platform engine, when this server runs it instead of Coolify.
+    engine: OnceLock<Arc<vercelify_platform::engine::Engine>>,
+}
+
+/// A platform app's base routers and its `CRON_SECRET`.
+type PlatformRoutes = (Vec<CoolifyRouter>, Option<String>);
+
+/// The base routers of a platform app or preview, in the shape the
+/// `vercel.json` layer copies (it sits above them at higher priorities).
+pub fn platform_routers(route: &vercelify_platform::proxy::Route) -> Vec<CoolifyRouter> {
+    use vercelify_platform::proxy::{router_name, service_name, RESOLVER};
+    let auth = (!route.basic_auth.is_empty()).then(|| format!("vfy-{}-auth@file", route.key));
+    route
+        .hosts
+        .iter()
+        .enumerate()
+        .filter(|(_, h)| h.redirect_to.is_none())
+        .map(|(i, h)| CoolifyRouter {
+            name: router_name(&route.key, i, h.https),
+            rule: format!("Host(`{}`)", h.host),
+            entry_points: vec![if h.https { "websecure" } else { "web" }.to_string()],
+            service: format!("{}@file", service_name(&route.key)),
+            middlewares: auth.iter().cloned().collect(),
+            tls: h.https.then(|| serde_json::json!({ "certResolver": RESOLVER })),
+        })
+        .collect()
 }
 
 impl Projects {
@@ -313,6 +339,57 @@ impl Projects {
             events,
             jobs,
             watcher: OnceLock::new(),
+            engine: OnceLock::new(),
+        }
+    }
+
+    /// Route the platform engine's apps instead of Coolify's.
+    pub fn set_engine(&self, e: Arc<vercelify_platform::engine::Engine>) {
+        let _ = self.engine.set(e);
+    }
+
+    /// Routers and `CRON_SECRET` per key, from the platform's database.
+    fn platform_routes(
+        &self,
+        engine: &vercelify_platform::engine::Engine,
+    ) -> Option<HashMap<String, PlatformRoutes>> {
+        use vercelify_platform::{apps, deployments, env, previews, reconcile};
+        let res = engine.store.with(|c| {
+            let settings = apps::domain_settings(c)?;
+            let mut out = HashMap::new();
+            for app in apps::list(c, None)? {
+                let mut deps: Vec<(u64, String)> = vec![];
+                if let Some(d) = &app.current_deployment_id {
+                    deps.push((0, d.clone()));
+                }
+                for p in previews::list(c, &app.id, true)? {
+                    if let Some(d) = p.deployment_id {
+                        deps.push((u64::from(p.pr_number), d));
+                    }
+                }
+                for (pr, dep) in deps {
+                    let d = deployments::get(c, &dep)?;
+                    let container = deployments::container(c, &dep)?;
+                    if container.is_empty() {
+                        continue;
+                    }
+                    let Some(route) = reconcile::route_for(c, &settings, &app, &d, &container)? else {
+                        continue;
+                    };
+                    let secret = env::resolve(c, &engine.key, &app.id, pr > 0)?
+                        .get("CRON_SECRET")
+                        .map(|v| v.value.to_string());
+                    out.insert(key_for(&app.id, pr), (platform_routers(&route), secret));
+                }
+            }
+            Ok(out)
+        });
+        match res {
+            Ok(m) => Some(m),
+            Err(e) => {
+                tracing::warn!("projects: reading platform routes: {e}");
+                None
+            }
         }
     }
 
@@ -639,14 +716,33 @@ impl Projects {
                 image.clone().unwrap_or_default()
             ))
         } else if image.is_none() {
-            Some("Coolify's proxy isn't running; rules apply once it starts".into())
+            Some("the proxy isn't running; rules apply once it starts".into())
         } else {
             None
         };
-        let Some(containers) = self.containers().await else {
-            // Leave the routes as they are rather than drop them all.
-            *self.error.lock().await = Some("can't read Docker's containers right now; routes are unchanged".into());
-            return;
+        let platform = match self.engine.get() {
+            Some(e) => match self.platform_routes(e) {
+                Some(m) => Some(m),
+                None => {
+                    *self.error.lock().await =
+                        Some("can't read the platform's apps right now; routes are unchanged".into());
+                    return;
+                }
+            },
+            None => None,
+        };
+        let containers = if platform.is_some() {
+            HashMap::new()
+        } else {
+            match self.containers().await {
+                Some(c) => c,
+                None => {
+                    // Leave the routes as they are rather than drop them all.
+                    *self.error.lock().await =
+                        Some("can't read Docker's containers right now; routes are unchanged".into());
+                    return;
+                }
+            }
         };
         let mut live = HashMap::new();
         for p in &projects {
@@ -660,12 +756,21 @@ impl Projects {
                     continue;
                 }
             };
-            let (routers, skipped) = match containers.get(&p.key) {
-                Some(c) => {
+            let from_platform = platform.as_ref().map(|m| m.get(&p.key));
+            let (routers, skipped) = match (from_platform, containers.get(&p.key)) {
+                (Some(Some((routers, secret))), _) => {
+                    l.cron_secret = secret.clone();
+                    (routers.clone(), vec![])
+                }
+                (Some(None), _) => {
+                    l.error = Some("this app isn't deployed yet (or it runs on another server)".into());
+                    (vec![], vec![])
+                }
+                (None, Some(c)) => {
                     l.cron_secret = env_value(&c.env, "CRON_SECRET");
                     routing::coolify_routers(&c.labels)
                 }
-                None => {
+                (None, None) => {
                     l.error = Some(
                         "no container for this app on this server yet (deploy it, or it runs on another server)".into(),
                     );
@@ -955,6 +1060,44 @@ mod tests {
         // Same second: the later fraction wins regardless of its length.
         assert_eq!(p.get("u1-pr-7").map(|c| c.id.as_str()), Some("b1"));
         assert_eq!(p.len(), 2);
+    }
+
+    #[test]
+    fn platform_base_routers() {
+        use vercelify_platform::proxy::{Route, RouteHost};
+        let r = Route {
+            key: "blog".into(),
+            hosts: vec![
+                RouteHost {
+                    host: "blog.example.com".into(),
+                    https: true,
+                    redirect_to: None,
+                },
+                RouteHost {
+                    host: "www.example.com".into(),
+                    https: true,
+                    redirect_to: Some("blog.example.com".into()),
+                },
+                RouteHost {
+                    host: "blog.lan".into(),
+                    https: false,
+                    redirect_to: None,
+                },
+            ],
+            upstreams: vec!["http://vfy-blog-1:3000".into()],
+            basic_auth: vec!["me:x".into()],
+            dns_challenge: false,
+        };
+        let routers = platform_routers(&r);
+        assert_eq!(routers.len(), 2, "redirect hosts are not copied");
+        assert_eq!(routers[0].name, "vfy-blog-0-secure");
+        assert_eq!(routers[0].service, "vfy-blog@file");
+        assert_eq!(routers[0].entry_points, ["websecure"]);
+        assert_eq!(routers[0].middlewares, ["vfy-blog-auth@file"]);
+        assert!(routers[0].tls.is_some());
+        assert_eq!(routers[1].name, "vfy-blog-2");
+        assert!(routers[1].tls.is_none());
+        assert_eq!(cron_base(&routers).as_deref(), Some("https://blog.example.com"));
     }
 
     #[test]

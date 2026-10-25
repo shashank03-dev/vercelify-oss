@@ -186,6 +186,21 @@ pub fn set_built(
     Ok(())
 }
 
+pub fn set_project_files(c: &Connection, id: &str, files: &[(String, String)]) -> Result<()> {
+    c.execute(
+        "UPDATE deployments SET project_files = ?2 WHERE id = ?1",
+        params![id, serde_json::to_string(files)?],
+    )?;
+    Ok(())
+}
+
+pub fn project_files(c: &Connection, id: &str) -> Result<Vec<(String, String)>> {
+    let raw: String = c.query_row("SELECT project_files FROM deployments WHERE id = ?1", [id], |r| {
+        r.get(0)
+    })?;
+    Ok(serde_json::from_str(&raw).unwrap_or_default())
+}
+
 /// The port and framework recorded at build time.
 pub fn built_info(c: &Connection, id: &str) -> Result<(Option<u16>, String)> {
     Ok(
