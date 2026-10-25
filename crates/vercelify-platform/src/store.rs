@@ -22,6 +22,7 @@ use std::time::Duration;
 pub const MIGRATIONS: &[(u32, &str)] = &[
     (1, include_str!("../migrations/0001_init.sql")),
     (2, include_str!("../migrations/0002_multinode.sql")),
+    (3, include_str!("../migrations/0003_git_webhooks.sql")),
 ];
 
 pub fn latest_version() -> u32 {

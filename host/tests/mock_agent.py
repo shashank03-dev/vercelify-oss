@@ -148,6 +148,16 @@ class H(BaseHTTPRequestHandler):
                  "last_seen_at": "2026-10-25T11:00:00Z", "cert_expires_at": None, "revoked_at": None, "created_at": "t",
                  "relay_connected": True, "relayed_bytes": 52224},
             ])
+        if method == "POST" and p == "/v1/platform/github-app":
+            org = body.get("org")
+            return self.reply(200, {"start_url": f"https://mesh.example.com/v1/github-app/start?state=s{'-' + org if org else ''}",
+                                    "state": "s", "expires_at": "2026-10-25T12:30:00Z"})
+        if method == "POST" and p.startswith("/v1/platform/git-sources/") and p.endswith("/webhook"):
+            src = p.split("/")[4]
+            if src != "github":
+                return self.reply(404, {"error": f"git source {src} not found"})
+            return self.reply(200, {"url": "https://mesh.example.com/v1/webhooks/github/git_1", "secret": "S" * 40,
+                                    "lan_urls": [], "content_type": "application/json", "events": ["push", "pull_request"]})
         if p == "/v1/platform/settings/standby":
             if method == "PUT":
                 node = body.get("node")

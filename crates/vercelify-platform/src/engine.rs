@@ -27,8 +27,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Notify;
 use vercelify_core::platform::{
-    App, AppKind, AppPatch, AppSource, CertStatus, Deployment, DeploymentStatus, DeploymentTrigger, PlatformNode,
-    VolumeOwner,
+    App, AppKind, AppPatch, AppSource, CertStatus, Deployment, DeploymentStatus, DeploymentTrigger, GitAuthKind,
+    PlatformNode, VolumeOwner,
 };
 
 /// What happened, for the agent's events, alerts and GitHub statuses.
@@ -67,7 +67,13 @@ pub struct Engine {
     /// Where the image registry keeps its data, and the addresses it is
     /// published on (the mesh one): set once there are other servers.
     registry: Mutex<Option<(PathBuf, Vec<String>)>>,
+    minter: Mutex<Option<TokenMinter>>,
 }
+
+/// Makes a GitHub App's installation token for (git source, repository).
+pub type TokenMinter = Arc<
+    dyn Fn(String, String) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String>> + Send>> + Send + Sync,
+>;
 
 /// A request to deploy.
 #[derive(Debug, Clone, Default)]
@@ -109,6 +115,7 @@ impl Engine {
             listener: Mutex::default(),
             private_ip: Mutex::default(),
             registry: Mutex::default(),
+            minter: Mutex::default(),
         })
     }
 
@@ -345,13 +352,46 @@ impl Engine {
         self.emit(EngineEvent::Changed);
     }
 
-    /// Credentials of the app's git source; the key file (deploy keys)
-    /// lives as long as the returned guard.
-    fn auth(&self, app: &App) -> Result<(GitAuth, Option<git_sources::KeyFile>)> {
+    /// Credentials for fetching `repo` from a git source; the key file
+    /// (deploy keys) lives as long as the returned guard. GitHub Apps get an
+    /// installation token for the repository from the minter.
+    pub async fn git_auth(&self, source: Option<&str>, repo: &str) -> Result<(GitAuth, Option<git_sources::KeyFile>)> {
+        if let Some(id) = source.filter(|s| !s.is_empty()) {
+            if self.store.with(|c| git_sources::get(c, id))?.auth == GitAuthKind::GithubApp {
+                let token = self.mint(id, repo).await?;
+                return Ok((
+                    GitAuth::Token {
+                        user: "x-access-token".into(),
+                        token,
+                    },
+                    None,
+                ));
+            }
+        }
         let tmp = self.builder.work_dir.join(".keys");
         let known_hosts = self.builder.work_dir.join("known_hosts");
         self.store
-            .with(|c| git_sources::auth(c, &self.key, app.source.git_source_id.as_deref(), &tmp, &known_hosts))
+            .with(|c| git_sources::auth(c, &self.key, source, &tmp, &known_hosts))
+    }
+
+    /// A token for the provider's API (statuses, pull requests) of `repo`.
+    pub async fn api_token(&self, source: Option<&str>, repo: &str) -> Option<String> {
+        let id = source.filter(|s| !s.is_empty())?;
+        match self.store.with(|c| git_sources::get(c, id)).ok()?.auth {
+            GitAuthKind::GithubApp => self.mint(id, repo).await.ok(),
+            _ => self.store.with(|c| git_sources::token(c, &self.key, id)).ok().flatten(),
+        }
+    }
+
+    pub fn set_token_minter(&self, m: TokenMinter) {
+        *lock(&self.minter) = Some(m);
+    }
+
+    async fn mint(&self, source: &str, repo: &str) -> Result<String> {
+        let m = lock(&self.minter)
+            .clone()
+            .ok_or_else(|| Error::Unavailable("GitHub App tokens can't be made here".into()))?;
+        m(source.to_string(), repo.to_string()).await
     }
 
     /// Where a deployment's instances go (design §8.3): the main server,
@@ -497,7 +537,12 @@ impl Engine {
                 .filter(|(_, v)| v.build)
                 .map(|(k, v)| (k.clone(), v.value.to_string()))
                 .collect();
-            let (auth, _key_file) = self.auth(app)?;
+            let (auth, _key_file) = self
+                .git_auth(
+                    app.source.git_source_id.as_deref(),
+                    app.source.repository.as_deref().unwrap_or(""),
+                )
+                .await?;
             let built = self
                 .builder
                 .build(

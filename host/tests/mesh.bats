@@ -174,3 +174,23 @@ JSON
   [ "$status" -ne 0 ]
   [[ "$output" == *"no standby replaced this server"* ]]
 }
+
+@test "github-app and webhook (platform engine)" {
+  run "$CLI" github-app
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"part of the platform engine"* ]]
+  printf 'engine = "platform"\n' >"$T/etc/agent.toml"
+  run "$CLI" github-app --org acme
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"https://mesh.example.com/v1/github-app/start?state=s-acme"* ]]
+  grep -q '^POST /v1/platform/github-app auth=Bearer test-agent-token' "$T/requests.log"
+  run "$CLI" github-app --bogus
+  [[ "$output" == *"usage: vercelify github-app"* ]]
+  run "$CLI" webhook github
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Payload URL: https://mesh.example.com/v1/webhooks/github/git_1"* ]]
+  [[ "$output" == *"SSSSSSSSSS"* && "$output" == *"push, pull_request"* ]]
+  run "$CLI" webhook nope
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"git source nope not found"* ]]
+}

@@ -93,6 +93,16 @@ impl AppState {
                 tokio::spawn(async move { g.on_event(e).await });
             }));
             platform_git = Some(git);
+            // GitHub App git sources: installation tokens, minted here.
+            let (cfg, store, key) = (config.clone(), p.store.clone(), p.key.clone());
+            p.engine.set_token_minter(std::sync::Arc::new(move |source, repo| {
+                let (cfg, store, key) = (cfg.clone(), store.clone(), key.clone());
+                Box::pin(async move {
+                    crate::github_app::installation_token(&cfg, &store, &key, &source, &repo)
+                        .await
+                        .map_err(vercelify_platform::Error::Unavailable)
+                })
+            }));
         }
         let mesh = match crate::mesh::Coordinator::open(&config, platform.as_ref().map(|p| p.store.clone())) {
             Ok(m) => m,

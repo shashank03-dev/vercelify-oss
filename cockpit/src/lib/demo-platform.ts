@@ -560,6 +560,36 @@ export function platformRoute(req: HttpRequest): unknown {
     if (m === "PUT") domainSetting = body as unknown as PlatformDomain;
     return { ...domainSetting };
   }
+  if (seg[0] === "github-app") {
+    if (seg[1] === "convert") {
+      if (!body.code) throw new Error("that isn't a code from GitHub");
+      const g: GitSource = {
+        id: id("git"),
+        name: "GitHub App vercelify-optiplex",
+        provider: "github",
+        auth: "github_app",
+        public_key: "",
+        created_at: isoNow(),
+        webhook: true,
+        app_url: "https://github.com/apps/vercelify-optiplex",
+      };
+      gitSources.push(g);
+      return g;
+    }
+    return { start_url: "https://github.com/settings/apps/new?state=demo", state: "demo", expires_at: isoNow() };
+  }
+  if (seg[0] === "git-sources" && seg[2] === "webhook") {
+    const g = gitSources.find((x) => x.id === seg[1]);
+    if (!g) throw new Error(`git source ${seg[1]} not found`);
+    g.webhook = true;
+    return {
+      url: `https://mesh.example.com/v1/webhooks/${g.provider === "generic" ? "github" : g.provider}/${g.id}`,
+      secret: "Zq3demoWebhookSecretForTheCockpitDemo42",
+      lan_urls: [`http://192.168.1.20:7443/v1/webhooks/github/${g.id}`],
+      content_type: "application/json",
+      events: ["push", "pull_request"],
+    };
+  }
   if (seg[0] === "git-sources") {
     if (m === "POST") {
       const g: GitSource = {
@@ -569,6 +599,7 @@ export function platformRoute(req: HttpRequest): unknown {
         auth: body.auth === "deploy_key" ? "deploy_key" : "token",
         public_key: body.auth === "deploy_key" ? "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDemoKeyForVercelifyOptiplex vercelify" : "",
         created_at: isoNow(),
+        webhook: false,
       };
       gitSources.push(g);
       return g;

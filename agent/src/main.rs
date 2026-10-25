@@ -14,6 +14,7 @@ mod error;
 mod events;
 mod exec;
 mod github;
+mod github_app;
 mod http;
 mod json;
 mod llm;
@@ -40,6 +41,7 @@ mod tokens;
 mod update;
 mod volumes;
 mod watch;
+mod webhooks;
 mod worker;
 
 use cli::Cmd;
@@ -379,7 +381,8 @@ async fn serve(cfg: Config) {
         match state.config.mesh_control_listen.parse::<SocketAddr>() {
             Ok(addr) => {
                 tasks.spawn(mdns::respond(state.config.clone(), co.clone()));
-                let router = mesh::control_router(co, state.claims.clone());
+                // Git providers' webhooks and the GitHub App flow come here too.
+                let router = mesh::control_router(co, state.claims.clone()).merge(webhooks::router(state.clone()));
                 tasks.spawn(async move {
                     let listener = loop {
                         match tokio::net::TcpListener::bind(addr).await {

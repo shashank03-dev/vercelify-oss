@@ -83,6 +83,8 @@ pub struct Config {
     pub timedatectl_bin: String,
     pub iptables_bin: String,
     pub curl_bin: String,
+    /// Signs GitHub App tokens (RS256), so the agent carries no RSA code.
+    pub openssl_bin: String,
     /// Where alerts go (ntfy topic URL, or any URL accepting a POSTed text
     /// body). Unset: NOTIFY_URL from power-guard.conf. The cockpit can set
     /// one at runtime (stored in the state directory).
@@ -221,6 +223,7 @@ impl Default for Config {
             timedatectl_bin: "timedatectl".into(),
             iptables_bin: "iptables".into(),
             curl_bin: "curl".into(),
+            openssl_bin: "openssl".into(),
             notify_url: None,
             watch_interval_secs: 60,
             uptime_checks: true,
@@ -483,6 +486,9 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_CURL_BIN") {
             self.curl_bin = v;
+        }
+        if let Some(v) = var("VERCELIFY_OPENSSL_BIN") {
+            self.openssl_bin = v;
         }
         if let Some(v) = var("VERCELIFY_NOTIFY_URL") {
             self.notify_url = Some(v);

@@ -25,6 +25,7 @@ import type {
   GitSource,
   GitSourceRequest,
   GitWatchStatus,
+  GithubAppStart,
   Job,
   PlatformDomain,
   NodePatch,
@@ -40,6 +41,7 @@ import type {
   TerminalRequest,
   TerminalSession,
   VolumeInfo,
+  WebhookSetup,
 } from "../types";
 
 const q = encodeURIComponent;
@@ -205,6 +207,9 @@ export function platformOn(server?: string) {
     gitSources: () => req<GitSource[]>("GET", "/git-sources"),
     createGitSource: (r: GitSourceRequest) => req<GitSource>("POST", "/git-sources", r),
     deleteGitSource: (id: string) => req<unknown>("DELETE", `/git-sources/${q(id)}`),
+    webhook: (id: string) => req<WebhookSetup>("POST", `/git-sources/${q(id)}/webhook`),
+    startGithubApp: (org?: string) => req<GithubAppStart>("POST", "/github-app", org ? { org } : {}),
+    convertGithubApp: (code: string, state: string) => req<GitSource>("POST", "/github-app/convert", { code, state }),
     domain: () => req<PlatformDomain>("GET", "/settings/domain"),
     setDomain: (d: PlatformDomain) => req<PlatformDomain>("PUT", "/settings/domain", d),
     nodes: () => req<PlatformNode[]>("GET", "/nodes"),

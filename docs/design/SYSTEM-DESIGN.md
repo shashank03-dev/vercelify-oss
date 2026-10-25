@@ -493,9 +493,30 @@ needs, so the cockpit can say "about 2 GB" for Plausible before it is created.
 - Previews: the existing logic (forks never built, per-app cap, GitHub status + comment)
   calls `deployer.enqueue_preview(app, pr, sha)`; closing a PR deletes the preview's
   container, route and row.
-- Webhooks: `POST /v1/webhooks/{github|gitlab|gitea}` on the control listener (reachable via
-  the tunnel), HMAC-verified with the per-source secret, only nudge the poller (never trust
-  the payload's sha without `ls-remote`).
+- Webhooks (M9): `POST /v1/webhooks/{github|gitlab|gitea}[/{source}]` on the control
+  listener, reachable through the tunnel's public URL (`mesh_public_url`) or on the LAN
+  (a self-hosted Gitea). `POST /v1/platform/git-sources/{id}/webhook` (`vercelify
+  webhook SOURCE`, the app's "Deploy on push" card) makes a secret for a git source
+  (sealed, `git_sources.webhook_secret`, shown once) and says where to send events. A
+  request is accepted only when signed with a source's secret (GitHub: `X-Hub-Signature-256`
+  HMAC-SHA256 of the body; Gitea/Forgejo: `X-Gitea-Signature`; GitLab: `X-Gitlab-Token`,
+  compared in constant time), at most 60 a minute per source. `push` and `pull_request`
+  events only make the poller check the apps of that repository now (the source's apps
+  and apps without a source; URLs matched across https/ssh forms): the payload's commit
+  is never trusted, `git ls-remote` decides.
+- GitHub App (M9), for organizations that won't hand out personal tokens: `POST
+  /v1/platform/github-app` (`vercelify github-app [--org ORG]`, the cockpit's New app
+  form) returns a start page on the control listener with a one-time state (30 min).
+  The page posts GitHub's manifest (permissions: contents and metadata read, statuses
+  and pull requests write; events: push, pull_request; webhook to the public URL, or
+  inactive without one; back to `/v1/github-app/callback`). The callback (or the address
+  pasted into `…/github-app/convert`) trades the code for the app's id, private key and
+  webhook secret, stored sealed as a `github_app` git source. Fetches, `ls-remote` and
+  GitHub statuses/comments then use installation tokens: a JWT (RS256, 9 minutes) signed
+  by the `openssl` command (the agent carries no RSA code), `GET
+  /repos/{owner}/{repo}/installation`, `POST /app/installations/{id}/access_tokens`, kept
+  50 of their 60 minutes. The engine asks the agent for them through a token minter, so
+  the platform crate stays free of HTTP to GitHub.
 - Deploy hooks: `POST /v1/hooks/deploy/{secret}` on the control listener; 32-byte secret,
   SHA-256 stored, rate limit 6/min per hook.
 
@@ -821,7 +842,8 @@ container block). A database's public port changing bumps the map version.
 | Secrets at rest | XChaCha20-Poly1305 with AAD per cell; master key 0600 root; backups encrypted by restic |
 | Containers | No Docker socket mounted into apps; containers can't reach the mesh except DNS and replies (existing isolation); Docker provider in Traefik off |
 | Builds | Run in BuildKit, never on the host shell; repository code never executes outside a container; git hardened (no inherited config, only http(s)/ssh with pinned host keys) |
-| Webhooks / deploy hooks | HMAC / 256-bit secret, rate limits, payloads never trusted for the commit |
+| Webhooks / deploy hooks | HMAC-SHA256 per git source (GitLab: its token), 60/min per source; deploy hooks a 256-bit secret, 6/min; payloads never trusted for the commit |
+| GitHub App | Private key and webhook secret sealed; the manifest flow gated by a one-time state; installation tokens per repository, an hour at most, signed JWTs 9 minutes |
 
 Threats explicitly out of scope: a root compromise of the main server (it holds the master
 key and the coordinator key, as Coolify's host held its `APP_KEY`); a malicious Docker image

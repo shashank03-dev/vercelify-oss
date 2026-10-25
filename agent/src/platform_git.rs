@@ -16,7 +16,7 @@ use std::time::Duration;
 use vercelify_core::platform::{App, AppKind, DeploymentKind, DeploymentTrigger, GitWatchStatus};
 use vercelify_platform::engine::{Engine, EngineEvent, Enqueue};
 use vercelify_platform::git::Git;
-use vercelify_platform::{apps, deployments, git_sources, git_watch, previews};
+use vercelify_platform::{apps, deployments, git_watch, previews};
 
 pub struct PlatformGit {
     cfg: Arc<Config>,
@@ -82,14 +82,15 @@ impl PlatformGit {
         }
     }
 
-    /// The token of the app's git source (GitHub API calls).
-    fn token(&self, app: &App) -> Option<String> {
-        let id = app.source.git_source_id.as_deref()?;
+    /// A token for the GitHub API of the app's repository (its source's
+    /// token, or a GitHub App's installation token).
+    async fn token(&self, app: &App) -> Option<String> {
         self.engine
-            .store
-            .with(|c| git_sources::token(c, &self.engine.key, id))
-            .ok()
-            .flatten()
+            .api_token(
+                app.source.git_source_id.as_deref(),
+                app.source.repository.as_deref().unwrap_or(""),
+            )
+            .await
     }
 
     fn record(&self, app: &App, head: Option<&str>, error: Option<&str>) {
@@ -110,16 +111,8 @@ impl PlatformGit {
         let branch = app.source.branch.clone().unwrap_or_else(|| "main".into());
         let (auth, _key) = self
             .engine
-            .store
-            .with(|c| {
-                git_sources::auth(
-                    c,
-                    &self.engine.key,
-                    app.source.git_source_id.as_deref(),
-                    &self.engine.builder.work_dir.join(".keys"),
-                    &self.engine.builder.work_dir.join("known_hosts"),
-                )
-            })
+            .git_auth(app.source.git_source_id.as_deref(), &repo)
+            .await
             .map_err(|e| e.to_string())?;
         let head = match self.git.resolve(&repo, &branch, &auth).await {
             Ok(h) => h,
@@ -129,7 +122,7 @@ impl PlatformGit {
             }
         };
         let slug = github_slug(&repo);
-        let token = self.token(app);
+        let token = self.token(app).await;
         if app.previews.enabled {
             if let Some(slug) = &slug {
                 self.sync_previews(app, slug, token.as_deref()).await;
@@ -287,7 +280,7 @@ impl PlatformGit {
     async fn report(&self, app: &App, sha: &str, pr: Option<u32>, state: &str, description: &str, url: Option<&str>) {
         let (Some(slug), Some(token)) = (
             github_slug(app.source.repository.as_deref().unwrap_or("")),
-            self.token(app),
+            self.token(app).await,
         ) else {
             return;
         };
@@ -362,7 +355,7 @@ impl PlatformGit {
     async fn comment(&self, app: &App, pr: u32, url: &str, sha: &str) {
         let (Some(slug), Some(token)) = (
             github_slug(app.source.repository.as_deref().unwrap_or("")),
-            self.token(app),
+            self.token(app).await,
         ) else {
             return;
         };

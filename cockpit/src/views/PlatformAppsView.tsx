@@ -37,6 +37,7 @@ import {
   Webhook,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { GithubAppModal, WebhookModal } from "../components/GitIntegrations";
 import { TerminalView } from "../components/Terminal";
 import { useToast } from "../components/Toast";
 import {
@@ -363,6 +364,7 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
   const [error, setError] = useState<string>();
   const [busy, setBusy] = useState(false);
   const sources = usePoll(() => (open ? client.gitSources() : Promise.resolve([])), 0, [open, client]);
+  const [ghApp, setGhApp] = useState(false);
   const [gitSource, setGitSource] = useState("");
 
   useEffect(() => {
@@ -486,7 +488,7 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
             </div>
             {!!sources.data?.length && (
               <Field label="Credentials" hint="For private repositories">
-                <Select value={gitSource} onChange={(e) => setGitSource(e.target.value)}>
+                <Select value={gitSource} onChange={(e) => setGitSource(e.target.value)} data-testid="new-git-source">
                   <option value="">None (public repository)</option>
                   {sources.data.map((g) => (
                     <option key={g.id} value={g.id}>
@@ -495,6 +497,21 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
                   ))}
                 </Select>
               </Field>
+            )}
+            {/github\.com/.test(repo) && !sources.data?.some((g) => g.auth === "github_app") && (
+              <button type="button" className="text-xs text-accent hover:underline" onClick={() => setGhApp(true)} data-testid="github-app-open">
+                Private GitHub repositories: connect a GitHub App
+              </button>
+            )}
+            {ghApp && (
+              <GithubAppModal
+                client={client}
+                onClose={() => setGhApp(false)}
+                onCreated={(g) => {
+                  setGitSource(g.id);
+                  void sources.refresh();
+                }}
+              />
             )}
           </>
         ) : (
@@ -1196,6 +1213,9 @@ function SettingsTab({ app, client, onChanged, onDeleted }: { app: App; client: 
   const git = usePoll(() => (app.kind === "git" ? client.git(app.id) : Promise.resolve(null)), 0, [app.id, client]);
   const hooks = usePoll(() => client.hooks(app.id), 0, [app.id, client]);
   const tasks = usePoll(() => client.tasks(app.id), 0, [app.id, client]);
+  const sources = usePoll(() => (app.source.git_source_id ? client.gitSources() : Promise.resolve([])), 0, [app.id, client]);
+  const source = sources.data?.find((g) => g.id === app.source.git_source_id);
+  const [hook, setHook] = useState(false);
   const [newHook, setNewHook] = useState<string>();
   const [user, setUser] = useState("");
   const [password, setPassword] = useState("");
@@ -1229,7 +1249,13 @@ function SettingsTab({ app, client, onChanged, onDeleted }: { app: App; client: 
             <Button size="sm" variant="ghost" icon={<RefreshCw />} busy={busy === "check"} onClick={() => void act("check", () => client.checkGit(app.id), "Checked").then(() => void git.refresh())}>
               Check now
             </Button>
+            {source && (
+              <Button size="sm" variant="ghost" icon={<Webhook />} onClick={() => setHook(true)} data-testid="webhook-open">
+                {source.webhook ? "Webhook on" : "Faster: a webhook"}
+              </Button>
+            )}
           </div>
+          {hook && source && <WebhookModal client={client} source={source} onClose={() => setHook(false)} />}
         </Card>
       )}
 

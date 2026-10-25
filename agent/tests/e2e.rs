@@ -2218,3 +2218,298 @@ fn mesh_coordinator() {
     assert_eq!(status["coordinator"]["nodes"], 1);
     assert_eq!(status["coordinator"]["revoked"], 1);
 }
+
+// --- GitHub App and webhooks (design §11) ----------------------------------------
+
+static APP_PEM: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+static APP_PUB: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// Checks the JWT's RS256 signature with the app's public key, like GitHub.
+fn jwt_valid(headers: &str) -> bool {
+    use base64::Engine as _;
+    let Some(t) = headers.lines().find_map(|l| {
+        l.strip_prefix("Authorization: Bearer ")
+            .or_else(|| l.strip_prefix("authorization: Bearer "))
+    }) else {
+        return false;
+    };
+    let parts: Vec<&str> = t.trim().split('.').collect();
+    if parts.len() != 3 {
+        return false;
+    }
+    let b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    let claims: Value = serde_json::from_slice(&b64.decode(parts[1]).unwrap_or_default()).unwrap_or_default();
+    if claims["iss"] != "7" {
+        return false;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let sig = dir.path().join("sig");
+    std::fs::write(&sig, b64.decode(parts[2]).unwrap_or_default()).unwrap();
+    let mut child = Command::new("openssl")
+        .args(["dgst", "-sha256", "-verify"])
+        .arg(APP_PUB.get().unwrap())
+        .arg("-signature")
+        .arg(&sig)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(format!("{}.{}", parts[0], parts[1]).as_bytes())
+        .unwrap();
+    String::from_utf8_lossy(&child.wait_with_output().unwrap().stdout).contains("Verified OK")
+}
+
+fn fake_github_app(r: &Seen) -> (u16, &'static str, String) {
+    let j = "application/json";
+    match (r.method.as_str(), r.path.as_str()) {
+        ("POST", "/app-manifests/c0de/conversions") => (
+            201,
+            j,
+            json!({"id": 7, "slug": "vercelify-test", "pem": APP_PEM.get().unwrap(), "webhook_secret": "whs3cret",
+                   "client_id": "Iv1.c", "client_secret": "cs", "html_url": "https://github.com/apps/vercelify-test",
+                   "owner": {"login": "me"}})
+            .to_string(),
+        ),
+        ("POST", p) if p.starts_with("/app-manifests/") => (404, j, r#"{"message":"Not Found"}"#.into()),
+        ("GET", "/repos/me/app/installation") if jwt_valid(&r.headers) => (200, j, r#"{"id": 99}"#.into()),
+        ("POST", "/app/installations/99/access_tokens") if jwt_valid(&r.headers) => (
+            201,
+            j,
+            r#"{"token": "ghs_installation", "expires_at": "2099-01-01T00:00:00Z"}"#.into(),
+        ),
+        ("GET", p) if p.starts_with("/repos/me/app/pulls") => (200, j, "[]".into()),
+        _ => (401, j, r#"{"message":"Bad credentials"}"#.into()),
+    }
+}
+
+fn hmac(key: &[u8], msg: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut k = [0u8; 64];
+    k[..key.len()].copy_from_slice(key);
+    let ipad: Vec<u8> = k.iter().map(|b| b ^ 0x36).collect();
+    let opad: Vec<u8> = k.iter().map(|b| b ^ 0x5c).collect();
+    let inner = Sha256::new().chain_update(&ipad).chain_update(msg).finalize();
+    let out = Sha256::new().chain_update(&opad).chain_update(inner).finalize();
+    out.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// A request with headers of our own to `port` (the control listener).
+fn raw(port: u16, method: &str, path: &str, headers: &[(&str, &str)], body: &str) -> (u16, String) {
+    let mut s = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+    let mut head = format!(
+        "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: {}\r\n",
+        body.len()
+    );
+    for (k, v) in headers {
+        head.push_str(&format!("{k}: {v}\r\n"));
+    }
+    s.write_all(format!("{head}\r\n{body}").as_bytes()).unwrap();
+    let mut out = String::new();
+    s.read_to_string(&mut out).unwrap();
+    let (h, b) = out.split_once("\r\n\r\n").unwrap_or((&out, ""));
+    (
+        h.split_whitespace().nth(1).unwrap_or("0").parse().unwrap_or(0),
+        b.to_string(),
+    )
+}
+
+#[test]
+fn github_app_and_webhooks() {
+    if Command::new("openssl").arg("version").output().is_err() {
+        return;
+    }
+    let keys = tempfile::tempdir().unwrap();
+    let pem = keys.path().join("app.pem");
+    let ok = Command::new("openssl")
+        .args(["genrsa", "-traditional", "-out"])
+        .arg(&pem)
+        .arg("2048")
+        .output()
+        .is_ok_and(|o| o.status.success())
+        || Command::new("openssl")
+            .args(["genrsa", "-out"])
+            .arg(&pem)
+            .arg("2048")
+            .output()
+            .is_ok_and(|o| o.status.success());
+    assert!(ok, "openssl genrsa");
+    let public = keys.path().join("app.pub");
+    assert!(Command::new("openssl")
+        .args(["rsa", "-pubout", "-in"])
+        .arg(&pem)
+        .arg("-out")
+        .arg(&public)
+        .output()
+        .unwrap()
+        .status
+        .success());
+    APP_PEM.set(std::fs::read_to_string(&pem).unwrap()).unwrap();
+    APP_PUB.set(public).unwrap();
+    let (gh, seen) = fake_server(fake_github_app);
+    let control = free_port();
+    let a = start_with(&[
+        ("VERCELIFY_ENGINE", "platform".into()),
+        ("VERCELIFY_ROLE", "main".into()),
+        ("VERCELIFY_MESH_COORDINATOR", "1".into()),
+        ("VERCELIFY_MESH_CONTROL_LISTEN", format!("127.0.0.1:{control}")),
+        ("VERCELIFY_MESH_PUBLIC_URL", format!("http://127.0.0.1:{control}")),
+        ("VERCELIFY_GITHUB_API", format!("http://127.0.0.1:{gh}")),
+    ]);
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while TcpStream::connect(("127.0.0.1", control)).is_err() {
+        assert!(Instant::now() < deadline, "no control listener");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    // The manifest flow: a start page that posts to GitHub, GitHub's
+    // callback with a code, the app stored as a git source.
+    let (s, st) = post(&a, "/v1/platform/github-app", json!({}));
+    assert_eq!(s, 200, "{st}");
+    let url = st["start_url"].as_str().unwrap();
+    let path = url.split_once(&format!(":{control}")).unwrap().1;
+    let (s, page) = raw(control, "GET", path, &[], "");
+    assert_eq!(s, 200);
+    assert!(page.contains("https://github.com/settings/apps/new?state="), "{page}");
+    assert!(page.contains("&quot;default_events&quot;"), "{page}");
+    let state = st["state"].as_str().unwrap();
+    let (s, page) = raw(
+        control,
+        "GET",
+        &format!("/v1/github-app/callback?code=bad&state={state}"),
+        &[],
+        "",
+    );
+    assert_eq!(s, 200);
+    assert!(page.contains("not created"), "{page}");
+    let (s, page) = raw(
+        control,
+        "GET",
+        &format!("/v1/github-app/callback?code=c0de&state={state}"),
+        &[],
+        "",
+    );
+    assert_eq!(s, 200);
+    assert!(
+        page.contains("GitHub App created") && page.contains("vercelify-test/installations/new"),
+        "{page}"
+    );
+    let (s, again) = raw(
+        control,
+        "GET",
+        &format!("/v1/github-app/callback?code=c0de&state={state}"),
+        &[],
+        "",
+    );
+    assert!(s == 200 && again.contains("expired or was used"), "one use: {again}");
+    let (_, sources) = get(&a, "/v1/platform/git-sources");
+    let src = &sources[0];
+    assert_eq!(
+        (src["auth"].as_str(), src["webhook"].as_bool()),
+        (Some("github_app"), Some(true))
+    );
+    let src_id = src["id"].as_str().unwrap().to_string();
+
+    // An app on it, followed.
+    let (s, app) = post(
+        &a,
+        "/v1/platform/apps",
+        json!({"name": "site", "kind": "git",
+               "source": {"repository": "https://github.com/me/app", "branch": "main", "git_source_id": src_id}}),
+    );
+    assert_eq!(s, 200, "{app}");
+    let (s, v) = send(
+        &a,
+        "PUT",
+        "/v1/platform/apps/site/git",
+        TOKEN,
+        Some(json!({"enabled": true})),
+    );
+    assert_eq!(s, 200, "{v}");
+
+    // A push, signed with the app's webhook secret: the app is checked, with
+    // an installation token minted by a JWT GitHub accepts.
+    let body = r#"{"ref":"refs/heads/main","repository":{"clone_url":"https://github.com/me/app.git"}}"#;
+    let sig = format!("sha256={}", hmac(b"whs3cret", body.as_bytes()));
+    let (s, out) = raw(
+        control,
+        "POST",
+        "/v1/webhooks/github",
+        &[
+            ("X-GitHub-Event", "push"),
+            ("X-Hub-Signature-256", &sig),
+            ("Content-Type", "application/json"),
+        ],
+        body,
+    );
+    assert_eq!(s, 202, "{out}");
+    assert!(out.contains("checking 1 app"), "{out}");
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let paths: Vec<String> = seen.lock().unwrap().iter().map(|r| r.path.clone()).collect();
+        if paths.iter().any(|p| p == "/app/installations/99/access_tokens") {
+            break;
+        }
+        assert!(Instant::now() < deadline, "no installation token was minted: {paths:?}");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !std::fs::read_to_string(&a.log)
+        .unwrap_or_default()
+        .contains("ls-remote")
+    {
+        assert!(Instant::now() < deadline, "the poller didn't look");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    // Bad signatures, pings, and other events.
+    let (s, _) = raw(
+        control,
+        "POST",
+        "/v1/webhooks/github",
+        &[("X-GitHub-Event", "push"), ("X-Hub-Signature-256", "sha256=00")],
+        body,
+    );
+    assert_eq!(s, 401);
+    let ping = r#"{"zen":"hi"}"#;
+    let sig = format!("sha256={}", hmac(b"whs3cret", ping.as_bytes()));
+    let (s, out) = raw(
+        control,
+        "POST",
+        "/v1/webhooks/github",
+        &[("X-GitHub-Event", "ping"), ("X-Hub-Signature-256", &sig)],
+        ping,
+    );
+    assert_eq!((s, out.contains("pong")), (200, true), "{out}");
+
+    // A token source gets a webhook of its own.
+    let (s, g) = post(
+        &a,
+        "/v1/platform/git-sources",
+        json!({"name": "gitea", "provider": "gitea", "auth": "token", "token": "tok"}),
+    );
+    assert_eq!(s, 200, "{g}");
+    let gid = g["id"].as_str().unwrap();
+    let (s, w) = post(&a, &format!("/v1/platform/git-sources/{gid}/webhook"), json!({}));
+    assert_eq!(s, 200, "{w}");
+    assert_eq!(w["url"], format!("http://127.0.0.1:{control}/v1/webhooks/gitea/{gid}"));
+    assert_eq!(w["secret"].as_str().unwrap().len(), 40);
+    let body = r#"{"repository":{"clone_url":"https://git.example.com/me/other.git"}}"#;
+    let sig = hmac(w["secret"].as_str().unwrap().as_bytes(), body.as_bytes());
+    let (s, out) = raw(
+        control,
+        "POST",
+        &format!("/v1/webhooks/gitea/{gid}"),
+        &[("X-Gitea-Event", "push"), ("X-Gitea-Signature", &sig)],
+        body,
+    );
+    assert_eq!(s, 202, "{out}");
+    assert!(out.contains("checking 0 app"), "{out}");
+    // Without a token: refused.
+    let (s, _) = send(&a, "POST", "/v1/platform/github-app", "nope", Some(json!({})));
+    assert_eq!(s, 401);
+}

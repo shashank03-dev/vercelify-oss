@@ -85,6 +85,9 @@ pub fn router() -> Router<AppState> {
         .route("/platform/apps/{app}/tasks/{id}/run", post(app_task_run))
         .route("/platform/git-sources", get(git_source_list).post(git_source_create))
         .route("/platform/git-sources/{id}", delete(git_source_delete))
+        .route("/platform/git-sources/{id}/webhook", post(git_source_webhook))
+        .route("/platform/github-app", post(github_app_start))
+        .route("/platform/github-app/convert", post(github_app_convert))
         .route("/platform/settings/domain", get(domain_get).put(domain_set))
         .route("/platform/databases", get(db_list).post(db_create))
         .route(
@@ -1134,6 +1137,56 @@ async fn git_source_create(State(s): State<AppState>, Json(req): Json<GitSourceR
 async fn git_source_delete(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
     tx(&s, move |c, _| git_sources::delete(c, &id)).await?;
     Ok(Json(json!({ "deleted": true })))
+}
+
+/// A new webhook secret for a git source, and where the provider sends events.
+async fn git_source_webhook(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<WebhookSetup> {
+    let (g, secret) = tx(&s, move |c, k| {
+        let g = git_sources::get(c, &id)?;
+        let secret = git_sources::new_webhook_secret(c, k, &g.id)?;
+        Ok((g, secret))
+    })
+    .await?;
+    let provider = match g.provider {
+        GitProvider::Gitlab => "gitlab",
+        GitProvider::Gitea => "gitea",
+        _ => "github",
+    };
+    let (public, lan) = crate::github_app::public_bases(&s.config);
+    let path = format!("/v1/webhooks/{provider}/{}", g.id);
+    let events = match g.provider {
+        GitProvider::Gitlab => vec!["Push events".into(), "Merge request events".into()],
+        _ => vec!["push".into(), "pull_request".into()],
+    };
+    changed(&s, "git-sources");
+    Ok(Json(WebhookSetup {
+        url: public.map(|b| format!("{b}{path}")).unwrap_or_default(),
+        secret,
+        lan_urls: lan.into_iter().map(|b| format!("{b}{path}")).collect(),
+        content_type: "application/json".into(),
+        events,
+    }))
+}
+
+async fn github_app_start(
+    State(s): State<AppState>,
+    body: Option<Json<GithubAppRequest>>,
+) -> ApiResult<GithubAppStart> {
+    platform(&s)?;
+    let org = body.and_then(|b| b.0.org).filter(|o| !o.is_empty());
+    Ok(Json(
+        crate::github_app::start(&s.config, org).map_err(AppError::bad_request)?,
+    ))
+}
+
+/// The manual end of the flow: the address GitHub sent the browser to.
+async fn github_app_convert(State(s): State<AppState>, Json(r): Json<GithubAppConvert>) -> ApiResult<GitSource> {
+    let p = platform(&s)?;
+    let g = crate::github_app::convert(&s.config, &p.store, &p.key, r.code.trim(), r.state.trim())
+        .await
+        .map_err(AppError::bad_request)?;
+    changed(&s, "git-sources");
+    Ok(Json(g))
 }
 
 async fn domain_get(State(s): State<AppState>) -> ApiResult<PlatformDomain> {

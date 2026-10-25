@@ -580,3 +580,32 @@ test("platform engine: apps across servers — where they run, replicas, drain a
   await page.getByTestId("platform-remove-yes").click();
   await expect(page.getByText(/still runs/)).toBeVisible();
 });
+
+test("platform engine: a GitHub App for private repositories, and a webhook", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "optiplex-7050");
+  await page.getByTestId("new-app").click();
+  await page.getByTestId("new-repo").fill("https://github.com/you/private-site");
+  await page.getByTestId("github-app-open").click();
+  const gh = page.getByTestId("github-app");
+  await gh.getByTestId("github-app-start").click();
+  await expect(gh).toContainText("GitHub opened in your browser");
+  await expect(gh.getByTestId("github-app-finish")).toBeDisabled();
+  await gh.getByTestId("github-app-address").fill("http://192.168.1.20:7443/v1/github-app/callback?code=abc&state=demo");
+  await gh.getByTestId("github-app-finish").click();
+  await expect(page.getByText(/is ready: install it on your repositories/)).toBeVisible();
+  await expect(page.getByTestId("new-git-source")).toHaveValue(/git_/);
+  await expect(page.getByTestId("github-app-open")).toHaveCount(0);
+  await page.getByTestId("create-app").click();
+  await expect(page.getByTestId("app-detail")).toContainText("private-site");
+
+  // pushes deploy at once with a webhook
+  await page.getByTestId("tab-settings").click();
+  await page.getByTestId("autodeploy-toggle").click();
+  await page.getByTestId("webhook-open").click();
+  const hook = page.getByTestId("webhook-setup");
+  await expect(hook).toContainText("It has a webhook already");
+  await hook.getByTestId("webhook-create").click();
+  await expect(hook.getByTestId("webhook-url")).toContainText("/v1/webhooks/github/git_");
+  await expect(hook.getByTestId("webhook-secret")).toHaveText(/\S{30,}/);
+});

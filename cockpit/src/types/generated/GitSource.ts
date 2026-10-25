@@ -9,4 +9,12 @@ export type GitSource = { id: string, name: string, provider: GitProvider, auth:
 /**
  * Deploy keys: the public key to add to the repository (read-only).
  */
-public_key: string, created_at: string, };
+public_key: string, created_at: string, 
+/**
+ * A webhook secret is set: pushes and pull requests are announced.
+ */
+webhook: boolean, 
+/**
+ * GitHub Apps: its page (install it on repositories there).
+ */
+app_url?: string, };

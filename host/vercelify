@@ -44,6 +44,8 @@ Usage: sudo vercelify <command> [args]
   mesh [status|init|invite [--device] [--role R]|join TOKEN [--name N]|nodes|revoke NAME|rotate]
                          Vercelify's own private network (WireGuard, vfy0): make this main
                          server its coordinator, invite and join machines, revoke them
+  github-app [--org ORG] Create a GitHub App for private repositories and instant deploys
+  webhook SOURCE         A webhook secret for a git source (GitHub, GitLab, Gitea)
   standby [NAME|off]     A worker that keeps a sealed copy of this main server (every 5 min)
   promote [--force]      On the standby: become the main server when the old one is gone
   demote [--force]       On a main server a standby replaced: step back, to rejoin as a worker
@@ -602,6 +604,8 @@ main() {
     sleep) cmd_sleep "$@" ;;
     mesh) mesh_cli "$@" ;;
     standby) need_root standby; standby_cli "$@" ;;
+    github-app) need_root github-app; platform_github_app "$@" ;;
+    webhook) need_root webhook; platform_webhook "$@" ;;
     promote) cmd_promote "$@" ;;
     demote) cmd_demote "$@" ;;
     tokens) need_root tokens; "$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" tokens "$@" ;;

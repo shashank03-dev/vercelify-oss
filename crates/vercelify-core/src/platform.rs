@@ -870,6 +870,9 @@ pub enum GitAuthKind {
     None,
     Token,
     DeployKey,
+    /// A GitHub App created for this server (manifest flow): short-lived
+    /// installation tokens, minted per repository.
+    GithubApp,
 }
 
 /// Credentials for private repositories. The secret is never returned.
@@ -883,6 +886,58 @@ pub struct GitSource {
     /// Deploy keys: the public key to add to the repository (read-only).
     pub public_key: String,
     pub created_at: String,
+    /// A webhook secret is set: pushes and pull requests are announced.
+    #[serde(default)]
+    pub webhook: bool,
+    /// GitHub Apps: its page (install it on repositories there).
+    #[serde(default)]
+    #[ts(optional)]
+    pub app_url: Option<String>,
+}
+
+/// `POST /v1/platform/git-sources/{id}/webhook`: where the provider sends
+/// events and the secret it signs them with (shown once).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct WebhookSetup {
+    /// Empty when this server has no address the provider can reach
+    /// (set a public URL: sudo vercelify tunnel …).
+    pub url: String,
+    pub secret: String,
+    /// Other addresses that work from inside the network (a self-hosted Gitea).
+    pub lan_urls: Vec<String>,
+    /// What to set on the provider's side.
+    pub content_type: String,
+    pub events: Vec<String>,
+}
+
+/// `POST /v1/platform/github-app`: open `start_url` in a browser to create
+/// the app on GitHub (it comes back here by itself, or paste the address
+/// GitHub lands on into `…/github-app/convert`).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct GithubAppRequest {
+    /// Create it for an organization instead of your account.
+    #[serde(default)]
+    #[ts(optional)]
+    pub org: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct GithubAppStart {
+    pub start_url: String,
+    pub state: String,
+    pub expires_at: String,
+}
+
+/// `POST /v1/platform/github-app/convert`: the `code` (and `state`) GitHub
+/// put in the address it sent the browser to.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct GithubAppConvert {
+    pub code: String,
+    pub state: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
