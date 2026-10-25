@@ -39,7 +39,7 @@ LOCAL_CONFIG_FILE=${POWER_GUARD_LOCAL_CONFIG:-/var/lib/vercelify/power-guard.loc
 # Images that hold data: never frozen while hot.
 : "${DATA_IMAGE_PATTERN:=postgres|postgis|mysql|mariadb|mongo|redis|valkey|keydb|dragonfly|clickhouse|minio}"
 # Build containers (Coolify's helper image) and the local AI server.
-: "${BUILD_IMAGE_PATTERN:=coolify-helper|vercelify-ollama|ollama/ollama}"
+: "${BUILD_IMAGE_PATTERN:=coolify-helper|buildx_buildkit_vercelify|moby/buildkit|vercelify-ollama|ollama/ollama}"
 : "${SHUTDOWN_CMD:=systemctl poweroff}"
 : "${POWER_SUPPLY_DIR:=/sys/class/power_supply}"
 : "${SYS_CLASS_DIR:=/sys/class}"

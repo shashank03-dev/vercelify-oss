@@ -6,11 +6,17 @@
 //! deployments and the reconciler build on those.
 
 pub mod apps;
+pub mod build;
 pub mod deployments;
+pub mod detect;
 pub mod env;
 pub mod error;
+pub mod gate;
+pub mod git;
 pub mod ids;
+pub mod logs;
 pub mod nodes;
+pub mod proc;
 pub mod projects;
 pub mod secrets;
 pub mod store;
