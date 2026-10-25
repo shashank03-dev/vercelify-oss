@@ -688,6 +688,12 @@ pub struct MeshNode {
     pub cert_expires_at: Option<String>,
     pub revoked_at: Option<String>,
     pub created_at: String,
+    /// Connected to the relay now (design §13.7).
+    #[serde(default)]
+    pub relay_connected: bool,
+    /// Bytes it sent through the relay since the agent started.
+    #[serde(default)]
+    pub relayed_bytes: u64,
 }
 
 /// `POST /v1/mesh/invites`: a single-use token to join the mesh.

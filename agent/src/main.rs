@@ -16,6 +16,7 @@ mod github;
 mod http;
 mod llm;
 mod mesh;
+mod mesh_relay;
 mod pairing;
 mod platform;
 mod platform_api;

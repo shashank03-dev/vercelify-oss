@@ -39,6 +39,7 @@ pub struct Coordinator {
     pub self_id: String,
     /// Enrollment attempts per source address (a minute's window).
     attempts: Mutex<HashMap<IpAddr, (Instant, u32)>>,
+    pub relay: crate::mesh_relay::RelayHub,
 }
 
 fn hostname() -> String {
@@ -93,6 +94,7 @@ impl Coordinator {
             cfg: cfg.clone(),
             self_id: me.id.clone(),
             attempts: Mutex::new(HashMap::new()),
+            relay: Default::default(),
         });
         co.write_own_state(&me)?;
         Ok(Some(co))
@@ -100,6 +102,21 @@ impl Coordinator {
 
     pub fn wg_public(&self) -> PublicKey {
         self.wg.public()
+    }
+
+    /// Open a message a node sealed to this coordinator's WireGuard key.
+    pub fn open_sealed(&self, s: &Sealed) -> vercelify_mesh::Result<(CoordinatorSession, Vec<u8>)> {
+        CoordinatorSession::open(&self.wg, s)
+    }
+
+    /// Ids of nodes as they are revoked.
+    pub fn kicked(&self) -> tokio::sync::broadcast::Receiver<String> {
+        self.kick.subscribe()
+    }
+
+    /// Where the relay is: the control addresses, and the public URL.
+    fn relays(&self) -> Vec<String> {
+        vercelify_mesh::relay::relay_urls(&control_addresses(&self.cfg), self.cfg.mesh_public_url.as_deref())
     }
 
     /// The coordinator's own daemon joins without a token: the agent writes
@@ -189,7 +206,9 @@ impl Coordinator {
             .find(|r| r.id == node.id)
             .cloned()
             .ok_or_else(|| AppError::not_found("node"))?;
-        Ok(build_map(&records, &me, &self.addressing, version, epoch, unix_now()).sign(&self.key))
+        let mut map = build_map(&records, &me, &self.addressing, version, epoch, unix_now());
+        map.relays = self.relays();
+        Ok(map.sign(&self.key))
     }
 
     /// Something changed: every map stream sends a new map.
@@ -249,6 +268,7 @@ pub fn control_router(co: Arc<Coordinator>) -> Router {
     Router::new()
         .route("/v1/mesh/enroll", post(enroll))
         .route("/v1/mesh/hello", get(hello))
+        .route(vercelify_mesh::relay::RELAY_PATH, get(crate::mesh_relay::relay))
         .with_state(co)
 }
 
@@ -483,7 +503,16 @@ pub fn owner_routes() -> Router<AppState> {
 async fn node_list(State(s): State<AppState>) -> ApiResult<Vec<MeshNode>> {
     let co = coordinator(&s)?;
     let nodes = co.store.with(reg::list)?;
-    Ok(Json(nodes.iter().map(|n| n.wire(&co.addressing)).collect()))
+    Ok(Json(
+        nodes
+            .iter()
+            .map(|n| {
+                let mut w = n.wire(&co.addressing);
+                (w.relay_connected, w.relayed_bytes) = co.relay.stats(&n.public_key, &n.id);
+                w
+            })
+            .collect(),
+    ))
 }
 
 /// Revoke (and with `?forget=true`, then remove) a node.
@@ -537,7 +566,22 @@ async fn invite(State(s): State<AppState>, body: Option<Json<MeshInviteRequest>>
     let role = req.role.clone().unwrap_or_else(|| "owner".into());
     let ttl = req.ttl_minutes.unwrap_or(60);
     let (claim, expires_at) = co.store.tx(|c| reg::invite(c, kind, &role, ttl))?;
-    let control = control_addresses(&co.cfg);
+    let mut control = control_addresses(&co.cfg);
+    // Outside the LAN: through the tunnel.
+    if let Some(u) = co
+        .cfg
+        .mesh_public_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+    {
+        let u = u.trim_end_matches('/');
+        control.push(if u.contains("://") {
+            u.to_string()
+        } else {
+            format!("https://{u}")
+        });
+    }
     if control.is_empty() {
         return Err(AppError::unavailable("this server has no LAN address to be reached at"));
     }

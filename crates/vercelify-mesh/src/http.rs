@@ -1,13 +1,17 @@
-//! The daemon's HTTP client: plain HTTP/1.1, because everything it talks to
-//! is either sealed (enrollment) or inside the mesh already (the
-//! coordinator's agent at its mesh address, or on 127.0.0.1).
+//! The daemon's HTTP client: HTTP/1.1, plain inside the mesh (the
+//! coordinator's agent at its mesh address, or on 127.0.0.1) and for the
+//! sealed enrollment on a LAN; TLS (webpki roots) for a public control URL
+//! behind a Cloudflare tunnel. `connect_io` is shared with the relay client.
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
 use hyper::Request;
 use hyper_util::rt::TokioIo;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpStream;
+use tokio_rustls::rustls;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HttpError {
@@ -20,36 +24,102 @@ pub enum HttpError {
 }
 
 pub struct Url {
+    pub tls: bool,
+    /// For TLS server names.
+    pub host: String,
     pub host_port: String,
     pub path: String,
 }
 
-/// `http://host:port/path` → parts (only plain http).
+/// `http(s)://host[:port]/path` (and `ws(s)://`) → parts.
 pub fn parse_url(url: &str) -> Result<Url, HttpError> {
-    let rest = url
-        .strip_prefix("http://")
-        .ok_or_else(|| HttpError::Io(format!("{url}: only http:// URLs (the mesh encrypts)")))?;
+    let (tls, rest) = if let Some(r) = url.strip_prefix("http://").or_else(|| url.strip_prefix("ws://")) {
+        (false, r)
+    } else if let Some(r) = url.strip_prefix("https://").or_else(|| url.strip_prefix("wss://")) {
+        (true, r)
+    } else {
+        return Err(HttpError::Io(format!("{url}: not an http(s):// URL")));
+    };
     let (hp, path) = match rest.find('/') {
         Some(i) => (&rest[..i], &rest[i..]),
         None => (rest, "/"),
     };
+    if hp.is_empty() {
+        return Err(HttpError::Io(format!("{url}: no host")));
+    }
+    // `[v6]:port`, `host:port`, or a bare host (default port).
+    let has_port = match hp.rfind(']') {
+        Some(b) => hp[b..].contains(':'),
+        None => hp.contains(':'),
+    };
+    let host_port = if has_port {
+        hp.to_string()
+    } else {
+        format!("{hp}:{}", if tls { 443 } else { 80 })
+    };
+    let host = match host_port.rsplit_once(':') {
+        Some((h, _)) => h.trim_matches(['[', ']']).to_string(),
+        None => hp.to_string(),
+    };
     Ok(Url {
-        host_port: hp.to_string(),
+        tls,
+        host,
+        host_port,
         path: path.to_string(),
     })
 }
 
+/// A byte stream: TCP, or TLS over TCP.
+pub trait Io: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> Io for T {}
+
+fn tls_config() -> Arc<rustls::ClientConfig> {
+    static CONFIG: OnceLock<Arc<rustls::ClientConfig>> = OnceLock::new();
+    CONFIG
+        .get_or_init(|| {
+            let roots = rustls::RootCertStore {
+                roots: webpki_roots::TLS_SERVER_ROOTS.to_vec(),
+            };
+            let cfg = rustls::ClientConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+                .with_safe_default_protocol_versions()
+                .expect("ring supports the default versions")
+                .with_root_certificates(roots)
+                .with_no_client_auth();
+            Arc::new(cfg)
+        })
+        .clone()
+}
+
+/// Connect to `u`, with TLS for https/wss.
+pub async fn connect_io(u: &Url, timeout: Duration) -> Result<Box<dyn Io>, HttpError> {
+    let err = |e: String| HttpError::Connect(u.host_port.clone(), e);
+    let stream = tokio::time::timeout(timeout, TcpStream::connect(&u.host_port))
+        .await
+        .map_err(|_| err("timed out".into()))?
+        .map_err(|e| err(e.to_string()))?;
+    let _ = stream.set_nodelay(true);
+    if !u.tls {
+        return Ok(Box::new(stream));
+    }
+    let name = rustls::pki_types::ServerName::try_from(u.host.clone()).map_err(|e| err(e.to_string()))?;
+    let tls = tokio::time::timeout(
+        timeout,
+        tokio_rustls::TlsConnector::from(tls_config()).connect(name, stream),
+    )
+    .await
+    .map_err(|_| err("TLS handshake timed out".into()))?
+    .map_err(|e| err(format!("TLS: {e}")))?;
+    Ok(Box::new(tls))
+}
+
 async fn connect(
-    host_port: &str,
+    u: &Url,
     timeout: Duration,
 ) -> Result<hyper::client::conn::http1::SendRequest<Full<Bytes>>, HttpError> {
-    let stream = tokio::time::timeout(timeout, TcpStream::connect(host_port))
+    let io = connect_io(u, timeout).await?;
+    let (send, conn) = hyper::client::conn::http1::handshake(TokioIo::new(io))
         .await
-        .map_err(|_| HttpError::Connect(host_port.into(), "timed out".into()))?
-        .map_err(|e| HttpError::Connect(host_port.into(), e.to_string()))?;
-    let (send, conn) = hyper::client::conn::http1::handshake(TokioIo::new(stream))
-        .await
-        .map_err(|e| HttpError::Connect(host_port.into(), e.to_string()))?;
+        .map_err(|e| HttpError::Connect(u.host_port.clone(), e.to_string()))?;
     tokio::spawn(async move {
         let _ = conn.await;
     });
@@ -73,7 +143,7 @@ pub async fn request(
 ) -> Result<Vec<u8>, HttpError> {
     let u = parse_url(url)?;
     let fut = async {
-        let mut send = connect(&u.host_port, timeout).await?;
+        let mut send = connect(&u, timeout).await?;
         let mut b = Request::builder()
             .method(method)
             .uri(&u.path)
@@ -118,7 +188,7 @@ pub async fn stream_lines(
     mut on_line: impl FnMut(&str) -> bool,
 ) -> Result<(), HttpError> {
     let u = parse_url(url)?;
-    let mut send = connect(&u.host_port, Duration::from_secs(10)).await?;
+    let mut send = connect(&u, Duration::from_secs(10)).await?;
     let req = Request::builder()
         .method("GET")
         .uri(&u.path)
@@ -172,8 +242,19 @@ mod tests {
         let u = parse_url("http://10.77.0.1:7420/v1/mesh/map").unwrap();
         assert_eq!(u.host_port, "10.77.0.1:7420");
         assert_eq!(u.path, "/v1/mesh/map");
+        assert!(!u.tls);
         assert_eq!(parse_url("http://127.0.0.1:7443").unwrap().path, "/");
-        assert!(parse_url("https://x").is_err());
+        let t = parse_url("https://mesh.example.com/v1/mesh/enroll").unwrap();
+        assert!(t.tls);
+        assert_eq!(
+            (t.host.as_str(), t.host_port.as_str()),
+            ("mesh.example.com", "mesh.example.com:443")
+        );
+        let w = parse_url("ws://[fd76::1]:7443/v1/mesh/relay").unwrap();
+        assert_eq!((w.host.as_str(), w.host_port.as_str()), ("fd76::1", "[fd76::1]:7443"));
+        assert_eq!(parse_url("wss://m.example.com").unwrap().host_port, "m.example.com:443");
+        assert!(parse_url("ftp://x").is_err());
+        assert!(parse_url("http:///x").is_err());
         assert_eq!(error_message(br#"{"error":"revoked"}"#), "revoked");
     }
 }

@@ -553,34 +553,66 @@ depends on re-serialising JSON (`vercelify-mesh::cert`).
 
 ### 13.6 Disco and path selection
 
-Disco messages are sealed with a key derived from both nodes' WireGuard keys:
-`HKDF-SHA256(X25519(my_priv, peer_pub), "vercelify-disco-v1")` → ChaCha20-Poly1305;
-frame `VFYD ‖ sender public key (32) ‖ nonce (12) ‖ sealed { kind: ping|pong|call_me, tx (12 B), observed_addr? }`.
+Disco messages (`vercelify-mesh::disco`) are sealed with a key only the two nodes share:
+`HKDF-SHA256(X25519(my_priv, peer_pub), info "vercelify-disco-v1")` → ChaCha20-Poly1305;
+frame `VFYD ‖ sender public key (32) ‖ nonce (12) ‖ sealed body`, the first 36 bytes as
+associated data. Bodies: `ping {tx}`, `pong {tx, observed}`, `call_me {endpoints[≤16]}`.
 
-Per peer:
+Per peer, in the engine (`wg.rs`):
 
-1. Every 5 s while not on a confirmed direct path, and every 25 s after: send `ping` to every
-   candidate endpoint (map endpoints + addresses learned from earlier pongs).
-2. `pong` carries the address the ping came from (gives each side its public mapping, so
-   peers act as STUN servers for each other) and confirms the path; the lowest round-trip
-   confirmed path wins, with LAN preferred within 2 ms.
-3. `call_me` is sent through the relay so both sides ping each other at the same time (hole
-   punching for endpoint-dependent filtering).
-4. No confirmed path: WireGuard packets go through the relay. A confirmed path that misses 3
-   pings falls back to the relay.
+1. Candidates: the map's endpoints, then what the node learned (the source of a peer's
+   pings, `call_me` lists, authenticated WireGuard packets), at most 16.
+2. Every 5 s while no direct path is confirmed, every 12 s once one is: a `ping` to every
+   candidate. A `pong` from the address pinged confirms that path with its round trip and
+   tells the node where the peer saw it (peers act as STUN servers for each other; the
+   coordinator, usually reachable, gives every node its public mapping this way).
+3. The best confirmed path wins: lowest round trip, a private (LAN) address within 2 ms
+   preferred. A path without a pong or a packet for 40 s (three missed pings) is dropped.
+4. While nothing is confirmed and the relay is up, `call_me` goes through the relay at most
+   every 15 s with this node's local and observed endpoints; the peer adds them and pings
+   at once, so both sides send at the same moment (hole punching for NATs that only let
+   replies in).
+5. Where packets go: the confirmed path; else an endpoint the peer's authenticated packets
+   arrive from (it works both ways); else the relay; else the candidates in turn (4 s each,
+   the only mechanism without a relay).
 
-STUN: binding requests to `mesh.stun_servers` (default `stun.cloudflare.com:3478`,
-`stun.l.google.com:19302`) every 60 s from the same socket, to learn the public endpoint
-before any peer is reachable.
+The daemon reports its interface addresses plus what peers and STUN servers observed to the
+coordinator (`POST /v1/mesh/endpoints`, at 10 s and 30 s after start, then every minute);
+the map passes them on as candidates.
+
+STUN (`vercelify-mesh::stun`, RFC 5389 binding only) on the same socket: requests to
+`--stun` (default `stun.cloudflare.com:3478,stun.l.google.com:19302`, `""` for none,
+`VERCELIFY_MESH_STUN`) every 60 s, resolved hourly; every node also answers binding
+requests (rate-limited with the handshake budget, 200/s).
+
+Measured in `host/tests/contract/mesh-nat.sh` with real Linux NAT: two nodes behind
+port-preserving NATs that only let replies in punch a direct path within seconds; a node
+behind a symmetric NAT (`MASQUERADE --random-fully`) reaches public nodes directly and the
+others through the relay. One Linux behaviour matters: a router that accepts unsolicited
+UDP to itself records it in its NAT table, which then takes the port the LAN host needs and
+turns a cone NAT symmetric; home routers drop such packets (the test's routers do too).
 
 ### 13.7 Relay
 
-Endpoint `GET /v1/mesh/relay` (WebSocket, binary) on the control listener, authenticated by
-node token. Frames: client → relay `dst public key (32) ‖ packet`; relay → client
-`src public key (32) ‖ packet`. The relay forwards only between nodes that the map lets talk
-to each other, keeps no packets (drops when the destination's queue holds more than 256),
-and counts bytes per node for the Servers page. Payloads are WireGuard (or disco) packets, so
-the relay sees only ciphertext.
+Endpoint `GET /v1/mesh/relay` (WebSocket, binary) on the control listener; the map's
+`relays` lists `ws://<control address>/v1/mesh/relay` for every control address and, with
+`mesh_public_url` set (a Cloudflare tunnel to `127.0.0.1:7443`), `wss://<host>/v1/mesh/relay`.
+Join tokens carry that URL too, so a node can enroll through the tunnel (`https://`, the
+daemon checks it with the webpki roots).
+
+- **Authentication by key, not token.** The relay sends `{"challenge": <32 random bytes>}`;
+  the node answers it sealed to the coordinator's WireGuard key (§13.2's sealing); only the
+  holder of the node's private key can, and the key must belong to a node that isn't
+  revoked. So a node uses the relay before it has any path into the mesh, and rotation
+  reconnects with the new key.
+- Frames: client → relay `dst public key (32) ‖ packet`; relay → client
+  `src public key (32) ‖ packet`, at most 4 KiB + 32. The relay forwards only between nodes
+  the map lets talk (a device to a server and back, servers among themselves), keeps no
+  packets beyond 256 queued per destination (then drops), and counts bytes per node
+  (`relay_connected`, `relayed_bytes` in `GET /v1/mesh/nodes`).
+- A newer connection of the same key replaces the older; revocation closes it at once.
+- Payloads are WireGuard or disco packets, so the relay only sees ciphertext. Pings every
+  25 s (client) and 30 s (relay) keep tunnels and proxies from idling it out.
 
 ### 13.8 DNS and ACLs
 
@@ -618,19 +650,23 @@ the relay sees only ciphertext.
   forwards); `listen = "mesh"` binds the agent to its mesh address.
 - `vercelify mesh init | invite [--device] | join TOKEN | nodes | revoke NAME`; on
   workers the installer installs `vercelify-mesh` and `vercelify-mesh.service`.
-- `vercelify-mesh join TOKEN [--name] | up | status [--json] | rotate | pubkey`;
-  `up` writes `/run/vercelify/mesh-status.json` (peers, endpoint, path, last handshake)
-  every few seconds.
+- `vercelify-mesh join TOKEN [--name] | up [--stun …] | status [--json] | rotate | pubkey`;
+  `up` writes `/run/vercelify/mesh-status.json` every 5 s: per peer the endpoint, the path
+  (`lan`, `direct`, `relay`, `none`), the round trip, the last handshake and bytes.
+- `mesh_public_url` in `agent.toml` (`VERCELIFY_MESH_PUBLIC_URL`): the control listener
+  through a tunnel, for joins and the relay from outside the LAN.
 - `host/tests/contract/mesh.sh` runs four nodes in network namespaces (a LAN, a router, a
   network behind it) with the real binaries and checks joining, paths, DNS, the firewall,
-  rotation, revocation and restart on the saved map.
+  rotation, revocation and restart on the saved map. `host/tests/contract/mesh-nat.sh`
+  puts three nodes behind real NAT routers (two that keep ports, one symmetric) and checks
+  hole punching, the relay and revocation on it.
 
 ## 14. Security model
 
 | Asset | Protection |
 | --- | --- |
 | Agent API | Only on mesh IP + loopback; bearer token (host / device / node), role check per route, audit of every non-GET |
-| Control listener `:7443` | Plain HTTP carrying sealed enrollment (§13.2) and a hello; only `enroll`, `hello` (later `relay`, `webhooks`, `hooks/deploy`) exist there; enrollment rate-limited (10/min per address) and claim-protected (single use, TTL); node tokens work only from the node's own mesh address |
+| Control listener `:7443` | Plain HTTP carrying sealed enrollment (§13.2), the relay (authenticated by node key, §13.7) and a hello; only `enroll`, `hello`, `relay` (later `webhooks`, `hooks/deploy`) exist there; enrollment rate-limited (10/min per address) and claim-protected (single use, TTL); node tokens work only from the node's own mesh address |
 | Mesh traffic | WireGuard; keys generated on each node; certificates signed by the coordinator; map signed; revocation within one map push |
 | Secrets at rest | XChaCha20-Poly1305 with AAD per cell; master key 0600 root; backups encrypted by restic |
 | Containers | No Docker socket mounted into apps; containers can't reach the mesh except DNS and replies (existing isolation); Docker provider in Traefik off |
@@ -670,8 +706,9 @@ The release profile uses fat LTO and `opt-level = "z"` for the whole workspace (
 levels measured larger under fat LTO): with thin LTO and `"s"` the agent measured 8.9 MiB
 after M6, over budget; this way 7.6 MiB. M7 (the coordinator, `vercelify-mesh` as a library)
 brought it to 8.0 MiB; logging filters with `tracing_subscriber::filter::Targets` instead of
-`EnvFilter` (which pulls in a regex engine) brought it back to 7.75 MiB. `vercelify-mesh`
-measures 1.8 MiB. CI builds the binaries of every pull request with
+`EnvFilter` (which pulls in a regex engine) brought it back to 7.75 MiB; the relay hub (axum's
+WebSocket) added 0.07 MiB. `vercelify-mesh` measures 2.9 MiB, 1.1 MiB of it rustls with
+webpki roots for `wss://` and `https://` through a tunnel. CI builds the binaries of every pull request with
 `cargo zigbuild` and fails over budget, so growth shows up the commit it happens.
 
 ## 17. Decisions log

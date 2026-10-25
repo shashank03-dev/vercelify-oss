@@ -53,12 +53,21 @@ cf_ensure_tunnel() {
 
 cf_tunnel_token() { cf GET "/accounts/$1/cfd_tunnel/$2/token" | jq -r '.'; }
 
+# The coordinator of the mesh (design §13.7) is reachable through the
+# tunnel at mesh.DOMAIN: joins and the relay from outside the LAN.
+mesh_coordinates() {
+  grep -Eq '^[[:space:]]*mesh_coordinator[[:space:]]*=[[:space:]]*true' "${VERCELIFY_ETC:-/etc/vercelify}/agent.toml" 2>/dev/null
+}
+
 # Route *.DOMAIN and DOMAIN to Traefik. ROUTES (JSON array of
-# {hostname, service}) come first: apps running on other servers in the pool.
+# {hostname, service}) come first: apps running on other servers in the pool;
+# then mesh.DOMAIN to the mesh's control listener on a coordinator.
 cf_configure_ingress() {
-  local account=$1 tunnel=$2 domain=$3 routes=${4:-[]} body
-  body=$(jq -nc --arg d "$domain" --argjson r "$routes" '{config: {ingress: (
-    [$r[] | {hostname, service, originRequest: {}}] + [
+  local account=$1 tunnel=$2 domain=$3 routes=${4:-[]} mesh=false body
+  mesh_coordinates && mesh=true
+  body=$(jq -nc --arg d "$domain" --argjson r "$routes" --argjson m "$mesh" '{config: {ingress: (
+    [$r[] | {hostname, service, originRequest: {}}] +
+    (if $m then [{hostname: ("mesh." + $d), service: "http://localhost:7443", originRequest: {}}] else [] end) + [
     {hostname: ("*." + $d), service: "http://localhost:80", originRequest: {}},
     {hostname: $d, service: "http://localhost:80", originRequest: {}},
     {service: "http_status:404"}

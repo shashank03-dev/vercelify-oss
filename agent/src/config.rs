@@ -155,6 +155,10 @@ pub struct Config {
     /// Addresses peers reach the coordinator at, besides what nodes report
     /// (`203.0.113.7:51820` behind a port forward).
     pub mesh_public_endpoints: Vec<String>,
+    /// Public URL of the control listener for nodes outside the LAN (a
+    /// Cloudflare tunnel to `127.0.0.1:7443`, `https://mesh.example.com`):
+    /// joins and the relay go there when no LAN address answers.
+    pub mesh_public_url: Option<String>,
 }
 
 impl Default for Config {
@@ -249,6 +253,7 @@ impl Default for Config {
             mesh_port: 51820,
             mesh_name: None,
             mesh_public_endpoints: vec![],
+            mesh_public_url: None,
         }
     }
 }
@@ -318,6 +323,9 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_MESH_NAME") {
             self.mesh_name = Some(v);
+        }
+        if let Some(v) = var("VERCELIFY_MESH_PUBLIC_URL") {
+            self.mesh_public_url = Some(v).filter(|v| !v.is_empty());
         }
         if let Some(v) = var("VERCELIFY_BUILD_DRIVER") {
             self.build_driver = v;

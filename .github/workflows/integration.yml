@@ -10,7 +10,8 @@ name: Integration
 #     rewrites, headers, firewall and cron jobs through the agent, on apps
 #     labelled the way Coolify labels them
 #   - the mesh: four nodes in network namespaces with the real agent and
-#     vercelify-mesh (joining, paths, DNS, firewall, rotation, revocation)
+#     vercelify-mesh (joining, paths, DNS, firewall, rotation, revocation),
+#     then three behind real NAT routers (hole punching, the relay)
 #   - the real installer in a systemd container (Docker, Tailscale, Coolify,
 #     agent, guard, firewall), twice, to prove it is idempotent
 on:
@@ -98,6 +99,8 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y iputils-ping jq
       - name: Contract
         run: sudo -E env "PATH=$PATH" host/tests/contract/mesh.sh
+      - name: NAT traversal (hole punching, relay)
+        run: sudo -E env "PATH=$PATH" host/tests/contract/mesh-nat.sh
 
   installer:
     name: Installer on Debian 12 (systemd, real Coolify)

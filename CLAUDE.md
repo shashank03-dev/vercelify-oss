@@ -54,6 +54,7 @@ shellcheck -x -S warning install.sh install-mac.sh cli/vfy host/*.sh host/vercel
 sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/coolify.sh   # real Coolify (Docker)
 sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/routing.sh   # vercel.json rules on a real Traefik
 sudo host/tests/contract/mesh.sh                 # four mesh nodes in network namespaces (debug agent + vercelify-mesh)
+sudo host/tests/contract/mesh-nat.sh             # NAT traversal: hole punching and the relay behind real Linux NAT
 
 cd cockpit
 npm ci && npm run typecheck && npm test && npx vite build

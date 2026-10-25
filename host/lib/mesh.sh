@@ -71,7 +71,23 @@ mesh_init() {
   [[ -s "$MESH_DIR/state.json" ]] || die "the agent didn't set up the coordinator — see: journalctl -u vercelify-agent -n 50"
   mesh_install_unit
   mesh_wait_up 10.77.0.1 && ok "this server coordinates the mesh as 10.77.0.1"
+  mesh_tunnel_route
   info "add a machine: sudo vercelify mesh invite   (then run what it prints on that machine)"
+}
+
+# With a Cloudflare tunnel: mesh.DOMAIN reaches the control listener, so
+# machines outside the LAN can join and use the relay (design §13.7).
+mesh_tunnel_route() {
+  local env="$VERCELIFY_ETC/cloudflare.env" cfg="$VERCELIFY_ETC/agent.toml"
+  [[ -r "$env" ]] || { info "outside the LAN: set a tunnel up (sudo vercelify tunnel …) or forward UDP 51820 and TCP 7443"; return 0; }
+  # shellcheck disable=SC1090
+  . "$env"
+  [[ -n "${CF_DOMAIN:-}" ]] || return 0
+  toml_set mesh_public_url "\"https://mesh.$CF_DOMAIN\"" "$cfg"
+  rm -f "${VERCELIFY_STATE:-/var/lib/vercelify}/routes.json"
+  routes_sync || warn "the tunnel routes weren't updated; next sync retries"
+  run_cmd systemctl restart vercelify-agent
+  ok "outside the LAN: joins and the relay go through https://mesh.$CF_DOMAIN"
 }
 
 # mesh invite [--device] [--role ROLE] [--ttl MINUTES] — a single-use join token.
@@ -110,9 +126,10 @@ mesh_join() {
 mesh_nodes() {
   agent_api GET /v1/mesh/nodes | jq -r '.[] |
     [(if .revoked_at then "revoked" elif .coordinator then "coordinator" else .kind end), .name, .ipv4,
-     (.endpoints | join(",")), (.last_seen_at // "never")] | @tsv' |
-    while IFS=$'\t' read -r kind name ip eps seen; do
-      printf '%-12s %-18s %-13s %-30s %s\n' "$kind" "$name" "$ip" "${eps:--}" "$seen"
+     (.endpoints | join(",")), (.last_seen_at // "never"),
+     (if .relay_connected then "on the relay (\((.relayed_bytes // 0) / 1024 | floor) KiB)" else "" end)] | @tsv' |
+    while IFS=$'\t' read -r kind name ip eps seen relay; do
+      printf '%-12s %-18s %-13s %-30s %s%s\n' "$kind" "$name" "$ip" "${eps:--}" "$seen" "${relay:+  $relay}"
     done
 }
 

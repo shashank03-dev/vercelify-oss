@@ -1,18 +1,28 @@
-//! The WireGuard data plane (design §13.5): one UDP socket, one
+//! The WireGuard data plane (design §13.5–13.7): one UDP socket, one
 //! `boringtun::noise::Tunn` per peer, driven by one task. Packets from the
 //! node's network device go to the peer owning their destination address;
 //! datagrams from the network are matched to a peer (by the key in a
 //! handshake, by our index in the others), decrypted, checked against the
 //! peer's own addresses, and handed to the device.
 //!
+//! The same socket carries disco (`disco.rs`: path discovery between
+//! peers) and STUN (`stun.rs`: this node's public address, and answers for
+//! others). Each peer's packets take its best confirmed direct path; with
+//! none, they go through the relay when one is connected, and otherwise to
+//! its candidate endpoints in turn.
+//!
 //! The device is a trait: a tun interface on Linux (`tun.rs`), a channel in
-//! tests, a userspace TCP/IP stack on the Mac later.
+//! tests, a userspace TCP/IP stack on the Mac.
 
+use crate::disco::{self, DiscoKey, Message, TxId};
 use crate::keys::{NodeKey, PublicKey};
+use crate::stun;
 use boringtun::noise::{handshake::parse_handshake_anon, Packet, Tunn, TunnResult};
 use boringtun::x25519;
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
 use tokio::sync::{mpsc, oneshot};
@@ -23,11 +33,32 @@ const MAX_PACKET: usize = 65_535;
 const OVERHEAD: usize = 32;
 /// Seconds between keepalives (behind NAT a mapping lives about 30 s).
 pub const KEEPALIVE_SECS: u16 = 25;
-/// Try the next candidate endpoint when one hasn't answered for this long.
+/// Try the next candidate endpoint when one hasn't answered for this long
+/// (only without a relay: with one, packets wait there for a path).
 const CANDIDATE_TIMEOUT: Duration = Duration::from_secs(4);
-/// At most this many anonymous handshake parses per second (each is an
-/// X25519 operation; this bounds what a flood of junk can cost).
+/// At most this many anonymous handshake parses and STUN answers per
+/// second (a handshake parse is an X25519 operation; this bounds what a
+/// flood of junk can cost).
 const ANON_PER_SEC: u32 = 200;
+/// Disco pings to every candidate: this often while no direct path is
+/// confirmed, and this often to keep a confirmed one.
+const PING_SEARCHING: Duration = Duration::from_secs(5);
+const PING_CONFIRMED: Duration = Duration::from_secs(12);
+/// A path without a pong (or a packet) for this long is gone: three
+/// missed pings.
+const PATH_STALE: Duration = Duration::from_secs(40);
+/// Within this, a private (LAN) path wins over a faster public one.
+const LAN_PREFERENCE: Duration = Duration::from_millis(2);
+/// Pings waiting for a pong are forgotten after this.
+const PING_TIMEOUT: Duration = Duration::from_secs(10);
+/// `call_me` through the relay at most this often per peer.
+const CALL_ME_EVERY: Duration = Duration::from_secs(15);
+/// Candidates per peer at most (map endpoints first, then learned ones).
+const MAX_CANDIDATES: usize = 16;
+/// STUN servers are asked this often.
+const STUN_EVERY: Duration = Duration::from_secs(60);
+/// What this node learned about its own address is kept this long.
+const OBSERVED_TTL: Duration = Duration::from_secs(300);
 
 /// A packet device: whole IP packets in and out.
 #[allow(async_fn_in_trait)]
@@ -53,8 +84,12 @@ pub struct PeerStatus {
     pub name: String,
     pub public_key: String,
     pub addresses: Vec<String>,
-    /// Where its packets come from / go to now.
+    /// Where its packets come from / go to now (None through the relay).
     pub endpoint: Option<String>,
+    /// `direct` (a confirmed or working endpoint), `relay`, or `none`.
+    pub path: &'static str,
+    /// Round trip of the direct path, from disco.
+    pub rtt_ms: Option<f64>,
     /// Seconds since the last completed handshake.
     pub handshake_secs: Option<u64>,
     pub rx_bytes: u64,
@@ -66,25 +101,67 @@ pub enum Control {
     /// The node's key changed (rotation): every tunnel re-handshakes.
     Rekey(NodeKey),
     Status(oneshot::Sender<Vec<PeerStatus>>),
+    /// This node's own addresses (`ip:port` on its interfaces), sent to
+    /// peers in `call_me`.
+    SetLocal(Vec<SocketAddr>),
+    /// STUN servers to learn this node's public address from.
+    SetStun(Vec<SocketAddr>),
+    /// The addresses peers and STUN servers saw this node at.
+    Observed(oneshot::Sender<Vec<SocketAddr>>),
+}
+
+/// The engine's side of a relay connection (`relay_client.rs`).
+pub struct RelayLink {
+    /// (destination, packet) to send through the relay.
+    pub tx: mpsc::Sender<(PublicKey, Vec<u8>)>,
+    /// (source, packet) the relay delivered.
+    pub rx: mpsc::Receiver<(PublicKey, Vec<u8>)>,
+    /// Whether the connection is up now.
+    pub up: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Route {
+    Udp(SocketAddr),
+    Relay,
+    Nowhere,
+}
+
+struct DirectPath {
+    rtt: Duration,
+    /// Last pong, or last packet from it.
+    alive: Instant,
 }
 
 struct PeerState {
     spec: PeerSpec,
     tunn: Box<Tunn>,
     index: u32,
-    /// Current endpoint: learned from authenticated packets, or a candidate.
+    disco: Option<DiscoKey>,
+    /// Current endpoint: the best path, learned from authenticated
+    /// packets, or a candidate.
     endpoint: Option<SocketAddr>,
     /// Learned from the peer itself (roaming) rather than the map.
     roamed: bool,
     candidate: usize,
     candidate_since: Instant,
     last_rx: Option<Instant>,
+    /// Endpoints to ping: the map's, then what call_me and pings taught us.
+    learned: Vec<SocketAddr>,
+    paths: HashMap<SocketAddr, DirectPath>,
+    pings: Vec<(TxId, SocketAddr, Instant)>,
+    best: Option<SocketAddr>,
+    next_ping: Instant,
+    last_call_me: Option<Instant>,
+    last_relay_rx: Option<Instant>,
+    /// The way the last packet to it went.
+    route: Route,
 }
 
 impl PeerState {
-    fn new(key: &x25519::StaticSecret, spec: PeerSpec, index: u32) -> Self {
+    fn new(key: &NodeKey, secret: &x25519::StaticSecret, spec: PeerSpec, index: u32) -> Self {
         let tunn = Tunn::new(
-            key.clone(),
+            secret.clone(),
             x25519::PublicKey::from(spec.public_key.0),
             None,
             Some(KEEPALIVE_SECS),
@@ -92,20 +169,98 @@ impl PeerState {
             None,
         );
         let endpoint = spec.endpoints.first().copied();
+        let disco = DiscoKey::new(key, &spec.public_key).ok();
         Self {
             spec,
             tunn: Box::new(tunn),
             index,
+            disco,
             endpoint,
             roamed: false,
             candidate: 0,
             candidate_since: Instant::now(),
             last_rx: None,
+            learned: vec![],
+            paths: HashMap::new(),
+            pings: vec![],
+            best: None,
+            next_ping: Instant::now(),
+            last_call_me: None,
+            last_relay_rx: None,
+            route: Route::Nowhere,
         }
     }
 
     fn handshake_age(&self) -> Option<Duration> {
         self.tunn.stats().0
+    }
+
+    fn candidates(&self) -> Vec<SocketAddr> {
+        let mut v: Vec<SocketAddr> = vec![];
+        for e in self.spec.endpoints.iter().chain(self.learned.iter()) {
+            if !v.contains(e) {
+                v.push(*e);
+            }
+        }
+        v.truncate(MAX_CANDIDATES);
+        v
+    }
+
+    fn learn(&mut self, a: SocketAddr) {
+        if a.port() == 0 || a.ip().is_unspecified() || self.spec.endpoints.contains(&a) || self.learned.contains(&a) {
+            return;
+        }
+        if self.learned.len() >= MAX_CANDIDATES {
+            self.learned.remove(0);
+        }
+        self.learned.push(a);
+    }
+
+    fn best_valid(&self, now: Instant) -> bool {
+        self.best
+            .and_then(|b| self.paths.get(&b))
+            .is_some_and(|p| now.duration_since(p.alive) < PATH_STALE)
+    }
+
+    /// Pick the best live direct path: the lowest round trip, a LAN path
+    /// winning within 2 ms.
+    fn select_best(&mut self, now: Instant) {
+        self.paths.retain(|_, p| now.duration_since(p.alive) < PATH_STALE);
+        let score = |a: &SocketAddr, p: &DirectPath| {
+            let bonus = if disco::is_private(a) {
+                LAN_PREFERENCE
+            } else {
+                Duration::ZERO
+            };
+            p.rtt.saturating_sub(bonus)
+        };
+        let best = self.paths.iter().min_by_key(|(a, p)| score(a, p)).map(|(a, _)| *a);
+        if best != self.best {
+            if let Some(b) = best {
+                tracing::debug!("{}: direct path {b}", self.spec.name);
+                self.endpoint = Some(b);
+                self.roamed = false;
+            }
+            self.best = best;
+        }
+    }
+
+    /// Where the next packet to this peer goes.
+    fn route(&self, now: Instant, relay_up: bool) -> Route {
+        if self.best_valid(now) {
+            return Route::Udp(self.best.expect("valid"));
+        }
+        // An endpoint the peer's packets arrive from works both ways.
+        let heard = self.roamed
+            && self
+                .last_rx
+                .is_some_and(|t| now.duration_since(t) < Duration::from_secs(10));
+        match self.endpoint {
+            Some(e) if heard => Route::Udp(e),
+            _ if relay_up => Route::Relay,
+            Some(e) => Route::Udp(e),
+            None => Route::Nowhere,
+        }
     }
 
     /// Without a recent handshake, move on to the next candidate endpoint.
@@ -115,7 +270,7 @@ impl PeerState {
         let heard = self
             .last_rx
             .is_some_and(|t| now.duration_since(t) < Duration::from_secs(30));
-        if fresh || heard || self.spec.endpoints.len() < 2 {
+        if fresh || heard || self.best_valid(now) || self.spec.endpoints.len() < 2 {
             return false;
         }
         if now.duration_since(self.candidate_since) < CANDIDATE_TIMEOUT {
@@ -130,8 +285,9 @@ impl PeerState {
 }
 
 pub struct Engine<D: Device> {
-    device: std::sync::Arc<D>,
+    device: Arc<D>,
     socket: UdpSocket,
+    key: NodeKey,
     secret: x25519::StaticSecret,
     public: x25519::PublicKey,
     peers: Vec<Option<PeerState>>,
@@ -140,15 +296,28 @@ pub struct Engine<D: Device> {
     next_index: u32,
     anon_budget: u32,
     anon_window: Instant,
+    relay_tx: Option<mpsc::Sender<(PublicKey, Vec<u8>)>>,
+    relay_rx: Option<mpsc::Receiver<(PublicKey, Vec<u8>)>>,
+    relay_up: Arc<AtomicBool>,
+    local: Vec<SocketAddr>,
+    stun_servers: Vec<SocketAddr>,
+    stun_pending: Vec<(stun::TxId, Instant)>,
+    next_stun: Instant,
+    observed: HashMap<SocketAddr, Instant>,
+}
+
+fn copy_key(k: &NodeKey) -> NodeKey {
+    NodeKey::from_bytes(*k.secret_bytes())
 }
 
 impl<D: Device> Engine<D> {
-    pub fn new(key: &NodeKey, socket: UdpSocket, device: std::sync::Arc<D>) -> Self {
+    pub fn new(key: &NodeKey, socket: UdpSocket, device: Arc<D>) -> Self {
         let secret = x25519::StaticSecret::from(*key.secret_bytes());
         let public = x25519::PublicKey::from(&secret);
         Self {
             device,
             socket,
+            key: copy_key(key),
             secret,
             public,
             peers: vec![],
@@ -157,11 +326,31 @@ impl<D: Device> Engine<D> {
             next_index: 1,
             anon_budget: ANON_PER_SEC,
             anon_window: Instant::now(),
+            relay_tx: None,
+            relay_rx: None,
+            relay_up: Arc::new(AtomicBool::new(false)),
+            local: vec![],
+            stun_servers: vec![],
+            stun_pending: vec![],
+            next_stun: Instant::now() + Duration::from_secs(1),
+            observed: HashMap::new(),
         }
+    }
+
+    /// Send through `relay` when no direct path works.
+    pub fn with_relay(mut self, relay: RelayLink) -> Self {
+        self.relay_tx = Some(relay.tx);
+        self.relay_rx = Some(relay.rx);
+        self.relay_up = relay.up;
+        self
     }
 
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.socket.local_addr()
+    }
+
+    fn relay_up(&self) -> bool {
+        self.relay_tx.is_some() && self.relay_up.load(Ordering::Relaxed)
     }
 
     /// Replace the peer set: unchanged peers keep their sessions; changed
@@ -178,19 +367,22 @@ impl<D: Device> Engine<D> {
         for (key, spec) in wanted {
             match self.by_key.get(&key).and_then(|i| self.peers[*i].as_mut()) {
                 Some(p) => {
-                    if p.spec.endpoints != spec.endpoints && !p.roamed {
-                        p.candidate = 0;
-                        p.endpoint = spec.endpoints.first().copied().or(p.endpoint);
-                        p.candidate_since = Instant::now();
+                    if p.spec.endpoints != spec.endpoints {
+                        if !p.roamed && !p.best_valid(Instant::now()) {
+                            p.candidate = 0;
+                            p.endpoint = spec.endpoints.first().copied().or(p.endpoint);
+                            p.candidate_since = Instant::now();
+                        }
+                        // New endpoints: look for a path there now.
+                        p.next_ping = Instant::now();
                     }
                     p.spec = spec;
                 }
                 None => {
                     let index = self.next_index & 0x00ff_ffff;
                     self.next_index = self.next_index.wrapping_add(1).max(1);
-                    let slot = self.peers.len();
-                    self.peers.push(Some(PeerState::new(&self.secret, spec, index)));
-                    let _ = slot;
+                    self.peers
+                        .push(Some(PeerState::new(&self.key, &self.secret, spec, index)));
                 }
             }
         }
@@ -212,24 +404,45 @@ impl<D: Device> Engine<D> {
     }
 
     pub fn rekey(&mut self, key: &NodeKey) {
+        self.key = copy_key(key);
         self.secret = x25519::StaticSecret::from(*key.secret_bytes());
         self.public = x25519::PublicKey::from(&self.secret);
         for p in self.peers.iter_mut().flatten() {
             p.tunn.set_static_private(self.secret.clone(), self.public, None);
+            p.disco = DiscoKey::new(key, &p.spec.public_key).ok();
+            p.next_ping = Instant::now();
         }
     }
 
     pub fn status(&self) -> Vec<PeerStatus> {
+        let now = Instant::now();
+        let relay_up = self.relay_up();
         self.peers
             .iter()
             .flatten()
             .map(|p| {
                 let (hs, tx, rx, _, _) = p.tunn.stats();
+                let route = p.route(now, relay_up);
+                let live = hs.is_some_and(|d| d < Duration::from_secs(180));
+                let (endpoint, path) = match route {
+                    Route::Udp(e) => (
+                        Some(e.to_string()),
+                        if live || p.best_valid(now) { "direct" } else { "none" },
+                    ),
+                    Route::Relay => (None, if live { "relay" } else { "none" }),
+                    Route::Nowhere => (None, "none"),
+                };
                 PeerStatus {
                     name: p.spec.name.clone(),
                     public_key: p.spec.public_key.to_base64(),
                     addresses: p.spec.addresses.iter().map(|a| a.to_string()).collect(),
-                    endpoint: p.endpoint.map(|e| e.to_string()),
+                    endpoint,
+                    path,
+                    rtt_ms: p
+                        .best
+                        .filter(|_| p.best_valid(now))
+                        .and_then(|b| p.paths.get(&b))
+                        .map(|d| (d.rtt.as_secs_f64() * 10_000.0).round() / 10.0),
                     handshake_secs: hs.map(|d| d.as_secs()),
                     rx_bytes: rx as u64,
                     tx_bytes: tx as u64,
@@ -238,9 +451,41 @@ impl<D: Device> Engine<D> {
             .collect()
     }
 
-    async fn send_to(&self, data: &[u8], to: Option<SocketAddr>) {
-        if let Some(to) = to {
-            let _ = self.socket.send_to(data, to).await;
+    fn observed(&self) -> Vec<SocketAddr> {
+        let now = Instant::now();
+        let mut v: Vec<(SocketAddr, Instant)> = self
+            .observed
+            .iter()
+            .filter(|(_, t)| now.duration_since(**t) < OBSERVED_TTL)
+            .map(|(a, t)| (*a, *t))
+            .collect();
+        v.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
+        v.into_iter().map(|(a, _)| a).take(8).collect()
+    }
+
+    async fn send_udp(&self, data: &[u8], to: SocketAddr) {
+        let _ = self.socket.send_to(data, to).await;
+    }
+
+    /// A WireGuard message for peer `i`, the way its packets go now.
+    async fn send_wg(&mut self, i: usize, data: &[u8]) {
+        let now = Instant::now();
+        let relay_up = self.relay_up();
+        let Some(p) = self.peers[i].as_mut() else { return };
+        let route = p.route(now, relay_up);
+        p.route = route;
+        let key = p.spec.public_key;
+        match route {
+            Route::Udp(to) => self.send_udp(data, to).await,
+            Route::Relay => self.send_relay(key, data.to_vec()),
+            Route::Nowhere => {}
+        }
+    }
+
+    fn send_relay(&self, to: PublicKey, data: Vec<u8>) {
+        if let Some(tx) = &self.relay_tx {
+            // Full: drop, as a congested link would.
+            let _ = tx.try_send((to, data));
         }
     }
 
@@ -251,9 +496,8 @@ impl<D: Device> Engine<D> {
         let Some(p) = self.peers[i].as_mut() else { return };
         match p.tunn.encapsulate(packet, out) {
             TunnResult::WriteToNetwork(b) => {
-                let to = p.endpoint;
-                let len = b.len();
-                self.send_to(&out[..len], to).await;
+                let data = b.to_vec();
+                self.send_wg(i, &data).await;
             }
             TunnResult::Err(e) => tracing::debug!("encapsulate for {}: {e:?}", p.spec.name),
             _ => {}
@@ -273,7 +517,7 @@ impl<D: Device> Engine<D> {
         true
     }
 
-    /// Which peer a datagram is for.
+    /// Which peer a WireGuard datagram is for.
     fn peer_of(&mut self, datagram: &[u8]) -> Option<usize> {
         match Tunn::parse_incoming_packet(datagram).ok()? {
             Packet::HandshakeInit(h) => {
@@ -296,40 +540,143 @@ impl<D: Device> Engine<D> {
             .position(|p| p.as_ref().is_some_and(|p| p.index == idx))
     }
 
-    /// A datagram from the network.
+    /// A datagram from the network: STUN, disco or WireGuard.
     async fn on_datagram(&mut self, datagram: &[u8], from: SocketAddr, out: &mut [u8]) {
-        let Some(i) = self.peer_of(datagram) else { return };
+        if stun::is_stun(datagram) {
+            self.on_stun(datagram, from).await;
+        } else if disco::is_disco(datagram) {
+            self.on_disco(datagram, Some(from)).await;
+        } else if let Some(i) = self.peer_of(datagram) {
+            self.on_wg(i, datagram, Some(from), out).await;
+        }
+    }
+
+    /// A message the relay delivered from `src`.
+    async fn on_relayed(&mut self, src: PublicKey, data: &[u8], out: &mut [u8]) {
+        if disco::is_disco(data) {
+            // Only its own sender may speak for a key.
+            if disco::sender(data) == Some(src) {
+                self.on_disco(data, None).await;
+            }
+            return;
+        }
+        let Some(&i) = self.by_key.get(&src) else { return };
+        if let Some(p) = self.peers[i].as_mut() {
+            p.last_relay_rx = Some(Instant::now());
+        }
+        self.on_wg(i, data, None, out).await;
+    }
+
+    async fn on_stun(&mut self, datagram: &[u8], from: SocketAddr) {
+        if let Some((tx, addr)) = stun::parse_success(datagram) {
+            if let Some(pos) = self.stun_pending.iter().position(|(t, _)| *t == tx) {
+                self.stun_pending.remove(pos);
+                self.observed.insert(addr, Instant::now());
+            }
+        } else if self.anon_allowed() {
+            if let Some(answer) = stun::answer(datagram, from) {
+                self.send_udp(&answer, from).await;
+            }
+        }
+    }
+
+    async fn on_disco(&mut self, frame: &[u8], from: Option<SocketAddr>) {
+        let Some(sender) = disco::sender(frame) else { return };
+        let Some(&i) = self.by_key.get(&sender) else { return };
+        let me = PublicKey(self.public.to_bytes());
+        let now = Instant::now();
+        let Some(p) = self.peers[i].as_mut() else { return };
+        let Some(msg) = p.disco.as_ref().and_then(|k| k.open(frame)) else {
+            return;
+        };
+        match (msg, from) {
+            (Message::Ping { tx }, Some(from)) => {
+                // It reached us from there, so we can likely reach it there.
+                p.learn(from);
+                let reply = p
+                    .disco
+                    .as_ref()
+                    .expect("opened")
+                    .seal(&me, &Message::Pong { tx, observed: from });
+                self.send_udp(&reply, from).await;
+            }
+            (Message::Pong { tx, observed }, Some(from)) => {
+                let Some(pos) = p.pings.iter().position(|(t, _, _)| *t == tx) else {
+                    return;
+                };
+                let (_, to, sent) = p.pings.swap_remove(pos);
+                if to != from {
+                    return;
+                }
+                p.paths.insert(
+                    to,
+                    DirectPath {
+                        rtt: now.duration_since(sent),
+                        alive: now,
+                    },
+                );
+                p.select_best(now);
+                self.observed.insert(observed, now);
+            }
+            (Message::CallMe { endpoints }, _) => {
+                for e in endpoints {
+                    p.learn(e);
+                }
+                // Ping now: the peer is pinging us at this moment too.
+                p.next_ping = now;
+            }
+            _ => {}
+        }
+    }
+
+    async fn on_wg(&mut self, i: usize, datagram: &[u8], from: Option<SocketAddr>, out: &mut [u8]) {
         let mut first = true;
         loop {
             let input: &[u8] = if first { datagram } else { &[] };
-            let src = first.then_some(from.ip());
+            let src = if first { from.map(|f| f.ip()) } else { None };
             first = false;
             let p = match self.peers[i].as_mut() {
                 Some(p) => p,
                 None => return,
             };
-            match p.tunn.decapsulate(src, input, out) {
+            let res = p.tunn.decapsulate(src, input, out);
+            let ok = !matches!(res, TunnResult::Done | TunnResult::Err(_));
+            if ok {
+                p.last_rx = Some(Instant::now());
+                if let Some(from) = from {
+                    // Authenticated: the peer is at `from` now (roaming).
+                    if p.endpoint != Some(from) && !p.best_valid(Instant::now()) {
+                        p.endpoint = Some(from);
+                    }
+                    if p.endpoint == Some(from) {
+                        p.roamed = true;
+                    }
+                    if let Some(path) = p.paths.get_mut(&from) {
+                        path.alive = Instant::now();
+                    }
+                    p.learn(from);
+                }
+            }
+            match res {
                 TunnResult::Done => break,
                 TunnResult::Err(e) => {
-                    tracing::debug!("from {from} for {}: {e:?}", p.spec.name);
+                    tracing::debug!("from {from:?} for {}: {e:?}", p.spec.name);
                     break;
                 }
                 TunnResult::WriteToNetwork(b) => {
-                    // A handshake answer or queued packets: back where it came from.
-                    let len = b.len();
-                    p.endpoint = Some(from);
-                    p.roamed = true;
-                    p.last_rx = Some(Instant::now());
-                    let _ = self.socket.send_to(&out[..len], from).await;
+                    // A handshake answer or queued packets: back the way it came.
+                    let data = b.to_vec();
+                    let key = p.spec.public_key;
+                    match from {
+                        Some(f) => self.send_udp(&data, f).await,
+                        None => self.send_relay(key, data),
+                    }
                     // Repeat with empty input to flush what was queued.
                 }
                 TunnResult::WriteToTunnelV4(b, src_ip) => {
-                    let len = b.len();
-                    p.endpoint = Some(from);
-                    p.roamed = true;
-                    p.last_rx = Some(Instant::now());
                     // Only the peer's own addresses (WireGuard's allowed IPs).
                     if p.spec.addresses.contains(&IpAddr::V4(src_ip)) {
+                        let len = b.len();
                         let _ = self.device.send(&out[..len]).await;
                     } else {
                         tracing::debug!("{} sent a packet from {src_ip}: dropped", p.spec.name);
@@ -337,11 +684,8 @@ impl<D: Device> Engine<D> {
                     break;
                 }
                 TunnResult::WriteToTunnelV6(b, src_ip) => {
-                    let len = b.len();
-                    p.endpoint = Some(from);
-                    p.roamed = true;
-                    p.last_rx = Some(Instant::now());
                     if p.spec.addresses.contains(&IpAddr::V6(src_ip)) {
+                        let len = b.len();
                         let _ = self.device.send(&out[..len]).await;
                     }
                     break;
@@ -350,26 +694,87 @@ impl<D: Device> Engine<D> {
         }
     }
 
-    /// Handshake retries, keepalives, session expiry; candidate rotation.
+    /// Disco for peer `i` when due: pings to every candidate, and
+    /// `call_me` through the relay while no direct path is confirmed.
+    async fn disco_round(&mut self, i: usize, now: Instant) {
+        let me = PublicKey(self.public.to_bytes());
+        let relay_up = self.relay_up();
+        let mut ours: Vec<SocketAddr> = self.local.clone();
+        ours.extend(self.observed());
+        let Some(p) = self.peers[i].as_mut() else { return };
+        if now < p.next_ping || p.disco.is_none() {
+            return;
+        }
+        p.pings.retain(|(_, _, t)| now.duration_since(*t) < PING_TIMEOUT);
+        p.select_best(now);
+        let confirmed = p.best_valid(now);
+        p.next_ping = now + if confirmed { PING_CONFIRMED } else { PING_SEARCHING };
+        let mut sends: Vec<(SocketAddr, Vec<u8>)> = vec![];
+        for to in p.candidates() {
+            let tx = disco::new_tx();
+            if p.pings.len() >= 64 {
+                p.pings.remove(0);
+            }
+            p.pings.push((tx, to, now));
+            let frame = p.disco.as_ref().expect("checked").seal(&me, &Message::Ping { tx });
+            sends.push((to, frame));
+        }
+        let call_me = (!confirmed && relay_up && p.last_call_me.is_none_or(|t| now.duration_since(t) >= CALL_ME_EVERY))
+            .then(|| {
+                p.last_call_me = Some(now);
+                ours.truncate(disco::MAX_CALL_ME);
+                (
+                    p.spec.public_key,
+                    p.disco
+                        .as_ref()
+                        .expect("checked")
+                        .seal(&me, &Message::CallMe { endpoints: ours }),
+                )
+            });
+        for (to, frame) in sends {
+            self.send_udp(&frame, to).await;
+        }
+        if let Some((key, frame)) = call_me {
+            self.send_relay(key, frame);
+        }
+    }
+
+    async fn stun_round(&mut self, now: Instant) {
+        if now < self.next_stun || self.stun_servers.is_empty() {
+            return;
+        }
+        self.next_stun = now + STUN_EVERY;
+        self.stun_pending.retain(|(_, t)| now.duration_since(*t) < PING_TIMEOUT);
+        for server in self.stun_servers.clone() {
+            let tx = disco::new_tx();
+            self.stun_pending.push((tx, now));
+            self.send_udp(&stun::binding_request(&tx), server).await;
+        }
+    }
+
+    /// Handshake retries, keepalives, session expiry; disco, STUN and
+    /// candidate rotation.
     async fn timers(&mut self, out: &mut [u8]) {
         let now = Instant::now();
+        let relay_up = self.relay_up();
+        self.stun_round(now).await;
         for i in 0..self.peers.len() {
+            self.disco_round(i, now).await;
             let Some(p) = self.peers[i].as_mut() else { continue };
-            let moved = p.maybe_next_candidate(now);
-            let to = p.endpoint;
-            if moved {
+            // Without a relay, step through the candidates for a handshake.
+            if !relay_up && p.maybe_next_candidate(now) {
                 // Don't wait for the 5 s handshake retry: try the new candidate now.
                 if let TunnResult::WriteToNetwork(b) = p.tunn.format_handshake_initiation(out, true) {
-                    let len = b.len();
-                    self.send_to(&out[..len], to).await;
+                    let data = b.to_vec();
+                    self.send_wg(i, &data).await;
                 }
                 continue;
             }
             let Some(p) = self.peers[i].as_mut() else { continue };
             match p.tunn.update_timers(out) {
                 TunnResult::WriteToNetwork(b) => {
-                    let len = b.len();
-                    self.send_to(&out[..len], to).await;
+                    let data = b.to_vec();
+                    self.send_wg(i, &data).await;
                 }
                 TunnResult::Err(e) => tracing::trace!("timers: {e:?}"),
                 _ => {}
@@ -385,6 +790,7 @@ impl<D: Device> Engine<D> {
         let mut tick = tokio::time::interval(Duration::from_millis(250));
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let device = self.device.clone();
+        let mut relay_rx = self.relay_rx.take();
         loop {
             tokio::select! {
                 r = self.socket.recv_from(&mut net_buf) => match r {
@@ -405,15 +811,34 @@ impl<D: Device> Engine<D> {
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                 },
+                m = recv_relay(&mut relay_rx) => match m {
+                    Some((src, data)) => self.on_relayed(src, &data, &mut out).await,
+                    None => relay_rx = None,
+                },
                 _ = tick.tick() => self.timers(&mut out).await,
                 c = control.recv() => match c {
                     Some(Control::SetPeers(p)) => self.set_peers(p),
                     Some(Control::Rekey(k)) => self.rekey(&k),
                     Some(Control::Status(tx)) => { let _ = tx.send(self.status()); }
+                    Some(Control::SetLocal(l)) => self.local = l,
+                    Some(Control::SetStun(s)) => {
+                        if s != self.stun_servers {
+                            self.stun_servers = s;
+                            self.next_stun = Instant::now();
+                        }
+                    }
+                    Some(Control::Observed(tx)) => { let _ = tx.send(self.observed()); }
                     None => return,
                 },
             }
         }
+    }
+}
+
+async fn recv_relay(rx: &mut Option<mpsc::Receiver<(PublicKey, Vec<u8>)>>) -> Option<(PublicKey, Vec<u8>)> {
+    match rx {
+        Some(rx) => rx.recv().await,
+        None => std::future::pending().await,
     }
 }
 
@@ -633,5 +1058,135 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    async fn status_of(n: &Node) -> Vec<PeerStatus> {
+        let (tx, rx) = oneshot::channel();
+        n.control.send(Control::Status(tx)).await.unwrap();
+        rx.await.unwrap()
+    }
+
+    async fn until<F: Fn(&[PeerStatus]) -> bool>(n: &Node, what: &str, f: F) -> Vec<PeerStatus> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(15);
+        loop {
+            let st = status_of(n).await;
+            if f(&st) {
+                return st;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "{what}: {st:?}");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    #[tokio::test]
+    async fn disco_confirms_the_direct_path_and_teaches_our_address() {
+        let (mut a, mut ea, ca) = node(Ipv4Addr::new(10, 77, 0, 1)).await;
+        let (b, mut eb, cb) = node(Ipv4Addr::new(10, 77, 0, 2)).await;
+        ea.set_peers(vec![spec(&b, vec![b.addr])]);
+        eb.set_peers(vec![spec(&a, vec![a.addr])]);
+        tokio::spawn(ea.run(ca));
+        tokio::spawn(eb.run(cb));
+        b.inject.send(ipv4(b.ip, a.ip, b"hi")).await.unwrap();
+        expect_packet(&mut a.delivered, b"hi").await;
+        let st = until(&a, "a confirmed path", |s| s[0].rtt_ms.is_some()).await;
+        assert_eq!(st[0].path, "direct");
+        assert_eq!(st[0].endpoint.as_deref(), Some(b.addr.to_string().as_str()));
+        // B's pongs told A where B sees it.
+        let (tx, rx) = oneshot::channel();
+        a.control.send(Control::Observed(tx)).await.unwrap();
+        assert_eq!(rx.await.unwrap(), vec![a.addr]);
+    }
+
+    /// Two relay links joined by a task, as the coordinator's hub joins them.
+    fn relay_pair(a: PublicKey, b: PublicKey) -> (RelayLink, RelayLink) {
+        let (a_out, mut a_hub) = mpsc::channel::<(PublicKey, Vec<u8>)>(64);
+        let (b_out, mut b_hub) = mpsc::channel::<(PublicKey, Vec<u8>)>(64);
+        let (a_in_tx, a_in) = mpsc::channel(64);
+        let (b_in_tx, b_in) = mpsc::channel(64);
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    Some((dst, p)) = a_hub.recv() => if dst == b { let _ = b_in_tx.send((a, p)).await; },
+                    Some((dst, p)) = b_hub.recv() => if dst == a { let _ = a_in_tx.send((b, p)).await; },
+                    else => return,
+                }
+            }
+        });
+        let up = || Arc::new(AtomicBool::new(true));
+        (
+            RelayLink {
+                tx: a_out,
+                rx: a_in,
+                up: up(),
+            },
+            RelayLink {
+                tx: b_out,
+                rx: b_in,
+                up: up(),
+            },
+        )
+    }
+
+    #[tokio::test]
+    async fn the_relay_carries_traffic_when_no_path_exists() {
+        let (mut a, ea, ca) = node(Ipv4Addr::new(10, 77, 0, 1)).await;
+        let (mut b, eb, cb) = node(Ipv4Addr::new(10, 77, 0, 2)).await;
+        let (la, lb) = relay_pair(a.key.public(), b.key.public());
+        let (mut ea, mut eb) = (ea.with_relay(la), eb.with_relay(lb));
+        // Neither knows where the other is.
+        ea.set_peers(vec![spec(&b, vec![])]);
+        eb.set_peers(vec![spec(&a, vec![])]);
+        tokio::spawn(ea.run(ca));
+        tokio::spawn(eb.run(cb));
+        a.inject.send(ipv4(a.ip, b.ip, b"via relay")).await.unwrap();
+        expect_packet(&mut b.delivered, b"via relay").await;
+        b.inject.send(ipv4(b.ip, a.ip, b"and back")).await.unwrap();
+        expect_packet(&mut a.delivered, b"and back").await;
+        let st = until(&a, "relay path", |s| s[0].path == "relay").await;
+        assert!(st[0].endpoint.is_none());
+    }
+
+    #[tokio::test]
+    async fn call_me_through_the_relay_finds_a_direct_path() {
+        let (mut a, ea, ca) = node(Ipv4Addr::new(10, 77, 0, 1)).await;
+        let (b, eb, cb) = node(Ipv4Addr::new(10, 77, 0, 2)).await;
+        let (la, lb) = relay_pair(a.key.public(), b.key.public());
+        let (mut ea, mut eb) = (ea.with_relay(la), eb.with_relay(lb));
+        ea.set_peers(vec![spec(&b, vec![])]);
+        eb.set_peers(vec![spec(&a, vec![])]);
+        // Each knows its own address (as `local_ipv4s` gives the daemon).
+        a.control.send(Control::SetLocal(vec![a.addr])).await.unwrap();
+        b.control.send(Control::SetLocal(vec![b.addr])).await.unwrap();
+        tokio::spawn(ea.run(ca));
+        tokio::spawn(eb.run(cb));
+        let st = until(&a, "a direct path after call_me", |s| s[0].rtt_ms.is_some()).await;
+        assert_eq!(st[0].endpoint.as_deref(), Some(b.addr.to_string().as_str()));
+        until(&b, "b direct path after call_me", |s| s[0].rtt_ms.is_some()).await;
+        b.inject.send(ipv4(b.ip, a.ip, b"direct now")).await.unwrap();
+        expect_packet(&mut a.delivered, b"direct now").await;
+        let st = until(&a, "direct", |s| s[0].path == "direct").await;
+        assert!(st[0].endpoint.is_some());
+    }
+
+    #[tokio::test]
+    async fn answers_stun_and_learns_from_it() {
+        let (a, mut ea, ca) = node(Ipv4Addr::new(10, 77, 0, 1)).await;
+        let (b, eb, cb) = node(Ipv4Addr::new(10, 77, 0, 2)).await;
+        ea.set_peers(vec![]);
+        tokio::spawn(ea.run(ca));
+        tokio::spawn(eb.run(cb));
+        // A asks B (any node is a STUN server).
+        a.control.send(Control::SetStun(vec![b.addr])).await.unwrap();
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let (tx, rx) = oneshot::channel();
+            a.control.send(Control::Observed(tx)).await.unwrap();
+            if rx.await.unwrap() == vec![a.addr] {
+                break;
+            }
+            assert!(tokio::time::Instant::now() < deadline, "no STUN answer");
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        drop(b);
     }
 }

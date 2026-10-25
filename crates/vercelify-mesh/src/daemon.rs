@@ -17,6 +17,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 use tokio::net::UdpSocket;
+use tokio::sync::watch;
 use tokio::sync::{mpsc, oneshot};
 
 #[derive(Debug, thiserror::Error)]
@@ -68,7 +69,7 @@ pub async fn join(dir: &Path, token: &str, name: &str, endpoints: Vec<String>) -
     let body = serde_json::to_value(&sealed).expect("serializable");
     let mut last = None;
     for control in &t.control {
-        let url = format!("http://{control}/v1/mesh/enroll");
+        let url = control_url(control, "/v1/mesh/enroll");
         match http::request("POST", &url, None, Some(&body), Duration::from_secs(20)).await {
             Ok(raw) => {
                 let answer: Sealed = serde_json::from_slice(&raw).map_err(|e| msg(format!("enroll answer: {e}")))?;
@@ -87,6 +88,17 @@ pub async fn join(dir: &Path, token: &str, name: &str, endpoints: Vec<String>) -
     Err(last
         .map(DaemonError::from)
         .unwrap_or_else(|| msg("the token names no coordinator")))
+}
+
+/// A control address of a join token as a URL: `192.168.1.20:7443` is
+/// plain HTTP on the LAN; `https://mesh.example.com` a tunnel.
+pub fn control_url(control: &str, path: &str) -> String {
+    let c = control.trim_end_matches('/');
+    if c.contains("://") {
+        format!("{c}{path}")
+    } else {
+        format!("http://{c}{path}")
+    }
 }
 
 /// Check an enrollment answer: certificate and map signed by the
@@ -172,8 +184,13 @@ pub fn acl_json(map: &PeerMap, interface: &str) -> serde_json::Value {
     serde_json::json!({ "interface": interface, "version": map.version, "servers": servers, "devices": devices })
 }
 
-/// LAN when the endpoint shares a /24 with one of this node's addresses.
-pub fn path_of(endpoint: Option<&str>, local: &[Ipv4Addr]) -> &'static str {
+/// The path to a peer as the status file shows it: `relay`, `none`, or
+/// for a direct one `lan` when the endpoint shares a /24 with one of this
+/// node's addresses, else `direct`.
+pub fn path_of(engine_path: &str, endpoint: Option<&str>, local: &[Ipv4Addr]) -> &'static str {
+    if engine_path != "direct" {
+        return if engine_path == "relay" { "relay" } else { "none" };
+    }
     let Some(ep) = endpoint.and_then(|e| e.parse::<SocketAddr>().ok()) else {
         return "none";
     };
@@ -191,6 +208,8 @@ pub struct UpOptions {
     pub dns: bool,
     /// Run after the ACL file changes (`vercelify-firewall mesh`).
     pub acl_hook: Option<String>,
+    /// STUN servers (`host:port`) to learn the public address from.
+    pub stun_servers: Vec<String>,
 }
 
 /// Shared between the daemon's tasks.
@@ -200,11 +219,22 @@ struct Live {
     zone: Arc<RwLock<Dns>>,
     coordinator_seen: RwLock<Option<Instant>>,
     revoked: RwLock<bool>,
+    /// The node's key, for the relay (it reconnects when it changes).
+    key: watch::Sender<Arc<NodeKey>>,
+    /// Relay URLs from the map.
+    relays: watch::Sender<Vec<String>>,
 }
 
 impl Live {
     fn verifying(&self) -> Result<VerifyingKey> {
         Ok(VerifyingKey::from_base64(&self.state.read().unwrap().coordinator_key)?)
+    }
+
+    /// Switch the tunnels (and the relay) to `key`.
+    async fn use_key(&self, ctl: &mpsc::Sender<Control>, key: &NodeKey) {
+        let _ = ctl.send(Control::Rekey(NodeKey::from_bytes(*key.secret_bytes()))).await;
+        self.key
+            .send_replace(Arc::new(NodeKey::from_bytes(*key.secret_bytes())));
     }
 }
 
@@ -218,6 +248,11 @@ fn apply_map(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>, map: Pe
     let coordinator = live.state.read().unwrap().coordinator.clone();
     let _ = ctl.try_send(Control::SetPeers(peer_specs(&map, &coordinator)));
     *live.zone.write().unwrap() = map.dns.clone();
+    live.relays.send_if_modified(|r| {
+        let changed = *r != map.relays;
+        r.clone_from(&map.relays);
+        changed
+    });
     let acl = acl_json(&map, &opts.interface);
     let acl_path = opts.run_dir.join("mesh-acl.json");
     if write_private(
@@ -295,12 +330,28 @@ async fn follow_map(live: &Arc<Live>, opts: &Arc<UpOptions>, ctl: &mpsc::Sender<
     }
 }
 
-async fn report_endpoints(live: &Live, port: u16, last: &mut Vec<String>) {
+/// Tell the coordinator where this node can be reached: its interface
+/// addresses, then what peers and STUN servers saw (its public mapping).
+async fn report_endpoints(live: &Live, ctl: &mpsc::Sender<Control>, port: u16, last: &mut Vec<String>) {
     let mesh_prefix = live.state.read().unwrap().ipv4.parse::<Ipv4Addr>().ok();
-    let eps: Vec<String> = crate::tun::local_ipv4s(mesh_prefix)
+    let local: Vec<SocketAddr> = crate::tun::local_ipv4s(mesh_prefix)
         .into_iter()
-        .map(|ip| format!("{ip}:{port}"))
+        .map(|ip| SocketAddr::new(IpAddr::V4(ip), port))
         .collect();
+    let _ = ctl.send(Control::SetLocal(local.clone())).await;
+    let (tx, rx) = oneshot::channel();
+    let observed = if ctl.send(Control::Observed(tx)).await.is_ok() {
+        rx.await.unwrap_or_default()
+    } else {
+        vec![]
+    };
+    let mut eps: Vec<String> = local.iter().map(|a| a.to_string()).collect();
+    for a in observed {
+        let a = a.to_string();
+        if !eps.contains(&a) {
+            eps.push(a);
+        }
+    }
     if eps == *last || eps.is_empty() {
         return;
     }
@@ -370,9 +421,7 @@ async fn renew(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>, force
         Err(first) => {
             // Maybe the coordinator has the next key already: use it and ask again.
             tracing::info!("no answer to the renewal ({first}); trying the next key");
-            let _ = ctl
-                .send(Control::Rekey(NodeKey::from_bytes(*next.secret_bytes())))
-                .await;
+            live.use_key(ctl, &next).await;
             let mut r = Err(first);
             for _ in 0..4 {
                 tokio::time::sleep(Duration::from_secs(2)).await;
@@ -385,7 +434,7 @@ async fn renew(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>, force
                 // Not taken: back to the key the mesh knows; the next key
                 // stays pending for the next attempt.
                 let old = NodeKey::load_or_create(&key_path(&opts.dir))?;
-                let _ = ctl.send(Control::Rekey(old)).await;
+                live.use_key(ctl, &old).await;
             }
             r
         }
@@ -398,7 +447,7 @@ async fn renew(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>, force
         s.certificate = certificate;
         s.save(&opts.dir)?;
     }
-    let _ = ctl.send(Control::Rekey(next)).await;
+    live.use_key(ctl, &next).await;
     tracing::info!("certificate renewed until {until} with a new key");
     Ok(true)
 }
@@ -426,8 +475,8 @@ async fn write_status(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>
                 .map(|x| x.kind);
             serde_json::json!({
                 "name": p.name, "kind": kind, "addresses": p.addresses, "endpoint": p.endpoint,
-                "path": path_of(p.endpoint.as_deref(), &local),
-                "handshake_secs": p.handshake_secs, "rx_bytes": p.rx_bytes, "tx_bytes": p.tx_bytes,
+                "path": path_of(p.path, p.endpoint.as_deref(), &local),
+                "rtt_ms": p.rtt_ms, "handshake_secs": p.handshake_secs, "rx_bytes": p.rx_bytes, "tx_bytes": p.tx_bytes,
             })
         })
         .collect();
@@ -442,6 +491,30 @@ async fn write_status(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>
         &opts.run_dir.join("mesh-status.json"),
         serde_json::to_string_pretty(&doc).unwrap_or_default().as_bytes(),
     );
+}
+
+/// Resolve the STUN servers now and every hour (their addresses move).
+async fn resolve_stun(servers: Vec<String>, ctl: mpsc::Sender<Control>) {
+    if servers.is_empty() {
+        return;
+    }
+    loop {
+        let mut addrs = vec![];
+        for s in &servers {
+            if let Ok(Ok(found)) =
+                tokio::time::timeout(Duration::from_secs(5), tokio::net::lookup_host(s.as_str())).await
+            {
+                // One per server, IPv4 first (the socket is IPv4).
+                if let Some(a) = found.into_iter().find(|a| a.is_ipv4()) {
+                    addrs.push(a);
+                }
+            }
+        }
+        if ctl.send(Control::SetStun(addrs)).await.is_err() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_secs(3600)).await;
+    }
 }
 
 /// Point `*.vfy` at the mesh name server (systemd-resolved, when present).
@@ -482,9 +555,23 @@ pub async fn up(opts: UpOptions) -> Result<()> {
     tun.configure(ipv4, state.ipv4_prefix_len, ipv6.map(|ip| (ip, 48)))?;
     tracing::info!("{} is {} on {}", state.name, state.ipv4, opts.interface);
     let socket = UdpSocket::bind(("0.0.0.0", opts.port)).await?;
-    let engine = Engine::new(&key, socket, Arc::new(tun));
+    let coordinator_wg = PublicKey::from_base64(&state.coordinator.public_key)?;
+    let (key_tx, key_rx) = watch::channel(Arc::new(NodeKey::from_bytes(*key.secret_bytes())));
+    let (relays_tx, relays_rx) = watch::channel(vec![]);
+    let mut engine = Engine::new(&key, socket, Arc::new(tun));
+    // The coordinator's own daemon needs no relay to itself; it still
+    // connects, so nodes reach it through the relay when nothing else works.
+    engine = engine.with_relay(crate::relay_client::spawn(crate::relay_client::RelayConfig {
+        urls: relays_rx,
+        key: key_rx,
+        coordinator: coordinator_wg,
+    }));
     let (ctl, ctl_rx) = mpsc::channel(32);
     tokio::spawn(engine.run(ctl_rx));
+    {
+        let (servers, ctl) = (opts.stun_servers.clone(), ctl.clone());
+        tokio::spawn(async move { resolve_stun(servers, ctl).await });
+    }
     let _ = write_private(
         &opts.run_dir.join("mesh.pid"),
         std::process::id().to_string().as_bytes(),
@@ -496,6 +583,8 @@ pub async fn up(opts: UpOptions) -> Result<()> {
         zone: Arc::new(RwLock::new(Dns::default())),
         coordinator_seen: RwLock::new(None),
         revoked: RwLock::new(false),
+        key: key_tx,
+        relays: relays_tx,
     });
     // The last map first: the mesh works before the coordinator answers.
     if let Some(signed) = &state.map {
@@ -543,8 +632,8 @@ pub async fn up(opts: UpOptions) -> Result<()> {
                 ticks += 1;
                 write_status(&live, &opts, &ctl).await;
                 // Endpoints every minute (sooner at start); renewal hourly.
-                if ticks == 2 || ticks.is_multiple_of(12) {
-                    report_endpoints(&live, opts.port, &mut last_endpoints).await;
+                if ticks == 2 || ticks == 6 || ticks.is_multiple_of(12) {
+                    report_endpoints(&live, &ctl, opts.port, &mut last_endpoints).await;
                 }
                 if ticks % 720 == 3 {
                     if let Err(e) = renew(&live, &opts, &ctl, false).await {
@@ -629,9 +718,19 @@ mod tests {
         assert!(ports.contains(&serde_json::json!("7420/tcp")) && ports.contains(&serde_json::json!("5432/tcp")));
 
         let local = [Ipv4Addr::new(192, 168, 1, 9)];
-        assert_eq!(path_of(Some("192.168.1.31:51820"), &local), "lan");
-        assert_eq!(path_of(Some("81.2.3.4:51820"), &local), "direct");
-        assert_eq!(path_of(None, &local), "none");
+        assert_eq!(path_of("direct", Some("192.168.1.31:51820"), &local), "lan");
+        assert_eq!(path_of("direct", Some("81.2.3.4:51820"), &local), "direct");
+        assert_eq!(path_of("direct", None, &local), "none");
+        assert_eq!(path_of("relay", None, &local), "relay");
+        assert_eq!(path_of("none", Some("81.2.3.4:51820"), &local), "none");
+        assert_eq!(
+            control_url("192.168.1.20:7443", "/v1/mesh/enroll"),
+            "http://192.168.1.20:7443/v1/mesh/enroll"
+        );
+        assert_eq!(
+            control_url("https://mesh.example.com/", "/x"),
+            "https://mesh.example.com/x"
+        );
     }
 
     #[test]

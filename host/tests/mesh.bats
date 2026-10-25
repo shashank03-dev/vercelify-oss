@@ -94,6 +94,8 @@ JSON
   [ "$status" -eq 0 ]
   [[ "${lines[0]}" == "coordinator  main"*"10.77.0.1"*"192.168.1.20:51820"* ]]
   [[ "${lines[1]}" == "revoked      pi5"*"never"* ]]
+  [[ "${lines[2]}" == "server       cabin"*"on the relay (51 KiB)" ]]
+  [[ "${lines[0]}" != *"relay"* ]]
   run "$CLI" mesh revoke pi5
   [ "$status" -eq 0 ]
   [[ "$output" == *"pi5 is off the mesh"* ]]

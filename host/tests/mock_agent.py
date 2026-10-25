@@ -143,6 +143,10 @@ class H(BaseHTTPRequestHandler):
                 {"id": "mn_2", "name": "pi5", "kind": "server", "role": "owner", "ipv4": "10.77.0.2", "ipv6": "fd76:6679:6d65::2",
                  "public_key": "k2", "endpoints": [], "os": "linux", "arch": "aarch64", "coordinator": False,
                  "last_seen_at": None, "cert_expires_at": None, "revoked_at": "2026-10-25T10:00:00Z", "created_at": "t"},
+                {"id": "mn_3", "name": "cabin", "kind": "server", "role": "owner", "ipv4": "10.77.0.3", "ipv6": "fd76:6679:6d65::3",
+                 "public_key": "k3", "endpoints": ["203.0.113.23:4123"], "os": "linux", "arch": "aarch64", "coordinator": False,
+                 "last_seen_at": "2026-10-25T11:00:00Z", "cert_expires_at": None, "revoked_at": None, "created_at": "t",
+                 "relay_connected": True, "relayed_bytes": 52224},
             ])
         if method == "DELETE" and p.startswith("/v1/mesh/nodes/"):
             name = p.split("/")[4]

@@ -19,4 +19,12 @@ endpoints: Array<string>, os: string, arch: string,
 /**
  * The coordinator itself.
  */
-coordinator: boolean, last_seen_at: string | null, cert_expires_at: string | null, revoked_at: string | null, created_at: string, };
+coordinator: boolean, last_seen_at: string | null, cert_expires_at: string | null, revoked_at: string | null, created_at: string, 
+/**
+ * Connected to the relay now (design §13.7).
+ */
+relay_connected: boolean, 
+/**
+ * Bytes it sent through the relay since the agent started.
+ */
+relayed_bytes: number, };

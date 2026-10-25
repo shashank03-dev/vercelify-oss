@@ -110,6 +110,8 @@ impl Node {
             cert_expires_at: self.cert_expires_at.clone(),
             revoked_at: self.revoked_at.clone(),
             created_at: self.created_at.clone(),
+            relay_connected: false,
+            relayed_bytes: 0,
         }
     }
 }
@@ -149,6 +151,17 @@ pub fn by_token(c: &Connection, token: &str) -> Result<Option<Node>> {
     Ok(c.query_row(
         "SELECT * FROM mesh_nodes WHERE token_hash = ?1 AND revoked_at IS NULL",
         [hash(token)],
+        row,
+    )
+    .optional()?)
+}
+
+/// The node holding a WireGuard key, unless revoked (the relay
+/// authenticates by key, design §13.7).
+pub fn by_public_key(c: &Connection, public_key: &PublicKey) -> Result<Option<Node>> {
+    Ok(c.query_row(
+        "SELECT * FROM mesh_nodes WHERE public_key = ?1 AND revoked_at IS NULL",
+        [public_key.to_base64()],
         row,
     )
     .optional()?)
@@ -472,6 +485,11 @@ mod tests {
         assert!(s.with(versions).unwrap().0 > v0, "the map changed");
         assert_eq!(s.with(|c| by_token(c, &token)).unwrap().unwrap().id, pi.id);
         assert!(s.with(|c| by_token(c, "vfyn_nope")).unwrap().is_none());
+        assert_eq!(s.with(|c| by_public_key(c, &pk)).unwrap().unwrap().id, pi.id);
+        assert!(s
+            .with(|c| by_public_key(c, &NodeKey::generate().public()))
+            .unwrap()
+            .is_none());
 
         // An invitation works once.
         let other = NodeKey::generate().public();
@@ -490,6 +508,10 @@ mod tests {
         // Revoked: the token stops working, the name and key are free again.
         assert!(s.tx(|c| revoke(c, "pi5")).unwrap().revoked_at.is_some());
         assert!(s.with(|c| by_token(c, &token)).unwrap().is_none());
+        assert!(
+            s.with(|c| by_public_key(c, &pk)).unwrap().is_none(),
+            "no relay for a revoked key"
+        );
         assert!(s.tx(|c| revoke(c, "main")).is_err(), "not the coordinator");
         let (again, _) = s.tx(|c| enroll(c, &enrollment(&c2, "pi5", &pk))).unwrap();
         assert_eq!(again.ip_index, 2, "the freed address is reused");

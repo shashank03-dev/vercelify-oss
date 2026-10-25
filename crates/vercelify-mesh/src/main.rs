@@ -55,6 +55,14 @@ enum Cmd {
         /// Run after the ACL file changes.
         #[arg(long, env = "VERCELIFY_MESH_ACL_HOOK")]
         acl_hook: Option<String>,
+        /// STUN servers for the public address, comma-separated ("" for none;
+        /// peers on the mesh tell each other too).
+        #[arg(
+            long,
+            env = "VERCELIFY_MESH_STUN",
+            default_value = "stun.cloudflare.com:3478,stun.l.google.com:19302"
+        )]
+        stun: String,
     },
     /// This node and its peers.
     Status {
@@ -157,6 +165,7 @@ fn main() {
             port,
             no_dns,
             acl_hook,
+            stun,
         } => {
             let opts = UpOptions {
                 dir: cli.dir,
@@ -165,6 +174,12 @@ fn main() {
                 port,
                 dns: !no_dns,
                 acl_hook,
+                stun_servers: stun
+                    .split(',')
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(String::from)
+                    .collect(),
             };
             if let Err(e) = rt.block_on(daemon::up(opts)) {
                 fail(e)

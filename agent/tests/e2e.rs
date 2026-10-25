@@ -2095,6 +2095,55 @@ fn mesh_coordinator() {
     assert_eq!(map.peers[0].ipv4, "10.77.0.1", "the coordinator is its first peer");
     assert_eq!(map.dns.records.get("pi5").map(String::as_str), Some("10.77.0.2"));
 
+    // The relay: pi5 and the coordinator's own node reach each other through
+    // it, each authenticated by its WireGuard key; a stranger is refused.
+    let relay_url = format!("ws://127.0.0.1:{control}/v1/mesh/relay");
+    assert!(map.relays.contains(&relay_url), "{:?}", map.relays);
+    {
+        use std::sync::atomic::Ordering;
+        use std::sync::Arc;
+        use vercelify_mesh::keys::{NodeKey, PublicKey};
+        use vercelify_mesh::relay_client::{spawn, RelayConfig};
+        use vercelify_mesh::state::key_path;
+        let coordinator = PublicKey::from_base64(own["coordinator"]["public_key"].as_str().unwrap()).unwrap();
+        let pi_key = NodeKey::load_or_create(&key_path(node_dir.path())).unwrap();
+        let main_key = NodeKey::load_or_create(&key_path(&mesh_dir)).unwrap();
+        let (pi_pub, main_pub) = (pi_key.public(), main_key.public());
+        rt.block_on(async {
+            let (urls, urls_rx) = tokio::sync::watch::channel(vec![relay_url.clone()]);
+            let cfg = |key: NodeKey| RelayConfig {
+                urls: urls_rx.clone(),
+                key: tokio::sync::watch::channel(Arc::new(key)).1,
+                coordinator,
+            };
+            let mut pi = spawn(cfg(pi_key));
+            let mut main = spawn(cfg(main_key));
+            let stranger = spawn(cfg(NodeKey::generate()));
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+            while !(pi.up.load(Ordering::Relaxed) && main.up.load(Ordering::Relaxed)) {
+                assert!(tokio::time::Instant::now() < deadline, "the relay didn't connect");
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            pi.tx.send((main_pub, b"through the relay".to_vec())).await.unwrap();
+            let (src, data) = tokio::time::timeout(Duration::from_secs(5), main.rx.recv())
+                .await
+                .expect("relayed in time")
+                .unwrap();
+            assert_eq!((src, data.as_slice()), (pi_pub, &b"through the relay"[..]));
+            main.tx.send((pi_pub, b"and back".to_vec())).await.unwrap();
+            let (src, _) = tokio::time::timeout(Duration::from_secs(5), pi.rx.recv())
+                .await
+                .expect("relayed back")
+                .unwrap();
+            assert_eq!(src, main_pub);
+            assert!(!stranger.up.load(Ordering::Relaxed), "an unknown key was let in");
+            drop(urls);
+        });
+        let (_, nodes) = get(&a, "/v1/mesh/nodes");
+        let pi = nodes.as_array().unwrap().iter().find(|n| n["name"] == "pi5").unwrap();
+        assert!(pi["relayed_bytes"].as_u64().unwrap() >= 17, "{pi}");
+    }
+
     // Single use.
     let other = tempfile::tempdir().unwrap();
     let err = rt

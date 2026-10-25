@@ -52,6 +52,21 @@ state() { jq -r "$1" "$T/state.json"; }
   [ "$(state ".configs[\"$id\"].ingress[2].service")" = "http_status:404" ]
 }
 
+@test "a mesh coordinator gets mesh.DOMAIN to its control listener" {
+  export VERCELIFY_ETC="$T/etc"
+  mkdir -p "$VERCELIFY_ETC"
+  printf 'role = "main"\n' >"$VERCELIFY_ETC/agent.toml"
+  id=$(cf_ensure_tunnel acc456 t1)
+  cf_configure_ingress acc456 "$id" example.com
+  [ "$(state ".configs[\"$id\"].ingress | map(select(.hostname == \"mesh.example.com\")) | length")" -eq 0 ]
+  printf 'mesh_coordinator = true\n' >>"$VERCELIFY_ETC/agent.toml"
+  cf_configure_ingress acc456 "$id" example.com
+  [ "$(state ".configs[\"$id\"].ingress[0].hostname")" = "mesh.example.com" ]
+  [ "$(state ".configs[\"$id\"].ingress[0].service")" = "http://localhost:7443" ]
+  # Before the wildcard, so it wins.
+  [ "$(state ".configs[\"$id\"].ingress[1].hostname")" = "*.example.com" ]
+}
+
 @test "DNS: create, then update in place" {
   cf_upsert_cname zone123 "*.example.com" "t1.cfargotunnel.com"
   cf_upsert_cname zone123 "*.example.com" "t2.cfargotunnel.com"
