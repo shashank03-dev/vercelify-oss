@@ -570,6 +570,9 @@ test("platform engine: apps across servers — where they run, replicas, drain a
   await expect(fleet.getByTestId("platform-node-optiplex-7050")).toContainText("main");
   await expect(fleet.getByTestId("platform-node-pi-5")).toContainText("aarch64");
   await expect(fleet.getByTestId("platform-node-pi-5")).toContainText("online");
+  // a warm standby for the main server
+  await fleet.getByTestId("platform-standby-node").selectOption({ label: "pi-5" });
+  await expect(fleet.getByTestId("platform-standby-state")).toContainText("sudo vercelify promote on pi-5");
   await fleet.getByTestId("platform-drain-pi-5").click();
   await expect(fleet.getByTestId("platform-node-pi-5")).toContainText("drained");
   // a worker with instances can't be removed

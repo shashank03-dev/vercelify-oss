@@ -148,6 +148,17 @@ class H(BaseHTTPRequestHandler):
                  "last_seen_at": "2026-10-25T11:00:00Z", "cert_expires_at": None, "revoked_at": None, "created_at": "t",
                  "relay_connected": True, "relayed_bytes": 52224},
             ])
+        if p == "/v1/platform/settings/standby":
+            if method == "PUT":
+                node = body.get("node")
+                if node not in (None, "", "pi5"):
+                    return self.reply(404, {"error": f"server {node} not found"})
+                state["standby"] = {"node_id": "node_pi5" if node else None, "node": node or None,
+                                    "last_sent_at": None, "bytes": 0, "last_error": None}
+            st = state.get("standby") or {"node_id": None, "node": None, "last_sent_at": None, "bytes": 0, "last_error": None}
+            if st["node"] and method == "GET":
+                st = dict(st, last_sent_at="2026-10-25T11:55:00Z", bytes=204800)
+            return self.reply(200, st)
         if method == "DELETE" and p.startswith("/v1/mesh/nodes/"):
             name = p.split("/")[4]
             if name not in ("pi5", "mn_2"):

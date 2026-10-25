@@ -33,6 +33,7 @@ mod runtime_api;
 mod services;
 mod sleep;
 mod ssh;
+mod standby;
 mod tailscale;
 mod terminal;
 mod tokens;
@@ -239,6 +240,10 @@ async fn main() {
                 println!("{code}");
             }
         }
+        Cmd::Promote { force } => match standby::promote(&cfg, force).await {
+            Ok(m) => println!("{m}"),
+            Err(e) => fatal(&e),
+        },
         Cmd::TokensList => {
             let all = tokens::list(&cfg);
             if all.is_empty() {
@@ -335,6 +340,12 @@ async fn serve(cfg: Config) {
                 state.config.clone(),
                 state.collector.clone(),
             ));
+            tokio::spawn(standby::run(p.clone(), state.config.clone()));
+        }
+    }
+    if let Some(co) = &state.mesh {
+        if state.config.watch_interval_secs > 0 {
+            tokio::spawn(standby::watch_replaced(state.config.clone(), co.clone()));
         }
     }
     if let Some(g) = &state.platform_git {

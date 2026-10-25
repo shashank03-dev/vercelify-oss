@@ -110,6 +110,8 @@ export type * from "./generated/AppSource";
 export type * from "./generated/AppVolume";
 export type * from "./generated/VolumeInfo";
 export type * from "./generated/ServiceTemplate";
+export type * from "./generated/StandbyRequest";
+export type * from "./generated/StandbyStatus";
 export type * from "./generated/TemplateCreate";
 export type * from "./generated/TerminalRequest";
 export type * from "./generated/TerminalSession";

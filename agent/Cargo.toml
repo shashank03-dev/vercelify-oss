@@ -37,6 +37,7 @@ http-body = "1"
 bytes = "1"
 base64 = "0.22"
 sha2 = "0.10"
+zeroize = "1"
 # Validates rule regexes as RE2 (what Traefik/Go accepts).
 regex-syntax = "0.8"
 

@@ -151,6 +151,11 @@ impl Platform {
         if !cfg.platform_engine() {
             return (None, None);
         }
+        // A promoted standby took this server's place (design §8.4).
+        if let Some(m) = crate::standby::superseded(cfg) {
+            tracing::error!("{m}");
+            return (None, Some(OpenError(m)));
+        }
         match Self::open(cfg) {
             Ok(p) => {
                 tracing::info!("platform engine: {}", cfg.platform_db.display());

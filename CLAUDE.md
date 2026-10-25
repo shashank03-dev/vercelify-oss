@@ -56,6 +56,7 @@ sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/routing.sh 
 sudo host/tests/contract/mesh.sh                 # four mesh nodes in network namespaces (debug agent + vercelify-mesh)
 sudo host/tests/contract/mesh-nat.sh             # NAT traversal: hole punching and the relay behind real Linux NAT
 sudo host/tests/contract/multinode.sh            # a worker with its own Docker: placement, mesh registry, replicas, logs/terminal
+sudo host/tests/contract/promote.sh              # the warm standby promoted after the main server dies
 
 cd cockpit
 npm ci && npm run typecheck && npm test && npx vite build

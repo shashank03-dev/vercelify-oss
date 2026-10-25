@@ -25,6 +25,7 @@ import type {
   PlatformDomain,
   PlatformNode,
   Project,
+  StandbyStatus,
   ScheduledTask,
   ScheduledTaskRequest,
   ServiceTemplate,
@@ -496,6 +497,8 @@ const nodes: PlatformNode[] = [
   },
 ];
 
+let standby: StandbyStatus = { node_id: null, node: null, last_sent_at: null, bytes: 0, last_error: null };
+
 /** Where an app's live deployment runs: its server first, replicas spread. */
 function demoInstances(a: App): AppInstance[] {
   if (!a.current_deployment_id) return [];
@@ -543,6 +546,15 @@ export function platformRoute(req: HttpRequest): unknown {
       return { removed: true };
     }
     return clone(nodes.map((n) => ({ ...n, last_seen_at: isoNow(), instances: instanceCount(n.id) })));
+  }
+  if (seg[0] === "settings" && seg[1] === "standby") {
+    if (m === "PUT") {
+      const n = body.node ? nodes.find((x) => x.id === body.node || x.name === body.node) : null;
+      if (body.node && !n) throw new Error(`server ${String(body.node)} not found`);
+      if (n?.role === "main") throw new Error(`${n.name} is the main server: the standby is a worker`);
+      standby = n ? { node_id: n.id, node: n.name, last_sent_at: isoNow(), bytes: 412_160, last_error: null } : { node_id: null, node: null, last_sent_at: null, bytes: 0, last_error: null };
+    }
+    return { ...standby };
   }
   if (seg[0] === "settings" && seg[1] === "domain") {
     if (m === "PUT") domainSetting = body as unknown as PlatformDomain;

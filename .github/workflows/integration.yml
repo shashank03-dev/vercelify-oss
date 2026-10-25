@@ -14,7 +14,8 @@ name: Integration
 #     then three behind real NAT routers (hole punching, the relay)
 #   - multi-node: a worker with its own Docker in a network namespace; an
 #     app placed on it through the mesh registry, replicas on both servers,
-#     logs, restart, a terminal, automatic rollback and revocation
+#     logs, restart, a terminal, automatic rollback and revocation; then the
+#     warm standby promoted after the main server dies
 #   - the real installer in a systemd container (Docker, Tailscale, Coolify,
 #     agent, guard, firewall), twice, to prove it is idempotent
 on:
@@ -43,6 +44,8 @@ on:
       - crates/vercelify-platform/src/runtime.rs
       - agent/src/runtime_api.rs
       - agent/src/worker.rs
+      - agent/src/standby.rs
+      - crates/vercelify-platform/src/standby.rs
       - host/firewall.sh
       - .github/workflows/integration.yml
   schedule:
@@ -124,6 +127,8 @@ jobs:
       - run: sudo apt-get update && sudo apt-get install -y iputils-ping jq
       - name: Contract
         run: sudo -E env "PATH=$PATH" host/tests/contract/multinode.sh
+      - name: Warm standby and promote
+        run: sudo -E env "PATH=$PATH" host/tests/contract/promote.sh
 
   installer:
     name: Installer on Debian 12 (systemd, real Coolify)

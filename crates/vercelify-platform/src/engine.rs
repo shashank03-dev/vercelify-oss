@@ -1163,6 +1163,14 @@ impl Engine {
         if app.kind == AppKind::Compose {
             let _ = compose::down(docker, &compose::project_name(&app.name, None)).await;
         }
+        // Its project's network, unless other apps or databases still use it
+        // (Docker refuses then).
+        let _ = docker
+            .run(
+                &crate::proc::args(&["network", "rm", &deploy::project_network(&app.project_id)]),
+                Duration::from_secs(30),
+            )
+            .await;
         for key in crate::proxy::route_keys(&self.deployer.proxy) {
             if key == app.name || key.starts_with(&format!("{}-pr-", app.name)) {
                 let _ = crate::proxy::remove_route(&self.deployer.proxy, &key);

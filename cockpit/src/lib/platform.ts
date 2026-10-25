@@ -34,6 +34,7 @@ import type {
   ScheduledTask,
   ScheduledTaskRequest,
   ServiceTemplate,
+  StandbyStatus,
   StorageTier,
   TemplateCreate,
   TerminalRequest,
@@ -210,6 +211,8 @@ export function platformOn(server?: string) {
     patchNode: (id: string, p: NodePatch) => req<PlatformNode>("PATCH", `/nodes/${q(id)}`, p),
     removeNode: (id: string) => req<unknown>("DELETE", `/nodes/${q(id)}`),
     instances: (app: string) => req<AppInstance[]>("GET", `/apps/${q(app)}/instances`),
+    standby: () => req<StandbyStatus>("GET", "/settings/standby"),
+    setStandby: (node: string | null) => req<StandbyStatus>("PUT", "/settings/standby", { node }),
   };
 }
 

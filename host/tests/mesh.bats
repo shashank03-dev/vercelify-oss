@@ -138,3 +138,39 @@ JSON
   run "$CLI" mesh invite --device
   [[ "$output" != *"--platform"* ]]
 }
+
+@test "standby: choose a worker, see its copies, turn it off" {
+  run "$CLI" standby
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no standby"* ]]
+  run "$CLI" standby pi5
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"standby: pi5"* && "$output" == *"first copy is on its way"* ]]
+  grep -q '^PUT /v1/platform/settings/standby auth=Bearer test-agent-token' "$T/requests.log"
+  run "$CLI" standby
+  [[ "$output" == *"last copy 2026-10-25T11:55:00Z (200 KiB)"* ]]
+  run "$CLI" standby ghost
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"server ghost not found"* ]]
+  run "$CLI" standby off
+  [[ "$output" == *"no standby"* ]]
+}
+
+@test "promote and demote refuse what they shouldn't do" {
+  # The main server isn't a standby.
+  run "$CLI" promote
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"promote runs on the standby"* ]]
+  run "$CLI" promote --now
+  [[ "$output" == *"usage: vercelify promote [--force]"* ]]
+  # A worker without a copy.
+  printf 'role=worker\n' >"$T/etc/install.env"
+  run env STANDBY_DIR="$T/standby" "$CLI" promote
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no copy of the main server here"* ]]
+  # demote only after a standby took over (or --force).
+  printf 'role=main\n' >"$T/etc/install.env"
+  run env MESH_DIR="$T/mesh" "$CLI" demote
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no standby replaced this server"* ]]
+}

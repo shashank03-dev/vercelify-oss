@@ -803,6 +803,31 @@ pub struct NodePatch {
     pub builds: Option<bool>,
 }
 
+/// The warm standby (design §8.4): the worker that gets a sealed copy of
+/// the main server's state every 5 minutes, ready for `vercelify promote`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct StandbyStatus {
+    /// The worker (`node_…`); None: no standby.
+    pub node_id: Option<String>,
+    pub node: Option<String>,
+    pub last_sent_at: Option<String>,
+    /// Size of the last copy.
+    pub bytes: u64,
+    pub last_error: Option<String>,
+}
+
+/// `PUT /v1/platform/settings/standby`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct StandbyRequest {
+    /// A worker's id or name; empty or null turns the standby off.
+    #[serde(default)]
+    #[ts(optional)]
+    pub node: Option<String>,
+}
+
 /// One container of an app's live deployment, and where it runs.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]

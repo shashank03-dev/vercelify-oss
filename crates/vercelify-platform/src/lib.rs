@@ -39,6 +39,7 @@ pub mod registry;
 pub mod runtime;
 pub mod secrets;
 pub mod sleeping;
+pub mod standby;
 pub mod storage;
 pub mod store;
 pub mod tasks;

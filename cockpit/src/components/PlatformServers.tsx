@@ -1,12 +1,12 @@
-import { PauseCircle, PlayCircle, Server, Trash2 } from "lucide-react";
+import { LifeBuoy, PauseCircle, PlayCircle, Server, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { bytes, type Health } from "../lib/format";
+import { ago, bytes, type Health } from "../lib/format";
 import { usePoll } from "../lib/hooks";
 import { isPlatform, platformOn } from "../lib/platform";
 import { useSession } from "../lib/session";
 import type { PlatformNode } from "../types";
 import { useToast } from "./Toast";
-import { Button, Card, IconButton, Modal, StatusText } from "./ui";
+import { Button, Card, IconButton, Modal, Select, StatusText } from "./ui";
 
 function nodeHealth(n: PlatformNode): { health: Health; label: string } {
   if (!n.online) return { health: "bad", label: "offline" };
@@ -26,6 +26,7 @@ export function PlatformServers() {
   const main = servers.find(isPlatform);
   const client = main ? platformOn(main.agent_url) : null;
   const nodes = usePoll(() => (client ? client.nodes() : Promise.resolve([])), 30_000, [main?.agent_url, revision]);
+  const standby = usePoll(() => (client ? client.standby() : Promise.resolve(null)), 60_000, [main?.agent_url, revision]);
   const [removing, setRemoving] = useState<PlatformNode | null>(null);
   const [busy, setBusy] = useState<string>();
   if (!client || !nodes.data?.length) return null;
@@ -35,7 +36,7 @@ export function PlatformServers() {
     try {
       await fn();
       toast.ok(ok);
-      await nodes.refresh();
+      await Promise.all([nodes.refresh(), standby.refresh()]);
       return true;
     } catch (e) {
       toast.bad((e as Error).message);
@@ -102,6 +103,42 @@ export function PlatformServers() {
           );
         })}
       </div>
+      {nodes.data.some((n) => n.role === "worker") && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-line px-4 py-3 text-[13px]" data-testid="platform-standby">
+          <LifeBuoy className="size-4 text-fg-dim" />
+          <span className="text-fg">Warm standby</span>
+          <div className="w-44">
+            <Select
+              aria-label="Warm standby"
+              value={standby.data?.node_id ?? ""}
+              disabled={busy === "standby"}
+              data-testid="platform-standby-node"
+              onChange={(e) => {
+                const node = e.target.value || null;
+                void act("standby", () => client.setStandby(node), node ? "The first copy is on its way" : "No standby");
+              }}
+            >
+              <option value="">Off</option>
+              {nodes.data
+                .filter((n) => n.role === "worker")
+                .map((n) => (
+                  <option key={n.id} value={n.id}>
+                    {n.name}
+                  </option>
+                ))}
+            </Select>
+          </div>
+          <span className="text-xs text-fg-muted" data-testid="platform-standby-state">
+            {standby.data?.node_id
+              ? standby.data.last_error
+                ? `last copy failed: ${standby.data.last_error}`
+                : standby.data.last_sent_at
+                  ? `sealed copy ${ago(standby.data.last_sent_at)} (${bytes(standby.data.bytes)}), every 5 minutes; if this server dies: sudo vercelify promote on ${standby.data.node}`
+                  : "the first copy is on its way"
+              : "if this server dies, its apps' settings live only in its backups"}
+          </span>
+        </div>
+      )}
       {removing && (
         <Modal open onClose={() => setRemoving(null)} title={`Remove ${removing.name}?`} description="It stops being a place for apps. To take it off the network too, revoke it below.">
           <div className="flex justify-end gap-2" data-testid="platform-remove-confirm">

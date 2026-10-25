@@ -381,12 +381,46 @@ replica dies there, and revocation.
 
 ### 8.4 Warm standby
 
-`settings.standby_node`: every 5 minutes the main server pushes its latest SQLite backup and
-`master.key` (encrypted to the standby's mesh key) to `POST /v1/standby/snapshot` on that
-node. `sudo vercelify promote` on the standby: verify snapshot age, install it as
-`platform.db`, switch `role = main`, start the coordinator with the stored coordinator key,
-announce through the mesh. Old main, if it comes back, sees a newer coordinator epoch in the
-map and demotes itself to worker (`epoch` in §13.4).
+`sudo vercelify standby <worker>` (`PUT /v1/platform/settings/standby`, the cockpit's
+servers card) chooses it. Every 5 minutes (and right after choosing) the main server
+builds a snapshot: a consistent copy of `platform.db` (SQLite's backup API), the master
+key, the coordinator's signing key and WireGuard key, `tokens.json`, the host token,
+and when present `agent.toml`, `cloudflare.env` and the tunnel's `cloudflared.env`. It
+seals it to the standby's WireGuard key with its own (static X25519 → HKDF →
+ChaCha20-Poly1305, as enrollment): only the standby can open it, and the standby
+checks it came from the coordinator, then keeps it sealed
+(`<state>/standby/snapshot.sealed`, 0600; `POST /v1/runtime/standby`). The status
+(last copy, size, error) is in `settings.standby`.
+
+`sudo vercelify promote` on the standby, once the main server is gone for good:
+stops its agent and mesh daemon; `vercelify-agent promote` opens the copy (refused
+when it is over an hour old without `--force`, or while the main server still
+answers at its mesh address), restores the database and keys (the old files are kept
+as `*.before-promote`) and fixes the database: this server's worker identity goes
+(what ran on it is the main server's now: it is the main server), the coordinator's
+endpoints are re-learned and the **map epoch** moves on. The script switches
+`role = main`, `mesh_coordinator = true`, takes over the old main server's public
+mesh URL, ACME e-mail and tunnel, and starts the agent (which writes the coordinator's
+own mesh state) and the daemon. The new main server *is* the coordinator: 10.77.0.1,
+its WireGuard key, its signing key. Nodes need no change: the new coordinator's
+daemon handshakes from its own address, they roam to it (§13.6), their map streams
+reconnect over the mesh and they take the new epoch's maps (a newer epoch replaces
+any version). Apps that ran on the old main server come back on the new one through
+the reconciler (`recover` deployments); apps on the standby keep running; paired
+devices keep their tokens. Router port forwards and DNS that named the old main
+server are the owner's to change (the script says so).
+
+An old main server that comes back would fight over the coordinator's key. On start
+and every 2 minutes, a main server with a standby asks it (its LAN address from the
+mesh endpoints, the control port: `GET /v1/mesh/hello`) for its coordinator key and
+epoch; the same key at a newer epoch means it was replaced. It writes
+`mesh/superseded.json`, stops its mesh daemon and exits; started again, it opens
+neither the coordinator nor the platform (the API says why), and `sudo vercelify
+demote` clears its platform state and mesh identity (kept aside) so it can join the
+new main server as a worker. `host/tests/contract/promote.sh` runs all of it: two
+servers with Docker and a third mesh node, the copy, a refused promote while the main
+server answers, the promotion, the third node following, both apps serving on the new
+main server, and the old one stepping down.
 
 ## 9. Proxy and routing
 
@@ -802,7 +836,8 @@ the user chose to deploy.
 | Database corrupt | `PRAGMA quick_check` at start; on failure the agent starts read-only for the platform routes, alerts, and `vercelify restore-state` restores `platform.db.bak` or a restic snapshot |
 | Disk full | Builds refuse to start under 2 GB free on the Docker disk; disk cleanup (existing) runs first |
 | Worker offline | Its apps keep running on it; the main server marks it offline after 2 min (no heartbeat), takes it out of the routes, does not reschedule apps with volumes; stateless apps with `runtime.failover = true` are redeployed elsewhere; when it returns, the containers of the old deployment are orphans and go after 10 min |
-| Main server offline | Workers keep running what they have (their proxies keep serving anything reaching them); nothing is placed or deployed until it returns or a standby is promoted (§8.4) |
+| Main server offline | Workers keep running what they have (their proxies keep serving anything reaching them); nothing is placed or deployed until it returns or the standby is promoted (§8.4, losing at most 5 minutes of changes) |
+| Old main server returns after a promotion | It sees its coordinator key at a newer epoch on the standby and steps down (no coordinator, no platform) until `vercelify demote` |
 | Coordinator offline | Mesh keeps the last map; joins/revokes wait; certificates are valid for 10 more days at the earliest |
 | Relay offline | Direct paths unaffected; peers without a direct path are unreachable until it returns (doctor explains) |
 | Clock wrong | Certificates checked with 5 min skew; the existing clock-sync doctor check alerts |
@@ -826,12 +861,13 @@ brought it to 8.0 MiB; logging filters with `tracing_subscriber::filter::Targets
 `EnvFilter` (which pulls in a regex engine) brought it back to 7.75 MiB; the relay hub (axum's
 WebSocket) added 0.07 MiB, mDNS and SPAKE2 0.08 MiB (7.90); `toml` 1 with only its parser
 (no `toml_edit`) and axum without its unused default features brought it back to 7.75 MiB.
-M9 (workers, the runtime API, the registry, the engine on several servers) took it to
-8.35 MiB; three changes brought it to 7.96 MiB: request bodies through a small JSON
-extractor of our own on plain serde_json instead of axum's (which runs every type
-through `serde_path_to_error`, a second copy of each deserializer; axum's `json`
-feature is off), a hand-parsed command line instead of clap, and one non-generic
-request path in the worker client.
+M9 (workers, the runtime API, the registry, the warm standby) is kept in check by three
+changes: request bodies go through a small JSON extractor of our own on plain serde_json
+instead of axum's (which runs every type through `serde_path_to_error`, a second copy of
+each deserializer; axum's `json` feature is off), the command line is parsed by hand
+instead of with clap, and the worker's runtime API is one handler dispatching on the path
+(each axum handler costs several KiB). After M9c the agent measures 7.65 MiB as CI builds
+it (`cargo zigbuild`; other linkers give larger numbers, so budgets are checked that way).
 `panic = "abort"` would save more but turns a panicking task into a dead agent; not taken. `vercelify-mesh` measures 3.2 MiB, 1.1 MiB of it rustls with
 webpki roots for `wss://` and `https://` through a tunnel, 0.3 MiB the userspace stack. CI builds the binaries of every pull request with
 `cargo zigbuild` and fails over budget, so growth shows up the commit it happens.

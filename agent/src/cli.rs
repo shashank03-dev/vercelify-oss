@@ -21,6 +21,7 @@ commands:
       --name NAME               name of the device token minted for it
       --tailscale               pair over Tailscale even on a mesh coordinator
   tokens [list | revoke ID]   device tokens
+  promote [--force]           on the standby: take over as the main server (see: vercelify promote)
 
 options:
   -c, --config FILE   config file (default: $VERCELIFY_CONFIG or /etc/vercelify/agent.toml)
@@ -54,6 +55,9 @@ pub enum Cmd {
     TokensList,
     TokensRevoke {
         id: String,
+    },
+    Promote {
+        force: bool,
     },
     Version,
     Help,
@@ -170,6 +174,11 @@ pub fn parse(args: impl IntoIterator<Item = String>, env_config: Option<String>)
                 tailscale,
             }
         }
+        "promote" => match a.next().as_deref() {
+            None => Cmd::Promote { force: false },
+            Some("--force") if a.next().is_none() => Cmd::Promote { force: true },
+            Some(x) => return Err(unknown(x)),
+        },
         "tokens" => match (a.next().as_deref(), a.next()) {
             (None | Some("list"), None) => Cmd::TokensList,
             (Some("revoke"), Some(id)) if a.next().is_none() => Cmd::TokensRevoke { id },
@@ -244,6 +253,7 @@ mod tests {
             p(&["-c", "/x", "tokens", "revoke", "tok_1"]).unwrap().cmd,
             Cmd::TokensRevoke { id: "tok_1".into() }
         );
+        assert_eq!(p(&["promote", "--force"]).unwrap().cmd, Cmd::Promote { force: true });
         assert_eq!(p(&["--version"]).unwrap().cmd, Cmd::Version);
         assert_eq!(p(&["pair", "-h"]).unwrap().cmd, Cmd::Help);
     }

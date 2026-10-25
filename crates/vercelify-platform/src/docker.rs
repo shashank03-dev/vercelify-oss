@@ -155,14 +155,28 @@ impl Docker {
             .success())
     }
 
+    /// Pull, trying again twice on what may be transient (the network, the
+    /// registry, containerd), never on an image that doesn't exist.
     pub async fn pull(&self, image: &str) -> Result<()> {
-        self.ok(
-            &proc::args(&["pull", "--quiet", image]),
-            Duration::from_secs(900),
-            &format!("docker pull {image}"),
-        )
-        .await
-        .map(|_| ())
+        let mut last = None;
+        for attempt in 0..3 {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(2 * attempt)).await;
+            }
+            match self
+                .ok(
+                    &proc::args(&["pull", "--quiet", image]),
+                    Duration::from_secs(900),
+                    &format!("docker pull {image}"),
+                )
+                .await
+            {
+                Ok(_) => return Ok(()),
+                Err(e) if !retryable_pull(e.message()) => return Err(e),
+                Err(e) => last = Some(e),
+            }
+        }
+        Err(last.unwrap_or_else(|| Error::Internal(format!("docker pull {image}"))))
     }
 
     /// Create (not start) a container.
@@ -418,6 +432,21 @@ impl Docker {
     }
 }
 
+/// Whether a failed pull may succeed on another try.
+pub fn retryable_pull(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    ![
+        "not found: manifest unknown",
+        "manifest unknown",
+        "unauthorized",
+        "denied",
+        "invalid reference",
+        "docker is not running",
+    ]
+    .iter()
+    .any(|p| m.contains(p))
+}
+
 pub fn parse_ps(stdout: &str) -> Vec<ContainerState> {
     stdout
         .lines()
@@ -443,6 +472,19 @@ pub fn parse_ps(stdout: &str) -> Vec<ContainerState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pull_retries_only_what_may_pass() {
+        assert!(retryable_pull(
+            "unable to lease content: lease does not exist: not found"
+        ));
+        assert!(retryable_pull("net/http: TLS handshake timeout"));
+        assert!(!retryable_pull("manifest unknown: manifest unknown"));
+        assert!(!retryable_pull(
+            "pull access denied for nope, repository does not exist"
+        ));
+        assert!(!retryable_pull("Docker is not running"));
+    }
 
     #[test]
     fn ps_rows() {

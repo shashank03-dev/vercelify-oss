@@ -5240,6 +5240,7 @@ dependencies = [
  "vercelify-core",
  "vercelify-mesh",
  "vercelify-platform",
+ "zeroize",
 ]
 
 [[package]]

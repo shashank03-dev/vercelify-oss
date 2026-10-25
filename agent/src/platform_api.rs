@@ -68,6 +68,7 @@ pub fn router() -> Router<AppState> {
         .route("/platform/deployments/{id}/cancel", post(deployment_cancel))
         .route("/platform/deployments/{id}/logs", get(deployment_logs))
         .route("/platform/nodes", get(node_list))
+        .route("/platform/settings/standby", get(standby_get).put(standby_set))
         .route(
             "/platform/nodes/{id}",
             axum::routing::patch(node_patch).delete(node_remove),
@@ -605,6 +606,29 @@ pub async fn run_fleet(
         }
         tokio::time::sleep(std::time::Duration::from_secs(60)).await;
     }
+}
+
+async fn standby_get(State(s): State<AppState>) -> ApiResult<StandbyStatus> {
+    Ok(Json(tx(&s, |c, _| vercelify_platform::standby::status(c)).await?))
+}
+
+/// Choose the standby (or none); the first copy goes right away.
+async fn standby_set(State(s): State<AppState>, Json(r): Json<StandbyRequest>) -> ApiResult<StandbyStatus> {
+    let p = platform(&s)?;
+    let st = tx(&s, move |c, _| {
+        vercelify_platform::standby::choose(c, r.node.as_deref())
+    })
+    .await?;
+    if st.node_id.is_some() {
+        let cfg = s.config.clone();
+        let events = s.events.clone();
+        tokio::spawn(async move {
+            crate::standby::once(&p, &cfg).await;
+            events.changed("nodes");
+        });
+    }
+    changed(&s, "nodes");
+    Ok(Json(st))
 }
 
 async fn node_patch(

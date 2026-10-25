@@ -65,6 +65,9 @@ impl Coordinator {
         if !cfg.mesh_coordinator || cfg.role() == "worker" {
             return Ok(None);
         }
+        if let Some(m) = crate::standby::superseded(cfg) {
+            return Err(m);
+        }
         let store = match platform_store {
             Some(s) => s,
             None => Arc::new(Store::open(&cfg.platform_db).map_err(|e| e.to_string())?),
@@ -282,7 +285,9 @@ pub fn control_router(co: Arc<Coordinator>, claims: Arc<crate::pairing::Claims>)
 }
 
 async fn hello(State(co): State<Arc<Coordinator>>) -> Json<Value> {
-    Json(json!({ "coordinator_wg": co.wg_public().to_base64(), "service": "vercelify-mesh" }))
+    // The epoch tells a returning main server that a standby replaced it.
+    let epoch = co.store.with(reg::versions).map(|v| v.1).unwrap_or(1);
+    Json(json!({ "coordinator_wg": co.wg_public().to_base64(), "service": "vercelify-mesh", "epoch": epoch }))
 }
 
 async fn enroll(
