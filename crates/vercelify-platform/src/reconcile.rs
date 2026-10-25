@@ -95,6 +95,10 @@ pub fn plan(
         if wanted.contains(c.name.as_str()) {
             continue;
         }
+        // Databases are reconciled on their own (`Engine::reconcile_databases`).
+        if c.labels.get("vercelify.kind").map(String::as_str) == Some("db") {
+            continue;
+        }
         let dep = c.labels.get(LABEL_DEPLOYMENT).map(String::as_str).unwrap_or("");
         if active.contains(dep) || wanted_deployments.contains(dep) {
             continue;
@@ -248,6 +252,7 @@ impl Reconciler {
                 Err(e) => r.errors.push(format!("route {key}: {e}")),
             }
         }
+        r.errors.extend(self.engine.reconcile_databases().await);
         for (app_id, dep) in &p.recover {
             if busy_apps.contains(app_id) {
                 continue;
@@ -405,6 +410,10 @@ mod tests {
             c("vfy-new-1", "running", fresh, "dpl_other"),
             c("vfy-building-1", "running", old, "dpl_inflight"),
             c("vfy-fine-worker-1", "running", old, "dpl_fine"),
+            ContainerState {
+                labels: [("vercelify.kind".to_string(), "db".to_string())].into(),
+                ..c("vfy-db-pg", "running", old, "")
+            },
         ];
         let active: HashSet<String> = ["dpl_inflight".to_string()].into();
         let keys = vec!["fine".into(), "off".into(), "deleted-app".into()];

@@ -349,10 +349,7 @@ impl Projects {
     }
 
     /// Routers and `CRON_SECRET` per key, from the platform's database.
-    fn platform_routes(
-        &self,
-        engine: &vercelify_platform::engine::Engine,
-    ) -> Option<HashMap<String, PlatformRoutes>> {
+    fn platform_routes(&self, engine: &vercelify_platform::engine::Engine) -> Option<HashMap<String, PlatformRoutes>> {
         use vercelify_platform::{apps, deployments, env, previews, reconcile};
         let res = engine.store.with(|c| {
             let settings = apps::domain_settings(c)?;

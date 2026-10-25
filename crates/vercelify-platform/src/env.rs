@@ -198,6 +198,25 @@ pub fn resolve(c: &Connection, key: &MasterKey, app_id: &str, preview: bool) -> 
     Ok(out)
 }
 
+/// [`resolve`], with database references (`${{db.<name>.url}}`) filled in:
+/// what a deployment actually gets.
+pub fn resolve_for_deploy(
+    c: &Connection,
+    key: &MasterKey,
+    app_id: &str,
+    preview: bool,
+) -> Result<BTreeMap<String, Resolved>> {
+    let mut vars = resolve(c, key, app_id, preview)?;
+    for (k, v) in vars.iter_mut() {
+        if v.value.contains("${{db.") {
+            let filled = crate::databases::resolve_references(c, key, &v.value)
+                .map_err(|e| Error::Invalid(format!("{k}: {}", e.message())))?;
+            v.value = Zeroizing::new(filled);
+        }
+    }
+    Ok(vars)
+}
+
 /// Parse a `.env` file: `KEY=value`, `export KEY=value`, quotes, comments.
 pub fn parse_dotenv(raw: &str) -> Result<Vec<(String, String)>> {
     let mut out = vec![];

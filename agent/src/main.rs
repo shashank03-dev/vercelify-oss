@@ -277,11 +277,14 @@ async fn serve(cfg: Config) {
     tokio::spawn(state.watcher.clone().run(state.clone()));
     tokio::spawn(update::resume_update_job(state.config.clone(), state.jobs.clone()));
     if let Some(p) = &state.platform {
+        // Databases' public ports listen on the private network only.
+        p.engine
+            .set_private_ip(tailscale::ipv4(state.config.tailscale_bin.as_deref()).await);
         // Tests run with the background loops off (watch interval 0).
         let every = if state.config.watch_interval_secs == 0 { 0 } else { 30 };
         p.spawn(Duration::from_secs(every));
         if every > 0 {
-            tokio::spawn(platform_api::run_tasks(p.clone()));
+            tokio::spawn(platform_api::run_tasks(p.clone(), state.config.clone()));
         }
     }
     if let Some(g) = &state.platform_git {

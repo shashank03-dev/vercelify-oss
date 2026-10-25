@@ -8,6 +8,8 @@
 pub mod apps;
 pub mod build;
 pub mod compose;
+pub mod databases;
+pub mod dbengine;
 pub mod deploy;
 pub mod deployments;
 pub mod detect;

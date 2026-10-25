@@ -55,6 +55,9 @@ pub struct Engine {
     running: Mutex<HashMap<String, CancelHandle>>,
     busy: Mutex<HashSet<String>>,
     listener: Mutex<Option<Listener>>,
+    /// This server's private address (mesh/Tailscale): where databases'
+    /// public ports listen unless opened to everyone.
+    private_ip: Mutex<Option<String>>,
 }
 
 /// A request to deploy.
@@ -95,7 +98,16 @@ impl Engine {
             running: Mutex::default(),
             busy: Mutex::default(),
             listener: Mutex::default(),
+            private_ip: Mutex::default(),
         })
+    }
+
+    pub fn set_private_ip(&self, ip: Option<String>) {
+        *lock(&self.private_ip) = ip;
+    }
+
+    pub fn private_ip(&self) -> Option<String> {
+        lock(&self.private_ip).clone()
     }
 
     pub fn set_listener(&self, l: Listener) {
@@ -330,7 +342,9 @@ impl Engine {
         let vars = {
             let key = self.key.clone();
             let id = app.id.clone();
-            self.store.call(move |c| env::resolve(c, &key, &id, preview)).await?
+            self.store
+                .call(move |c| env::resolve_for_deploy(c, &key, &id, preview))
+                .await?
         };
         // Image: reuse (rollback, image apps) or build. Compose apps keep
         // their checkout for `docker compose up`.

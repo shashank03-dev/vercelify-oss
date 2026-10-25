@@ -17,7 +17,8 @@ use std::sync::Arc;
 use vercelify_core::platform::*;
 use vercelify_platform::engine::{EngineEvent, Enqueue};
 use vercelify_platform::{
-    apps, deployments, env, git_sources, git_watch, hooks, nodes, previews, projects, tasks, volumes,
+    apps, databases, dbengine, deployments, env, git_sources, git_watch, hooks, nodes, previews, projects, tasks,
+    volumes,
 };
 
 impl From<vercelify_platform::Error> for AppError {
@@ -78,6 +79,15 @@ pub fn router() -> Router<AppState> {
         .route("/platform/git-sources", get(git_source_list).post(git_source_create))
         .route("/platform/git-sources/{id}", delete(git_source_delete))
         .route("/platform/settings/domain", get(domain_get).put(domain_set))
+        .route("/platform/databases", get(db_list).post(db_create))
+        .route(
+            "/platform/databases/{db}",
+            get(db_get).patch(db_patch).delete(db_delete),
+        )
+        .route("/platform/databases/{db}/link", post(db_link))
+        .route("/platform/databases/{db}/move", post(db_move))
+        .route("/platform/databases/{db}/backups", get(db_backups).post(db_backup_run))
+        .route("/platform/databases/{db}/restore", post(db_restore))
 }
 
 /// The platform of this server, or why there is none.
@@ -888,7 +898,7 @@ pub async fn run_task(p: &crate::platform::Platform, t: &ScheduledTask) -> Strin
 }
 
 /// The minute loop for scheduled tasks.
-pub async fn run_tasks(p: Arc<crate::platform::Platform>) {
+pub async fn run_tasks(p: Arc<crate::platform::Platform>, cfg: Arc<crate::config::Config>) {
     use chrono::Timelike;
     let mut last = None;
     loop {
@@ -916,6 +926,8 @@ pub async fn run_tasks(p: Arc<crate::platform::Platform>) {
                 }
             });
         }
+        let (p2, cfg2) = (p.clone(), cfg.clone());
+        tokio::spawn(async move { run_database_backups(&p2, &cfg2, now).await });
     }
 }
 
@@ -976,4 +988,265 @@ async fn domain_set(State(s): State<AppState>, Json(req): Json<PlatformDomain>) 
         https: req.https && !req.edge_tls,
         edge_tls: req.edge_tls,
     }))
+}
+
+// ----- databases -----------------------------------------------------------------------
+
+/// restic settings from `backup.env` (the installer's backup setup).
+pub fn restic(cfg: &crate::config::Config) -> dbengine::Restic {
+    dbengine::Restic {
+        bin: "restic".into(),
+        env: crate::config::env_file_values(&cfg.backup_env).into_iter().collect(),
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct DbListQuery {
+    project: Option<String>,
+    #[serde(default)]
+    reveal: bool,
+}
+
+async fn db_list(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Query(q): Query<DbListQuery>,
+) -> ApiResult<Vec<Database>> {
+    if q.reveal && actor.role < Role::Deployer {
+        return Err(AppError {
+            status: axum::http::StatusCode::FORBIDDEN,
+            message: "a viewer token can't reveal passwords".into(),
+        });
+    }
+    Ok(Json(
+        tx(&s, move |c, k| databases::list(c, k, q.project.as_deref(), q.reveal)).await?,
+    ))
+}
+
+async fn db_get(
+    State(s): State<AppState>,
+    Extension(actor): Extension<Actor>,
+    Path(db): Path<String>,
+    Query(q): Query<EnvQuery>,
+) -> ApiResult<Database> {
+    check_reveal(&actor, &q)?;
+    Ok(Json(tx(&s, move |c, k| databases::get(c, k, &db, q.reveal)).await?))
+}
+
+/// Start (or restart) a database in the background; the API answers at once.
+fn ensure_in_background(s: &AppState, id: String, title: String) {
+    let Ok(p) = platform(s) else { return };
+    let job = s.jobs.start("database", title, Some(&id));
+    tokio::spawn(async move {
+        match p.engine.ensure_database(&id).await {
+            Ok(d) => job.done(format!(
+                "{} is {}",
+                d.name,
+                if d.desired == Desired::Stopped {
+                    "stopped"
+                } else {
+                    "running"
+                }
+            )),
+            Err(e) => job.fail(e.to_string()),
+        }
+    });
+}
+
+async fn db_create(State(s): State<AppState>, Json(req): Json<DatabaseCreate>) -> ApiResult<Database> {
+    let d = tx(&s, move |c, k| databases::create(c, k, &req)).await?;
+    ensure_in_background(&s, d.id.clone(), format!("Start {}", d.name));
+    changed(&s, "databases");
+    Ok(Json(d))
+}
+
+async fn db_patch(
+    State(s): State<AppState>,
+    Path(db): Path<String>,
+    Json(req): Json<DatabasePatch>,
+) -> ApiResult<Database> {
+    if let Some(sched) = req.backup_schedule.as_deref().filter(|x| !x.trim().is_empty()) {
+        crate::cron::parse(sched.trim()).map_err(|e| AppError::bad_request(format!("backup schedule: {e}")))?;
+    }
+    let d = tx(&s, move |c, k| {
+        let id = databases::get(c, k, &db, false)?.id;
+        databases::patch(c, k, &id, &req)
+    })
+    .await?;
+    ensure_in_background(&s, d.id.clone(), format!("Apply the settings of {}", d.name));
+    changed(&s, "databases");
+    Ok(Json(d))
+}
+
+#[derive(Deserialize, Default)]
+struct PurgeQuery {
+    /// Also delete its data (otherwise the volume stays, for a later restore).
+    #[serde(default)]
+    purge: bool,
+}
+
+async fn db_delete(State(s): State<AppState>, Path(db): Path<String>, Query(q): Query<PurgeQuery>) -> ApiResult<Value> {
+    let (d, hdd) = tx(&s, move |c, k| {
+        let d = databases::get(c, k, &db, false)?;
+        let hdd = volumes::list(c, VolumeOwner::Database, &d.id)?
+            .into_iter()
+            .next()
+            .and_then(|v| v.host_path);
+        Ok((databases::delete(c, k, &d.id)?, hdd))
+    })
+    .await?;
+    let p = platform(&s)?;
+    let name = d.name.clone();
+    tokio::spawn(async move {
+        if let Err(e) = p.engine.remove_database(&d, q.purge, hdd).await {
+            tracing::warn!("removing the database {}: {e}", d.name);
+        }
+    });
+    changed(&s, "databases");
+    Ok(Json(json!({ "deleted": name, "data_kept": !q.purge })))
+}
+
+#[derive(Deserialize)]
+struct LinkRequest {
+    app: String,
+    /// Default: DATABASE_URL (REDIS_URL for Redis-likes…).
+    var: Option<String>,
+}
+
+async fn db_link(State(s): State<AppState>, Path(db): Path<String>, Json(req): Json<LinkRequest>) -> ApiResult<Value> {
+    let var = tx(&s, move |c, k| {
+        let d = databases::get(c, k, &db, false)?;
+        let var = req
+            .var
+            .clone()
+            .unwrap_or_else(|| databases::template(d.kind).url_var.to_string());
+        vercelify_platform::validate::env_key(&var)?;
+        databases::link(c, k, &req.app, &d.name, &var)?;
+        Ok(var)
+    })
+    .await?;
+    changed(&s, "apps");
+    Ok(Json(json!({ "variable": var, "note": "redeploy the app to use it" })))
+}
+
+#[derive(Deserialize)]
+struct MoveRequest {
+    tier: vercelify_core::StorageTier,
+}
+
+async fn db_move(
+    State(s): State<AppState>,
+    Path(db): Path<String>,
+    Json(req): Json<MoveRequest>,
+) -> ApiResult<vercelify_core::Job> {
+    let p = platform(&s)?;
+    let d = tx(&s, move |c, k| databases::get(c, k, &db, false)).await?;
+    if req.tier == vercelify_core::StorageTier::Hdd
+        && !crate::volumes::is_mount_point(std::path::Path::new(&s.config.storage_mount))
+        && s.config.require_storage_mount
+    {
+        return Err(AppError::conflict("the storage disk isn't mounted"));
+    }
+    let job = s
+        .jobs
+        .start("move", format!("Move {} to the {:?}", d.name, req.tier), Some(&d.id));
+    let snapshot = job.snapshot();
+    let root = s.config.docker_volumes_root.clone();
+    let events = s.events.clone();
+    tokio::spawn(async move {
+        match p.engine.move_database(&d.id, req.tier, &root).await {
+            Ok(_) => job.done(format!("{} runs from the new disk", d.name)),
+            Err(e) => job.fail(e.to_string()),
+        }
+        events.changed("databases");
+    });
+    snapshot.map(Json).ok_or_else(|| AppError::internal("job vanished"))
+}
+
+async fn db_backups(State(s): State<AppState>, Path(db): Path<String>) -> ApiResult<Vec<DatabaseBackup>> {
+    Ok(Json(
+        tx(&s, move |c, k| {
+            let id = databases::get(c, k, &db, false)?.id;
+            dbengine::backups(c, &id)
+        })
+        .await?,
+    ))
+}
+
+async fn db_backup_run(State(s): State<AppState>, Path(db): Path<String>) -> ApiResult<vercelify_core::Job> {
+    let p = platform(&s)?;
+    let restic = restic(&s.config);
+    if !restic.configured() {
+        return Err(AppError::conflict(
+            "backups aren't set up on this server: sudo vercelify backup setup",
+        ));
+    }
+    let d = tx(&s, move |c, k| databases::get(c, k, &db, false)).await?;
+    let job = s.jobs.start("backup", format!("Back up {}", d.name), Some(&d.id));
+    let snapshot = job.snapshot();
+    let events = s.events.clone();
+    tokio::spawn(async move {
+        match p.engine.backup_database(&d.id, &restic).await {
+            Ok(b) => job.done(format!(
+                "snapshot {} ({} bytes)",
+                &b.snapshot[..b.snapshot.len().min(8)],
+                b.bytes
+            )),
+            Err(e) => job.fail(e.to_string()),
+        }
+        events.changed("databases");
+    });
+    snapshot.map(Json).ok_or_else(|| AppError::internal("job vanished"))
+}
+
+#[derive(Deserialize)]
+struct RestoreRequest {
+    snapshot: String,
+}
+
+async fn db_restore(
+    State(s): State<AppState>,
+    Path(db): Path<String>,
+    Json(req): Json<RestoreRequest>,
+) -> ApiResult<vercelify_core::Job> {
+    let p = platform(&s)?;
+    let restic = restic(&s.config);
+    let d = tx(&s, move |c, k| databases::get(c, k, &db, false)).await?;
+    let job = s.jobs.start("restore", format!("Restore {}", d.name), Some(&d.id));
+    let snapshot = job.snapshot();
+    let events = s.events.clone();
+    tokio::spawn(async move {
+        match p.engine.restore_database(&d.id, &req.snapshot, &restic).await {
+            Ok(()) => job.done(format!("{} restored from {}", d.name, req.snapshot)),
+            Err(e) => job.fail(e.to_string()),
+        }
+        events.changed("databases");
+    });
+    snapshot.map(Json).ok_or_else(|| AppError::internal("job vanished"))
+}
+
+/// Scheduled backups of databases (their `backup_schedule`), from the minute loop.
+pub async fn run_database_backups(
+    p: &Arc<crate::platform::Platform>,
+    cfg: &crate::config::Config,
+    now: chrono::DateTime<chrono::Utc>,
+) {
+    let due: Vec<Database> = p
+        .store
+        .with(|c| databases::list(c, &p.key, None, false))
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|d| {
+            !d.backup_schedule.is_empty() && crate::cron::parse(&d.backup_schedule).is_ok_and(|s| s.matches(now))
+        })
+        .collect();
+    if due.is_empty() {
+        return;
+    }
+    let restic = restic(cfg);
+    for d in due {
+        if let Err(e) = p.engine.backup_database(&d.id, &restic).await {
+            tracing::warn!("scheduled backup of {}: {e}", d.name);
+        }
+    }
 }

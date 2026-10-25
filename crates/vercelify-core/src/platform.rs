@@ -737,6 +737,129 @@ pub struct PlatformDomain {
     pub edge_tls: bool,
 }
 
+// ----- databases --------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum DatabaseKind {
+    Postgresql,
+    Mysql,
+    Mariadb,
+    Mongodb,
+    Redis,
+    Keydb,
+    Dragonfly,
+    Clickhouse,
+}
+
+impl DatabaseKind {
+    pub const ALL: [DatabaseKind; 8] = [
+        Self::Postgresql,
+        Self::Mysql,
+        Self::Mariadb,
+        Self::Mongodb,
+        Self::Redis,
+        Self::Keydb,
+        Self::Dragonfly,
+        Self::Clickhouse,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Postgresql => "postgresql",
+            Self::Mysql => "mysql",
+            Self::Mariadb => "mariadb",
+            Self::Mongodb => "mongodb",
+            Self::Redis => "redis",
+            Self::Keydb => "keydb",
+            Self::Dragonfly => "dragonfly",
+            Self::Clickhouse => "clickhouse",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.as_str() == s)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct Database {
+    pub id: String,
+    pub name: String,
+    pub project_id: String,
+    pub environment_id: String,
+    pub kind: DatabaseKind,
+    pub version: String,
+    pub image: String,
+    pub node_id: Option<String>,
+    /// `postgres://user:password@name:5432/db` for apps of the same project
+    /// (password only with `?reveal=true`).
+    pub internal_url: Option<String>,
+    /// Reachable from the mesh (or everywhere) on this port.
+    pub public_port: Option<u16>,
+    /// `mesh` or `all`.
+    pub public_bind: String,
+    pub desired: Desired,
+    pub container: String,
+    /// Cron schedule of its own backups (empty: only the nightly server backup).
+    pub backup_schedule: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct DatabaseCreate {
+    pub name: String,
+    pub kind: DatabaseKind,
+    /// Default: the version Vercelify tests with.
+    #[ts(optional)]
+    pub version: Option<String>,
+    #[ts(optional)]
+    pub environment_id: Option<String>,
+    #[ts(optional)]
+    pub project_id: Option<String>,
+    #[ts(optional)]
+    pub public_port: Option<u16>,
+    /// Data on the HDD instead of the SSD.
+    #[serde(default)]
+    #[ts(optional)]
+    pub tier: Option<crate::model::StorageTier>,
+    /// Set `DATABASE_URL` (or `REDIS_URL`…) on this app to reference it.
+    #[ts(optional)]
+    pub link_app: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct DatabasePatch {
+    #[ts(optional)]
+    pub desired: Option<Desired>,
+    /// 0 closes the public port.
+    #[ts(optional)]
+    pub public_port: Option<u16>,
+    #[ts(optional)]
+    pub public_bind: Option<String>,
+    #[ts(optional)]
+    pub backup_schedule: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct DatabaseBackup {
+    pub id: String,
+    pub database_id: String,
+    /// running / succeeded / failed
+    pub status: String,
+    pub bytes: u64,
+    pub snapshot: String,
+    pub error: String,
+    pub created_at: String,
+    pub finished_at: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

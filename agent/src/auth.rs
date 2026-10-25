@@ -30,6 +30,8 @@ pub fn allowed(role: Role, method: &Method, path: &str) -> bool {
         // their parts (variables, domains, previews) are a deployer's.
         ["v1", "platform", "apps", _] | ["v1", "platform", "databases", _] => !delete,
         ["v1", "platform", "apps", _, "volumes", ..] | ["v1", "platform", "databases", _, "volumes", ..] => !delete,
+        // Restoring over a database's data or moving it: owners.
+        ["v1", "platform", "databases", _, "restore" | "move"] => false,
         ["v1", "platform", "apps", _, ..] | ["v1", "platform", "databases", _, ..] => true,
         ["v1", "platform", "databases"] => !delete,
         ["v1", "platform", "deployments", _, ..] => !delete,
@@ -125,6 +127,13 @@ mod tests {
         );
         assert!(can(d, Method::POST, "/v1/platform/deployments/dpl_x/cancel"));
         assert!(!can(d, Method::DELETE, "/v1/platform/databases/pg"));
+        assert!(can(d, Method::POST, "/v1/platform/databases"));
+        assert!(can(d, Method::POST, "/v1/platform/databases/pg/backups"));
+        assert!(
+            !can(d, Method::POST, "/v1/platform/databases/pg/restore"),
+            "overwrites data: owner"
+        );
+        assert!(!can(d, Method::POST, "/v1/platform/databases/pg/move"));
         assert!(can(d, Method::POST, "/v1/containers/abc/restart"));
         assert!(!can(d, Method::POST, "/v1/containers/abc/remove"));
         for p in [

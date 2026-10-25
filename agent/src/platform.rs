@@ -118,6 +118,26 @@ impl Platform {
                 }
             }
             tokio::spawn(me.engine.clone().run());
+            // A consistent copy for restic (and the warm standby): backups
+            // never read the live database file.
+            let store = me.store.clone();
+            tokio::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(300)).await;
+                    let s = store.clone();
+                    let res = tokio::task::spawn_blocking(move || {
+                        let path = s.path().map(vercelify_platform::store::backup_path);
+                        match path {
+                            Some(p) => s.backup_to(&p),
+                            None => Ok(()),
+                        }
+                    })
+                    .await;
+                    if let Ok(Err(e)) = res {
+                        tracing::warn!("platform database copy: {e}");
+                    }
+                }
+            });
             if !reconcile_every.is_zero() {
                 me.reconciler.clone().run(reconcile_every).await;
             }

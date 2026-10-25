@@ -1918,6 +1918,58 @@ fn platform_api() {
     let (s, _) = send(&a, "DELETE", "/v1/platform/apps/blog/previews/9", TOKEN, None);
     assert_eq!(s, 200, "removing a preview that isn't there is fine");
 
+    // Databases: created (started in the background), passwords masked
+    // unless revealed, linked to an app, protected while linked.
+    let (s, d) = post(
+        &a,
+        "/v1/platform/databases",
+        json!({"name": "blog-db", "kind": "postgresql", "link_app": "blog"}),
+    );
+    assert_eq!(s, 200, "{d}");
+    assert_eq!(d["image"], "postgres:17-alpine");
+    assert!(d["internal_url"].as_str().unwrap().contains("••••••"));
+    let (s, v) = post(&a, "/v1/platform/databases", json!({"name": "blog", "kind": "redis"}));
+    assert_eq!(s, 409, "names are shared with apps: {v}");
+    let (s, v) = send(&a, "GET", "/v1/platform/databases/blog-db?reveal=true", &viewer, None);
+    assert_eq!(s, 403, "{v}");
+    let (s, v) = send(&a, "GET", "/v1/platform/databases/blog-db?reveal=true", &deployer, None);
+    assert!(
+        s == 200 && !v["internal_url"].as_str().unwrap().contains("••••••"),
+        "{v}"
+    );
+    let (_, vars) = get(&a, "/v1/platform/apps/blog/env?reveal=true");
+    let url = vars
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["key"] == "DATABASE_URL")
+        .unwrap();
+    assert_eq!(url["value"], "${{db.blog-db.url}}");
+    let (s, v) = send(&a, "DELETE", "/v1/platform/databases/blog-db", TOKEN, None);
+    assert_eq!(s, 409, "in use by blog: {v}");
+    let (s, v) = send(
+        &a,
+        "POST",
+        "/v1/platform/databases/blog-db/restore",
+        &deployer,
+        Some(json!({"snapshot": "abc"})),
+    );
+    assert_eq!(s, 403, "{v}");
+    let (s, v) = post(&a, "/v1/platform/databases/blog-db/backups", json!({}));
+    assert_eq!(s, 409, "backups not set up: {v}");
+    let (s, v) = send(
+        &a,
+        "PATCH",
+        "/v1/platform/databases/blog-db",
+        TOKEN,
+        Some(json!({"backup_schedule": "nope"})),
+    );
+    assert_eq!(s, 400, "{v}");
+    let (s, v) = send(&a, "DELETE", "/v1/platform/apps/blog/env/DATABASE_URL", TOKEN, None);
+    assert_eq!(s, 200, "{v}");
+    let (s, v) = send(&a, "DELETE", "/v1/platform/databases/blog-db", TOKEN, None);
+    assert_eq!((s, v["data_kept"].as_bool()), (200, Some(true)), "{v}");
+
     // Delete.
     let (s, _) = send(&a, "DELETE", "/v1/platform/apps/blog", TOKEN, None);
     assert_eq!(s, 200);
