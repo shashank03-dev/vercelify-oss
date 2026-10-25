@@ -264,8 +264,16 @@ pub fn coordinator(s: &AppState) -> Result<Arc<Coordinator>, AppError> {
 // ----- the control listener ----------------------------------------------------------
 
 /// What answers on `mesh_control_listen`: enrollment, nothing else.
-pub fn control_router(co: Arc<Coordinator>) -> Router {
+pub fn control_router(co: Arc<Coordinator>, claims: Arc<crate::pairing::Claims>) -> Router {
+    let cfg = co.cfg.clone();
     Router::new()
+        .route(
+            vercelify_mesh::pake::PAIR_PATH,
+            post(move |Json(req): Json<vercelify_mesh::pake::PairRequest>| {
+                let (claims, cfg) = (claims.clone(), cfg.clone());
+                async move { claims.pake(&cfg, &req).await.map(Json) }
+            }),
+        )
         .route("/v1/mesh/enroll", post(enroll))
         .route("/v1/mesh/hello", get(hello))
         .route(vercelify_mesh::relay::RELAY_PATH, get(crate::mesh_relay::relay))
@@ -555,9 +563,15 @@ fn control_addresses(cfg: &Config) -> Vec<String> {
         .collect()
 }
 
-async fn invite(State(s): State<AppState>, body: Option<Json<MeshInviteRequest>>) -> ApiResult<MeshInvite> {
-    let co = coordinator(&s)?;
-    let req = body.map(|b| b.0).unwrap_or_default();
+/// A single-use join token: where the control listener is (LAN addresses,
+/// then the tunnel), the coordinator's WireGuard key, and the claim. Also
+/// used by `vercelify-agent pair` for the Mac app (outside the server).
+pub fn make_invite(
+    cfg: &Config,
+    store: &Store,
+    coordinator_wg: &PublicKey,
+    req: &MeshInviteRequest,
+) -> Result<MeshInvite, AppError> {
     let kind = match req.kind.as_deref().unwrap_or("server") {
         "server" => NodeKind::Server,
         "device" => NodeKind::Device,
@@ -565,16 +579,9 @@ async fn invite(State(s): State<AppState>, body: Option<Json<MeshInviteRequest>>
     };
     let role = req.role.clone().unwrap_or_else(|| "owner".into());
     let ttl = req.ttl_minutes.unwrap_or(60);
-    let (claim, expires_at) = co.store.tx(|c| reg::invite(c, kind, &role, ttl))?;
-    let mut control = control_addresses(&co.cfg);
+    let mut control = control_addresses(cfg);
     // Outside the LAN: through the tunnel.
-    if let Some(u) = co
-        .cfg
-        .mesh_public_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|u| !u.is_empty())
-    {
+    if let Some(u) = cfg.mesh_public_url.as_deref().map(str::trim).filter(|u| !u.is_empty()) {
         let u = u.trim_end_matches('/');
         control.push(if u.contains("://") {
             u.to_string()
@@ -585,15 +592,22 @@ async fn invite(State(s): State<AppState>, body: Option<Json<MeshInviteRequest>>
     if control.is_empty() {
         return Err(AppError::unavailable("this server has no LAN address to be reached at"));
     }
+    let (claim, expires_at) = store.tx(|c| reg::invite(c, kind, &role, ttl))?;
     let token = JoinToken {
         v: 1,
         control,
-        coordinator_wg: co.wg_public().to_base64(),
+        coordinator_wg: coordinator_wg.to_base64(),
         claim,
         kind,
     }
     .encode();
-    Ok(Json(MeshInvite { token, expires_at }))
+    Ok(MeshInvite { token, expires_at })
+}
+
+async fn invite(State(s): State<AppState>, body: Option<Json<MeshInviteRequest>>) -> ApiResult<MeshInvite> {
+    let co = coordinator(&s)?;
+    let req = body.map(|b| b.0).unwrap_or_default();
+    Ok(Json(make_invite(&co.cfg, &co.store, &co.wg_public(), &req)?))
 }
 
 /// This node's view (the daemon's status file) and, on the coordinator, the

@@ -4,23 +4,33 @@
 
 pub mod addr;
 pub mod cert;
-#[cfg(all(feature = "daemon", target_os = "linux"))]
+#[cfg(all(feature = "daemon", any(target_os = "linux", target_os = "macos")))]
 pub mod daemon;
 pub mod disco;
 pub mod dns;
 #[cfg(feature = "daemon")]
 pub mod http;
 pub mod keys;
+pub mod mdns;
 pub mod net;
+#[cfg(feature = "daemon")]
+pub mod netstack;
+#[cfg(all(feature = "daemon", any(target_os = "linux", target_os = "macos")))]
+pub mod pair_client;
+pub mod pake;
 pub mod proto;
 pub mod relay;
 #[cfg(feature = "daemon")]
 pub mod relay_client;
 pub mod seal;
+#[cfg(feature = "daemon")]
+pub mod socks;
 pub mod state;
 pub mod stun;
 #[cfg(all(feature = "daemon", target_os = "linux"))]
 pub mod tun;
+#[cfg(all(feature = "daemon", target_os = "macos"))]
+pub mod utun;
 #[cfg(feature = "daemon")]
 pub mod wg;
 

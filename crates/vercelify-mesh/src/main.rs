@@ -2,14 +2,18 @@
 //!
 //!   vercelify-mesh join TOKEN [--name NAME]   join the mesh a token points at
 //!   vercelify-mesh up                         run the node on the mesh (systemd)
+//!   vercelify-mesh up --userspace --socks …   app mode, no root (the Mac app)
 //!   vercelify-mesh status [--json]            this node and its peers
 //!   vercelify-mesh rotate                     new key and certificate now
 //!   vercelify-mesh pubkey                     this node's WireGuard public key
+//!   vercelify-mesh discover                   coordinators on the LAN (mDNS)
+//!   vercelify-mesh pair CODE [--join]         trade a short code for the pairing code
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use vercelify_mesh::daemon::{self, UpOptions};
 use vercelify_mesh::keys::NodeKey;
+use vercelify_mesh::pair_client;
 use vercelify_mesh::proto::DEFAULT_WG_PORT;
 use vercelify_mesh::state::key_path;
 
@@ -45,8 +49,19 @@ enum Cmd {
     },
     /// Run the node on the mesh.
     Up {
+        /// The tun interface (Linux; macOS picks a utunN).
         #[arg(long, default_value = "vfy0")]
         interface: String,
+        /// App mode: no tun device and no root; reach the mesh through
+        /// --socks and --forward (the Mac app).
+        #[arg(long)]
+        userspace: bool,
+        /// With --userspace: a SOCKS5 proxy to the mesh (`127.0.0.1:7480`).
+        #[arg(long, requires = "userspace")]
+        socks: Option<std::net::SocketAddr>,
+        /// With --userspace: `[udp:]127.0.0.1:PORT=HOST:PORT`, repeatable.
+        #[arg(long = "forward", requires = "userspace")]
+        forwards: Vec<vercelify_mesh::socks::Forward>,
         #[arg(long, default_value_t = DEFAULT_WG_PORT)]
         port: u16,
         /// Don't answer `*.vfy` names on the mesh address.
@@ -73,6 +88,40 @@ enum Cmd {
     Rotate,
     /// Print this node's WireGuard public key (creating the key).
     Pubkey,
+    /// Find coordinators on the LAN (mDNS).
+    Discover {
+        #[arg(long)]
+        json: bool,
+        /// Seconds to listen for answers.
+        #[arg(long, default_value_t = 2)]
+        wait: u64,
+    },
+    /// Trade a short pairing code (`sudo vercelify pair` on the server) for
+    /// the full code; prints it.
+    Pair {
+        code: String,
+        /// The server (`192.168.1.20`); default: found on the LAN.
+        #[arg(long)]
+        server: Option<String>,
+        /// Also join the mesh with the code's join token.
+        #[arg(long)]
+        join: bool,
+        /// With --join: this device's name on the mesh (default: the hostname).
+        #[arg(long)]
+        name: Option<String>,
+        /// With --join: the UDP port to announce (0: `up` picks and reports one).
+        #[arg(long, default_value_t = 0)]
+        port: u16,
+    },
+}
+
+/// The `mesh_join` of a `vfy2.` pairing code.
+fn mesh_join_of(code: &str) -> Option<String> {
+    use base64::Engine;
+    let body = code.trim().strip_prefix("vfy2.")?;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(body).ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&raw).ok()?;
+    v["mesh_join"].as_str().map(String::from)
 }
 
 fn hostname() -> String {
@@ -151,8 +200,10 @@ fn main() {
     match cli.cmd {
         Cmd::Join { token, name, port } => {
             let name = name.unwrap_or_else(hostname);
-            let local: Vec<String> = vercelify_mesh::tun::local_ipv4s(None)
+            // `--port 0` (a device on a random port): `up` reports its addresses.
+            let local: Vec<String> = vercelify_mesh::net::local_ipv4s(None)
                 .into_iter()
+                .filter(|_| port != 0)
                 .map(|ip| format!("{ip}:{port}"))
                 .collect();
             match rt.block_on(daemon::join(&cli.dir, &token, &name, local)) {
@@ -162,6 +213,9 @@ fn main() {
         }
         Cmd::Up {
             interface,
+            userspace,
+            socks,
+            forwards,
             port,
             no_dns,
             acl_hook,
@@ -180,6 +234,7 @@ fn main() {
                     .filter(|s| !s.is_empty())
                     .map(String::from)
                     .collect(),
+                userspace: userspace.then_some(daemon::Userspace { socks, forwards }),
             };
             if let Err(e) = rt.block_on(daemon::up(opts)) {
                 fail(e)
@@ -200,5 +255,78 @@ fn main() {
             Ok(k) => println!("{}", k.public()),
             Err(e) => fail(e),
         },
+        Cmd::Discover { json, wait } => {
+            let found = rt
+                .block_on(pair_client::discover(std::time::Duration::from_secs(wait.clamp(1, 30))))
+                .unwrap_or_else(|e| fail(e));
+            if json {
+                let v: Vec<serde_json::Value> = found
+                    .iter()
+                    .map(|f| {
+                        serde_json::json!({
+                            "name": f.announcement.name, "control": f.control(),
+                            "coordinator_wg": f.announcement.coordinator_wg,
+                            "pairing_open": f.announcement.pairing_open,
+                        })
+                    })
+                    .collect();
+                println!("{}", serde_json::Value::Array(v));
+            } else if found.is_empty() {
+                fail("no Vercelify server answered on this network");
+            } else {
+                for f in &found {
+                    println!(
+                        "{:<20} {:<24} {}",
+                        f.announcement.name,
+                        f.control().first().cloned().unwrap_or_default(),
+                        if f.announcement.pairing_open {
+                            "pairing code waiting"
+                        } else {
+                            ""
+                        }
+                    );
+                }
+            }
+        }
+        Cmd::Pair {
+            code,
+            server,
+            join,
+            name,
+            port,
+        } => {
+            let control = match server {
+                Some(s) => vec![pair_client::control_of(&s)],
+                None => {
+                    let found = rt
+                        .block_on(pair_client::discover(std::time::Duration::from_secs(2)))
+                        .unwrap_or_else(|e| fail(e));
+                    // The one waiting for a code, if several answer.
+                    let pick = found
+                        .iter()
+                        .find(|f| f.announcement.pairing_open)
+                        .or(found.first())
+                        .unwrap_or_else(|| fail("no Vercelify server answered on this network; pass --server"));
+                    pick.control()
+                }
+            };
+            let full = rt
+                .block_on(pair_client::claim(&control, &code))
+                .unwrap_or_else(|e| fail(e));
+            println!("{full}");
+            if join {
+                let token = mesh_join_of(&full).unwrap_or_else(|| fail("that server isn't on the mesh (a vfy1. code)"));
+                let name = name.unwrap_or_else(hostname);
+                let local: Vec<String> = vercelify_mesh::net::local_ipv4s(None)
+                    .into_iter()
+                    .filter(|_| port != 0)
+                    .map(|ip| format!("{ip}:{port}"))
+                    .collect();
+                match rt.block_on(daemon::join(&cli.dir, &token, &name, local)) {
+                    Ok(s) => eprintln!("joined as {} ({}, {})", s.name, s.ipv4, s.node_id),
+                    Err(e) => fail(e),
+                }
+            }
+        }
     }
 }

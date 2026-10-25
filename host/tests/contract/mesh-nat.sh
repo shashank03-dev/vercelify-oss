@@ -36,8 +36,8 @@ fail() {
 }
 ns_run() { local ns=$1; shift; ip netns exec "$ns" "$@"; }
 until_ok() {
-  local n=$1; shift
-  for _ in $(seq "$((n * 4))"); do "$@" >/dev/null 2>&1 && return 0; sleep 0.25; done
+  local end=$((SECONDS + $1)); shift
+  while ((SECONDS < end)); do "$@" >/dev/null 2>&1 && return 0; sleep 0.25; done
   return 1
 }
 

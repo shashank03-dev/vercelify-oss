@@ -110,6 +110,49 @@ impl Claims {
     }
 }
 
+impl Claims {
+    /// The mesh's short-code claim (design §13.3), on the control listener:
+    /// SPAKE2 with the code, the pairing sealed under the key. The server
+    /// can't tell a right code from a wrong one (only the app can open the
+    /// answer), so every request spends one of the code's attempts and a
+    /// second, as a wrong code does on `/v1/pair/claim`.
+    pub async fn pake(
+        &self,
+        cfg: &Config,
+        req: &vercelify_mesh::pake::PairRequest,
+    ) -> Result<vercelify_mesh::pake::PairAnswer, AppError> {
+        let mut failures = self.failures.lock().await;
+        let Some(file) = read(cfg) else {
+            return Err(AppError::not_found(
+                "no pairing code is waiting on this server — run `sudo vercelify pair` there",
+            ));
+        };
+        if file.is_expired(unix_now()) {
+            let _ = std::fs::remove_file(code_file(cfg));
+            return Err(AppError {
+                status: StatusCode::GONE,
+                message: "that pairing code expired — run `sudo vercelify pair` for a new one".into(),
+            });
+        }
+        if failures.0 != file.code {
+            *failures = (file.code.clone(), 0);
+        }
+        failures.1 += 1;
+        if failures.1 > SHORT_CODE_MAX_ATTEMPTS {
+            let _ = std::fs::remove_file(code_file(cfg));
+            *failures = Default::default();
+            return Err(AppError {
+                status: StatusCode::FORBIDDEN,
+                message: "too many tries, so that code is gone — run `sudo vercelify pair` for a new one".into(),
+            });
+        }
+        let answer = vercelify_mesh::pake::server_answer(&file.code, req, file.pairing.as_bytes())
+            .map_err(|e| AppError::bad_request(e.to_string()))?;
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        Ok(answer)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,6 +211,30 @@ mod tests {
             claims.claim(&cfg, &f.code).await.unwrap_err().status,
             StatusCode::NOT_FOUND
         );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn pake_claims() {
+        use vercelify_mesh::pake::app_start;
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = cfg(dir.path());
+        let f = create(&cfg, "vfy2.full", None).unwrap();
+        let claims = Claims::default();
+        // The right code opens the answer; the code stays until it runs out
+        // of attempts or expires (the server can't tell a right one).
+        let (app, req) = app_start(&f.code.to_lowercase());
+        let ans = claims.pake(&cfg, &req).await.unwrap();
+        assert_eq!(app.finish(&ans).unwrap(), b"vfy2.full");
+        // A wrong code gets an answer it can't open.
+        let (app, req) = app_start("2222-2223");
+        let ans = claims.pake(&cfg, &req).await.unwrap();
+        assert!(app.finish(&ans).is_err());
+        for _ in 2..SHORT_CODE_MAX_ATTEMPTS {
+            claims.pake(&cfg, &app_start("2222-2223").1).await.unwrap();
+        }
+        let e = claims.pake(&cfg, &app_start(&f.code).1).await.unwrap_err();
+        assert_eq!(e.status, StatusCode::FORBIDDEN);
+        assert!(!is_open(&cfg), "five tries and the code is gone");
     }
 
     #[tokio::test]

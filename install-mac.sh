@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Vercelify for macOS: installs Tailscale and the Vercelify app, then opens it.
+# Vercelify for macOS: installs the Vercelify app, its network daemon
+# (vercelify-mesh) and Tailscale, then opens the app.
 #
 #   curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash
 #
@@ -7,6 +8,9 @@
 #   --with-display   also install ffmpeg + Moonlight (laptop screen as a monitor, remote desktop)
 #   --from-source    build the app here instead of downloading a release (needs Xcode CLT, Node 20+, Rust)
 #   --no-tailscale   skip the Tailscale check
+#   --no-mesh        skip vercelify-mesh, Vercelify's own network (servers on the mesh need it)
+#   --mesh-system    run vercelify-mesh as root with a real interface (*.vfy for every app;
+#                    asks for your password) instead of in the app's user session
 #   --dest DIR       install the app into DIR (default: /Applications, else ~/Applications)
 #   -y, --yes        never ask
 #
@@ -22,6 +26,9 @@ APP_NAME=Vercelify
 WITH_DISPLAY=0
 FROM_SOURCE=0
 WITH_TAILSCALE=1
+WITH_MESH=1
+MESH_SYSTEM=0
+MESH_LABEL=dev.vercelify.mesh
 DEST=''
 ASSUME_YES=0
 
@@ -57,7 +64,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-usage() { sed -n '2,16p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null | sed 's/^# \{0,1\}//' || true; }
+usage() { sed -n '2,20p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null | sed 's/^# \{0,1\}//' || true; }
 
 parse_args() {
   while (( $# )); do
@@ -65,6 +72,8 @@ parse_args() {
       --with-display) WITH_DISPLAY=1 ;;
       --from-source) FROM_SOURCE=1 ;;
       --no-tailscale) WITH_TAILSCALE=0 ;;
+      --no-mesh) WITH_MESH=0 ;;
+      --mesh-system) MESH_SYSTEM=1 ;;
       --dest) DEST=${2:?--dest needs a directory}; shift ;;
       -y|--yes) ASSUME_YES=1 ;;
       -h|--help) usage; exit 0 ;;
@@ -90,6 +99,12 @@ pick_asset() {
     *) want='_x64\.dmg$' ;;
   esac
   { grep -E '_universal\.dmg$' <<<"$urls" || grep -E "$want" <<<"$urls" || true; } | head -1
+}
+
+# mesh_asset RELEASE_JSON_FILE — the vercelify-mesh binary for macOS.
+mesh_asset() {
+  grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" | sed 's/.*"\(https[^"]*\)"$/\1/' |
+    { grep -E '/vercelify-mesh-universal-apple-darwin$' || true; } | head -1
 }
 
 # Release tag in the same JSON, e.g. v0.2.0.
@@ -193,6 +208,103 @@ install_cli() {
   have jq || info "vfy needs jq: brew install jq"
 }
 
+# Where vercelify-mesh keeps its key and state: the user's (app mode) or
+# the system's (--mesh-system, root).
+mesh_home() {
+  if (( MESH_SYSTEM )); then echo "/Library/Application Support/Vercelify"
+  else echo "${VERCELIFY_MESH_HOME:-$HOME/Library/Application Support/Vercelify}"; fi
+}
+
+# mesh_plist BIN HOME SYSTEM — the launchd job. App mode: no root, no
+# interface; the app reaches servers through SOCKS on 127.0.0.1:7480.
+# It waits until the app (or `vercelify-mesh pair CODE --join`) joins.
+mesh_plist() {
+  local bin=$1 home=$2 system=$3 mode
+  if [[ "$system" == 1 ]]; then
+    mode='<string>--port</string><string>0</string>'
+  else
+    mode='<string>--userspace</string><string>--port</string><string>0</string><string>--socks</string><string>127.0.0.1:7480</string>'
+  fi
+  cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$MESH_LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$bin</string>
+    <string>--dir</string><string>$home/mesh</string>
+    <string>--run-dir</string><string>$home/run</string>
+    <string>up</string>
+    $mode
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>RUST_LOG</key><string>vercelify_mesh=info</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardErrorPath</key><string>$home/run/mesh.log</string>
+</dict>
+</plist>
+PLIST
+}
+
+# The binary: VERCELIFY_MESH_BINARY, else the release's, else built here.
+obtain_mesh_binary() {
+  local out=$1 json url src="${XDG_CACHE_HOME:-$HOME/Library/Caches}/vercelify-src"
+  if [[ -n "${VERCELIFY_MESH_BINARY:-}" ]]; then cp "$VERCELIFY_MESH_BINARY" "$out"; return; fi
+  json="${WORK:-$(mktemp -d)}/release.json"
+  if [[ -s "$json" ]] || curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' -o "$json" "$GITHUB_API/repos/$REPO/releases/latest" 2>/dev/null; then
+    url=$(mesh_asset "$json")
+    if [[ -n "$url" ]] && curl -fsSL --retry 3 -o "$out" "$url" && curl -fsSL --retry 3 -o "$out.sha256" "$url.sha256"; then
+      [[ "$(shasum -a 256 "$out" | cut -d' ' -f1)" == "$(cut -d' ' -f1 "$out.sha256")" ]] || die "vercelify-mesh: checksum mismatch"
+      rm -f "$out.sha256"
+      return 0
+    fi
+  fi
+  have cargo || return 1
+  [[ -d "$src/.git" ]] || git clone --depth 1 -q "https://github.com/$REPO" "$src" || return 1
+  (cd "$src" && cargo build --release -q -p vercelify-mesh --features daemon) >&2 || return 1
+  cp "$src/target/release/vercelify-mesh" "$out"
+}
+
+install_mesh() {
+  step "Vercelify network (vercelify-mesh: your servers without Tailscale)"
+  local home bin plist sudo='' domain
+  home=$(mesh_home)
+  if (( MESH_SYSTEM )); then
+    sudo=sudo
+    plist="/Library/LaunchDaemons/$MESH_LABEL.plist"
+    domain=system
+  else
+    plist="${VERCELIFY_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}/$MESH_LABEL.plist"
+    domain="gui/$(id -u)"
+  fi
+  bin="$home/bin/vercelify-mesh"
+  $sudo mkdir -p "$home/bin" "$home/mesh" "$home/run" "$(dirname "$plist")"
+  local tmp
+  tmp=$(mktemp)
+  if ! obtain_mesh_binary "$tmp"; then
+    rm -f "$tmp"
+    warn "no vercelify-mesh build for this Mac yet (servers on Tailscale still work)"
+    return 0
+  fi
+  $sudo install -m 0755 "$tmp" "$bin"
+  rm -f "$tmp"
+  mesh_plist "$bin" "$home" "$MESH_SYSTEM" | $sudo tee "$plist" >/dev/null
+  if [[ "${VERCELIFY_NO_LAUNCHCTL:-0}" != 1 ]]; then
+    $sudo launchctl bootout "$domain/$MESH_LABEL" 2>/dev/null || true
+    $sudo launchctl bootstrap "$domain" "$plist" || warn "launchctl couldn't start $MESH_LABEL (see $home/run/mesh.log)"
+  fi
+  if (( MESH_SYSTEM )); then
+    ok "vercelify-mesh runs as root (*.vfy names on this Mac); join with:"
+    info "sudo \"$bin\" --dir \"$home/mesh\" pair <code> --join"
+  else
+    ok "vercelify-mesh runs in your session; the app joins it to your servers' network when you pair"
+  fi
+}
+
 install_display_tools() {
   step "Display streaming tools"
   have brew || { warn "Homebrew is needed for ffmpeg and Moonlight: https://brew.sh"; return 0; }
@@ -221,6 +333,7 @@ main() {
     fi
   fi
 
+  (( WITH_MESH )) && install_mesh
   (( WITH_DISPLAY )) && install_display_tools
   install_cli
 

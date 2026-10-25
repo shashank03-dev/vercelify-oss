@@ -494,11 +494,26 @@ lifetime 30 days, renewed after day 20 (§13.9). Checked with 5 min clock skew.
 
 ### 13.3 Pairing code v2
 
-`vfy2.<base64url JSON>`: `{v:2, hostname, role, control: ["192.168.1.20:7443",
-"mesh.example.com:7443"], coordinator_wg, coordinator_key, claim, expires_at}`, a join
-token for a device plus what the app shows before joining. The
-8-symbol short code still works: the app finds the server on the LAN (mDNS) or the user
-types the address, then claims with the code. `vfy1.` codes keep working during migration.
+`vfy2.<base64url JSON>`: the `vfy1.` fields plus `mesh_join` (a single-use device join
+token, `vfyj1.…`, at least a day valid); `agent_url` is the server's mesh address
+(`http://10.77.0.1:7420`), `coolify_url` its Coolify on the mesh while one runs. `sudo
+vercelify pair` prints one on a mesh coordinator (`--tailscale` for the old kind); the app
+joins with `mesh_join`, then talks to `agent_url` over the mesh. `vfy1.` codes keep working.
+
+The 8-symbol short code works without typing an address:
+
+- **Discovery.** The coordinator's agent answers multicast DNS for `_vercelify._tcp.local`
+  (`agent/src/mdns.rs`, on 5353 next to Avahi with `SO_REUSEPORT`): PTR, SRV (the control
+  port), TXT (`name`, `wg` = the coordinator's key, `pair=1` while a code waits) and A
+  records for its LAN addresses. `vercelify-mesh discover` (and the app through it) asks
+  with a legacy-unicast query and lists what answered. Nothing in an answer is trusted.
+- **Claim.** `POST /v1/pair/pake` on the control listener runs SPAKE2 (Ed25519 group,
+  identities `vercelify-app`/`vercelify-server`) with the code as the password; the server
+  seals the full pairing code with ChaCha20-Poly1305 under `HKDF(key, "vercelify-pair-v1")`.
+  The code never travels and an answer can't be tested offline: someone answering mDNS in
+  the server's place, or listening, gets one online guess per attempt. The server can't
+  tell a right code from a wrong one, so each request spends one of the code's 5 attempts
+  and a second; `vercelify-mesh pair CODE [--server ADDR] [--join]` is the client.
 
 ### 13.4 Peer map
 
@@ -545,11 +560,21 @@ depends on re-serialising JSON (`vercelify-mesh::cert`).
   route `10.77.0.0/16` set with rtnetlink-free `ioctl`s (`SIOCSIFADDR`, `SIOCSIFNETMASK`,
   `SIOCSIFMTU`, `SIOCSIFFLAGS`) and IPv6 via `/proc/net/if_inet6`-compatible `ioctl(SIOCSIFADDR)` on an
   `AF_INET6` socket.
-- macOS app mode: no tun; a `smoltcp` interface over the same WireGuard tunnels. SOCKS5 on
-  `127.0.0.1:7480` (CONNECT only, hostname resolution through mesh DNS), fixed TCP/UDP
-  forwards configured by the cockpit (`127.0.0.1:<port> → <mesh ip>:<port>`).
-- macOS system mode: `utun` via the system socket `com.apple.net.utun_control`, same loop
-  as Linux.
+- App mode (`up --userspace`, the Mac without root; works on Linux too, which is how it is
+  tested): no tun; a `smoltcp` stack (`netstack.rs`) is the engine's device. SOCKS5
+  (`--socks 127.0.0.1:7480`, CONNECT only, `*.vfy` and bare node names resolved from the
+  map, anything off the mesh refused) and fixed forwards (`--forward
+  [udp:]127.0.0.1:PORT=HOST:PORT`, loopback only; UDP for the display stream). The daemon's
+  own requests to mesh addresses (map stream, endpoint reports, renewal) go over the same
+  stack. Devices bind a random UDP port (`--port 0`) and report the real one. No DNS
+  server (nothing could query it); the server's firewall applies as to any device.
+- macOS system mode: `utun` via the kernel control `com.apple.net.utun_control` (`utun.rs`),
+  addresses and routes with `ifconfig`/`route`, `*.vfy` through `/etc/resolver/vfy`; the
+  same engine as Linux.
+- On the Mac `install-mac.sh` installs `vercelify-mesh` (release asset
+  `vercelify-mesh-universal-apple-darwin`, else a source build) with a LaunchAgent
+  `dev.vercelify.mesh` in app mode (`--mesh-system`: a LaunchDaemon as root, utun). It
+  waits until pairing joins it.
 
 ### 13.6 Disco and path selection
 
@@ -624,7 +649,7 @@ daemon checks it with the webpki roots).
   rebuilds two chains for both address families: `VERCELIFY-MESH` (jumped to from INPUT for
   `vfy0`) and `VERCELIFY-MESH-FWD` (from `DOCKER-USER`, matching published ports with
   `conntrack --ctorigdstport`). Servers: accept all. Devices: accept only their
-  `allowed_ports` (`DEVICE_PORTS`: 7420, 80, 443, 11434/tcp, 5600–5610/udp). Anything else
+  `allowed_ports` (`DEVICE_PORTS`: 7420, 80, 443, 8000 (Coolify, until M10), 11434/tcp, 5600–5610/udp). Anything else
   from the mesh: drop. Plain iptables rules, no ipset: a mesh has tens of devices, not
   thousands. `vfy0` joins `tailscale0` in the container isolation rules (containers can't
   reach the mesh).
@@ -650,7 +675,8 @@ daemon checks it with the webpki roots).
   forwards); `listen = "mesh"` binds the agent to its mesh address.
 - `vercelify mesh init | invite [--device] | join TOKEN | nodes | revoke NAME`; on
   workers the installer installs `vercelify-mesh` and `vercelify-mesh.service`.
-- `vercelify-mesh join TOKEN [--name] | up [--stun …] | status [--json] | rotate | pubkey`;
+- `vercelify-mesh join TOKEN [--name] [--port] | up [--stun …] [--userspace --socks ADDR
+  --forward …] | status [--json] | rotate | pubkey | discover [--json] | pair CODE [--join]`;
   `up` writes `/run/vercelify/mesh-status.json` every 5 s: per peer the endpoint, the path
   (`lan`, `direct`, `relay`, `none`), the round trip, the last handshake and bytes.
 - `mesh_public_url` in `agent.toml` (`VERCELIFY_MESH_PUBLIC_URL`): the control listener
@@ -659,7 +685,9 @@ daemon checks it with the webpki roots).
   network behind it) with the real binaries and checks joining, paths, DNS, the firewall,
   rotation, revocation and restart on the saved map. `host/tests/contract/mesh-nat.sh`
   puts three nodes behind real NAT routers (two that keep ports, one symmetric) and checks
-  hole punching, the relay and revocation on it.
+  hole punching, the relay and revocation on it. The first also pairs a device the way the
+  Mac app does (mDNS, short code, SPAKE2, join) and runs it in app mode: SOCKS, forwards,
+  4 MB through the userspace stack, UDP, and the firewall still applying.
 
 ## 14. Security model
 

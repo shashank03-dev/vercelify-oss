@@ -28,6 +28,8 @@ subtle = "2"
 getrandom = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 libc = "0.2"
+# mDNS on 5353 next to Avahi (SO_REUSEPORT).
+socket2 = { version = "0.6", features = ["all"] }
 # HTTP client for Coolify and Ollama on localhost (already built for axum).
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }

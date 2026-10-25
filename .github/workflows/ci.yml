@@ -95,6 +95,24 @@ jobs:
             grep -q "hardware profile: pi5" /tmp/out
             grep -q "zram swap" /tmp/out'
 
+  mesh-macos:
+    name: vercelify-mesh on macOS (utun, app mode)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p vercelify-mesh --all-targets --features daemon -- -D warnings
+      - run: cargo test -p vercelify-mesh --features daemon
+      - run: cargo build --release -p vercelify-mesh --features daemon
+      - name: Size budget (docs/design/SYSTEM-DESIGN.md §16)
+        run: |
+          size=$(stat -f %z target/release/vercelify-mesh)
+          echo "vercelify-mesh (macOS arm64): $((size / 1024)) KiB"
+          [ "$size" -le $((6 * 1024 * 1024)) ] || { echo "::error::vercelify-mesh is over the 6 MiB budget"; exit 1; }
+
   cockpit:
     name: Cockpit frontend
     runs-on: ubuntu-24.04

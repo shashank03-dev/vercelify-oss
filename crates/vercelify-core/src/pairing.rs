@@ -1,7 +1,9 @@
 //! Pairing codes: a single copy-pasteable string printed by the host
 //! installer that carries everything the cockpit needs to connect.
 //!
-//! Format: `vfy1.` + base64url(JSON of [`Pairing`]) without padding.
+//! Format: `vfy1.` + base64url(JSON of [`Pairing`]) without padding;
+//! `vfy2.` for a server on Vercelify's own mesh (the code then carries a
+//! device join token, and `agent_url` is the server's mesh address).
 
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
@@ -10,6 +12,7 @@ use thiserror::Error;
 use ts_rs::TS;
 
 pub const PREFIX: &str = "vfy1.";
+pub const PREFIX_MESH: &str = "vfy2.";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
@@ -28,11 +31,17 @@ pub struct Pairing {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub role: Option<String>,
+    /// `vfyj1.…`: a single-use token that puts this device on the server's
+    /// mesh (design §13.3). The app joins with it, then reaches `agent_url`
+    /// over the mesh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub mesh_join: Option<String>,
 }
 
 #[derive(Debug, Error, PartialEq)]
 pub enum PairingError {
-    #[error("pairing code must start with '{PREFIX}'")]
+    #[error("pairing code must start with '{PREFIX}' or '{PREFIX_MESH}'")]
     Prefix,
     #[error("pairing code is not valid base64")]
     Encoding,
@@ -42,13 +51,18 @@ pub enum PairingError {
 
 pub fn encode(p: &Pairing) -> String {
     format!(
-        "{PREFIX}{}",
+        "{}{}",
+        if p.mesh_join.is_some() { PREFIX_MESH } else { PREFIX },
         URL_SAFE_NO_PAD.encode(serde_json::to_vec(p).expect("serializable"))
     )
 }
 
 pub fn decode(code: &str) -> Result<Pairing, PairingError> {
-    let body = code.trim().strip_prefix(PREFIX).ok_or(PairingError::Prefix)?;
+    let code = code.trim();
+    let (body, mesh) = match code.strip_prefix(PREFIX) {
+        Some(b) => (b, false),
+        None => (code.strip_prefix(PREFIX_MESH).ok_or(PairingError::Prefix)?, true),
+    };
     // Tolerate padding and whitespace introduced by copy/paste.
     let cleaned: String = body.chars().filter(|c| !c.is_whitespace() && *c != '=').collect();
     let bytes = URL_SAFE_NO_PAD.decode(cleaned).map_err(|_| PairingError::Encoding)?;
@@ -58,6 +72,14 @@ pub fn decode(code: &str) -> Result<Pairing, PairingError> {
     }
     if p.agent_token.len() < 16 {
         return Err(PairingError::Payload("agent_token too short".into()));
+    }
+    if mesh != p.mesh_join.is_some() {
+        return Err(PairingError::Payload(
+            "a vfy2. code carries a mesh join token, a vfy1. code doesn't".into(),
+        ));
+    }
+    if p.mesh_join.as_deref().is_some_and(|j| !j.starts_with("vfyj1.")) {
+        return Err(PairingError::Payload("mesh_join must be a vfyj1. token".into()));
     }
     Ok(p)
 }

@@ -90,8 +90,41 @@ fn tls_config() -> Arc<rustls::ClientConfig> {
         .clone()
 }
 
+/// In app mode the kernel has no route into the mesh: the daemon's own
+/// requests to mesh addresses (the map stream, endpoint reports, renewals)
+/// go over the userspace stack instead.
+static MESH_DIALER: OnceLock<(crate::netstack::Stack, crate::socks::Resolver)> = OnceLock::new();
+
+pub fn dial_mesh_with(stack: crate::netstack::Stack, resolver: crate::socks::Resolver) {
+    let _ = MESH_DIALER.set((stack, resolver));
+}
+
+async fn connect_mesh(u: &Url, timeout: Duration) -> Option<Result<Box<dyn Io>, HttpError>> {
+    let (stack, resolver) = MESH_DIALER.get()?;
+    let ip: std::net::IpAddr = u.host.parse().ok()?;
+    if !resolver.on_mesh(ip) {
+        return None;
+    }
+    let port = u.host_port.rsplit_once(':').and_then(|(_, p)| p.parse().ok())?;
+    let r = match tokio::time::timeout(timeout, stack.connect_tcp(std::net::SocketAddr::new(ip, port))).await {
+        Err(_) => Err(HttpError::Connect(u.host_port.clone(), "timed out".into())),
+        Ok(Err(e)) => Err(HttpError::Connect(u.host_port.clone(), e.to_string())),
+        Ok(Ok(conn)) => {
+            let (ours, theirs) = tokio::io::duplex(64 * 1024);
+            tokio::spawn(crate::socks::bridge(theirs, conn));
+            Ok(Box::new(ours) as Box<dyn Io>)
+        }
+    };
+    Some(r)
+}
+
 /// Connect to `u`, with TLS for https/wss.
 pub async fn connect_io(u: &Url, timeout: Duration) -> Result<Box<dyn Io>, HttpError> {
+    if !u.tls {
+        if let Some(r) = connect_mesh(u, timeout).await {
+            return r;
+        }
+    }
     let err = |e: String| HttpError::Connect(u.host_port.clone(), e);
     let stream = tokio::time::timeout(timeout, TcpStream::connect(&u.host_port))
         .await

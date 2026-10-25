@@ -210,6 +210,16 @@ pub struct UpOptions {
     pub acl_hook: Option<String>,
     /// STUN servers (`host:port`) to learn the public address from.
     pub stun_servers: Vec<String>,
+    /// App mode (the Mac without root): a userspace stack instead of a tun
+    /// device, reached through SOCKS5 and forwards.
+    pub userspace: Option<Userspace>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Userspace {
+    /// SOCKS5 on loopback (`127.0.0.1:7480`).
+    pub socks: Option<SocketAddr>,
+    pub forwards: Vec<crate::socks::Forward>,
 }
 
 /// Shared between the daemon's tasks.
@@ -223,6 +233,10 @@ struct Live {
     key: watch::Sender<Arc<NodeKey>>,
     /// Relay URLs from the map.
     relays: watch::Sender<Vec<String>>,
+    /// `vfy0`, `utun5`, or `userspace`.
+    interface: String,
+    /// The WireGuard socket's port.
+    port: u16,
 }
 
 impl Live {
@@ -334,7 +348,7 @@ async fn follow_map(live: &Arc<Live>, opts: &Arc<UpOptions>, ctl: &mpsc::Sender<
 /// addresses, then what peers and STUN servers saw (its public mapping).
 async fn report_endpoints(live: &Live, ctl: &mpsc::Sender<Control>, port: u16, last: &mut Vec<String>) {
     let mesh_prefix = live.state.read().unwrap().ipv4.parse::<Ipv4Addr>().ok();
-    let local: Vec<SocketAddr> = crate::tun::local_ipv4s(mesh_prefix)
+    let local: Vec<SocketAddr> = crate::net::local_ipv4s(mesh_prefix)
         .into_iter()
         .map(|ip| SocketAddr::new(IpAddr::V4(ip), port))
         .collect();
@@ -458,7 +472,7 @@ async fn write_status(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>
         return;
     }
     let Ok(peers) = rx.await else { return };
-    let local = crate::tun::local_ipv4s(None);
+    let local = crate::net::local_ipv4s(None);
     let st = live.state.read().unwrap().clone();
     let map = live.map.read().unwrap().clone();
     let vk = live.verifying().ok();
@@ -482,7 +496,7 @@ async fn write_status(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>
         .collect();
     let doc = serde_json::json!({
         "node_id": st.node_id, "name": st.name, "kind": st.kind, "ipv4": st.ipv4, "ipv6": st.ipv6,
-        "interface": opts.interface, "port": opts.port,
+        "interface": live.interface, "port": live.port,
         "map_version": map.as_ref().map(|m| m.version), "epoch": map.as_ref().map(|m| m.epoch),
         "coordinator_seen_secs": seen, "revoked": *live.revoked.read().unwrap(),
         "cert_expires_at": cert_expires, "updated_at": unix_now(), "peers": peers,
@@ -519,6 +533,13 @@ async fn resolve_stun(servers: Vec<String>, ctl: mpsc::Sender<Control>) {
 
 /// Point `*.vfy` at the mesh name server (systemd-resolved, when present).
 async fn configure_resolver(interface: &str, ip: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        let _ = interface;
+        if let Err(e) = crate::utun::configure_resolver(ip) {
+            tracing::warn!("/etc/resolver/vfy: {e}");
+        }
+    }
     if !Path::new("/run/systemd/resolve").exists() {
         return;
     }
@@ -550,24 +571,83 @@ pub async fn up(opts: UpOptions) -> Result<()> {
     };
     let key = NodeKey::load_or_create(&key_path(&opts.dir))?;
     let ipv4: Ipv4Addr = state.ipv4.parse().map_err(|_| msg("bad mesh address in state"))?;
-    let ipv6 = state.ipv6.parse().ok();
-    let tun = crate::tun::Tun::open(&opts.interface)?;
-    tun.configure(ipv4, state.ipv4_prefix_len, ipv6.map(|ip| (ip, 48)))?;
-    tracing::info!("{} is {} on {}", state.name, state.ipv4, opts.interface);
+    let ipv6: Option<std::net::Ipv6Addr> = state.ipv6.parse().ok();
     let socket = UdpSocket::bind(("0.0.0.0", opts.port)).await?;
+    // With `--port 0` (devices) the kernel picked one: that's what peers need.
+    let port = socket.local_addr()?.port();
     let coordinator_wg = PublicKey::from_base64(&state.coordinator.public_key)?;
     let (key_tx, key_rx) = watch::channel(Arc::new(NodeKey::from_bytes(*key.secret_bytes())));
     let (relays_tx, relays_rx) = watch::channel(vec![]);
-    let mut engine = Engine::new(&key, socket, Arc::new(tun));
     // The coordinator's own daemon needs no relay to itself; it still
     // connects, so nodes reach it through the relay when nothing else works.
-    engine = engine.with_relay(crate::relay_client::spawn(crate::relay_client::RelayConfig {
+    let relay = crate::relay_client::spawn(crate::relay_client::RelayConfig {
         urls: relays_rx,
         key: key_rx,
         coordinator: coordinator_wg,
-    }));
+    });
+    // Names from the last map right away: SOCKS may be asked before the
+    // map is applied below.
+    let cached = state
+        .map
+        .as_deref()
+        .and_then(|m| PeerMap::verify(&VerifyingKey::from_base64(&state.coordinator_key).ok()?, m).ok());
+    let zone = Arc::new(RwLock::new(cached.map(|m| m.dns).unwrap_or_default()));
     let (ctl, ctl_rx) = mpsc::channel(32);
-    tokio::spawn(engine.run(ctl_rx));
+    let interface = match &opts.userspace {
+        Some(us) => {
+            let mut addrs = vec![(IpAddr::V4(ipv4), state.ipv4_prefix_len)];
+            if let Some(ip) = ipv6 {
+                addrs.push((IpAddr::V6(ip), 48));
+            }
+            let (stack, dev) = crate::netstack::Stack::start(addrs);
+            tokio::spawn(Engine::new(&key, socket, Arc::new(dev)).with_relay(relay).run(ctl_rx));
+            let resolver = crate::socks::Resolver {
+                zone: zone.clone(),
+                ipv4_prefix: (ipv4, state.ipv4_prefix_len),
+                ipv6_prefix: (ipv6.unwrap_or(std::net::Ipv6Addr::UNSPECIFIED), 48),
+            };
+            crate::http::dial_mesh_with(stack.clone(), resolver.clone());
+            if let Some(addr) = us.socks {
+                let l = tokio::net::TcpListener::bind(addr)
+                    .await
+                    .map_err(|e| msg(format!("SOCKS on {addr}: {e}")))?;
+                tokio::spawn(crate::socks::serve_socks(l, stack.clone(), resolver.clone()));
+                tracing::info!("SOCKS5 to the mesh on {addr}");
+            }
+            for f in us.forwards.clone() {
+                let (stack, resolver) = (stack.clone(), resolver.clone());
+                tracing::info!("forward {}{} → {}", if f.udp { "udp " } else { "" }, f.listen, f.target);
+                tokio::spawn(async move {
+                    if let Err(e) = crate::socks::serve_forward(f.clone(), stack, resolver).await {
+                        tracing::warn!("forward {}: {e}", f.listen);
+                    }
+                });
+            }
+            tracing::info!("{} is {} (userspace)", state.name, state.ipv4);
+            "userspace".to_string()
+        }
+        None => {
+            #[cfg(target_os = "linux")]
+            let dev = {
+                let tun = crate::tun::Tun::open(&opts.interface)?;
+                tun.configure(ipv4, state.ipv4_prefix_len, ipv6.map(|ip| (ip, 48)))?;
+                tun
+            };
+            #[cfg(target_os = "macos")]
+            let dev = {
+                let tun = crate::utun::Utun::open()?;
+                tun.configure(ipv4, state.ipv4_prefix_len, ipv6.map(|ip| (ip, 48)))?;
+                tun
+            };
+            #[cfg(target_os = "linux")]
+            let interface = opts.interface.clone();
+            #[cfg(target_os = "macos")]
+            let interface = dev.name.clone();
+            tokio::spawn(Engine::new(&key, socket, Arc::new(dev)).with_relay(relay).run(ctl_rx));
+            tracing::info!("{} is {} on {}", state.name, state.ipv4, interface);
+            interface
+        }
+    };
     {
         let (servers, ctl) = (opts.stun_servers.clone(), ctl.clone());
         tokio::spawn(async move { resolve_stun(servers, ctl).await });
@@ -580,11 +660,13 @@ pub async fn up(opts: UpOptions) -> Result<()> {
     let live = Arc::new(Live {
         state: RwLock::new(state.clone()),
         map: RwLock::new(None),
-        zone: Arc::new(RwLock::new(Dns::default())),
+        zone,
         coordinator_seen: RwLock::new(None),
         revoked: RwLock::new(false),
         key: key_tx,
         relays: relays_tx,
+        interface: interface.clone(),
+        port,
     });
     // The last map first: the mesh works before the coordinator answers.
     if let Some(signed) = &state.map {
@@ -592,11 +674,11 @@ pub async fn up(opts: UpOptions) -> Result<()> {
             apply_map(&live, &opts, &ctl, m, signed);
         }
     }
-    if opts.dns {
+    if opts.dns && opts.userspace.is_none() {
         match UdpSocket::bind((ipv4, 53)).await {
             Ok(sock) => {
                 tokio::spawn(crate::dns::server::serve(sock, live.zone.clone()));
-                configure_resolver(&opts.interface, &state.ipv4).await;
+                configure_resolver(&interface, &state.ipv4).await;
             }
             Err(e) => tracing::warn!("mesh DNS on {ipv4}:53: {e}"),
         }
@@ -633,7 +715,7 @@ pub async fn up(opts: UpOptions) -> Result<()> {
                 write_status(&live, &opts, &ctl).await;
                 // Endpoints every minute (sooner at start); renewal hourly.
                 if ticks == 2 || ticks == 6 || ticks.is_multiple_of(12) {
-                    report_endpoints(&live, &ctl, opts.port, &mut last_endpoints).await;
+                    report_endpoints(&live, &ctl, live.port, &mut last_endpoints).await;
                 }
                 if ticks % 720 == 3 {
                     if let Err(e) = renew(&live, &opts, &ctl, false).await {

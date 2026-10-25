@@ -15,7 +15,7 @@ required-features = ["daemon"]
 default = []
 # The data plane and the daemon (`vercelify-mesh`): WireGuard, tun, DNS, the
 # map client. The agent uses the protocol types only and leaves this off.
-daemon = ["dep:boringtun", "dep:tokio", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes", "dep:clap", "dep:tracing", "dep:tracing-subscriber", "dep:tokio-tungstenite", "dep:futures-util", "dep:tokio-rustls", "dep:webpki-roots"]
+daemon = ["dep:boringtun", "dep:tokio", "dep:hyper", "dep:hyper-util", "dep:http-body-util", "dep:bytes", "dep:clap", "dep:tracing", "dep:tracing-subscriber", "dep:tokio-tungstenite", "dep:futures-util", "dep:tokio-rustls", "dep:webpki-roots", "dep:smoltcp"]
 
 [dependencies]
 serde.workspace = true
@@ -31,6 +31,8 @@ chacha20poly1305 = { version = "0.10", default-features = false, features = ["al
 hkdf = "0.12"
 sha2 = "0.10"
 libc = "0.2"
+# Pairing by short code over the LAN (pake.rs).
+spake2 = "0.4"
 
 boringtun = { version = "0.7.1", default-features = false, optional = true }
 tokio = { workspace = true, optional = true }
@@ -46,6 +48,8 @@ tokio-tungstenite = { version = "0.29", default-features = false, features = ["h
 futures-util = { version = "0.3", default-features = false, features = ["sink"], optional = true }
 tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"], optional = true }
 webpki-roots = { version = "1", optional = true }
+# Userspace TCP/IP for app mode on the Mac (no tun): SOCKS5 and forwards.
+smoltcp = { version = "0.12", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "proto-ipv6", "socket-tcp", "socket-udp"], optional = true }
 
 [dev-dependencies]
 tempfile = "3"

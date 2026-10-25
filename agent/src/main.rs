@@ -15,6 +15,7 @@ mod exec;
 mod github;
 mod http;
 mod llm;
+mod mdns;
 mod mesh;
 mod mesh_relay;
 mod pairing;
@@ -91,6 +92,9 @@ enum Cmd {
         /// Name of the device token minted for this pairing
         #[arg(long)]
         name: Option<String>,
+        /// Pair over Tailscale even on a mesh coordinator
+        #[arg(long)]
+        tailscale: bool,
     },
     /// Device tokens: list, or revoke one so that device can no longer connect
     Tokens {
@@ -111,6 +115,47 @@ fn log_filter(default: &str) -> tracing_subscriber::filter::Targets {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or_else(|| default.parse().expect("valid directives"))
+}
+
+/// A pairing for the Mac app on Vercelify's mesh (design §13.3): a device
+/// join token, and the agent at the server's mesh address.
+fn mesh_pairing(cfg: &Config, token: &str, ttl_secs: u64) -> Result<vercelify_core::pairing::Pairing, String> {
+    let own = vercelify_mesh::state::State::load(&cfg.mesh_dir)
+        .map_err(|e| e.to_string())?
+        .ok_or("the mesh isn't set up on this server yet: sudo vercelify mesh init (or pair with --tailscale)")?;
+    let key = vercelify_mesh::keys::NodeKey::load_or_create(&vercelify_mesh::state::key_path(&cfg.mesh_dir))
+        .map_err(|e| e.to_string())?;
+    let store = vercelify_platform::Store::open(&cfg.platform_db).map_err(|e| e.to_string())?;
+    // The join token lives as long as the short code, and at least a day
+    // for the full code (it works once either way).
+    let ttl_minutes = ((ttl_secs / 60) as u32).max(24 * 60);
+    let invite = mesh::make_invite(
+        cfg,
+        &store,
+        &key.public(),
+        &vercelify_core::platform::MeshInviteRequest {
+            kind: Some("device".into()),
+            role: Some("owner".into()),
+            ttl_minutes: Some(ttl_minutes),
+        },
+    )
+    .map_err(|e| e.message)?;
+    Ok(vercelify_core::pairing::Pairing {
+        agent_url: format!("http://{}:{}", own.ipv4, cfg.port),
+        agent_token: token.to_string(),
+        coolify_url: if cfg.platform_engine() {
+            String::new()
+        } else {
+            format!("http://{}:8000", own.ipv4)
+        },
+        coolify_token: std::fs::read_to_string(&cfg.coolify_token_file)
+            .ok()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty() && !cfg.platform_engine()),
+        hostname: own.name,
+        role: Some(cfg.role()),
+        mesh_join: Some(invite.token),
+    })
 }
 
 fn random_token() -> String {
@@ -164,6 +209,7 @@ async fn main() {
             with_code,
             ttl,
             name,
+            tailscale,
         } => {
             // Each pairing gets its own token, so a lost Mac can be revoked
             // alone (`vercelify tokens revoke`).
@@ -174,6 +220,11 @@ async fn main() {
                     "could not write {}: {e} (run as root)",
                     cfg.tokens_file.display()
                 )),
+            };
+            let mesh_pairing = if cfg.mesh_coordinator && cfg.role() != "worker" && !tailscale {
+                Some(mesh_pairing(&cfg, &token, ttl).unwrap_or_else(|e| fatal(&e)))
+            } else {
+                None
             };
             let ts = tailscale::status(cfg.tailscale_bin.as_deref()).await;
             let host = host
@@ -219,7 +270,9 @@ async fn main() {
                     .filter(|t| !t.is_empty() && !no_coolify),
                 hostname,
                 role: Some(role),
+                mesh_join: None,
             };
+            let pairing = mesh_pairing.unwrap_or(pairing);
             let code = vercelify_core::pairing::encode(&pairing);
             if short {
                 match pairing::create(&cfg, &code, Some(ttl)) {
@@ -347,7 +400,8 @@ async fn serve(cfg: Config) {
     if let Some(co) = state.mesh.clone() {
         match state.config.mesh_control_listen.parse::<SocketAddr>() {
             Ok(addr) => {
-                let router = mesh::control_router(co);
+                tasks.spawn(mdns::respond(state.config.clone(), co.clone()));
+                let router = mesh::control_router(co, state.claims.clone());
                 tasks.spawn(async move {
                     let listener = loop {
                         match tokio::net::TcpListener::bind(addr).await {

@@ -1,7 +1,8 @@
 name: Release
 
 # Push a tag like v0.1.0 to publish:
-#   - vercelify-agent-<target> (+ .sha256) — the installer downloads these
+#   - vercelify-agent-<target>, vercelify-mesh-<target> (+ .sha256) — the
+#     installers download these (the Mac's: vercelify-mesh-universal-apple-darwin)
 #   - the cockpit app: macOS universal .dmg, Linux .deb and .AppImage
 on:
   push:
@@ -39,6 +40,29 @@ jobs:
             cp "target/${{ matrix.target }}/release/$bin" "out/$bin-${{ matrix.target }}"
             (cd out && sha256sum "$bin-${{ matrix.target }}" > "$bin-${{ matrix.target }}.sha256")
           done
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: out/*
+
+  mesh-macos:
+    name: vercelify-mesh for macOS (universal)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - run: |
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked -p vercelify-mesh --features daemon --target "$t"
+          done
+      - name: Package
+        run: |
+          mkdir -p out
+          lipo -create -output out/vercelify-mesh-universal-apple-darwin \
+            target/aarch64-apple-darwin/release/vercelify-mesh target/x86_64-apple-darwin/release/vercelify-mesh
+          cd out && shasum -a 256 vercelify-mesh-universal-apple-darwin > vercelify-mesh-universal-apple-darwin.sha256
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:

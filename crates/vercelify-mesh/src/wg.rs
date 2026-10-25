@@ -645,14 +645,22 @@ impl<D: Device> Engine<D> {
                 p.last_rx = Some(Instant::now());
                 if let Some(from) = from {
                     // Authenticated: the peer is at `from` now (roaming).
-                    if p.endpoint != Some(from) && !p.best_valid(Instant::now()) {
-                        p.endpoint = Some(from);
-                    }
-                    if p.endpoint == Some(from) {
-                        p.roamed = true;
-                    }
-                    if let Some(path) = p.paths.get_mut(&from) {
-                        path.alive = Instant::now();
+                    let now = Instant::now();
+                    match p.paths.get_mut(&from) {
+                        // A path disco confirmed: it's alive; the best stays the best.
+                        Some(path) if now.duration_since(path.alive) < PATH_STALE => path.alive = now,
+                        // Somewhere new (a restart, a NAT rebinding): follow it
+                        // at once, and let disco confirm the best path again.
+                        _ => {
+                            if p.endpoint != Some(from) {
+                                tracing::debug!("{}: now at {from}", p.spec.name);
+                                p.best = None;
+                                p.paths.remove(&from);
+                                p.next_ping = now;
+                            }
+                            p.endpoint = Some(from);
+                            p.roamed = true;
+                        }
                     }
                     p.learn(from);
                 }
@@ -1166,6 +1174,51 @@ mod tests {
         expect_packet(&mut a.delivered, b"direct now").await;
         let st = until(&a, "direct", |s| s[0].path == "direct").await;
         assert!(st[0].endpoint.is_some());
+    }
+
+    #[tokio::test]
+    async fn follows_a_peer_that_moved() {
+        let (mut a, mut ea, ca) = node(Ipv4Addr::new(10, 77, 0, 1)).await;
+        let (b, mut eb, cb) = node(Ipv4Addr::new(10, 77, 0, 2)).await;
+        ea.set_peers(vec![spec(&b, vec![b.addr])]);
+        eb.set_peers(vec![spec(&a, vec![a.addr])]);
+        tokio::spawn(ea.run(ca));
+        let b_task = tokio::spawn(eb.run(cb));
+        b.inject.send(ipv4(b.ip, a.ip, b"before")).await.unwrap();
+        expect_packet(&mut a.delivered, b"before").await;
+        until(&a, "a confirmed path to b", |s| s[0].rtt_ms.is_some()).await;
+
+        // B restarts with the same key on another port (a new socket, a
+        // new session); A's map still has the old address.
+        b_task.abort();
+        let sock = UdpSocket::bind("127.0.0.1:0").await.unwrap();
+        let moved = sock.local_addr().unwrap();
+        let (inject, rx) = mpsc::channel(64);
+        let (dtx, mut delivered) = mpsc::channel(64);
+        let dev = Arc::new(ChanDevice {
+            rx: Mutex::new(rx),
+            delivered: dtx,
+        });
+        let mut eb2 = Engine::new(&b.key, sock, dev);
+        eb2.set_peers(vec![spec(&a, vec![a.addr])]);
+        let (_c2, cb2) = mpsc::channel(8);
+        tokio::spawn(eb2.run(cb2));
+        let started = tokio::time::Instant::now();
+        inject.send(ipv4(b.ip, a.ip, b"after the move")).await.unwrap();
+        expect_packet(&mut a.delivered, b"after the move").await;
+        // A answers at the new address right away, not after the old path expires.
+        a.inject.send(ipv4(a.ip, b.ip, b"answer")).await.unwrap();
+        expect_packet(&mut delivered, b"answer").await;
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "took {:?}",
+            started.elapsed()
+        );
+        let st = until(&a, "a follows b", |s| {
+            s[0].endpoint.as_deref() == Some(moved.to_string().as_str())
+        })
+        .await;
+        assert_eq!(st[0].path, "direct");
     }
 
     #[tokio::test]

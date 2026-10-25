@@ -237,6 +237,27 @@ SJ=$(server_json)
 [[ -n "$SJ" ]] || die "no server ${SERVER:+named $SERVER }in $SETTINGS (see: vfy servers)"
 field() { jq -r --arg k "$1" '.[$k] // ""' <<<"$SJ"; }
 
+# A server on Vercelify's mesh (10.77.x.x, *.vfy): from a Mac in app mode
+# the way in is vercelify-mesh's SOCKS proxy (as root, or on Linux, the
+# mesh is routed and needs nothing). VFY_MESH_SOCKS forces a proxy.
+MESH_STATUS=${VFY_MESH_STATUS:-"$HOME/Library/Application Support/Vercelify/run/mesh-status.json"}
+on_mesh() {
+  case "$(field agent_url | sed -E 's#^[a-z]+://##; s#[:/].*$##')" in 10.77.*|*.vfy) return 0 ;; esac
+  return 1
+}
+PROXY=()
+if on_mesh; then
+  if [[ -n "${VFY_MESH_SOCKS:-}" ]] || jq -e '.interface == "userspace"' "$MESH_STATUS" >/dev/null 2>&1; then
+    PROXY=(--socks5-hostname "${VFY_MESH_SOCKS:-127.0.0.1:7480}" --noproxy '')
+  fi
+fi
+# curl, through the mesh proxy when the server needs it.
+xcurl() { curl ${PROXY[@]+"${PROXY[@]}"} "$@"; }
+unreachable() {
+  if on_mesh; then die "cannot reach $(field hostname) — is vercelify-mesh running? (vercelify-mesh status)"; fi
+  die "cannot reach $(field hostname) — is Tailscale connected?"
+}
+
 # api agent|coolify METHOD PATH [JSON] — prints the body; dies with the error.
 api() {
   local kind=$1 method=$2 path=$3 body=${4:-} base token out code
@@ -249,8 +270,7 @@ api() {
   fi
   local opts=(-sS -X "$method" -K - -w '\n%{http_code}' --max-time 60 -H 'Accept: application/json')
   [[ -n "$body" ]] && opts+=(-H 'Content-Type: application/json' --data "$body")
-  out=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | curl "${opts[@]}" "${base%/}$path") ||
-    die "cannot reach $(field hostname) — is Tailscale connected?"
+  out=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | xcurl "${opts[@]}" "${base%/}$path") || unreachable
   code=${out##*$'\n'}
   out=${out%$'\n'*}
   if [[ "$code" != 2* ]]; then
@@ -312,7 +332,7 @@ why_answer() {
       printf '%sAsking %s on %s…%s\n\n' "$D" "$model" "$(field hostname)" "$N" >&2
       WHY_PULL_HINT="sudo vercelify llm pull $model"
       printf 'header = "Authorization: Bearer %s"\n' "$(field agent_token)" |
-        curl -sS -N -K - --max-time 900 -H 'Content-Type: application/json' --data "$body" "$(field agent_url)/v1/llm/chat" |
+        xcurl -sS -N -K - --max-time 900 -H 'Content-Type: application/json' --data "$body" "$(field agent_url)/v1/llm/chat" |
         print_stream "$model on $(field hostname), via Ollama"
       ;;
   esac
@@ -325,7 +345,7 @@ papi() { api agent "$1" "/v1/platform$2" "${3:-}"; }
 # Follow a JSON-lines stream of the platform API (token on stdin).
 pstream() {
   printf 'header = "Authorization: Bearer %s"\n' "$(field agent_token)" |
-    curl -sS -N -K - --max-time 86400 "$(field agent_url)/v1/platform$1" ||
+    xcurl -sS -N -K - --max-time 86400 "$(field agent_url)/v1/platform$1" ||
     die "the stream from $(field hostname) ended early"
 }
 

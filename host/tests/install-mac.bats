@@ -70,3 +70,31 @@ teardown() { rm -rf "$T"; }
   [[ "$output" == *"vfy installed in $bin"* ]]
   rm -rf "$bin"
 }
+
+@test "the network daemon: release asset and launchd job" {
+  printf '{"assets":[{"browser_download_url":"https://github.com/o/r/releases/download/v1/vercelify-mesh-universal-apple-darwin"},{"browser_download_url":"https://github.com/o/r/releases/download/v1/vercelify-mesh-universal-apple-darwin.sha256"}]}' >"$T/r.json"
+  [ "$(mesh_asset "$T/r.json")" = https://github.com/o/r/releases/download/v1/vercelify-mesh-universal-apple-darwin ]
+  [ -z "$(mesh_asset "$FIX/github-release.json")" ]
+  run mesh_plist /x/vercelify-mesh "/Users/me/Library/Application Support/Vercelify" 0
+  [[ "$output" == *"<string>--userspace</string>"* ]]
+  [[ "$output" == *"<string>127.0.0.1:7480</string>"* ]]
+  [[ "$output" == *"<string>/Users/me/Library/Application Support/Vercelify/mesh</string>"* ]]
+  [[ "$output" == *"<key>KeepAlive</key><true/>"* ]]
+  run mesh_plist /x/vercelify-mesh /L 1
+  [[ "$output" != *"--userspace"* ]]
+  # A real property list, with `up` where launchd will run it.
+  mesh_plist /x /h 0 >"$T/job.plist"
+  run python3 "$BATS_TEST_DIRNAME/fixtures/check_plist.py" "$T/job.plist"
+  [ "$status" -eq 0 ]
+}
+
+@test "install_mesh puts the binary and the LaunchAgent in place" {
+  printf '#!/bin/sh\necho mesh\n' >"$T/fake-mesh"
+  HOME=$T VERCELIFY_MESH_BINARY="$T/fake-mesh" VERCELIFY_NO_LAUNCHCTL=1 run install_mesh
+  [ "$status" -eq 0 ]
+  [ -x "$T/Library/Application Support/Vercelify/bin/vercelify-mesh" ]
+  grep -q "<string>$T/Library/Application Support/Vercelify/bin/vercelify-mesh</string>" "$T/Library/LaunchAgents/dev.vercelify.mesh.plist"
+  parse_args --no-mesh --mesh-system
+  [ "$WITH_MESH" = 0 ] && [ "$MESH_SYSTEM" = 1 ]
+  [ "$(mesh_home)" = "/Library/Application Support/Vercelify" ]
+}

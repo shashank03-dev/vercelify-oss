@@ -132,3 +132,25 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   run "$VFY" why blog
   [ "$status" -eq 0 ]
 }
+
+@test "a server on the mesh is reached through vercelify-mesh's SOCKS proxy" {
+  python3 "$BATS_TEST_DIRNAME/mock_socks.py" "$T/socks.port" "$T/socks.log" "127.0.0.1:$(cat "$T/port")" &
+  SOCKS_PID=$!
+  for _ in $(seq 50); do [ -s "$T/socks.port" ] && break; sleep 0.1; done
+  cat >"$T/mesh.json" <<JSON
+{"servers": [{"agent_url": "http://10.77.0.1:7420", "agent_token": "agent-secret", "coolify_url": "", "coolify_token": null, "hostname": "optiplex", "role": "main"}],
+ "active": "http://10.77.0.1:7420"}
+JSON
+  # App mode (the daemon's status says userspace) → through the proxy.
+  printf '{"interface": "userspace"}' >"$T/status.json"
+  VFY_SETTINGS="$T/mesh.json" VFY_MESH_STATUS="$T/status.json" VFY_MESH_SOCKS="127.0.0.1:$(cat "$T/socks.port")" run "$VFY" apps
+  kill "$SOCKS_PID" 2>/dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"✓ blog"* ]]
+  grep -q '^CONNECT 10.77.0.1:7420$' "$T/socks.log"
+  # A server not on the mesh never goes through it.
+  : >"$T/socks.log"
+  VFY_MESH_SOCKS="127.0.0.1:1" run "$VFY" apps
+  [ "$status" -eq 0 ]
+  [ ! -s "$T/socks.log" ]
+}

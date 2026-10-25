@@ -121,6 +121,7 @@ fn pairing_roundtrip() {
         coolify_token: Some("1|abc".into()),
         hostname: "vercelify-host".into(),
         role: Some("main".into()),
+        mesh_join: None,
     };
     let code = pairing::encode(&p);
     assert!(code.starts_with("vfy1."));
@@ -130,6 +131,25 @@ fn pairing_roundtrip() {
     assert_eq!(pairing::decode(&wrapped).unwrap(), p);
     assert_eq!(pairing::decode("abc"), Err(pairing::PairingError::Prefix));
     assert_eq!(pairing::decode("vfy1.!!!"), Err(pairing::PairingError::Encoding));
+
+    // On the mesh: vfy2., with the join token, and only together.
+    let mut m = p.clone();
+    m.agent_url = "http://10.77.0.1:7420".into();
+    m.coolify_url = String::new();
+    m.mesh_join = Some("vfyj1.eyJ2IjoxfQ".into());
+    let code = pairing::encode(&m);
+    assert!(code.starts_with("vfy2."));
+    assert_eq!(pairing::decode(&code).unwrap(), m);
+    let mismatched = code.replacen("vfy2.", "vfy1.", 1);
+    assert!(matches!(
+        pairing::decode(&mismatched),
+        Err(pairing::PairingError::Payload(_))
+    ));
+    m.mesh_join = Some("nonsense".into());
+    assert!(matches!(
+        pairing::decode(&pairing::encode(&m)),
+        Err(pairing::PairingError::Payload(_))
+    ));
 }
 
 #[test]

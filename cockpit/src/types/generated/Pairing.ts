@@ -16,4 +16,10 @@ coolify_token?: string, hostname: string,
 /**
  * `main` or `worker` (absent in codes from 0.1).
  */
-role?: string, };
+role?: string, 
+/**
+ * `vfyj1.…`: a single-use token that puts this device on the server's
+ * mesh (design §13.3). The app joins with it, then reaches `agent_url`
+ * over the mesh.
+ */
+mesh_join?: string, };

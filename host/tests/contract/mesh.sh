@@ -18,7 +18,7 @@ agent=${AGENT_BIN:-$repo/target/debug/vercelify-agent}
 mesh=${MESH_BIN:-$repo/target/debug/vercelify-mesh}
 work=$(mktemp -d)
 token="mesh-contract-0123456789abcdef"
-ns_main=vfyt-main ns_pi=vfyt-pi ns_far=vfyt-far ns_mac=vfyt-mac ns_rtr=vfyt-rtr
+ns_main=vfyt-main ns_pi=vfyt-pi ns_far=vfyt-far ns_mac=vfyt-mac ns_app=vfyt-app ns_rtr=vfyt-rtr
 
 pass=0
 ok() { pass=$((pass + 1)); printf '  \033[32m✓\033[0m %s\n' "$*"; }
@@ -28,10 +28,10 @@ fail() {
   exit 1
 }
 ns_run() { local ns=$1; shift; ip netns exec "$ns" "$@"; }
-# until N CMD…: retry CMD for N seconds.
+# until N CMD…: retry CMD for N seconds (however long each try takes).
 until_ok() {
-  local n=$1; shift
-  for _ in $(seq "$((n * 4))"); do "$@" >/dev/null 2>&1 && return 0; sleep 0.25; done
+  local end=$((SECONDS + $1)); shift
+  while ((SECONDS < end)); do "$@" >/dev/null 2>&1 && return 0; sleep 0.25; done
   return 1
 }
 
@@ -42,7 +42,7 @@ cleanup() {
   # Anything else this run started (found by its work directory).
   for p in $(pgrep -f -- "$work" 2>/dev/null); do [[ "$p" == "$$" ]] || kill "$p" 2>/dev/null || true; done
   sleep 0.5
-  for ns in $ns_main $ns_pi $ns_far $ns_mac $ns_rtr; do ip netns del "$ns" 2>/dev/null || true; done
+  for ns in $ns_main $ns_pi $ns_far $ns_mac $ns_app $ns_rtr; do ip netns del "$ns" 2>/dev/null || true; done
   rm -rf "$work"
 }
 trap cleanup EXIT
@@ -52,7 +52,7 @@ for b in "$agent" "$mesh"; do [[ -x "$b" ]] || { echo "missing $b (cargo build)"
 for t in ip ping curl jq python3; do command -v "$t" >/dev/null || { echo "missing $t"; exit 1; }; done
 
 echo "network: LAN 192.168.77.0/24 (main, pi) — router — 172.31.9.0/24 (far)"
-for ns in $ns_main $ns_pi $ns_far $ns_mac $ns_rtr; do ip netns del "$ns" 2>/dev/null || true; ip netns add "$ns"; ns_run "$ns" ip link set lo up; done
+for ns in $ns_main $ns_pi $ns_far $ns_mac $ns_app $ns_rtr; do ip netns del "$ns" 2>/dev/null || true; ip netns add "$ns"; ns_run "$ns" ip link set lo up; done
 ns_run $ns_rtr ip link add lan type bridge
 ns_run $ns_rtr ip link add wan type bridge
 ns_run $ns_rtr ip addr add 192.168.77.1/24 dev lan
@@ -73,20 +73,21 @@ link $ns_main lan 192.168.77.10/24 192.168.77.1
 link $ns_pi lan 192.168.77.11/24 192.168.77.1
 link $ns_far wan 172.31.9.10/24 172.31.9.1
 link $ns_mac lan 192.168.77.12/24 192.168.77.1
+link $ns_app lan 192.168.77.13/24 192.168.77.1
 
 echo "coordinator: agent + vercelify-mesh in $ns_main"
-mkdir -p "$work/main" "$work/pi" "$work/far" "$work/mac"
+mkdir -p "$work/main" "$work/pi" "$work/far" "$work/mac" "$work/app"
 printf '%s\n' "$token" >"$work/agent.token"
 # Background processes start as `ip netns exec` itself (it execs the
 # command), so $! is the daemon's pid and cleanup can stop it.
-ip netns exec $ns_main env VERCELIFY_CONFIG=/nonexistent VERCELIFY_LISTEN=127.0.0.1,mesh VERCELIFY_PORT=7420 \
-  VERCELIFY_TOKEN_FILE="$work/agent.token" VERCELIFY_ROLE=main VERCELIFY_INSTALL_ENV="$work/install.env" \
-  VERCELIFY_STATE_DIR="$work/main/state" VERCELIFY_RUN_DIR="$work/main/run" \
-  VERCELIFY_PLATFORM_DB="$work/main/state/platform.db" VERCELIFY_MESH_DIR="$work/main/mesh" \
-  VERCELIFY_MESH_COORDINATOR=1 VERCELIFY_MESH_CONTROL_LISTEN=0.0.0.0:7443 VERCELIFY_MESH_NAME=main \
-  VERCELIFY_WATCH_INTERVAL=0 VERCELIFY_AUTODEPLOY_INTERVAL=0 VERCELIFY_WAKE_LISTEN='' \
-  VERCELIFY_TOKENS_FILE="$work/main/state/tokens.json" VERCELIFY_AUDIT_LOG="$work/main/state/audit.log" \
-  "$agent" serve >"$work/agent.log" 2>&1 &
+agent_env=(VERCELIFY_CONFIG=/nonexistent "VERCELIFY_LISTEN=127.0.0.1,mesh" VERCELIFY_PORT=7420
+  VERCELIFY_TOKEN_FILE="$work/agent.token" VERCELIFY_ROLE=main VERCELIFY_INSTALL_ENV="$work/install.env"
+  VERCELIFY_STATE_DIR="$work/main/state" VERCELIFY_RUN_DIR="$work/main/run"
+  VERCELIFY_PLATFORM_DB="$work/main/state/platform.db" VERCELIFY_MESH_DIR="$work/main/mesh"
+  VERCELIFY_MESH_COORDINATOR=1 VERCELIFY_MESH_CONTROL_LISTEN=0.0.0.0:7443 VERCELIFY_MESH_NAME=main
+  VERCELIFY_WATCH_INTERVAL=0 VERCELIFY_AUTODEPLOY_INTERVAL=0 VERCELIFY_WAKE_LISTEN=''
+  VERCELIFY_TOKENS_FILE="$work/main/state/tokens.json" VERCELIFY_AUDIT_LOG="$work/main/state/audit.log")
+ip netns exec $ns_main env "${agent_env[@]}" "$agent" serve >"$work/agent.log" 2>&1 &
 echo $! >"$work/agent.pid"
 until_ok 20 ns_run $ns_main curl -sf http://127.0.0.1:7420/v1/health || fail "the agent didn't start"
 until_ok 10 test -s "$work/main/mesh/state.json" || fail "the coordinator wrote no state for its own node"
@@ -192,6 +193,65 @@ mac_get() { ns_run $ns_mac curl -s -o /dev/null -w '%{http_code}' --max-time 3 "
 pi_get=$(ns_run $ns_pi curl -s -o /dev/null -w '%{http_code}' --max-time 3 http://10.77.0.1:9999/ || true)
 [[ "$pi_get" == 200 ]] || fail "a server couldn't reach port 9999 on another server ($pi_get)"
 ok "firewall: the mac reaches the agent but not :9999; servers reach everything"
+
+echo "the Mac app: pairing by short code on the LAN, then app mode (no tun, no root)"
+codes=$(ip netns exec $ns_main env "${agent_env[@]}" "$agent" pair --short --with-code --name "contract mac")
+short=$(sed -n 1p <<<"$codes")
+[[ "$(sed -n 2p <<<"$codes")" == vfy2.* ]] || fail "pair on a mesh coordinator didn't print a vfy2. code: $codes"
+found() { ns_run $ns_app "$mesh" discover --json | jq -e '.[] | select(.name == "main" and .pairing_open) | .control[0] == "192.168.77.10:7443"'; }
+until_ok 10 found || fail "the app doesn't find main by mDNS: $(ns_run $ns_app "$mesh" discover --json 2>&1)"
+ok "the app finds main by mDNS (a pairing code is waiting)"
+wrong=$(ns_run $ns_app "$mesh" --dir "$work/app/wrong" pair 2222-2222 2>&1 || true)
+[[ "$wrong" == *"wrong code"* ]] || fail "a wrong code wasn't refused: $wrong"
+full=$(ns_run $ns_app "$mesh" --dir "$work/app/mesh" pair "$short" --join --name app 2>"$work/pair.err") || fail "pairing failed: $(cat "$work/pair.err")"
+[[ "$full" == "$(sed -n 2p <<<"$codes")" ]] || fail "the app got another code than the server printed"
+grep -q "joined as app (10.77.0.5" "$work/pair.err" || fail "the app didn't join: $(cat "$work/pair.err")"
+app_token=$(python3 -c 'import base64,json,sys; s=sys.argv[1].split(".")[1]
+print(json.loads(base64.urlsafe_b64decode(s + "=" * (-len(s) % 4)))["agent_token"])' "$full")
+ok "short code over SPAKE2: a wrong one opens nothing; the right one gives the vfy2. code, and the app joined"
+ip netns exec $ns_app env RUST_LOG=vercelify_mesh=debug "$mesh" --dir "$work/app/mesh" --run-dir "$work/app/run" up \
+  --port 0 --userspace --socks 127.0.0.1:7480 --forward 127.0.0.1:17420=main.vfy:7420 \
+  --forward udp:127.0.0.1:15600=main.vfy:5600 >"$work/mesh-app.log" 2>&1 &
+echo $! >"$work/mesh-app.pid"
+# (Without the NO_PROXY="*" set above: curl would skip the proxy.)
+socks() { ns_run $ns_app env -u NO_PROXY -u no_proxy curl -s --max-time "${T:-5}" --socks5-hostname 127.0.0.1:7480 "$@"; }
+health() { socks -f http://main.vfy:7420/v1/health | grep -q '"mesh"'; }
+until_ok 30 health || fail "the agent isn't reachable through SOCKS"
+ns_run $ns_app ip link show vfy0 >/dev/null 2>&1 && fail "app mode created a tun device"
+jq -e '.interface == "userspace"' "$work/app/run/mesh-status.json" >/dev/null || fail "the status doesn't say userspace"
+ok "SOCKS5: main.vfy:7420 from userspace, no tun device"
+ns_run $ns_app curl -sf --max-time 5 http://127.0.0.1:17420/v1/health | grep -q '"mesh"' || fail "the TCP forward doesn't work"
+ok "forward 127.0.0.1:17420 → main.vfy:7420"
+nodes=$(socks -f -H "Authorization: Bearer $app_token" http://10.77.0.1:7420/v1/mesh/nodes) || fail "the paired token doesn't work over the mesh"
+jq -e '.[] | select(.name == "app" and .kind == "device")' <<<"$nodes" >/dev/null || fail "app isn't listed: $nodes"
+ok "the pairing's device token works at its agent_url (10.77.0.1:7420) through the mesh"
+# A few MB both ways' worth of windows: flow control and FIN.
+head -c 4000000 /dev/urandom >"$work/big.bin"
+ip netns exec $ns_main python3 -m http.server 80 --bind 10.77.0.1 --directory "$work" >/dev/null 2>&1 &
+echo $! >"$work/http80.pid"
+until_ok 10 ns_run $ns_main curl -sf -o /dev/null --max-time 1 http://10.77.0.1:80/big.bin || fail "the file server didn't start"
+got=$(T=60 socks -f http://10.77.0.1:80/big.bin | sha256sum | cut -d' ' -f1)
+[[ "$got" == "$(sha256sum "$work/big.bin" | cut -d' ' -f1)" ]] || fail "4 MB through SOCKS arrived damaged or short"
+ok "4 MB through the userspace stack, byte for byte"
+ip netns exec $ns_main python3 -c '
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.bind(("10.77.0.1", 5600))
+while True:
+    d, a = s.recvfrom(2048); s.sendto(b"echo:" + d, a)' >/dev/null 2>&1 &
+echo $! >"$work/udp.pid"
+udp_echo() {
+  ns_run $ns_app python3 -c '
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(2)
+s.sendto(b"frame", ("127.0.0.1", 15600)); sys.exit(0 if s.recv(2048) == b"echo:frame" else 1)'
+}
+until_ok 15 udp_echo || fail "no answer through the UDP forward"
+ok "UDP forward 127.0.0.1:15600 → main.vfy:5600 and back (the display stream's path)"
+code=$(socks -o /dev/null -w '%{http_code}' http://example.com/ || true)
+[[ "$code" == 000 ]] || fail "SOCKS let a request out to the internet ($code)"
+code=$(T=15 socks -o /dev/null -w '%{http_code}' http://10.77.0.1:9999/ || true)
+[[ "$code" == 000 ]] || fail "the app reached :9999 on main (not a device port)"
+ok "SOCKS refuses the internet; main's firewall still applies to the app"
 
 echo "rotation"
 old=$(ns_run $ns_pi "$mesh" --dir "$work/pi/mesh" pubkey)
