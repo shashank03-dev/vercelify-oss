@@ -6,6 +6,7 @@ import { coolify, isWorker, local } from "../lib/api";
 import { hostOf, primaryUrl, statusHealth } from "../lib/format";
 import { NAV, useNav } from "../lib/nav";
 import { openExternal } from "../lib/open";
+import { isPlatform, listedApp, platform } from "../lib/platform";
 import { useSession } from "../lib/session";
 import type { CoolifyApplication } from "../types";
 import { useToast } from "./Toast";
@@ -25,6 +26,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     if (!open) return;
     setSearch("");
     if (isWorker(settings)) setApps([]);
+    else if (isPlatform(settings)) platform.apps().then((l) => setApps(l.map(listedApp)), () => setApps([]));
     else coolify.applications().then(setApps, () => setApps([]));
   }, [open, settings]);
 
@@ -41,7 +43,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   };
 
   const deploy = (a: CoolifyApplication) =>
-    coolify.deploy(a.uuid).then(
+    (isPlatform(settings) ? platform.deploy(a.uuid) : coolify.deploy(a.uuid)).then(
       () => toast.ok(`Deployment of ${a.name} queued`),
       (e: Error) => toast.bad(e.message),
     );

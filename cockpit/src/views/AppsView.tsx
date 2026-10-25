@@ -37,6 +37,8 @@ import { EnvPanel } from "../components/EnvPanel";
 import { GettingStarted } from "../components/GettingStarted";
 import { ProjectPanel } from "../components/ProjectPanel";
 import { useToast } from "../components/Toast";
+import { isPlatform } from "../lib/platform";
+import { PlatformApps } from "./PlatformAppsView";
 import {
   Button,
   AutoHeight,
@@ -81,6 +83,7 @@ type Filter = "all" | "running" | "issues";
 
 export function AppsView() {
   const { settings, servers, select } = useSession();
+  if (isPlatform(settings)) return <PlatformApps />;
   if (isWorker(settings)) {
     const mains = servers.filter((s) => !isWorker(s));
     return (
@@ -325,7 +328,7 @@ const ROW_GRID =
   "grid items-center gap-4 px-4 grid-cols-[minmax(0,1fr)_120px_184px] @3xl:grid-cols-[minmax(0,1.4fr)_120px_minmax(0,1fr)_184px] @5xl:grid-cols-[minmax(0,1.4fr)_120px_minmax(0,1fr)_72px_184px]";
 
 /** The machine behind the apps: how much headroom it has left. */
-function MachineCard() {
+export function MachineCard() {
   const { system: sys } = useLive();
   const { go } = useNav();
   const s = sys.data;
@@ -813,7 +816,13 @@ function DeploymentLog({ deployment, onClose }: { deployment: CoolifyDeployment;
 type Explanation = { model?: string; text: string; tps?: number | null; error?: { title: string; detail: string } };
 
 /** "Why did my deploy fail?": the server's own model (Gemma 4 E2B by default) reads the log. */
-function ExplainFailure({ deployment, lines }: { deployment: CoolifyDeployment; lines: CoolifyDeploymentLog[] }) {
+export function ExplainFailure({
+  deployment,
+  lines,
+}: {
+  deployment: Pick<CoolifyDeployment, "application_name" | "commit" | "commit_message">;
+  lines: CoolifyDeploymentLog[];
+}) {
   const { settings } = useSession();
   const agent = agentOn(settings.agent_url);
   const { go } = useNav();

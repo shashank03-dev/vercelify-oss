@@ -95,7 +95,9 @@ export function pairingToSettings(p: Pairing): CockpitSettings {
   };
 }
 
-export const isWorker = (s: CockpitSettings) => s.role === "worker" || !s.coolify_url;
+/** Workers deploy nothing themselves. A main server on the platform engine has
+ * no Coolify URL but says `role: "main"`; older pairings carry no role. */
+export const isWorker = (s: CockpitSettings) => s.role === "worker" || (!s.role && !s.coolify_url);
 
 const q = encodeURIComponent;
 

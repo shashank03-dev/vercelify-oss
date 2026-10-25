@@ -185,12 +185,14 @@ async fn main() {
                 .unwrap_or_else(|| host.clone());
             let role = cfg.role();
             let worker = role == "worker";
+            // Servers on the platform engine have no Coolify to hand out.
+            let no_coolify = worker || cfg.platform_engine();
             let token_file = coolify_token_file.unwrap_or_else(|| cfg.coolify_token_file.clone());
             let pairing = vercelify_core::pairing::Pairing {
                 agent_url: format!("http://{host}:{}", cfg.port),
                 agent_token: token,
                 // Workers run no Coolify: the main host deploys to them.
-                coolify_url: match (coolify_url, worker) {
+                coolify_url: match (coolify_url, no_coolify) {
                     (Some(u), _) => u,
                     (None, true) => String::new(),
                     (None, false) => format!("http://{host}:{coolify_port}"),
@@ -198,7 +200,7 @@ async fn main() {
                 coolify_token: std::fs::read_to_string(&token_file)
                     .ok()
                     .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty() && !worker),
+                    .filter(|t| !t.is_empty() && !no_coolify),
                 hostname,
                 role: Some(role),
             };

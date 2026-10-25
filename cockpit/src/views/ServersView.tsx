@@ -4,6 +4,7 @@ import { HealthChecks } from "../components/HealthChecks";
 import { useToast } from "../components/Toast";
 import { Button, Callout, Card, EmptyState, ErrorNote, IconButton, Meter, Modal, PageHeader, PixelWave, Select, ShimmerText, StatusDot, StatusText } from "../components/ui";
 import { agentOn, coolifyOn, isWorker } from "../lib/api";
+import { isPlatform } from "../lib/platform";
 import { compareVersions, newestVersion } from "../lib/caps";
 import { bytes, duration, pct } from "../lib/format";
 import { usePoll } from "../lib/hooks";
@@ -113,7 +114,9 @@ function ServerCard({
   const sys = usePoll(() => api.system(), 10_000, [s.agent_url]);
   const llm = usePoll(() => api.llm(), 30_000, [s.agent_url]);
   const worker = isWorker(s);
-  const pool = usePoll(() => (worker ? Promise.resolve([]) : coolifyOn(s.agent_url).servers()), worker ? 0 : 30_000, [s.agent_url, revision]);
+  // The pool is Coolify's server list; platform servers get theirs with M9.
+  const noPool = worker || isPlatform(s);
+  const pool = usePoll(() => (noPool ? Promise.resolve([]) : coolifyOn(s.agent_url).servers()), noPool ? 0 : 30_000, [s.agent_url, revision]);
   const doctor = usePoll(() => api.doctor(), 60_000, [s.agent_url, revision]);
   const upd = useUpdate(s, follow, () => void Promise.all([sys.refresh(), doctor.refresh()]));
   const d = sys.data;

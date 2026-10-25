@@ -297,6 +297,9 @@ pub struct App {
     pub node_id: Option<String>,
     pub desired: Desired,
     pub current_deployment_id: Option<String>,
+    /// Status of its newest production deployment (lists show build state
+    /// without a request per app).
+    pub last_status: Option<DeploymentStatus>,
     pub domains: Vec<AppDomain>,
     /// Primary URL, if it has a domain.
     pub url: Option<String>,

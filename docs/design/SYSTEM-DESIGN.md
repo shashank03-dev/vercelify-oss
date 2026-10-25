@@ -390,7 +390,14 @@ The platform routes live under `/v1/platform/` (`/v1/projects` is already the
 `/v1/platform/apps/{id}/env`, `…/domains`, `…/volumes`, `…/deployments`,
 `/v1/platform/deployments/{id}`, `/v1/platform/nodes`. Apps are addressed by id or
 name. Full list: §4.14 of the plan. Request/response types live in
-`vercelify-core::platform` and are exported to TypeScript.
+`vercelify-core::platform` and are exported to TypeScript. `App.last_status` carries
+the newest production deployment's status, so lists show build state without a
+request per app.
+
+The cockpit (M6) tells a platform server by its pairing: `role: "main"` with an empty
+`coolify_url` (the agent leaves Coolify out of `vfy1.` codes when `engine = "platform"`).
+Pairings without a role and without a Coolify URL stay workers. On such a server the
+Apps page, ⌘K and the sidebar use `/v1/platform`; everything else is shared.
 
 ## 13. Mesh
 

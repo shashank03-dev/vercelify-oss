@@ -378,3 +378,72 @@ test("vercel.json: rules, warnings, cron jobs, upload and removal", async ({ pag
   await expect(page.getByText("notes-api is served as Coolify configures it")).toBeVisible();
   await expect(page.getByText("No vercel.json for this app yet")).toBeVisible();
 });
+
+test("platform engine: deploy with a live log, roll back, variables, domains, databases", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "optiplex-7050");
+  await expect(page.getByTestId("host-status")).toContainText("optiplex-7050");
+  await expect(page.getByTestId("platform-apps")).toBeVisible();
+  await expect(page.getByTestId("status-shop")).toContainText("Live");
+  await expect(page.getByTestId("status-api")).toContainText("last deploy failed");
+
+  // a new app from Git: created, built with a streamed log, then live
+  await page.getByTestId("new-app").click();
+  await page.getByTestId("new-repo").fill("https://github.com/you/My-Site.git");
+  await expect(page.getByTestId("new-name")).toHaveValue("my-site");
+  await page.getByTestId("create-app").click();
+  await expect(page.getByTestId("app-detail")).toContainText("my-site");
+  await expect(page.getByTestId("deploy-log")).toContainText("Detected Next.js");
+  await expect(page.getByTestId("deploy-log")).toContainText("Deployment is live", { timeout: 15_000 });
+  await expect(page.getByTestId("deployment-1")).toContainText("Live");
+  await page.keyboard.press("Escape");
+  await expect(page.getByTestId("status-my-site")).toContainText("Live");
+
+  // a failed build, then a rollback to an earlier version
+  await page.getByTestId("papp-api").getByRole("button", { name: /api/ }).first().click();
+  await expect(page.getByTestId("deploy-log")).toContainText("undefined: handlers.Notes");
+  await page.getByTestId("rollback-1").click();
+  await expect(page.getByTestId("deployment-4")).toContainText("Live", { timeout: 15_000 });
+
+  // variables and an imported .env
+  await page.getByTestId("tab-env").click();
+  await page.getByTestId("env-key").fill("api_url");
+  await expect(page.getByTestId("env-key")).toHaveValue("API_URL");
+  await page.getByTestId("env-value").fill("https://api.example.com");
+  await page.getByTestId("env-add").click();
+  await expect(page.getByTestId("env-API_URL")).toBeVisible();
+  await page.getByTestId("env-import").click();
+  await page.getByTestId("env-import-text").fill("NODE_ENV=production\nexport FLAG=1\n");
+  await page.getByTestId("env-import-run").click();
+  await expect(page.getByTestId("env-FLAG")).toBeVisible();
+
+  // a custom domain gets its certificate
+  await page.getByTestId("tab-domains").click();
+  await page.getByTestId("domain-input").fill("notes.example.com");
+  await page.getByTestId("domain-add").click();
+  await expect(page.getByTestId("domain-notes.example.com")).toContainText("HTTPS", { timeout: 15_000 });
+
+  // a deploy hook is shown once
+  await page.getByTestId("tab-settings").click();
+  await page.getByTestId("hook-create").click();
+  await expect(page.getByTestId("hook-url")).toContainText("/v1/hooks/deploy/vfyh_");
+  await page.keyboard.press("Escape");
+
+  // a database connected to an app, backed up
+  await page.getByTestId("new-db").click();
+  await page.getByTestId("db-name").fill("notes-db");
+  await page.getByTestId("db-link").selectOption({ label: "api" });
+  await page.getByTestId("db-create").click();
+  await expect(page.getByTestId("db-detail")).toContainText("notes-db");
+  await expect(page.getByTestId("db-url")).toContainText("postgres://notes-db:••••@vfy-db-notes-db:5432/notes-db");
+  await page.getByTestId("db-backup").click();
+  await expect(page.getByTestId("db-backups")).toContainText("just now", { timeout: 10_000 });
+  await page.keyboard.press("Escape");
+
+  // pages without a platform version yet don't call Coolify
+  await page.getByTestId("nav-storage").click();
+  await expect(page.getByText("SSD tier")).toBeVisible();
+  await expect(page.getByTestId("coolify-volumes")).toHaveCount(0);
+  await page.getByTestId("nav-servers").click();
+  await expect(page.getByText("optiplex-7050").first()).toBeVisible();
+});

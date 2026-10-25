@@ -4,6 +4,7 @@ import type { AppDomain } from "./AppDomain";
 import type { AppKind } from "./AppKind";
 import type { AppRuntime } from "./AppRuntime";
 import type { AppSource } from "./AppSource";
+import type { DeploymentStatus } from "./DeploymentStatus";
 import type { Desired } from "./Desired";
 import type { PreviewSettings } from "./PreviewSettings";
 
@@ -11,7 +12,12 @@ export type App = { id: string, name: string, project_id: string, environment_id
 /**
  * Server it runs on (`node_…`); None = placed automatically.
  */
-node_id: string | null, desired: Desired, current_deployment_id: string | null, domains: Array<AppDomain>, 
+node_id: string | null, desired: Desired, current_deployment_id: string | null, 
+/**
+ * Status of its newest production deployment (lists show build state
+ * without a request per app).
+ */
+last_status: DeploymentStatus | null, domains: Array<AppDomain>, 
 /**
  * Primary URL, if it has a domain.
  */

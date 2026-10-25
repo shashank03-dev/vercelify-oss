@@ -5,6 +5,7 @@ import { agent, coolify, isWorker } from "./api";
 import { hasCap } from "./caps";
 import { usePoll, type Polled } from "./hooks";
 import { alertText, notify, shouldNotify } from "./notify";
+import { isPlatform, listedApp, platform } from "./platform";
 import { useSession } from "./session";
 import { inTauri } from "./transport";
 import type { Alert } from "../types";
@@ -14,7 +15,8 @@ type Listener = () => void;
 interface Live {
   /** The selected server's system snapshot, every 10 s. */
   system: Polled<SystemSnapshot>;
-  /** Its Coolify applications every 15 s (always empty on a worker). */
+  /** Its apps every 15 s (always empty on a worker); on the platform engine
+   * mapped to the same shape. */
   apps: Polled<CoolifyApplication[]>;
   /** Version and capabilities of its agent, every minute. */
   health: Polled<Health>;
@@ -73,7 +75,12 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const { settings } = useSession();
   const main = !isWorker(settings);
   const system = usePoll(() => agent.system(), 10_000, [settings.agent_url]);
-  const apps = usePoll(() => (main ? coolify.applications() : Promise.resolve([])), main ? 15_000 : 0, [settings.agent_url, main]);
+  const own = isPlatform(settings);
+  const apps = usePoll(
+    (): Promise<CoolifyApplication[]> => (!main ? Promise.resolve([]) : own ? platform.apps().then((l) => l.map(listedApp)) : coolify.applications()),
+    main ? 15_000 : 0,
+    [settings.agent_url, main, own],
+  );
   const health = usePoll(() => agent.health(), 60_000, [settings.agent_url]);
   const withAlerts = hasCap(health.data, "alerts");
   const withEvents = hasCap(health.data, "events");
@@ -168,6 +175,13 @@ export function LiveProvider({ children }: { children: ReactNode }) {
       setStreaming(false);
     };
   }, [settings.agent_url, settings.hostname, withEvents, emit, refreshAlerts]);
+
+  const refreshApps = apps.refresh;
+  useEffect(() => {
+    if (!own) return;
+    const off = [subscribe("apps", () => void refreshApps()), subscribe("deployments", () => void refreshApps())];
+    return () => off.forEach((f) => f());
+  }, [own, subscribe, refreshApps]);
 
   const withSleep = main && hasCap(health.data, "sleep");
   const sleep = usePoll(() => (withSleep ? agent.sleep() : Promise.resolve(null)), withSleep ? 60_000 : 0, [settings.agent_url, withSleep]);

@@ -8,12 +8,16 @@ import { hasCap } from "../lib/caps";
 import { useLive } from "../lib/live";
 import { bytes, mediaLabel, pct } from "../lib/format";
 import { sleep, usePoll } from "../lib/hooks";
+import { isPlatform } from "../lib/platform";
 import { useSession } from "../lib/session";
 import type { CoolifyVolume, DiskInfo, StorageTier } from "../types";
 
 export function StorageView() {
+  const { settings } = useSession();
+  // Platform servers have no Coolify; their volumes come with M9's storage page.
+  const own = isPlatform(settings);
   const sys = usePoll(() => agent.system(), 10_000);
-  const vols = usePoll(() => agent.coolifyVolumes(), 8000);
+  const vols = usePoll(() => (own ? Promise.resolve([]) : agent.coolifyVolumes()), own ? 0 : 8000, [own]);
   const raw = usePoll(() => agent.volumes(), 15_000);
   const [moving, setMoving] = useState<{ vol: CoolifyVolume; to: StorageTier } | null>(null);
 
@@ -55,69 +59,71 @@ export function StorageView() {
         />
       </div>
 
-      <Card
-        title="Coolify volumes"
-        description="Persistent data of your apps and databases. Move it between disks with one click."
-        icon={<Boxes />}
-        className="mb-6"
-        testId="coolify-volumes"
-        flush
-      >
-        <ErrorNote error={vols.error} className="m-4" />
-        {vols.loading && !vols.data ? (
-          <div className="p-4">
-            <Loading />
-          </div>
-        ) : !vols.data?.length ? (
-          <EmptyState icon={<Boxes />} title="No persistent volumes yet">
-            Databases and apps you create in Coolify show up here, and you can move them between tiers.
-          </EmptyState>
-        ) : (
-          <div role="table" aria-label="Coolify volumes" className="text-[13px]">
-            <div role="row" className={cx(VOLUME_GRID, "h-8 border-b border-line bg-fg/[0.015] text-[11px] font-medium text-fg-dim")}>
-              <span>Resource</span>
-              <span>Volume</span>
-              <span>Mounted at</span>
-              <span>Disk</span>
-              <span />
+      {!own && (
+        <Card
+          title="Coolify volumes"
+          description="Persistent data of your apps and databases. Move it between disks with one click."
+          icon={<Boxes />}
+          className="mb-6"
+          testId="coolify-volumes"
+          flush
+        >
+          <ErrorNote error={vols.error} className="m-4" />
+          {vols.loading && !vols.data ? (
+            <div className="p-4">
+              <Loading />
             </div>
-            <div className="divide-y divide-line">
-              {vols.data.map((v) => {
-                const to: StorageTier = v.tier === "ssd" ? "hdd" : "ssd";
-                return (
-                  <div role="row" key={v.id} data-testid={`volume-${v.name}`} className={cx(VOLUME_GRID, "py-2.5 transition-colors hover:bg-fg/[0.025]")}>
-                    <div className="min-w-0 leading-tight">
-                      <div className="truncate font-medium">{v.resource_name || "—"}</div>
-                      <div className="mt-1 text-[11px] text-fg-dim">{v.resource_type.replace("Standalone", "")}</div>
+          ) : !vols.data?.length ? (
+            <EmptyState icon={<Boxes />} title="No persistent volumes yet">
+              Databases and apps you create in Coolify show up here, and you can move them between tiers.
+            </EmptyState>
+          ) : (
+            <div role="table" aria-label="Coolify volumes" className="text-[13px]">
+              <div role="row" className={cx(VOLUME_GRID, "h-8 border-b border-line bg-fg/[0.015] text-[11px] font-medium text-fg-dim")}>
+                <span>Resource</span>
+                <span>Volume</span>
+                <span>Mounted at</span>
+                <span>Disk</span>
+                <span />
+              </div>
+              <div className="divide-y divide-line">
+                {vols.data.map((v) => {
+                  const to: StorageTier = v.tier === "ssd" ? "hdd" : "ssd";
+                  return (
+                    <div role="row" key={v.id} data-testid={`volume-${v.name}`} className={cx(VOLUME_GRID, "py-2.5 transition-colors hover:bg-fg/[0.025]")}>
+                      <div className="min-w-0 leading-tight">
+                        <div className="truncate font-medium">{v.resource_name || "—"}</div>
+                        <div className="mt-1 text-[11px] text-fg-dim">{v.resource_type.replace("Standalone", "")}</div>
+                      </div>
+                      <span className="truncate font-mono text-xs text-fg-muted" title={v.data_path}>
+                        {v.name}
+                      </span>
+                      <span className="truncate font-mono text-xs text-fg-muted">{v.mount_path}</span>
+                      <span className="text-[12px] text-fg-muted">{v.tier === "ssd" ? "SSD" : "HDD"}</span>
+                      <span className="flex justify-end">
+                        {v.movable ? (
+                          <Button
+                            size="sm"
+                            icon={<ArrowRightLeft />}
+                            disabled={to === "hdd" && !hdd}
+                            title={to === "hdd" && !hdd ? "No HDD mounted at /mnt/storage" : undefined}
+                            onClick={() => setMoving({ vol: v, to })}
+                            data-testid={`move-${v.name}`}
+                          >
+                            Move to {to.toUpperCase()}
+                          </Button>
+                        ) : (
+                          <span className="text-[11px] text-fg-dim">edit compose file</span>
+                        )}
+                      </span>
                     </div>
-                    <span className="truncate font-mono text-xs text-fg-muted" title={v.data_path}>
-                      {v.name}
-                    </span>
-                    <span className="truncate font-mono text-xs text-fg-muted">{v.mount_path}</span>
-                    <span className="text-[12px] text-fg-muted">{v.tier === "ssd" ? "SSD" : "HDD"}</span>
-                    <span className="flex justify-end">
-                      {v.movable ? (
-                        <Button
-                          size="sm"
-                          icon={<ArrowRightLeft />}
-                          disabled={to === "hdd" && !hdd}
-                          title={to === "hdd" && !hdd ? "No HDD mounted at /mnt/storage" : undefined}
-                          onClick={() => setMoving({ vol: v, to })}
-                          data-testid={`move-${v.name}`}
-                        >
-                          Move to {to.toUpperCase()}
-                        </Button>
-                      ) : (
-                        <span className="text-[11px] text-fg-dim">edit compose file</span>
-                      )}
-                    </span>
-                  </div>
-                );
-              })}
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        )}
-      </Card>
+          )}
+        </Card>
+      )}
 
       <Card
         title="Volume assistant"

@@ -38,6 +38,7 @@ import type {
 } from "../types";
 import type { HttpRequest } from "./transport";
 import { isExplainChat } from "./explain";
+import { followPlatformLogs, platformRoute, wirePlatformDemo } from "./demo-platform";
 import failedBuildLog from "../../../cli/examples/failed-build.log?raw";
 
 const GB = 1024 ** 3;
@@ -162,7 +163,10 @@ const DEMO_HOSTS: Record<string, { hostname: string; cores: number; mem: number;
   "dell-e7450": { hostname: "dell-e7450", cores: 4, mem: 16, load: 0.5 },
   "pi5-worker": { hostname: "pi5-worker", cores: 4, mem: 8, load: 0.3 },
   "hp-elitebook": { hostname: "hp-elitebook", cores: 4, mem: 4, load: 0.2 },
+  // A main server on Vercelify's own engine (no Coolify): `/v1/platform`.
+  "optiplex-7050": { hostname: "optiplex-7050", cores: 4, mem: 16, load: 0.6 },
 };
+const PLATFORM_HOST = "optiplex-7050";
 function hostFor(server: unknown) {
   const name = typeof server === "string" ? (/\/\/([^.:/]+)/.exec(server)?.[1] ?? "") : "";
   return DEMO_HOSTS[name] ?? DEMO_HOSTS["thinkpad-t470"]!;
@@ -489,6 +493,7 @@ const DISCOVERED: DiscoveredServer[] = [
   { hostname: "dell-e7450", dns_name: "dell-e7450.tail1234.ts.net", ip: "100.90.4.2", os: "linux", agent_url: "http://100.90.4.2:7420", version: "0.2.0", role: "main", pairing_open: true },
   { hostname: "pi5-worker", dns_name: "pi5-worker.tail1234.ts.net", ip: "100.77.3.9", os: "linux", agent_url: "http://100.77.3.9:7420", version: "0.2.0", role: "worker", pairing_open: false },
   { hostname: "thinkpad-t470", dns_name: "thinkpad-t470.tail1234.ts.net", ip: "100.101.102.103", os: "linux", agent_url: "http://100.101.102.103:7420", version: "0.2.0", role: "main", pairing_open: false },
+  { hostname: "optiplex-7050", dns_name: "optiplex-7050.tail1234.ts.net", ip: "100.88.1.7", os: "linux", agent_url: "http://100.88.1.7:7420", version: "0.3.0", role: "main", pairing_open: true },
 ];
 
 // A machine that comes online while the "Add a machine" wizard waits for it.
@@ -550,8 +555,13 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
       capabilities: [
         "doctor", "update", "rollback", "hardware", "alerts", "metrics", "uptime", "tokens", "audit", "backup", "previews",
         "auto-rollback", "images", "events", "jobs", "sleep", "power-guard", "domain", "projects",
+        ...(h.hostname === PLATFORM_HOST ? ["platform", "roles"] : []),
       ],
     };
+  }
+  if (p.startsWith("/v1/platform/")) {
+    if (hostFor(server).hostname !== PLATFORM_HOST) throw new Error("404 Not Found: this server runs Coolify");
+    return platformRoute(req);
   }
   if (p === "/v1/jobs") return jobs.map((j) => ({ ...j }));
   if (p === "/v1/sleep" && req.method === "GET") return sleepStatus();
@@ -782,8 +792,9 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
       return {
         agent_url: `http://${d.dns_name}:7420`,
         agent_token: "demo-token-0123456789",
-        coolify_url: d.role === "worker" ? "" : `http://${d.dns_name}:8000`,
-        coolify_token: d.role === "worker" ? undefined : "demo",
+        // Workers and servers on the platform engine have no Coolify.
+        coolify_url: d.role === "worker" || d.hostname === PLATFORM_HOST ? "" : `http://${d.dns_name}:8000`,
+        coolify_token: d.role === "worker" || d.hostname === PLATFORM_HOST ? undefined : "demo",
         hostname: d.hostname,
         role: d.role,
       };
@@ -835,6 +846,12 @@ function updateJob(j: Job, patch: Partial<Job>) {
   Object.assign(j, patch);
   emit("job", { job: { ...j } });
 }
+
+wirePlatformDemo({
+  changed: (topic) => emit("changed", { topic }),
+  startJob,
+  finishJob: (j, detail) => updateJob(j, { status: "ok", detail, progress: 100, finished_at: iso(0) }),
+});
 
 /** A rough stand-in for the agent's parser: counts only. */
 function demoSummary(files: { content: string }[]): ProjectSummary {
@@ -959,6 +976,7 @@ async function demoEvents(onLine: (line: string) => void, signal: AbortSignal): 
 
 export async function demoStream(req: HttpRequest, onLine: (line: string) => void, signal: AbortSignal): Promise<void> {
   if (req.path === "/v1/events") return demoEvents(onLine, signal);
+  if (req.path.startsWith("/v1/platform/")) return followPlatformLogs(req.path, onLine, signal);
   const body = req.body as { model: string; messages: LlmChatMessage[] };
   const last = body.messages[body.messages.length - 1]?.content ?? "";
   const reply = isExplainChat(body.messages)

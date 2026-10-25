@@ -25,7 +25,9 @@ export function SettingsView() {
     try {
       const res = await settingsApi.test(s);
       await update({ ...s, hostname: res.hostname || s.hostname });
-      toast.ok(res.coolify.ok ? "Connected to the agent and Coolify" : `Agent OK, but Coolify said: ${res.coolify.error}`);
+      // Workers and servers on the platform engine have no Coolify to test.
+      const noCoolify = !s.coolify_url.trim();
+      toast.ok(res.coolify.ok ? "Connected to the agent and Coolify" : noCoolify ? "Connected to the agent" : `Agent OK, but Coolify said: ${res.coolify.error}`);
     } catch (e) {
       toast.bad((e as Error).message);
     } finally {

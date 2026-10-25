@@ -6,8 +6,8 @@ use crate::{now, projects, validate, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension, Row};
 use serde::{Deserialize, Serialize};
 use vercelify_core::platform::{
-    App, AppBuild, AppCreate, AppDomain, AppKind, AppPatch, AppRuntime, AppSource, CertStatus, Desired, DomainRequest,
-    PreviewSettings,
+    App, AppBuild, AppCreate, AppDomain, AppKind, AppPatch, AppRuntime, AppSource, CertStatus, DeploymentStatus,
+    Desired, DomainRequest, PreviewSettings,
 };
 
 /// Server-wide domain setting (`settings.domain`): new apps get
@@ -94,7 +94,9 @@ fn url_of(domains: &[AppDomain]) -> Option<String> {
         })
 }
 
-const APP_SELECT: &str = "SELECT a.*, e.name AS environment, e.project_id AS project_id
+const APP_SELECT: &str = "SELECT a.*, e.name AS environment, e.project_id AS project_id,
+  (SELECT d.status FROM deployments d WHERE d.app_id = a.id AND d.kind = 'production'
+    ORDER BY d.number DESC LIMIT 1) AS last_status
   FROM apps a JOIN environments e ON a.environment_id = e.id";
 
 fn app_row(c: &Connection, r: &Row) -> Result<App> {
@@ -115,6 +117,9 @@ fn app_row(c: &Connection, r: &Row) -> Result<App> {
         node_id: r.get("node_id")?,
         desired: desired(&r.get::<_, String>("desired")?),
         current_deployment_id: r.get("current_deployment_id")?,
+        last_status: r
+            .get::<_, Option<String>>("last_status")?
+            .and_then(|s| DeploymentStatus::parse(&s)),
         created_at: r.get("created_at")?,
         updated_at: r.get("updated_at")?,
         id,
@@ -610,6 +615,39 @@ pub(crate) mod tests {
 
         s.tx(|c| delete(c, &a.id)).unwrap();
         s.tx(|c| create(c, &git_app("blog"))).unwrap();
+    }
+
+    #[test]
+    fn last_status_is_the_newest_production_deployment() {
+        use crate::deployments::{self, NewDeployment};
+        use vercelify_core::platform::{DeploymentStatus, DeploymentTrigger};
+        let s = Store::open_in_memory().unwrap();
+        let a = s.tx(|c| create(c, &git_app("blog"))).unwrap();
+        assert_eq!(a.last_status, None);
+        let new = |pr| NewDeployment {
+            app_id: &a.id,
+            pr_number: pr,
+            branch: "main",
+            commit_sha: "abc",
+            commit_message: "",
+            trigger: DeploymentTrigger::Manual,
+            rollback_of: None,
+            image: "",
+            node_id: None,
+        };
+        let d = s.tx(|c| deployments::create(c, &new(None))).unwrap();
+        s.tx(|c| deployments::transition(c, &d.id, DeploymentStatus::Building, None))
+            .unwrap();
+        // A preview doesn't count.
+        s.tx(|c| deployments::create(c, &new(Some(7)))).unwrap();
+        assert_eq!(
+            s.with(|c| get(c, &a.id)).unwrap().last_status,
+            Some(DeploymentStatus::Building)
+        );
+        assert_eq!(
+            s.with(|c| list(c, None)).unwrap()[0].last_status,
+            Some(DeploymentStatus::Building)
+        );
     }
 
     #[test]

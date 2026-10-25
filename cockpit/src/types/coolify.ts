@@ -101,4 +101,3 @@ export interface CoolifyServer {
   settings?: { is_reachable?: boolean; is_usable?: boolean; is_build_server?: boolean };
 }
 
-export type DatabaseKind = "postgresql" | "mysql" | "mariadb" | "mongodb" | "redis" | "keydb" | "dragonfly" | "clickhouse";
