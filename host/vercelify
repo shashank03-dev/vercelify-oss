@@ -5,7 +5,7 @@ set -Eeuo pipefail
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 HOST_DIR=$(dirname "$SELF")
 VERCELIFY_SRC=$(dirname "$HOST_DIR")
-for lib in common system hardware storage docker tailscale coolify platform mesh cloudflare agent backup registry maintenance standby; do
+for lib in common system hardware storage docker tailscale coolify platform mesh cloudflare agent backup registry maintenance standby migrate; do
   # shellcheck source=/dev/null
   . "$HOST_DIR/lib/$lib.sh"
 done
@@ -49,6 +49,9 @@ Usage: sudo vercelify <command> [args]
   standby [NAME|off]     A worker that keeps a sealed copy of this main server (every 5 min)
   promote [--force]      On the standby: become the main server when the old one is gone
   demote [--force]       On a main server a standby replaced: step back, to rejoin as a worker
+  migrate [--apply|--check|--rollback|--finish [--purge]|--tailscale-off]
+                         From Coolify and Tailscale to Vercelify's own engine and network
+                         (no flag: show what would happen, change nothing)
   tokens [list|revoke ID]
                          Devices paired with this server; revoke a lost one
   sleep [list|on APP_UUID [MINUTES] [--previews]|off APP_UUID]
@@ -608,6 +611,7 @@ main() {
     webhook) need_root webhook; platform_webhook "$@" ;;
     promote) cmd_promote "$@" ;;
     demote) cmd_demote "$@" ;;
+    migrate) migrate_cli "$@" ;;
     tokens) need_root tokens; "$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" tokens "$@" ;;
     update) cmd_update "$@" ;;
     rollback) cmd_rollback ;;

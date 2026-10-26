@@ -163,7 +163,7 @@ pub fn command(kind: DatabaseKind) -> Option<Vec<String>> {
     use DatabaseKind::*;
     match kind {
         Redis => Some(sh(
-            "printf 'requirepass \"%s\"\\nappendonly yes\\ndir /data\\n' \"$VFY_PASSWORD\" > /tmp/vfy.conf && exec valkey-server /tmp/vfy.conf",
+            "printf 'requirepass \"%s\"\\nappendonly yes\\ndir /data\\n' \"$VFY_PASSWORD\" > /tmp/vfy.conf && exec \"$(command -v valkey-server || echo redis-server)\" /tmp/vfy.conf",
         )),
         Keydb => Some(sh(
             "printf 'requirepass \"%s\"\\nappendonly yes\\ndir /data\\n' \"$VFY_PASSWORD\" > /tmp/vfy.conf && exec keydb-server /tmp/vfy.conf",
@@ -184,7 +184,9 @@ pub fn health_command(kind: DatabaseKind) -> Option<Vec<String>> {
         )),
         Mariadb => Some(sh("healthcheck.sh --connect --innodb_initialized")),
         Mongodb => Some(sh("mongosh --quiet --eval 'db.runCommand({ping:1}).ok' | grep -q 1")),
-        Redis => Some(sh("REDISCLI_AUTH=\"$VFY_PASSWORD\" valkey-cli ping | grep -q PONG")),
+        Redis => Some(sh(
+            "REDISCLI_AUTH=\"$VFY_PASSWORD\" \"$(command -v valkey-cli || echo redis-cli)\" ping | grep -q PONG",
+        )),
         Keydb => Some(sh("REDISCLI_AUTH=\"$VFY_PASSWORD\" keydb-cli ping | grep -q PONG")),
         Dragonfly => None,
         Clickhouse => Some(sh("wget -qO- http://127.0.0.1:8123/ping | grep -q Ok")),
@@ -221,7 +223,8 @@ pub fn console_command(kind: DatabaseKind) -> Vec<String> {
         Mongodb => {
             "exec mongosh -u \"$MONGO_INITDB_ROOT_USERNAME\" -p \"$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin \"$MONGO_INITDB_DATABASE\""
         }
-        Redis => "REDISCLI_AUTH=\"$VFY_PASSWORD\" exec valkey-cli",
+        // Valkey, or Redis in a database taken over from Coolify.
+        Redis => "REDISCLI_AUTH=\"$VFY_PASSWORD\" exec \"$(command -v valkey-cli || echo redis-cli)\"",
         Keydb => "REDISCLI_AUTH=\"$VFY_PASSWORD\" exec keydb-cli",
         // Dragonfly's image ships no CLI; a shell is the best it has.
         Dragonfly => "exec sh",
@@ -373,6 +376,37 @@ fn check_public_port(c: &Connection, port: u16, except: Option<&str>) -> Result<
 }
 
 pub fn create(c: &Connection, key: &MasterKey, req: &DatabaseCreate) -> Result<Database> {
+    let name = req.name.trim();
+    let cred = Credentials {
+        user: format!("u{}", random_token(11).to_ascii_lowercase()),
+        password: random_token(32),
+        database: name.replace('-', "_"),
+    };
+    insert(c, key, req, cred, None, "mesh")
+}
+
+/// A database whose data exists already (taken over from Coolify): its
+/// credentials, its exact image (the data directory's version), and its
+/// public port open on every interface as it was.
+pub fn adopt(
+    c: &Connection,
+    key: &MasterKey,
+    req: &DatabaseCreate,
+    cred: Credentials,
+    image: &str,
+) -> Result<Database> {
+    crate::validate::image(image)?;
+    insert(c, key, req, cred, Some(image), "all")
+}
+
+fn insert(
+    c: &Connection,
+    key: &MasterKey,
+    req: &DatabaseCreate,
+    cred: Credentials,
+    image_ref: Option<&str>,
+    bind: &str,
+) -> Result<Database> {
     let env = projects::resolve_target(c, req.environment_id.as_deref(), req.project_id.as_deref())?;
     let t = template(req.kind);
     let version = req.version.clone().unwrap_or_else(|| t.default_version.to_string());
@@ -385,26 +419,24 @@ pub fn create(c: &Connection, key: &MasterKey, req: &DatabaseCreate) -> Result<D
     let id = new_id("db");
     let name = req.name.trim();
     claim_name(c, name, "database", &id)?;
-    let cred = Credentials {
-        user: format!("u{}", random_token(11).to_ascii_lowercase()),
-        password: random_token(32),
-        database: name.replace('-', "_"),
-    };
     let sealed = key.seal_str(&credentials_aad(&id), &serde_json::to_string(&cred)?);
     let ts = now();
     c.execute(
-        "INSERT INTO databases (id, environment_id, name, kind, version, image, credentials, public_port, container,
-                                created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
+        "INSERT INTO databases (id, environment_id, name, kind, version, image, credentials, public_port, public_bind,
+                                container, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
         params![
             id,
             env.id,
             name,
             req.kind.as_str(),
             version,
-            image(req.kind, &version),
+            image_ref
+                .map(str::to_string)
+                .unwrap_or_else(|| image(req.kind, &version)),
             sealed,
             req.public_port,
+            if req.public_port.is_some() { bind } else { "mesh" },
             container_name(name),
             ts
         ],

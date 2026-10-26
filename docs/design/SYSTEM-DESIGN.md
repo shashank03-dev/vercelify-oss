@@ -908,3 +908,62 @@ webpki roots for `wss://` and `https://` through a tunnel, 0.3 MiB the userspace
 | D8 | Single main + warm standby | Raft cluster (needs 3 always-on machines) |
 | D9 | Enrollment sealed to the coordinator's WireGuard key, everything else inside the mesh (changed in M7) | Self-signed TLS pinned by fingerprint (a second key and certificate to rotate, a TLS stack in a 6 MB daemon), plain HTTP (tokens in the clear), ACME (needs a public name) |
 | D10 | Workers pull images from the main server's registry as `127.0.0.1:5055`, forwarded by their agent over the mesh (M9) | An insecure registry in every `daemon.json` (a Docker restart per server, trust in a plain-HTTP registry on the network), `docker save`/`load` per deploy (no layer sharing, full images over the relay) |
+| D11 | The migration reads Coolify through a PHP script run in Coolify's own container (its models' tables, its `decrypt`) | Decrypting Laravel's AES-256-CBC payloads ourselves (Coolify mixes `encrypt` and `encryptString`, keeps Redis passwords in variables, and has a secret-manager path: its own code knows) |
+| D12 | One proxy swap for every app at once, from Coolify's built images (no builds) | Per-app switch with two proxies (only one can own :80/:443; a per-app switch needed our proxy to forward to Coolify's network for the apps not yet moved) |
+
+## 18. Migration from Coolify
+
+`sudo vercelify migrate` (`host/lib/migrate.sh`) moves a Coolify server to the
+platform engine. The work is in the agent (`vercelify-agent migrate …`,
+`agent/src/migrate.rs`) and the platform crate (`import.rs`); the host script
+runs it around the agent restart.
+
+1. **Plan** (`vercelify migrate`, nothing changes). `migrate_export.php` runs in
+   the `coolify` container (`docker exec -i coolify php`) and prints one JSON
+   document: projects and environments, applications (source, branch, build
+   pack, ports, domains, health check, limits, watch paths, auto-deploy,
+   previews, basic auth, variables, volumes, scheduled tasks), standalone
+   databases (credentials, image, public port, volumes), one-click services
+   (raw compose, routes, variables), git sources (GitHub Apps with their key,
+   deploy keys), shared variables, servers. `import::plan` maps it: names made
+   valid and unique, Coolify's build packs onto ours (`nixpacks`/`railpack` →
+   detected, `dockerfile`, `static`, `dockerimage` → image app, `dockercompose`
+   → compose app, an inline Dockerfile → the image Coolify built), services →
+   compose apps. Skipped, with the reason: resources on other Coolify servers
+   (they join as workers first), databases whose data isn't where our template
+   keeps it.
+2. **Apply.** The mesh is set up first if it isn't (Tailscale keeps working).
+   One transaction writes the records (`import::apply`): variables keep
+   preview-only values only where they differ; a database's Coolify host name
+   (its uuid) becomes `${{db.<name>.host}}`; `{{project.X}}`-style shared
+   references are resolved; databases are *adopted* with Coolify's credentials
+   and exact image (`databases::adopt`); every app gets a queued deployment of
+   the image Coolify runs (`vfy/<app>:coolify`, tagged from Coolify's), so
+   nothing is built. A basic-auth password we can't accept leaves that app
+   stopped, never open. Then Coolify stops: Coolify itself first, then every
+   `coolify.managed` container and the stack, each set to `--restart=no` with its
+   old policy kept in `migrate/state.json`. With nothing writing, volume data
+   is copied (`cp -a` between Docker volume mount points) into our volumes;
+   Coolify's are left untouched. Compose projects' volumes are matched by
+   compose label or the `<uuid>_` prefix. Coolify's Let's Encrypt
+   `acme.json` becomes ours (resolver renamed), so no certificates are asked for
+   again.
+3. **Switch.** The host script sets `engine = "platform"` and restarts the agent;
+   the reconciler starts the databases, the queued deployments start Coolify's
+   images, our proxy takes :80/:443. Downtime is one container start and health
+   check (D12). `migrate check` waits for every first deployment and asks each
+   domain through our proxy (404 tolerated only after 30 s: Traefik answers 404
+   until it has read new routes); then the phase is `switched`.
+4. **Rollback** (until finish): our containers of the migrated resources and our
+   proxy removed, the records (`import::remove`), copies and tags deleted,
+   Coolify's containers started with their restart policies, database first,
+   Coolify last. Data written after the switch isn't carried back.
+5. **Finish**: Coolify's containers, images and network removed; `--purge`
+   also its volumes and `/data/coolify`.
+6. **Tailscale off** (`--tailscale-off`): only when every non-revoked mesh node
+   was seen within 24 hours (`--force` overrides).
+
+The state file's phases are `importing` → `imported` → `switched` →
+`finished`, or `rolled_back`; a step interrupted halfway is rolled back
+rather than resumed, except `imported`, which resumes at the switch. Tested
+against a real Coolify 4.4.6 by `host/tests/contract/migrate.sh`.

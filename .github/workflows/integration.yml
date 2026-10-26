@@ -5,7 +5,8 @@ name: Integration
 #   - the Coolify contract: schema, API routes, the agent's SQL, the proxy
 #     edit and a full sleep/wake cycle against the Coolify version the
 #     installer pins (COOLIFY_TESTED_VERSION), and against Coolify's newest
-#     release as an early warning
+#     release as an early warning; then `vercelify migrate` takes a shop
+#     (database, apps, a service, their data) over from that Coolify
 #   - project rules (vercel.json) against a real Traefik: redirects,
 #     rewrites, headers, firewall and cron jobs through the agent, on apps
 #     labelled the way Coolify labels them
@@ -27,6 +28,10 @@ on:
       - host/tests/contract/**
       - host/tests/integration/**
       - agent/src/coolify.rs
+      - agent/src/migrate.rs
+      - agent/src/migrate_export.php
+      - crates/vercelify-platform/src/import.rs
+      - crates/vercelify-platform/src/databases.rs
       - agent/src/sleep.rs
       - agent/src/watch.rs
       - agent/src/doctor.rs
@@ -79,6 +84,8 @@ jobs:
           fi
       - name: Contract
         run: sudo -E env "PATH=$PATH" AGENT_BIN="$PWD/target/debug/vercelify-agent" host/tests/contract/coolify.sh
+      - name: Migration (vercelify migrate)
+        run: sudo -E env "PATH=$PATH" AGENT_BIN="$PWD/target/debug/vercelify-agent" host/tests/contract/migrate.sh
 
   routing-contract:
     name: Project rules on Traefik (${{ matrix.traefik }})

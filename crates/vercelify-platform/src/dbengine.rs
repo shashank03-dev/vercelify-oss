@@ -457,7 +457,7 @@ fn save_script(kind: DatabaseKind) -> &'static str {
     use DatabaseKind::*;
     match kind {
         Keydb => "REDISCLI_AUTH=\"$VFY_PASSWORD\" keydb-cli SAVE | grep -q OK",
-        _ => "REDISCLI_AUTH=\"$VFY_PASSWORD\" valkey-cli SAVE | grep -q OK",
+        _ => "REDISCLI_AUTH=\"$VFY_PASSWORD\" \"$(command -v valkey-cli || echo redis-cli)\" SAVE | grep -q OK",
     }
 }
 

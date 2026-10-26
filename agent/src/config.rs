@@ -40,6 +40,9 @@ pub struct Config {
     pub cors_origins: Vec<String>,
     /// Container running Coolify's PostgreSQL (for storage-tier moves).
     pub coolify_db_container: String,
+    /// Coolify's application container and data directory (`vercelify migrate`).
+    pub coolify_container: String,
+    pub coolify_data_dir: PathBuf,
     /// Docker's named-volume directory (SSD tier).
     pub docker_volumes_root: PathBuf,
     /// `main` or `worker`. Unset: read `role=` from `install_env`.
@@ -196,6 +199,8 @@ impl Default for Config {
             .to_vec(),
             cors_origins: vec![],
             coolify_db_container: "coolify-db".into(),
+            coolify_container: "coolify".into(),
+            coolify_data_dir: "/data/coolify".into(),
             docker_volumes_root: vercelify_core::SSD_VOLUME_ROOT.into(),
             role: None,
             install_env: "/etc/vercelify/install.env".into(),
@@ -386,6 +391,12 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_COOLIFY_DB_CONTAINER") {
             self.coolify_db_container = v;
+        }
+        if let Some(v) = var("VERCELIFY_COOLIFY_CONTAINER") {
+            self.coolify_container = v;
+        }
+        if let Some(v) = var("VERCELIFY_COOLIFY_DATA_DIR") {
+            self.coolify_data_dir = v.into();
         }
         if let Some(v) = var("VERCELIFY_DOCKER_VOLUMES_ROOT") {
             self.docker_volumes_root = v.into();

@@ -25,6 +25,7 @@ pub mod git_watch;
 pub mod health;
 pub mod hooks;
 pub mod ids;
+pub mod import;
 pub mod instances;
 pub mod logs;
 pub mod mesh_registry;

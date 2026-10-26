@@ -21,6 +21,7 @@ mod llm;
 mod mdns;
 mod mesh;
 mod mesh_relay;
+mod migrate;
 mod pairing;
 mod platform;
 mod platform_api;
@@ -246,6 +247,11 @@ async fn main() {
             Ok(m) => println!("{m}"),
             Err(e) => fatal(&e),
         },
+        Cmd::Migrate(step) => {
+            if let Err(e) = migrate::run(&cfg, step) {
+                fatal(&e)
+            }
+        }
         Cmd::TokensList => {
             let all = tokens::list(&cfg);
             if all.is_empty() {

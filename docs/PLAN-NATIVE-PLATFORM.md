@@ -410,10 +410,11 @@ during the transition.
    previews, databases (credentials, images, volumes), persistent volumes, scheduled
    tasks, servers (workers).
 3. **Write our database** and show the diff. Nothing is changed yet.
-4. **Switch over per app**, one at a time: start our container from the same image
-   Coolify built, health check, move the route to our Traefik files, stop Coolify's
-   container. Databases keep their volume (same data directory), stopped and started
-   once.
+4. **Switch over**, all apps at once (as built: design §18, D12): our containers
+   start from the images Coolify built (no builds), Coolify's proxy hands :80/:443
+   to ours, so the downtime is one container start and health check. Databases
+   and volumes are copied while Coolify is stopped; Coolify's copies stay as they
+   were for the rollback.
 5. **Stop the Coolify stack** (containers kept, not deleted, for 14 days),
    `vercelify migrate --rollback` brings it back. `vercelify migrate --finish` removes
    it afterwards and frees the RAM.

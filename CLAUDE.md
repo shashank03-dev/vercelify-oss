@@ -57,6 +57,7 @@ sudo host/tests/contract/mesh.sh                 # four mesh nodes in network na
 sudo host/tests/contract/mesh-nat.sh             # NAT traversal: hole punching and the relay behind real Linux NAT
 sudo host/tests/contract/multinode.sh            # a worker with its own Docker: placement, mesh registry, replicas, logs/terminal
 sudo host/tests/contract/promote.sh              # the warm standby promoted after the main server dies
+sudo host/tests/contract/migrate.sh              # vercelify migrate from a real Coolify: plan, apply, rollback, finish
 
 cd cockpit
 npm ci && npm run typecheck && npm test && npx vite build
