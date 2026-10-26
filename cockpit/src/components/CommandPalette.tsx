@@ -1,14 +1,13 @@
 import { Command } from "cmdk";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowRightLeft, ExternalLink, LayoutDashboard, Monitor, Moon, Plus, Rocket, Search, Server, Sun, SquareArrowOutUpRight } from "lucide-react";
+import { ArrowRightLeft, ExternalLink, Monitor, Moon, Plus, Rocket, Search, Server, Sun, SquareArrowOutUpRight } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
-import { coolify, isWorker, local } from "../lib/api";
-import { hostOf, primaryUrl, statusHealth } from "../lib/format";
+import { isWorker } from "../lib/api";
+import { hostOf } from "../lib/format";
 import { NAV, useNav } from "../lib/nav";
 import { openExternal } from "../lib/open";
-import { isPlatform, listedApp, platform } from "../lib/platform";
+import { listedApp, platform, type ListedApp } from "../lib/platform";
 import { useSession } from "../lib/session";
-import type { CoolifyApplication } from "../types";
 import { useToast } from "./Toast";
 import { Kbd, StatusDot } from "./ui";
 
@@ -19,15 +18,14 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const { go, setTheme } = useNav();
   const { settings, servers, select, addServer } = useSession();
   const toast = useToast();
-  const [apps, setApps] = useState<CoolifyApplication[]>();
+  const [apps, setApps] = useState<ListedApp[]>();
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     if (!open) return;
     setSearch("");
     if (isWorker(settings)) setApps([]);
-    else if (isPlatform(settings)) platform.apps().then((l) => setApps(l.map(listedApp)), () => setApps([]));
-    else coolify.applications().then(setApps, () => setApps([]));
+    else platform.apps().then((l) => setApps(l.map(listedApp)), () => setApps([]));
   }, [open, settings]);
 
   useEffect(() => {
@@ -42,8 +40,8 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
     void fn();
   };
 
-  const deploy = (a: CoolifyApplication) =>
-    (isPlatform(settings) ? platform.deploy(a.uuid) : coolify.deploy(a.uuid)).then(
+  const deploy = (a: ListedApp) =>
+    platform.deploy(a.id).then(
       () => toast.ok(`Deployment of ${a.name} queued`),
       (e: Error) => toast.bad(e.message),
     );
@@ -105,13 +103,13 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 {!!apps?.length && (
                   <Command.Group heading="Apps">
                     {apps.map((a) => {
-                      const url = primaryUrl(a.fqdn);
+                      const url = a.url;
                       return [
-                        <Item key={`open-${a.uuid}`} value={`open ${a.name} deployments logs`} icon={<SquareArrowOutUpRight />} onSelect={run(() => go("apps", { app: a.uuid }))}>
+                        <Item key={`open-${a.id}`} value={`open ${a.name} deployments logs`} icon={<SquareArrowOutUpRight />} onSelect={run(() => go("apps", { app: a.id }))}>
                           {a.name} <span className="text-fg-dim">— deployments & logs</span>
                         </Item>,
                         url && (
-                          <Item key={`visit-${a.uuid}`} value={`visit ${a.name} ${hostOf(url)}`} icon={<ExternalLink />} onSelect={run(() => openExternal(url))}>
+                          <Item key={`visit-${a.id}`} value={`visit ${a.name} ${hostOf(url)}`} icon={<ExternalLink />} onSelect={run(() => openExternal(url))}>
                             Visit <span className="font-mono text-[12px]">{hostOf(url)}</span>
                           </Item>
                         ),
@@ -124,11 +122,11 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                   <Command.Group heading="Deploy">
                     {apps.map((a) => (
                       <Item
-                        key={`deploy-${a.uuid}`}
+                        key={`deploy-${a.id}`}
                         value={`deploy ${a.name}`}
                         icon={<Rocket />}
                         onSelect={run(() => deploy(a))}
-                        right={<StatusDot health={statusHealth(a.status)} />}
+                        right={<StatusDot health={a.health} />}
                       >
                         Deploy <span className="font-medium text-fg">{a.name}</span>
                       </Item>
@@ -152,15 +150,6 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                       ))}
                   </Command.Group>
                 )}
-
-                <Command.Group heading="Coolify">
-                  <Item value="new project coolify" icon={<Plus />} onSelect={run(() => local.openCoolify("/projects").catch((e: Error) => toast.bad(e.message)))}>
-                    New project in Coolify
-                  </Item>
-                  <Item value="open coolify dashboard" icon={<LayoutDashboard />} onSelect={run(() => local.openCoolify().catch((e: Error) => toast.bad(e.message)))}>
-                    Open Coolify dashboard
-                  </Item>
-                </Command.Group>
 
                 <Command.Group heading="Appearance">
                   <Item value="theme dark" icon={<Moon />} onSelect={run(() => setTheme("dark"))}>

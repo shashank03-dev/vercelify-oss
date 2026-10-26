@@ -1,6 +1,7 @@
-//! Minimal HTTP/1.1 client for services on this machine (Coolify's API,
-//! Ollama). Plain `http://` only; built on the hyper that axum already
-//! links, so it adds almost nothing to the binary.
+//! Minimal HTTP/1.1 client for services on this machine and the mesh (the
+//! proxy's metrics, Ollama, other agents). Plain `http://` only; built on
+//! the hyper that axum already links, so it adds almost nothing to the
+//! binary.
 
 use bytes::Bytes;
 use http_body_util::{BodyExt, Full};
@@ -73,12 +74,6 @@ impl<'a> Req<'a> {
     pub fn delete(url: &'a str, body: &serde_json::Value) -> Self {
         Self {
             method: Method::DELETE,
-            ..Self::post(url, body)
-        }
-    }
-    pub fn patch(url: &'a str, body: &serde_json::Value) -> Self {
-        Self {
-            method: Method::PATCH,
             ..Self::post(url, body)
         }
     }

@@ -6,6 +6,6 @@ export type ContainerInfo = { id: string, name: string, image: string,
  */
 state: string, status: string, ports: string, cpu_pct: number | null, mem_bytes: number | null, mem_pct: number | null, 
 /**
- * Coolify resource name (from the `coolify.name` label) if managed by Coolify.
+ * The platform app it belongs to (its name, `vercelify.app-name`).
  */
-coolify_name: string | null, coolify_managed: boolean, };
+app: string | null, };

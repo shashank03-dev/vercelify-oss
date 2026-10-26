@@ -27,7 +27,7 @@ vi.mock("../lib/transport", async (original) => ({
 it("cancels model generation when leaving the AI page", async () => {
   // jsdom has no layout/scrolling implementation.
   Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: () => {} });
-  const settings: CockpitSettings = { agent_url: "http://server-a", agent_token: "test", coolify_url: "http://coolify-a", coolify_token: "test", hostname: "A" };
+  const settings: CockpitSettings = { agent_url: "http://server-a", agent_token: "test", hostname: "A" };
   const session = { settings, servers: [settings], unpair: async () => {}, update: async () => {}, select: async () => {}, remove: async () => {}, addServer: () => {}, revision: 0 };
   const page = render(<ToastProvider><SessionProvider value={session}><AiView /></SessionProvider></ToastProvider>);
   fireEvent.change(await screen.findByTestId("chat-input"), { target: { value: "Explain my build" } });

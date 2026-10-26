@@ -4,15 +4,13 @@ import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import pkg from "./package.json" with { type: "json" };
 
-// Browser mode (dev server / e2e tests) talks to the agent and Coolify
-// through these proxies, so no CORS setup is needed. Inside the Tauri app
+// Browser mode (dev server / e2e tests) talks to the agent through this
+// proxy, so no CORS setup is needed. Inside the Tauri app
 // requests go through Rust commands instead.
 function proxies(): Record<string, ProxyOptions> {
   const out: Record<string, ProxyOptions> = {};
   const agent = process.env.VERCELIFY_AGENT_URL;
-  const coolify = process.env.VERCELIFY_COOLIFY_URL;
   if (agent) out["/__agent"] = { target: agent, changeOrigin: true, rewrite: (p) => p.replace(/^\/__agent/, "") };
-  if (coolify) out["/__coolify"] = { target: coolify, changeOrigin: true, rewrite: (p) => p.replace(/^\/__coolify/, "") };
   return out;
 }
 

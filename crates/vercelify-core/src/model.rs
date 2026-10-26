@@ -181,48 +181,6 @@ pub struct SystemSnapshot {
     pub hardware: Option<HardwareInfo>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, TS)]
-#[ts(export)]
-pub struct TailscaleNode {
-    pub id: String,
-    pub hostname: String,
-    /// MagicDNS name without the trailing dot.
-    pub dns_name: String,
-    pub os: String,
-    pub ips: Vec<String>,
-    pub online: bool,
-    pub active: bool,
-    pub exit_node: bool,
-    /// DERP relay region in use, empty if unknown.
-    pub relay: String,
-    /// Direct endpoint (ip:port) when a peer-to-peer path exists.
-    pub cur_addr: String,
-    pub rx_bytes: u64,
-    pub tx_bytes: u64,
-    pub last_seen: Option<String>,
-    /// When this node's key expires (RFC 3339); None = never (tagged node or
-    /// expiry disabled in the admin console).
-    #[serde(default)]
-    pub key_expiry: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, TS)]
-#[ts(export)]
-pub struct TailscaleStatus {
-    pub installed: bool,
-    /// Running | NeedsLogin | Stopped | Starting | NoState | ...
-    pub backend_state: String,
-    pub version: String,
-    pub tailnet: String,
-    pub magic_dns_suffix: String,
-    pub auth_url: String,
-    pub self_node: Option<TailscaleNode>,
-    pub peers: Vec<TailscaleNode>,
-    pub health: Vec<String>,
-    /// Set when the CLI could not be run or returned garbage.
-    pub error: Option<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct ContainerInfo {
@@ -236,9 +194,9 @@ pub struct ContainerInfo {
     pub cpu_pct: Option<f32>,
     pub mem_bytes: Option<u64>,
     pub mem_pct: Option<f32>,
-    /// Coolify resource name (from the `coolify.name` label) if managed by Coolify.
-    pub coolify_name: Option<String>,
-    pub coolify_managed: bool,
+    /// The platform app it belongs to (its name, `vercelify.app-name`).
+    #[serde(default)]
+    pub app: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -290,7 +248,7 @@ pub struct VolumeEntry {
 #[serde(rename_all = "snake_case")]
 #[ts(export)]
 pub enum StreamTransport {
-    /// MPEG-TS over raw UDP. Lowest latency; fine over Tailscale/LAN.
+    /// MPEG-TS over raw UDP. Lowest latency; fine over the mesh or the LAN.
     Udp,
     /// SRT with ARQ; tolerates packet loss (cellular, long distance).
     Srt,
@@ -350,7 +308,7 @@ pub struct Health {
     pub ok: bool,
     pub version: String,
     pub hostname: String,
-    /// `main` (runs Coolify) or `worker` (Docker + agent only).
+    /// `main` (runs the platform engine) or `worker` (runs apps for it).
     #[serde(default)]
     pub role: String,
     /// A short pairing code (`sudo vercelify pair`) is waiting to be claimed.
@@ -365,49 +323,7 @@ pub struct Health {
     pub capabilities: Vec<String>,
 }
 
-/// A persistent volume of a Coolify-managed resource (from Coolify's DB).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
-pub struct CoolifyVolume {
-    pub id: u64,
-    /// Docker volume name, e.g. `postgres-data-<uuid>`.
-    pub name: String,
-    /// Path inside the container.
-    pub mount_path: String,
-    /// Bind-mount source when not using the named volume.
-    pub host_path: Option<String>,
-    /// Where the data currently lives.
-    pub tier: StorageTier,
-    /// Effective directory on the host.
-    pub data_path: String,
-    /// e.g. `StandalonePostgresql`, `Application`.
-    pub resource_type: String,
-    pub resource_name: String,
-    pub resource_uuid: String,
-    /// Only standalone databases and applications can be moved safely
-    /// (compose-based services regenerate their mounts from the compose file).
-    pub movable: bool,
-    /// A running container currently mounts this volume.
-    pub in_use: bool,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
-pub struct MoveVolumeRequest {
-    pub tier: StorageTier,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
-pub struct MoveVolumeResult {
-    pub volume: CoolifyVolume,
-    pub previous_path: String,
-    pub copied: bool,
-    /// Human-readable next step (start the resource, delete the old copy, ...).
-    pub note: String,
-}
-
-/// An external program the cockpit can drive (ffmpeg, Moonlight, Tailscale).
+/// An external program the cockpit can drive (ffmpeg, Moonlight).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct ToolStatus {
@@ -423,9 +339,6 @@ pub struct ToolStatus {
 pub struct CockpitSettings {
     pub agent_url: String,
     pub agent_token: String,
-    pub coolify_url: String,
-    #[serde(default)]
-    pub coolify_token: Option<String>,
     pub hostname: String,
     /// `main` or `worker`; missing in settings written by older versions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -486,16 +399,15 @@ impl CockpitConfig {
     }
 }
 
-/// A Vercelify host found on the tailnet (it answered `/v1/health`).
+/// A Vercelify server among this computer's mesh peers (it answered
+/// `/v1/health`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct DiscoveredServer {
     pub hostname: String,
-    /// MagicDNS name, empty when MagicDNS is off.
-    pub dns_name: String,
+    /// Its mesh address.
     pub ip: String,
-    pub os: String,
-    /// Base URL of the agent, e.g. `http://100.101.102.103:7420`.
+    /// Base URL of the agent, e.g. `http://10.77.0.2:7420`.
     pub agent_url: String,
     pub version: String,
     pub role: String,
@@ -572,104 +484,6 @@ pub struct PairClaimRequest {
 pub struct PairClaimResponse {
     /// Full `vfy1.` pairing code.
     pub pairing: String,
-}
-
-// --- auto-deploy ----------------------------------------------------------------
-
-/// A branch the agent watches; a new commit triggers a Coolify deployment.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
-pub struct AutoDeployWatch {
-    pub app_uuid: String,
-    pub name: String,
-    /// `https://…` clone URL.
-    pub repo: String,
-    pub branch: String,
-    pub enabled: bool,
-    /// An access token is stored for this repository (never returned).
-    pub has_token: bool,
-    /// Head of the branch at the last successful check.
-    pub last_commit: Option<String>,
-    pub last_checked_at: Option<String>,
-    pub last_deployed_commit: Option<String>,
-    pub last_deployed_at: Option<String>,
-    pub last_error: Option<String>,
-    pub deploys: u32,
-    /// Deploy a preview for every open pull request (GitHub).
-    #[serde(default)]
-    pub previews: bool,
-    /// Roll back to the previous commit when a new deploy fails or the app
-    /// is unhealthy right after it.
-    #[serde(default)]
-    pub auto_rollback: bool,
-    /// Report deploys as GitHub commit statuses and comment preview URLs
-    /// on pull requests (needs a token with write access).
-    #[serde(default)]
-    pub github_feedback: bool,
-    /// Pull requests with a live preview.
-    #[serde(default)]
-    pub open_previews: Vec<PreviewWatch>,
-    #[serde(default)]
-    pub rollbacks: u32,
-    /// Pushes not built because nothing in the app's watch paths changed or
-    /// the commit said `[skip deploy]` (Vercel's "Ignored Build Step").
-    #[serde(default)]
-    pub skipped: u32,
-    #[serde(default)]
-    pub last_skip: Option<String>,
-}
-
-/// A pull request the agent deployed as a preview.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, TS)]
-#[ts(export)]
-pub struct PreviewWatch {
-    pub number: u64,
-    pub title: String,
-    pub head_sha: String,
-    pub url: Option<String>,
-    pub deployed_at: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
-pub struct AutoDeployRequest {
-    pub app_uuid: String,
-    #[serde(default)]
-    #[ts(optional)]
-    pub name: Option<String>,
-    pub repo: String,
-    pub branch: String,
-    /// Read-only token for private repositories. Omit to keep the stored
-    /// one, send an empty string to remove it.
-    #[serde(default)]
-    #[ts(optional)]
-    pub token: Option<String>,
-    #[serde(default = "default_true")]
-    #[ts(optional)]
-    pub enabled: Option<bool>,
-    /// Omit to keep the current setting.
-    #[serde(default)]
-    #[ts(optional)]
-    pub previews: Option<bool>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub auto_rollback: Option<bool>,
-    #[serde(default)]
-    #[ts(optional)]
-    pub github_feedback: Option<bool>,
-}
-
-fn default_true() -> Option<bool> {
-    Some(true)
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
-pub struct AutoDeployStatus {
-    pub interval_secs: u64,
-    /// The agent has a Coolify API token, so it can trigger deployments.
-    pub coolify_configured: bool,
-    pub watches: Vec<AutoDeployWatch>,
 }
 
 // --- local LLMs (Ollama) ---------------------------------------------------------
@@ -775,31 +589,6 @@ pub struct LlmChatRequest {
     #[serde(default)]
     #[ts(optional)]
     pub stream: Option<bool>,
-}
-
-// --- server pools -----------------------------------------------------------------
-
-/// What a worker needs to let the main host's Coolify in over SSH.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
-pub struct CoolifyWorkerKey {
-    /// OpenSSH public key of Coolify's localhost key.
-    pub public_key: String,
-    /// Coolify `private_keys.uuid`, for `POST /api/v1/servers`.
-    pub private_key_uuid: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
-pub struct AuthorizeKeyRequest {
-    pub public_key: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
-pub struct AuthorizeKeyResult {
-    /// False when the key was already authorised.
-    pub added: bool,
 }
 
 // --- health checks and updates ------------------------------------------------------
@@ -983,15 +772,6 @@ pub struct AuditEntry {
 
 // --- images, backups ------------------------------------------------------------------
 
-/// Image tags an app can roll back to without rebuilding.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
-#[ts(export)]
-pub struct AppImages {
-    pub repository: String,
-    /// Usually commit SHAs (Coolify tags images with the commit).
-    pub tags: Vec<String>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Default, TS)]
 #[ts(export)]
 pub struct BackupStatus {
@@ -1174,10 +954,10 @@ pub struct PowerGuardStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct DomainInfo {
-    /// private (Tailscale only, sslip.io) | cloudflare (tunnel) | direct (A records)
+    /// private (the mesh and LAN, sslip.io) | cloudflare (tunnel) | direct (A records)
     pub mode: String,
     pub domain: Option<String>,
-    /// New apps get `<name>.<this>` (Coolify's wildcard domain).
+    /// New apps get `<name>.<this>` (the platform's wildcard domain).
     pub wildcard: Option<String>,
     /// The Cloudflare tunnel is running (cloudflare mode only).
     pub tunnel_active: Option<bool>,

@@ -2,7 +2,7 @@
 
 export type MoonlightLaunch = { 
 /**
- * Host running Sunshine (Tailscale name or IP).
+ * Host running Sunshine (mesh or LAN address).
  */
 host: string, 
 /**

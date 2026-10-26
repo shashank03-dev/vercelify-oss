@@ -4,15 +4,15 @@
 //! minutes, one request at a time, and half the CPU weight of other
 //! containers so the web apps on the same machine stay responsive. The API
 //! is published on port 11434; the Vercelify firewall keeps it private to
-//! the tailnet, so a Mac (or any other server) can use it directly, and
-//! apps on the same host reach it at `http://vercelify-ollama:11434` on
-//! Coolify's network.
+//! the mesh, so a Mac (or any other server) can use it directly, and apps
+//! on the same host reach it at `http://vercelify-ollama:11434` on the
+//! proxy's network.
 
 use crate::config::Config;
 use crate::error::AppError;
 use crate::exec::run;
 use crate::http::{self, Req};
-use crate::{services, tailscale, volumes};
+use crate::{services, volumes};
 use http_body_util::BodyExt;
 use serde::Deserialize;
 use std::sync::Arc;
@@ -272,17 +272,12 @@ impl Llm {
         } else {
             (None, vec![], vec![], None)
         };
-        let ts = tailscale::status(self.cfg.tailscale_bin.as_deref()).await;
         let port = self.cfg.ollama_port;
-        let mut endpoints = Vec::new();
-        if let Some(n) = &ts.self_node {
-            if !n.dns_name.is_empty() {
-                endpoints.push(format!("http://{}:{port}", n.dns_name));
-            }
-        }
-        if let Some(ip) = vercelify_core::tailscale::self_ipv4(&ts) {
-            endpoints.push(format!("http://{ip}:{port}"));
-        }
+        let endpoints: Vec<String> = crate::mesh::private_ipv4(&self.cfg)
+            .await
+            .map(|ip| format!("http://{ip}:{port}"))
+            .into_iter()
+            .collect();
         let (memory_total_bytes, memory_available_bytes) =
             parse_meminfo(&std::fs::read_to_string("/proc/meminfo").unwrap_or_default());
         let firewall_active = services::status(&self.cfg.systemctl_bin, "vercelify-firewall")
@@ -506,14 +501,11 @@ impl Llm {
             Duration::from_secs(120),
         )
         .await?;
-        // Let apps deployed by Coolify call http://vercelify-ollama:11434.
-        if self
-            .docker(&["network", "inspect", "coolify"], DOCKER_TIMEOUT)
-            .await
-            .is_ok()
-        {
+        // Let the platform's apps call http://vercelify-ollama:11434.
+        let net = vercelify_platform::docker::PROXY_NETWORK;
+        if self.docker(&["network", "inspect", net], DOCKER_TIMEOUT).await.is_ok() {
             let _ = self
-                .docker(&["network", "connect", "coolify", &c.ollama_container], DOCKER_TIMEOUT)
+                .docker(&["network", "connect", net, &c.ollama_container], DOCKER_TIMEOUT)
                 .await;
         }
         for _ in 0..60 {

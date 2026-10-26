@@ -2,7 +2,7 @@
 // servers whose `/v1/health` lists the `platform` capability.
 
 import type { Health } from "./format";
-import type { CockpitSettings, CoolifyApplication } from "../types";
+import type { CockpitSettings } from "../types";
 import { call, streamLines, type HttpRequest } from "./transport";
 import type {
   App,
@@ -275,10 +275,21 @@ export function parseLogLines(raw: unknown): LogLine[] {
 // ----- presentation helpers ------------------------------------------------------
 
 /**
- * A main server on Vercelify's own engine: it pairs without a Coolify URL
- * (the agent serves `/v1/platform`), unlike a worker, which says so.
+ * A main server: it runs Vercelify's engine (the agent serves
+ * `/v1/platform`). One not migrated yet says so in its health (no
+ * `platform` capability) until `vercelify migrate`.
  */
-export const isPlatform = (s: CockpitSettings) => s.role === "main" && !s.coolify_url;
+export const isPlatform = (s: CockpitSettings) => s.role !== "worker";
+
+/** An app as lists, the palette and the menu bar show it. */
+export interface ListedApp {
+  id: string;
+  name: string;
+  health: Health;
+  url: string | null;
+  /** What it is: a build pack for Git apps, else `image` or `compose`. */
+  kind: string;
+}
 
 /** How an app is doing, from what it should do and its newest deployment. */
 export function appState(app: App, latest: Deployment["status"] | null | undefined = app.last_status): { health: Health; label: string } {
@@ -294,27 +305,9 @@ export function appState(app: App, latest: Deployment["status"] | null | undefin
   return { health: "ok", label: "Live" };
 }
 
-/**
- * The shape the sidebar, top bar and ⌘K list apps in (Coolify's, until
- * those move to the platform types). `status` maps to the same traffic light.
- */
-export function listedApp(a: App): CoolifyApplication {
-  const { health } = appState(a);
-  const status = { ok: "running:healthy", warn: "starting", bad: "exited:unhealthy", idle: a.desired === "stopped" ? "stopped" : "idle" }[health];
-  return {
-    uuid: a.id,
-    name: a.name,
-    status,
-    fqdn: a.url,
-    git_repository: a.source.repository,
-    git_branch: a.source.branch,
-    build_pack: a.kind === "image" ? "dockerimage" : a.kind === "compose" ? "dockercompose" : a.build.pack === "static" ? "static" : a.build.pack === "dockerfile" ? "dockerfile" : "nixpacks",
-    docker_registry_image_name: a.source.image,
-    docker_registry_image_tag: null,
-    created_at: a.created_at,
-    updated_at: a.updated_at,
-    environment_id: 0,
-  };
+/** The shape the sidebar, top bar and ⌘K list apps in. */
+export function listedApp(a: App): ListedApp {
+  return { id: a.id, name: a.name, health: appState(a).health, url: a.url, kind: a.kind === "git" ? a.build.pack : a.kind };
 }
 
 export function deploymentHealth(d: Deployment): Health {

@@ -182,7 +182,7 @@ mod tests {
             master_key_file: dir.join("master.key"),
             ..Config::default()
         };
-        c.apply_engine_defaults();
+        c.apply_defaults();
         c
     }
 
@@ -194,7 +194,7 @@ mod tests {
         assert!(!dir.path().join("platform.db").exists());
 
         let c = cfg(dir.path(), "platform");
-        assert_eq!(c.proxy_dir, dir.path().join("proxy"), "our proxy, not Coolify's");
+        assert_eq!(c.proxy_dir, dir.path().join("proxy"), "in the state directory");
         assert_eq!(c.proxy_container, "vercelify-proxy");
         assert_eq!(c.traefik_metrics_url, "http://127.0.0.1:8082/metrics");
         let (p, e) = Platform::open_if_enabled(&c);

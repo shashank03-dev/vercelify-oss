@@ -1,25 +1,22 @@
-import { ArrowRightLeft, Boxes, CheckCircle2, Circle, HardDrive, RefreshCw, Wand2, XCircle, Zap } from "lucide-react";
+import { ArrowRightLeft, Boxes, HardDrive, RefreshCw, Wand2, Zap } from "lucide-react";
 import { useMemo, useState } from "react";
 import { StorageToggle } from "../components/StorageToggle";
 import { useToast } from "../components/Toast";
-import { Button, Callout, Card, cx, EmptyState, ErrorNote, IconButton, Loading, Meter, Modal, OrbitButton, PageHeader, PixelWave, ShimmerText, Skeleton } from "../components/ui";
-import { agent, agentOn, coolifyOn, waitForJob } from "../lib/api";
-import { hasCap } from "../lib/caps";
-import { useLive, useLiveTopic } from "../lib/live";
+import { Button, Callout, Card, cx, EmptyState, ErrorNote, IconButton, Loading, Meter, Modal, PageHeader, Skeleton } from "../components/ui";
+import { agent, waitForJob } from "../lib/api";
+import { useLiveTopic } from "../lib/live";
 import { bytes, mediaLabel, pct } from "../lib/format";
-import { sleep, usePoll } from "../lib/hooks";
+import { usePoll } from "../lib/hooks";
 import { isPlatform, platformOn } from "../lib/platform";
 import { useSession } from "../lib/session";
-import type { CoolifyVolume, DiskInfo, StorageTier, VolumeInfo } from "../types";
+import type { DiskInfo, StorageTier, VolumeInfo } from "../types";
 
 export function StorageView() {
   const { settings } = useSession();
-  // Platform servers have no Coolify; their volumes come with M9's storage page.
+  // Workers keep the volumes of the apps placed on them; their main server lists them.
   const own = isPlatform(settings);
   const sys = usePoll(() => agent.system(), 10_000);
-  const vols = usePoll(() => (own ? Promise.resolve([]) : agent.coolifyVolumes()), own ? 0 : 8000, [own]);
   const raw = usePoll(() => agent.volumes(), 15_000);
-  const [moving, setMoving] = useState<{ vol: CoolifyVolume; to: StorageTier } | null>(null);
 
   const disks = sys.data?.disks ?? [];
   const ssd = disks.find((d) => d.role === "system");
@@ -31,7 +28,7 @@ export function StorageView() {
         title="Storage"
         subtitle="Keep the OS, Docker and builds on the fast SSD; put databases and bulk data on the big HDD."
         actions={
-          <IconButton label="Refresh" onClick={() => void Promise.all([sys.refresh(), vols.refresh(), raw.refresh()])}>
+          <IconButton label="Refresh" onClick={() => void Promise.all([sys.refresh(), raw.refresh()])}>
             <RefreshCw />
           </IconButton>
         }
@@ -58,72 +55,6 @@ export function StorageView() {
           missing={!!sys.data && !hdd}
         />
       </div>
-
-      {!own && (
-        <Card
-          title="Coolify volumes"
-          description="Persistent data of your apps and databases. Move it between disks with one click."
-          icon={<Boxes />}
-          className="mb-6"
-          testId="coolify-volumes"
-          flush
-        >
-          <ErrorNote error={vols.error} className="m-4" />
-          {vols.loading && !vols.data ? (
-            <div className="p-4">
-              <Loading />
-            </div>
-          ) : !vols.data?.length ? (
-            <EmptyState icon={<Boxes />} title="No persistent volumes yet">
-              Databases and apps you create in Coolify show up here, and you can move them between tiers.
-            </EmptyState>
-          ) : (
-            <div role="table" aria-label="Coolify volumes" className="text-[13px]">
-              <div role="row" className={cx(VOLUME_GRID, "h-8 border-b border-line bg-fg/[0.015] text-[11px] font-medium text-fg-dim")}>
-                <span>Resource</span>
-                <span>Volume</span>
-                <span>Mounted at</span>
-                <span>Disk</span>
-                <span />
-              </div>
-              <div className="divide-y divide-line">
-                {vols.data.map((v) => {
-                  const to: StorageTier = v.tier === "ssd" ? "hdd" : "ssd";
-                  return (
-                    <div role="row" key={v.id} data-testid={`volume-${v.name}`} className={cx(VOLUME_GRID, "py-2.5 transition-colors hover:bg-fg/[0.025]")}>
-                      <div className="min-w-0 leading-tight">
-                        <div className="truncate font-medium">{v.resource_name || "—"}</div>
-                        <div className="mt-1 text-[11px] text-fg-dim">{v.resource_type.replace("Standalone", "")}</div>
-                      </div>
-                      <span className="truncate font-mono text-xs text-fg-muted" title={v.data_path}>
-                        {v.name}
-                      </span>
-                      <span className="truncate font-mono text-xs text-fg-muted">{v.mount_path}</span>
-                      <span className="text-[12px] text-fg-muted">{v.tier === "ssd" ? "SSD" : "HDD"}</span>
-                      <span className="flex justify-end">
-                        {v.movable ? (
-                          <Button
-                            size="sm"
-                            icon={<ArrowRightLeft />}
-                            disabled={to === "hdd" && !hdd}
-                            title={to === "hdd" && !hdd ? "No HDD mounted at /mnt/storage" : undefined}
-                            onClick={() => setMoving({ vol: v, to })}
-                            data-testid={`move-${v.name}`}
-                          >
-                            Move to {to.toUpperCase()}
-                          </Button>
-                        ) : (
-                          <span className="text-[11px] text-fg-dim">edit compose file</span>
-                        )}
-                      </span>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-        </Card>
-      )}
 
       {own && <PlatformVolumes hdd={!!hdd} />}
 
@@ -164,17 +95,6 @@ export function StorageView() {
         </div>
       </Card>
 
-      {moving && (
-        <MoveDialog
-          vol={moving.vol}
-          to={moving.to}
-          onClose={() => setMoving(null)}
-          onDone={() => {
-            void vols.refresh();
-            void raw.refresh();
-          }}
-        />
-      )}
     </>
   );
 }
@@ -244,28 +164,6 @@ function TierCard({
       )}
     </div>
   );
-}
-
-type StepState = "todo" | "doing" | "done" | "error";
-
-/** Stopped = Coolify says exited AND no container mounts the volume, twice in a row. */
-async function waitStopped(vol: CoolifyVolume, isApp: boolean, agent: ReturnType<typeof agentOn>, coolify: ReturnType<typeof coolifyOn>) {
-  const deadline = Date.now() + 150_000;
-  let streak = 0;
-  for (;;) {
-    const [volumes, status] = await Promise.all([
-      agent.coolifyVolumes(),
-      isApp
-        ? coolify.applications().then((a) => a.find((x) => x.uuid === vol.resource_uuid)?.status)
-        : coolify.databases().then((d) => d.find((x) => x.uuid === vol.resource_uuid)?.status),
-    ]);
-    const v = volumes.find((x) => x.id === vol.id);
-    const stopped = !!v && !v.in_use && !(status ?? "").startsWith("running") && !(status ?? "").startsWith("restarting");
-    streak = stopped ? streak + 1 : 0;
-    if (streak >= 2) return;
-    if (Date.now() > deadline) throw new Error(`${vol.resource_name} did not stop within 2½ minutes`);
-    await sleep(2500);
-  }
 }
 
 /** Volumes of the platform engine's apps and databases, movable between disks. */
@@ -373,118 +271,5 @@ function PlatformVolumes({ hdd }: { hdd: boolean }) {
         </div>
       </Modal>
     </>
-  );
-}
-
-/** Stop the resource, copy its data to the other tier, start it again. */
-function MoveDialog({ vol, to, onClose, onDone }: { vol: CoolifyVolume; to: StorageTier; onClose: () => void; onDone: () => void }) {
-  const toast = useToast();
-  const { health } = useLive();
-  const { settings } = useSession();
-  // A move continues after this page unmounts: every step belongs to this host.
-  const agent = agentOn(settings.agent_url);
-  const coolify = coolifyOn(settings.agent_url);
-  const [steps, setSteps] = useState<StepState[]>(["todo", "todo", "todo", "todo"]);
-  const [error, setError] = useState<string>();
-  const [note, setNote] = useState<string>();
-  const [running, setRunning] = useState(false);
-  const isApp = vol.resource_type === "Application";
-
-  const set = (i: number, s: StepState) => setSteps((prev) => prev.map((v, j) => (j === i ? s : v)));
-
-  async function run() {
-    setRunning(true);
-    setError(undefined);
-    let i = 0;
-    try {
-      set(0, "doing");
-      // Always ask: the volume list may be stale, and a start queued a moment
-      // ago (e.g. by a previous move) must not race with the copy.
-      try {
-        await (isApp ? coolify.appAction(vol.resource_uuid, "stop") : coolify.dbAction(vol.resource_uuid, "stop"));
-      } catch (e) {
-        if (!/already stopped|not running/i.test((e as Error).message)) throw e;
-      }
-      set(0, "done");
-      i = 1;
-      set(1, "doing");
-      await waitStopped(vol, isApp, agent, coolify);
-      set(1, "done");
-      i = 2;
-      set(2, "doing");
-      if (hasCap(health.data, "jobs")) {
-        // Large volumes take longer than a request may: follow the job.
-        const job = await agent.moveVolumeInBackground(vol.id, to);
-        const done = await waitForJob(job.id, undefined, 2000, settings.agent_url);
-        if (done.status === "failed") throw new Error(done.detail ?? "the move failed");
-        setNote(done.detail ?? "");
-      } else {
-        const res = await agent.moveVolume(vol.id, to);
-        setNote(res.note);
-      }
-      set(2, "done");
-      i = 3;
-      set(3, "doing");
-      await (isApp ? coolify.appAction(vol.resource_uuid, "start") : coolify.dbAction(vol.resource_uuid, "start"));
-      set(3, "done");
-      toast.ok(`${vol.resource_name} now stores ${vol.mount_path} on the ${to.toUpperCase()}`);
-      onDone();
-    } catch (e) {
-      set(i, "error");
-      setError((e as Error).message);
-    } finally {
-      setRunning(false);
-    }
-  }
-
-  const labels = [
-    `Stop ${vol.resource_name}`,
-    "Wait until it has stopped",
-    `Copy data to the ${to.toUpperCase()} (owners and permissions preserved)`,
-    `Start ${vol.resource_name} on the new location`,
-  ];
-  const finished = steps.every((s) => s === "done");
-
-  return (
-    <Modal open onClose={() => !running && onClose()} title={`Move ${vol.resource_name || vol.name} to ${to.toUpperCase()}`}>
-      <p className="mb-4 text-[13px] text-fg-muted">
-        {vol.resource_name} will be offline while its data is copied ({to === "hdd" ? "SSD → HDD" : "HDD → SSD"}). The old copy is kept
-        until you delete it.
-      </p>
-      <ol className="mb-4 space-y-2.5" data-testid="move-steps">
-        {labels.map((l, i) => (
-          <li key={l} className="flex items-center gap-3 text-[13px]">
-            {steps[i] === "done" ? (
-              <CheckCircle2 className="size-4 text-ok" />
-            ) : steps[i] === "doing" ? (
-              <span className="flex size-4 items-center justify-center">
-                <PixelWave size={3} pixel={3} gap={1.5} />
-              </span>
-            ) : steps[i] === "error" ? (
-              <XCircle className="size-4 text-bad" />
-            ) : (
-              <Circle className="size-4 text-fg-dim" />
-            )}
-            {steps[i] === "doing" ? <ShimmerText>{l}</ShimmerText> : <span className={steps[i] === "todo" ? "text-fg-muted" : ""}>{l}</span>}
-          </li>
-        ))}
-      </ol>
-      {error && <ErrorNote error={{ message: error }} className="mb-3" />}
-      {note && (
-        <Callout tone="idle" className="selectable mb-3">
-          {note}
-        </Callout>
-      )}
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={onClose} disabled={running}>
-          {finished ? "Close" : "Cancel"}
-        </Button>
-        {!finished && (
-          <OrbitButton busy={running} busyLabel="Moving" icon={<ArrowRightLeft />} onRun={run} testId="move-confirm">
-            {error ? "Retry" : "Move now"}
-          </OrbitButton>
-        )}
-      </div>
-    </Modal>
   );
 }

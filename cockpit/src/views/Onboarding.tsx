@@ -2,8 +2,7 @@ import { motion } from "framer-motion";
 import { BrainCircuit, Check, GitBranch, Globe, Laptop, ShieldCheck } from "lucide-react";
 import type { ReactNode } from "react";
 import { HOST_INSTALL, PairForm } from "../components/PairForm";
-import { CodeBlock, Logo } from "../components/ui";
-import { openExternal } from "../lib/open";
+import { CodeBlock, InlineCode, Logo } from "../components/ui";
 import type { CockpitSettings } from "../types";
 
 const FEATURES = [
@@ -11,7 +10,7 @@ const FEATURES = [
   { icon: BrainCircuit, text: "Run local AI models on your old laptops and use them from this Mac" },
   { icon: Laptop, text: "Connect several old machines and switch between them in one click" },
   { icon: Globe, text: "Your own domains with automatic HTTPS, even behind CGNAT" },
-  { icon: ShieldCheck, text: "Private by default over Tailscale, no open ports" },
+  { icon: ShieldCheck, text: "Private by default on your own encrypted network, no open ports" },
 ];
 
 export function Onboarding({ onPaired }: { onPaired: (s: CockpitSettings, note?: string) => void }) {
@@ -64,26 +63,22 @@ export function Onboarding({ onPaired }: { onPaired: (s: CockpitSettings, note?:
           <div className="mb-8">
             <Logo className="mb-5 h-7 w-auto lg:hidden" />
             <h1 className="text-[24px] font-semibold tracking-[-0.025em]">Welcome to Vercelify</h1>
-            <p className="mt-1.5 text-[13px] text-fg-muted">Three steps and your machine is ready to take deployments.</p>
+            <p className="mt-1.5 text-[13px] text-fg-muted">Two steps and your machine is ready to take deployments.</p>
           </div>
 
           <ol>
             <Step n={1} title="Run the installer on your Linux machine">
               <CodeBlock code={HOST_INSTALL} prompt />
               <p className="mt-2 text-xs text-fg-dim">
-                Debian 12/13 or Ubuntu 22.04/24.04. It sets up Coolify, Tailscale, storage and the agent, then shows an 8-character code.
+                Debian 12/13 or Ubuntu 22.04/24.04. It sets up Docker, Vercelify's engine, its private network, storage and the agent, then
+                shows an 8-character code.
               </p>
             </Step>
-            <Step n={2} title="Sign in to Tailscale on this computer">
-              <p className="text-[13px] text-fg-muted">
-                Use the same account as the server, so both machines can reach each other privately. No Tailscale yet?{" "}
-                <button type="button" className="text-fg underline underline-offset-2 hover:text-accent-fg" onClick={() => void openExternal("https://tailscale.com/download")}>
-                  Download it
-                </button>
-                .
+            <Step n={2} title="Connect" last>
+              <p className="mb-3 text-[13px] text-fg-muted">
+                On the same Wi-Fi the server shows up below: type its code and this computer joins its private network. Anywhere else, paste
+                the full code that <InlineCode>sudo vercelify pair</InlineCode> prints.
               </p>
-            </Step>
-            <Step n={3} title="Connect" last>
               <PairForm onPaired={onPaired} />
             </Step>
           </ol>

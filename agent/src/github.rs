@@ -248,7 +248,7 @@ pub fn preview_comment(app: &str, url: &str, sha: &str) -> String {
 }
 
 /// Path inside the repository for a file of an app built from `base_dir`
-/// (Coolify's "base directory", Vercel's "root directory").
+/// (the app's build context, Vercel's "root directory").
 pub fn repo_path(base_dir: &str, file: &str) -> Option<String> {
     let base = base_dir.trim().trim_matches('/');
     if base.split('/').any(|s| s == ".." || s == ".") || base.contains(['?', '#', '"', ' ', '\\']) {

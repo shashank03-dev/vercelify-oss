@@ -259,13 +259,15 @@ pub fn route_keys(c: &ProxyConfig) -> Vec<String> {
 }
 
 fn config_hash(c: &ProxyConfig) -> String {
+    // The directory too: a proxy that mounts another one never sees our routes.
     let h = Sha256::digest(format!(
-        "{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}",
         static_config(c),
         c.image,
         c.http_port,
         c.https_port,
-        c.metrics_port
+        c.metrics_port,
+        c.dir.display()
     ));
     h.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }

@@ -5,11 +5,11 @@
  */
 export type DomainInfo = { 
 /**
- * private (Tailscale only, sslip.io) | cloudflare (tunnel) | direct (A records)
+ * private (the mesh and LAN, sslip.io) | cloudflare (tunnel) | direct (A records)
  */
 mode: string, domain: string | null, 
 /**
- * New apps get `<name>.<this>` (Coolify's wildcard domain).
+ * New apps get `<name>.<this>` (the platform's wildcard domain).
  */
 wildcard: string | null, 
 /**

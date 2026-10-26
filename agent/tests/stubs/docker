@@ -3,8 +3,8 @@
 echo "docker $*" >> "${STUB_LOG:-/dev/null}"
 case "$1" in
   ps)
-    echo '{"ID":"a1b2c3d4e5f6","Image":"postgres:16","Labels":"coolify.managed=true,coolify.name=pg-main","Names":"pg-main","Ports":"5432/tcp","State":"running","Status":"Up 2 hours"}'
-    echo '{"ID":"0123456789ab","Image":"ghcr.io/coollabsio/coolify:4","Labels":"","Names":"coolify","Ports":"0.0.0.0:8000->8080/tcp","State":"running","Status":"Up 3 days (healthy)"}'
+    echo '{"ID":"a1b2c3d4e5f6","Image":"postgres:16","Labels":"vercelify.managed=true,vercelify.app-name=shop","Names":"pg-main","Ports":"5432/tcp","State":"running","Status":"Up 2 hours"}'
+    echo '{"ID":"0123456789ab","Image":"traefik:v3.7","Labels":"vercelify.managed=proxy","Names":"vercelify-proxy","Ports":"0.0.0.0:80->80/tcp","State":"running","Status":"Up 3 days (healthy)"}'
     echo '{"ID":"ffffeeeedddd","Image":"alpine","Labels":"","Names":"scratch","Ports":"","State":"exited","Status":"Exited (0)"}'
     ;;
   stats)
@@ -41,11 +41,7 @@ case "$1" in
     ;;
   pull|run|rm|network) echo "ok" ;;
   image) exit 0 ;;
-  images) [ "$4" = app1 ] && printf '2222222\nlatest\n<none>\n'; exit 0 ;;
+  images) exit 0 ;;
   info) echo "27.3.1" ;;  # `image inspect`: the Ollama image is already here
-  exec)
-    # coolify-db psql: the localhost server's key uuid
-    echo "key-uuid-1"
-    ;;
   *) echo "unexpected: $*" >&2; exit 2 ;;
 esac

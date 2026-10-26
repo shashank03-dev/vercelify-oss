@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main cockpit window only; the embedded Coolify window gets no IPC access.",
+  "description": "The main cockpit window: the only one with IPC access.",
   "windows": ["main"],
   "permissions": ["core:default", "opener:allow-open-url", "notification:default"]
 }

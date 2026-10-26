@@ -60,7 +60,7 @@ export function DisplayCaster() {
       if (!st.receiver.running) {
         throw new Error(`The display receiver on the host stopped: ${st.receiver.last_output.slice(-3).join(" ") || "no output"}`);
       }
-      if (!st.receiver_url) throw new Error("The host has no Tailscale address — is Tailscale up on it?");
+      if (!st.receiver_url) throw new Error("The host has no private address yet: is vercelify-mesh running on it? (sudo vercelify doctor)");
       await local.senderStart({
         url: st.receiver_url,
         source,
@@ -113,7 +113,7 @@ export function DisplayCaster() {
     <div className="space-y-6">
       <Card
         title="Linux screen as a second monitor"
-        description="Stream this Mac's screen to the laptop's panel over Tailscale"
+        description="Stream this Mac's screen to the laptop's panel over your private network"
         icon={<MonitorUp />}
         testId="extend-card"
         actions={
@@ -133,7 +133,7 @@ export function DisplayCaster() {
             {live && <span className="absolute inset-y-[-1px] left-0 w-1/3 animate-[stream_1.2s_linear_infinite] bg-gradient-to-r from-transparent via-accent to-transparent" />}
           </div>
           <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -translate-y-5 text-[11px] whitespace-nowrap text-fg-dim">
-              {transport.toUpperCase()} over Tailscale · {quality.kbps / 1000} Mbps
+              {transport.toUpperCase()} over your network · {quality.kbps / 1000} Mbps
           </div>
           <Endpoint icon={<MonitorPlay className="size-5" />} title={settings.hostname} sub="mpv · fullscreen" on={receiverOn} />
         </div>

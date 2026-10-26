@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { isWorker } from "../lib/api";
-import { pct, statusHealth } from "../lib/format";
+import { pct } from "../lib/format";
 import { useLive } from "../lib/live";
 import { NAV, NAV_GROUPS, useNav, type NavItem } from "../lib/nav";
 import { agentHost, useSession } from "../lib/session";
@@ -180,14 +180,14 @@ export function Sidebar() {
             </div>
             {list.slice(0, 8).map((a) => (
               <button
-                key={a.uuid}
+                key={a.id}
                 type="button"
-                onClick={() => go("apps", { app: a.uuid })}
+                onClick={() => go("apps", { app: a.id })}
                 className="group flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] text-fg-muted transition-colors hover:bg-fg/[0.05] hover:text-fg"
               >
-                <AppIcon pack={a.build_pack} />
+                <AppIcon kind={a.kind} />
                 <span className="min-w-0 flex-1 truncate">{a.name}</span>
-                {statusHealth(a.status) === "bad" && !asleep.has(a.uuid) && (
+                {a.health === "bad" && !asleep.has(a.id) && (
                   <Tooltip content="Stopped or failing">
                     <CircleAlert className="size-3.5 shrink-0 text-bad" aria-label="needs attention" />
                   </Tooltip>
@@ -258,8 +258,8 @@ function Switch({ on }: { on: boolean }) {
 }
 
 /** What the app is built from, so the list reads at a glance without status dots. */
-function AppIcon({ pack }: { pack: string }) {
-  const Icon = pack === "static" ? Globe : pack === "dockerimage" ? Container : pack === "dockercompose" ? Layers : pack === "dockerfile" ? Box : Package;
+function AppIcon({ kind }: { kind: string }) {
+  const Icon = kind === "static" ? Globe : kind === "image" ? Container : kind === "compose" ? Layers : kind === "dockerfile" ? Box : Package;
   return <Icon className="size-4 shrink-0 text-fg-dim group-hover:text-fg-muted" />;
 }
 

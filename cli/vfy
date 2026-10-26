@@ -86,7 +86,7 @@ OLLAMA_URL=${VFY_OLLAMA_URL:-http://localhost:11434}
 GEMINI_MODEL=${VFY_GEMINI_MODEL:-gemma-4-26b-a4b-it}
 GEMINI_URL=${VFY_GEMINI_URL:-https://generativelanguage.googleapis.com/v1beta}
 EXPLAIN_SYSTEM="You are Vercelify's deploy doctor. A deployment failed on a self-hosted Vercelify server:
-Coolify builds the app with Nixpacks or a Dockerfile inside a Linux container on an old laptop.
+Vercelify builds the app with its build pack or a Dockerfile inside a Linux container on an old laptop.
 Linux file names are case-sensitive, the build cannot see the developer's machine,
 and environment variables come only from the app's settings.
 Read the build log and answer in exactly this format, under 120 words:

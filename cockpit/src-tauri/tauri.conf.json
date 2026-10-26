@@ -32,7 +32,7 @@
     "targets": ["app", "dmg", "deb", "appimage"],
     "category": "DeveloperTool",
     "shortDescription": "Self-hosted Vercel control center",
-    "longDescription": "Control your self-hosted Coolify PaaS, storage tiers, Tailscale mesh and display streaming from one app.",
+    "longDescription": "Deploy to your own old hardware: apps, databases, storage tiers, your private Vercelify network and display streaming from one app.",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "macOS": { "minimumSystemVersion": "11.0" }
   }

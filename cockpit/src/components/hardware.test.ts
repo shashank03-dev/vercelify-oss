@@ -25,17 +25,12 @@ describe("hardware facts", () => {
     expect(f["Power supply"]!.health).toBe("bad");
     expect(f["Memory pressure"]!.health).toBe("warn");
     expect(f["Out-of-memory kills"]!.value).toBe("2 since boot");
-    expect(f["Tailscale key"]).toBeUndefined();
   });
-  it("a healthy laptop is all OK, and key expiry is counted", () => {
+  it("a healthy laptop is all OK", () => {
     const laptop: HardwareInfo = { ...pi, profile: "laptop", model: "", root_media: "ssd", memory_cgroup: true, throttling: null, pressure: null, oom_kills: 0 };
-    const soon = new Date(Date.now() + 5 * 86_400_000 + 3_600_000).toISOString();
-    const facts = hardwareFacts(laptop, { self_node: { key_expiry: soon } } as never);
+    const facts = hardwareFacts(laptop);
     expect(facts.find((x) => x.label === "Machine")!.value).toBe("Laptop");
     expect(facts.filter((x) => x.health === "bad")).toEqual([]);
-    const key = facts.find((x) => x.label === "Tailscale key")!;
-    expect(key.value).toBe("expires in 5 days");
-    expect(key.health).toBe("warn");
   });
 });
 

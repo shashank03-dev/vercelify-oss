@@ -11,15 +11,12 @@ commands:
   serve                       run the HTTP API (default)
   token [--write [--force]]   generate a random token; --write stores it in the token file
   pair [options]              print a pairing code for the cockpit
-      --host HOST               host name or IP the Mac should use
-      --coolify-port PORT       Coolify dashboard port (default 8000)
-      --coolify-url URL         Coolify URL (overrides host and port)
-      --coolify-token-file FILE Coolify API token to embed
+      --host HOST               host name or IP the Mac should use (instead of the mesh)
       --short                   also create a one-time short code (printed instead)
       --with-code               with --short: print the full code on a second line too
       --ttl SECONDS             lifetime of the short code
       --name NAME               name of the device token minted for it
-      --tailscale               pair over Tailscale even on a mesh coordinator
+      --tailscale               pair over Tailscale (a server not migrated yet)
   tokens [list | revoke ID]   device tokens
   promote [--force]           on the standby: take over as the main server (see: vercelify promote)
   migrate [STEP]              from Coolify to the platform engine (see: vercelify migrate)
@@ -50,9 +47,6 @@ pub enum Cmd {
     },
     Pair {
         host: Option<String>,
-        coolify_port: u16,
-        coolify_url: Option<String>,
-        coolify_token_file: Option<PathBuf>,
         short: bool,
         with_code: bool,
         ttl: u64,
@@ -146,9 +140,6 @@ pub fn parse(args: impl IntoIterator<Item = String>, env_config: Option<String>)
         }
         "pair" => {
             let mut host = None;
-            let mut coolify_port = 8000;
-            let mut coolify_url = None;
-            let mut coolify_token_file = None;
             let (mut short, mut with_code, mut tailscale) = (false, false, false);
             let mut ttl = vercelify_core::pairing::SHORT_CODE_TTL_SECS;
             let mut name = None;
@@ -156,9 +147,6 @@ pub fn parse(args: impl IntoIterator<Item = String>, env_config: Option<String>)
                 let (k, inline) = split(&arg);
                 match k.as_str() {
                     "--host" => host = Some(a.value(&k, inline)?),
-                    "--coolify-port" => coolify_port = number(&k, &a.value(&k, inline)?)?,
-                    "--coolify-url" => coolify_url = Some(a.value(&k, inline)?),
-                    "--coolify-token-file" => coolify_token_file = Some(PathBuf::from(a.value(&k, inline)?)),
                     "--ttl" => ttl = number(&k, &a.value(&k, inline)?)?,
                     "--name" => name = Some(a.value(&k, inline)?),
                     "--short" => short = true,
@@ -172,9 +160,6 @@ pub fn parse(args: impl IntoIterator<Item = String>, env_config: Option<String>)
             }
             Cmd::Pair {
                 host,
-                coolify_port,
-                coolify_url,
-                coolify_token_file,
                 short,
                 with_code,
                 ttl,
@@ -260,16 +245,11 @@ mod tests {
             .cmd
         {
             Cmd::Pair {
-                host,
-                name,
-                tailscale,
-                coolify_port,
-                ..
+                host, name, tailscale, ..
             } => {
                 assert_eq!(host.as_deref(), Some("10.77.0.1"));
                 assert_eq!(name.as_deref(), Some("Mac"));
                 assert!(tailscale);
-                assert_eq!(coolify_port, 8000);
             }
             other => panic!("{other:?}"),
         }

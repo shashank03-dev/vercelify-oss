@@ -80,7 +80,6 @@ fn start_with(extra_env: &[(&str, String)]) -> Agent {
     )
     .unwrap();
     let log = dir.path().join("calls.log");
-    std::fs::write(dir.path().join("coolify.token"), "1|coolify-api-token\n").unwrap();
 
     // free_port() releases the port before the agent binds it, and the tests
     // run in parallel with their own fake servers: make sure the port is
@@ -177,9 +176,9 @@ fn agent_cmd(
         .env("VERCELIFY_STATE_DIR", dir.join("state"))
         .env("VERCELIFY_RUN_DIR", dir.join("run"))
         .env("VERCELIFY_INSTALL_ENV", dir.join("install.env"))
-        .env("VERCELIFY_COOLIFY_TOKEN_FILE", dir.join("coolify.token"))
-        .env("VERCELIFY_AUTHORIZED_KEYS", dir.join("root-ssh/authorized_keys"))
-        .env("VERCELIFY_COOLIFY_SSH_KEYS_DIR", dir.join("coolify-keys"))
+        // A server not on the platform engine, unless a test says so.
+        .env("VERCELIFY_ENGINE", "coolify")
+        .env("VERCELIFY_COOLIFY_DATA_DIR", dir.join("coolify"))
         .env("VERCELIFY_TOKENS_FILE", dir.join("tokens.json"))
         .env("VERCELIFY_AUDIT_LOG", dir.join("state/audit.log"))
         .env("VERCELIFY_POWER_GUARD_CONF", dir.join("power-guard.conf"))
@@ -189,8 +188,7 @@ fn agent_cmd(
         .env("VERCELIFY_REBOOT_REQUIRED_FILE", dir.join("reboot-required"))
         .env("VERCELIFY_SMARTCTL_BIN", stubs.join("absent-smartctl"))
         .env("VERCELIFY_TIMEDATECTL_BIN", stubs.join("absent-timedatectl"))
-        // Only "check now" in tests: no background timing.
-        .env("VERCELIFY_AUTODEPLOY_INTERVAL", "0")
+        // No background loops in tests.
         .env("VERCELIFY_WATCH_INTERVAL", "0")
         .env("VERCELIFY_WAKE_LISTEN", "")
         .env(
@@ -303,21 +301,15 @@ fn agent_end_to_end() {
     assert!(v["cpu"]["cores"].as_u64().unwrap() > 0);
     assert!(v["disks"].as_array().unwrap().iter().any(|d| d["mount_point"] == "/"));
 
-    // --- tailscale
-    let (s, v) = get(&a, "/v1/tailscale");
-    assert_eq!(s, 200);
-    assert_eq!(v["backend_state"], "Running");
-    assert_eq!(v["self_node"]["dns_name"], "vercelify-host.tail1234.ts.net");
-    assert_eq!(v["peers"].as_array().unwrap().len(), 2);
-
     // --- containers
     let (s, v) = get(&a, "/v1/containers?stats=true");
     assert_eq!(s, 200, "{v}");
     let list = v.as_array().unwrap();
     assert_eq!(list.len(), 3);
-    assert_eq!(list[0]["name"], "coolify"); // running + coolify-managed first, by name
-    assert_eq!(list[1]["name"], "pg-main");
-    assert_eq!(list[1]["cpu_pct"], 2.5);
+    assert_eq!(list[0]["name"], "pg-main"); // running apps first, by name
+    assert_eq!(list[0]["app"], "shop");
+    assert_eq!(list[0]["cpu_pct"], 2.5);
+    assert_eq!(list[1]["name"], "vercelify-proxy");
     assert_eq!(list[2]["state"], "exited");
 
     let (s, _) = post(&a, "/v1/containers/pg-main/restart", json!({}));
@@ -422,11 +414,6 @@ fn agent_end_to_end() {
     assert!(v["points"].is_array());
     let (s, v) = get(&a, "/v1/uptime");
     assert_eq!((s, v.as_array().map(Vec::len)), (200, Some(0)));
-    let (s, v) = get(&a, "/v1/images/app1");
-    assert_eq!(s, 200, "{v}");
-    assert_eq!(v["tags"], json!(["2222222", "latest"]));
-    let (s, _) = get(&a, "/v1/images/..%2Fetc");
-    assert_eq!(s, 400);
     let (s, v) = get(&a, "/v1/backup");
     assert_eq!(s, 200);
     assert_eq!(v["configured"], false);
@@ -517,30 +504,6 @@ fn fake_server(handler: Handler) -> (u16, std::sync::Arc<std::sync::Mutex<Vec<Se
     (port, seen)
 }
 
-fn fake_coolify(r: &Seen) -> (u16, &'static str, String) {
-    if r.path == "/api/health" {
-        return (200, "text/plain", "OK".into());
-    }
-    if r.path == "/api/v1/version" && r.headers.contains("authorization: Bearer 1|coolify-api-token") {
-        return (200, "application/json", "\"4.0.0\"".into());
-    }
-    if r.path.contains("uuid=gone") {
-        return (
-            404,
-            "application/json",
-            r#"{"message":"Application not found."}"#.into(),
-        );
-    }
-    if r.path.starts_with("/api/v1/deploy") && r.headers.contains("authorization: Bearer 1|coolify-api-token") {
-        return (
-            200,
-            "application/json",
-            r#"{"deployments":[{"message":"queued","deployment_uuid":"d1"}]}"#.into(),
-        );
-    }
-    (401, "application/json", r#"{"message":"Unauthenticated."}"#.into())
-}
-
 fn fake_ollama(r: &Seen) -> (u16, &'static str, String) {
     match (r.method.as_str(), r.path.as_str()) {
         ("GET", "/api/version") => (200, "application/json", r#"{"version":"0.12.3"}"#.into()),
@@ -575,17 +538,11 @@ fn fake_ollama(r: &Seen) -> (u16, &'static str, String) {
 }
 
 #[test]
-fn pairing_autodeploy_llm_and_pools() {
-    let (coolify_port, coolify_seen) = fake_server(fake_coolify);
+fn pairing_llm_and_doctor() {
     let (ollama_port, ollama_seen) = fake_server(fake_ollama);
-    let scratch = tempfile::tempdir().unwrap();
-    let head = scratch.path().join("git-head");
-    std::fs::write(&head, "1111111111111111111111111111111111111111").unwrap();
     let a = start_with(&[
-        ("VERCELIFY_COOLIFY_URL", format!("http://127.0.0.1:{coolify_port}")),
         ("VERCELIFY_OLLAMA_URL", format!("http://127.0.0.1:{ollama_port}")),
         ("STUB_OLLAMA_STATE", "running".into()),
-        ("STUB_GIT_HEAD_FILE", head.display().to_string()),
     ]);
 
     // --- health tells the cockpit what this machine is
@@ -622,9 +579,8 @@ fn pairing_autodeploy_llm_and_pools() {
     let device = p.agent_token.clone();
     let (s, _, _) = req(&a, "GET", "/v1/system", Some(&device), None);
     assert_eq!(s, 200, "the device token works");
-    assert_eq!(p.coolify_token.as_deref(), Some("1|coolify-api-token"));
     assert_eq!(p.role.as_deref(), Some("main"));
-    assert_eq!(p.hostname, "vercelify-host");
+    assert!(!p.hostname.is_empty());
     let (s, _, _) = req(&a, "POST", "/v1/pair/claim", None, Some(json!({ "code": code })));
     assert_eq!(s, 404, "one-time");
 
@@ -687,90 +643,6 @@ fn pairing_autodeploy_llm_and_pools() {
     );
     assert!(!entries.iter().any(|e| e["method"] == "GET"), "reads are not audited");
 
-    // --- auto-deploy: baseline, then a push triggers exactly one deployment
-    let (s, v) = get(&a, "/v1/autodeploy");
-    assert_eq!(s, 200);
-    assert_eq!(v["coolify_configured"], true);
-    assert_eq!(v["interval_secs"], 0);
-    let (s, v) = post(
-        &a,
-        "/v1/autodeploy",
-        json!({"app_uuid": "app1", "name": "blog", "repo": "https://github.com/you/blog.git", "branch": "main"}),
-    );
-    assert_eq!(s, 200, "{v}");
-    assert_eq!(v["enabled"], true);
-    let (s, v) = post(&a, "/v1/autodeploy/app1/check", json!({}));
-    assert_eq!(s, 200, "{v}");
-    assert_eq!(v["last_commit"], "1111111111111111111111111111111111111111");
-    assert_eq!(v["deploys"], 0, "the first check only records the head");
-    assert!(v["last_error"].is_null(), "{v}");
-    let (_, v) = post(&a, "/v1/autodeploy/app1/check", json!({}));
-    assert_eq!(v["deploys"], 0);
-    std::fs::write(&head, "2222222222222222222222222222222222222222").unwrap();
-    let (_, v) = post(&a, "/v1/autodeploy/app1/check", json!({}));
-    assert_eq!(v["deploys"], 1, "{v}");
-    assert_eq!(v["last_deployed_commit"], "2222222222222222222222222222222222222222");
-    let (_, v) = post(&a, "/v1/autodeploy/app1/check", json!({}));
-    assert_eq!(v["deploys"], 1, "no new commit, no new deployment");
-    {
-        let seen = coolify_seen.lock().unwrap();
-        let deploys: Vec<_> = seen.iter().filter(|r| r.path.starts_with("/api/v1/deploy?")).collect();
-        assert_eq!(deploys.len(), 1);
-        assert_eq!(deploys[0].method, "POST");
-        assert!(deploys[0].path.contains("uuid=app1"), "{:?}", deploys[0]);
-    }
-
-    // a private repository needs a token; the token is used but never echoed
-    let (_, v) = post(
-        &a,
-        "/v1/autodeploy",
-        json!({"app_uuid": "app2", "repo": "https://github.com/you/private.git", "branch": "main"}),
-    );
-    assert_eq!(v["has_token"], false);
-    let (_, v) = post(&a, "/v1/autodeploy/app2/check", json!({}));
-    assert!(
-        v["last_error"]
-            .as_str()
-            .unwrap_or_else(|| panic!("{v}"))
-            .contains("access token"),
-        "{v}"
-    );
-    let (_, v) = post(
-        &a,
-        "/v1/autodeploy",
-        json!({"app_uuid": "app2", "repo": "https://github.com/you/private.git", "branch": "main", "token": "ghp_TopSecret"}),
-    );
-    assert_eq!(v["has_token"], true);
-    let (_, v) = post(&a, "/v1/autodeploy/app2/check", json!({}));
-    assert!(v["last_error"].is_null(), "{v}");
-    let (_, v) = get(&a, "/v1/autodeploy");
-    assert!(!v.to_string().contains("TopSecret"));
-
-    // an application deleted in Coolify switches its watch off
-    post(
-        &a,
-        "/v1/autodeploy",
-        json!({"app_uuid": "gone", "repo": "https://github.com/you/blog.git", "branch": "main"}),
-    );
-    post(&a, "/v1/autodeploy/gone/check", json!({}));
-    std::fs::write(&head, "3333333333333333333333333333333333333333").unwrap();
-    let (_, v) = post(&a, "/v1/autodeploy/gone/check", json!({}));
-    assert_eq!(v["enabled"], false, "{v}");
-    assert!(v["last_error"].as_str().unwrap().contains("no longer has"), "{v}");
-
-    let (s, _) = post(
-        &a,
-        "/v1/autodeploy",
-        json!({"app_uuid": "x", "repo": "https://github.com/you/blog.git", "branch": "--upload-pack=sh"}),
-    );
-    assert_eq!(s, 400);
-    let (s, _, _) = req(&a, "DELETE", "/v1/autodeploy/app2", Some(TOKEN), None);
-    assert_eq!(s, 200);
-    let (s, _, _) = req(&a, "DELETE", "/v1/autodeploy/app2", Some(TOKEN), None);
-    assert_eq!(s, 404);
-    let (s, _, _) = req(&a, "GET", "/v1/autodeploy", None, None);
-    assert_eq!(s, 401, "auto-deploy needs the agent token");
-
     // --- alerts: a notification URL set from the cockpit, sent with curl
     let (ntfy_port, ntfy_seen) = fake_server(|_| (200, "application/json", "{}".into()));
     let (s, _) = post(&a, "/v1/alerts/test", json!({}));
@@ -808,7 +680,10 @@ fn pairing_autodeploy_llm_and_pools() {
     assert_eq!(v["models"][0]["name"], "gemma3:1b");
     assert_eq!(v["models"][0]["parameter_size"], "999.89M");
     assert_eq!(v["data_path"], "/var/lib/docker/volumes/ollama-models/_data");
-    assert_eq!(v["endpoints"][0], "http://vercelify-host.tail1234.ts.net:11434");
+    assert_eq!(
+        v["endpoints"][0], "http://127.0.0.1:11434",
+        "Tailscale's address, without the mesh"
+    );
 
     let (s, v) = post(&a, "/v1/llm/models/pull", json!({"model": "qwen2.5:3b"}));
     assert_eq!(s, 200, "{v}");
@@ -913,26 +788,6 @@ fn pairing_autodeploy_llm_and_pools() {
         .iter()
         .any(|r| r.path == "/api/pull" && r.body.contains("qwen2.5:3b")));
 
-    // --- server pools: the main host's Coolify key, authorised on a worker
-    let (s, v) = get(&a, "/v1/coolify/worker-key");
-    assert_eq!(s, 200, "{v}");
-    assert_eq!(v["private_key_uuid"], "key-uuid-1");
-    let key = v["public_key"].as_str().unwrap().to_string();
-    assert!(key.starts_with("ssh-ed25519 ") && key.ends_with(" coolify"), "{key}");
-    let (s, v) = post(&a, "/v1/ssh/authorized-keys", json!({ "public_key": key }));
-    assert_eq!(s, 200, "{v}");
-    assert_eq!(v["added"], true);
-    let (_, v) = post(&a, "/v1/ssh/authorized-keys", json!({ "public_key": key }));
-    assert_eq!(v["added"], false);
-    let (s, _) = post(
-        &a,
-        "/v1/ssh/authorized-keys",
-        json!({"public_key": "command=\"id\" ssh-ed25519 AAAA"}),
-    );
-    assert_eq!(s, 400);
-    let keys = std::fs::read_to_string(a.root.join("root-ssh/authorized_keys")).unwrap();
-    assert_eq!(keys.lines().count(), 1);
-
     // --- doctor: structured health checks
     let (s, v) = get(&a, "/v1/doctor");
     assert_eq!(s, 200, "{v}");
@@ -941,9 +796,9 @@ fn pairing_autodeploy_llm_and_pools() {
     let by_id = |id: &str| checks.iter().find(|c| c["id"] == id).cloned().unwrap_or(Value::Null);
     assert_eq!(by_id("docker")["status"], "ok", "{v}");
     assert_eq!(by_id("docker")["detail"], "Docker 27.3.1");
-    assert_eq!(by_id("tailscale")["status"], "ok");
-    assert_eq!(by_id("coolify")["status"], "ok", "{v}");
-    assert_eq!(by_id("coolify-token")["status"], "ok", "{v}");
+    assert_eq!(by_id("mesh")["status"], "warn", "not on the mesh yet");
+    assert_eq!(by_id("migrate")["status"], "warn", "{v}");
+    assert!(by_id("migrate")["fix"].as_str().unwrap().contains("vercelify migrate"));
     assert_eq!(by_id("storage")["status"], "warn", "single disk");
     assert_eq!(by_id("firewall")["status"], "warn");
     assert!(by_id("firewall")["fix"]
@@ -978,15 +833,6 @@ fn pairing_autodeploy_llm_and_pools() {
 
     let calls = std::fs::read_to_string(&a.log).unwrap();
     assert!(
-        calls.contains("git ls-remote --heads https://github.com/you/blog.git refs/heads/main auth= prompt=0"),
-        "{calls}"
-    );
-    assert!(
-        calls.contains("git ls-remote --heads https://github.com/you/private.git refs/heads/main auth=yes"),
-        "{calls}"
-    );
-    assert!(!calls.contains("TopSecret"), "tokens never reach the command line");
-    assert!(
         calls.contains("docker run -d --name vercelify-ollama --restart unless-stopped"),
         "{calls}"
     );
@@ -1009,14 +855,14 @@ fn worker_role_and_missing_ollama() {
     ]);
     let (_, v, _) = req(&a, "GET", "/v1/health", None, None);
     assert_eq!(v["role"], "worker");
-    // a worker's pairing code has no Coolify in it
-    let out = a.cli(&["pair"]);
+    let out = a.cli(&["pair", "--tailscale"]);
     let p = vercelify_core::pairing::decode(String::from_utf8(out.stdout).unwrap().trim()).unwrap();
     assert_eq!(p.role.as_deref(), Some("worker"));
-    assert_eq!(p.coolify_url, "");
-    assert_eq!(p.coolify_token, None);
-    let (s, _) = get(&a, "/v1/coolify/worker-key");
-    assert_eq!(s, 409);
+    assert_eq!(
+        p.agent_url.split(':').nth(1),
+        Some("//127.0.0.1"),
+        "Tailscale's address"
+    );
 
     let (s, v) = get(&a, "/v1/llm");
     assert_eq!(s, 200);
@@ -1034,385 +880,10 @@ fn worker_role_and_missing_ollama() {
     assert_eq!(s, 503, "{v}");
 }
 
-// --- pull request previews, GitHub feedback and automatic rollback ---------------
-
-static PR_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
-static APP_HEALTHY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
-static OLD_COOLIFY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-
-fn fake_github(r: &Seen) -> (u16, &'static str, String) {
-    use std::sync::atomic::Ordering;
-    if !r.headers.contains("Bearer ghp_feedback") {
-        return (401, "application/json", r#"{"message":"Bad credentials"}"#.into());
-    }
-    match (r.method.as_str(), r.path.as_str()) {
-        ("GET", p) if p.starts_with("/repos/you/blog/pulls") => {
-            let own = r#"{"number":7,"title":"Add login","head":{"sha":"7777777777777777777777777777777777777777","repo":{"full_name":"you/blog"}},"base":{"sha":"x","repo":{"full_name":"you/blog"}}}"#;
-            let fork = r#"{"number":8,"title":"evil","head":{"sha":"8888888888888888888888888888888888888888","repo":{"full_name":"stranger/blog"}},"base":{"sha":"x","repo":{"full_name":"you/blog"}}}"#;
-            let body = if PR_OPEN.load(Ordering::SeqCst) {
-                format!("[{own},{fork}]")
-            } else {
-                format!("[{fork}]")
-            };
-            (200, "application/json", body)
-        }
-        ("POST", p) if p.starts_with("/repos/you/blog/statuses/") => (201, "application/json", "{}".into()),
-        ("POST", "/repos/you/blog/issues/7/comments") => (201, "application/json", r#"{"id":99}"#.into()),
-        ("PATCH", "/repos/you/blog/issues/comments/99") => (200, "application/json", r#"{"id":99}"#.into()),
-        _ => (404, "application/json", r#"{"message":"Not Found"}"#.into()),
-    }
-}
-
-fn fake_coolify_full(r: &Seen) -> (u16, &'static str, String) {
-    use std::sync::atomic::Ordering;
-    if !r.headers.contains("authorization: Bearer 1|coolify-api-token") {
-        return fake_coolify(r);
-    }
-    match (r.method.as_str(), r.path.as_str()) {
-        ("POST", p) if p.starts_with("/api/v1/deploy") => (
-            200,
-            "application/json",
-            r#"{"deployments":[{"message":"queued","deployment_uuid":"d1"}]}"#.into(),
-        ),
-        ("GET", "/api/v1/deployments/d1") => (200, "application/json", r#"{"status":"finished"}"#.into()),
-        ("GET", "/api/v1/applications/app1") => (
-            200,
-            "application/json",
-            format!(
-                r#"{{"uuid":"app1","name":"blog","fqdn":"https://blog.example.com","preview_url_template":"pr-{{{{pr_id}}}}-{{{{domain}}}}","status":"{}"}}"#,
-                if APP_HEALTHY.load(Ordering::SeqCst) {
-                    "running:healthy"
-                } else {
-                    "running:unhealthy"
-                }
-            ),
-        ),
-        // An older Coolify without the rollback endpoint: the agent pins + deploys.
-        ("POST", "/api/v1/applications/app1/rollback") if OLD_COOLIFY.load(Ordering::SeqCst) => {
-            (404, "application/json", r#"{"message":"Not found."}"#.into())
-        }
-        ("POST", "/api/v1/applications/app1/rollback") => (
-            200,
-            "application/json",
-            r#"{"message":"Rollback queued.","deployment_uuid":"d9"}"#.into(),
-        ),
-        ("PATCH", "/api/v1/applications/app1") => (200, "application/json", r#"{"uuid":"app1"}"#.into()),
-        ("DELETE", "/api/v1/applications/app1/previews/7") => {
-            (200, "application/json", r#"{"message":"deleted"}"#.into())
-        }
-        _ => fake_coolify(r),
-    }
-}
-
-#[test]
-fn previews_feedback_and_rollback() {
-    use std::sync::atomic::Ordering;
-    let (coolify_port, coolify_seen) = fake_server(fake_coolify_full);
-    let (github_port, github_seen) = fake_server(fake_github);
-    let scratch = tempfile::tempdir().unwrap();
-    let head = scratch.path().join("git-head");
-    std::fs::write(&head, "1111111111111111111111111111111111111111").unwrap();
-    let a = start_with(&[
-        ("VERCELIFY_COOLIFY_URL", format!("http://127.0.0.1:{coolify_port}")),
-        ("VERCELIFY_GITHUB_API", format!("http://127.0.0.1:{github_port}")),
-        ("STUB_GIT_HEAD_FILE", head.display().to_string()),
-    ]);
-
-    // Previews and statuses need a GitHub URL and a token.
-    let (s, _) = post(
-        &a,
-        "/v1/autodeploy",
-        json!({"app_uuid": "app1", "repo": "https://github.com/you/blog.git", "branch": "main", "github_feedback": true}),
-    );
-    assert_eq!(s, 400);
-    let (s, v) = post(
-        &a,
-        "/v1/autodeploy",
-        json!({"app_uuid": "app1", "repo": "https://github.com/you/blog.git", "branch": "main",
-               "token": "ghp_feedback", "previews": true, "github_feedback": true, "auto_rollback": true}),
-    );
-    assert_eq!(s, 200, "{v}");
-    assert_eq!(v["name"], "blog", "no name given (the CLI): Coolify's app name");
-    assert_eq!(
-        (v["previews"].clone(), v["auto_rollback"].clone()),
-        (json!(true), json!(true))
-    );
-
-    // First check: baseline for the branch, a preview for PR 7, never the fork.
-    let (_, v) = post(&a, "/v1/autodeploy/app1/check", json!({}));
-    assert_eq!(v["deploys"], 0, "{v}");
-    let previews = v["open_previews"].as_array().unwrap();
-    assert_eq!(previews.len(), 1, "{v}");
-    assert_eq!(previews[0]["number"], 7);
-    assert_eq!(previews[0]["url"], "https://pr-7-blog.example.com");
-    assert!(v["last_error"].as_str().unwrap().contains("forks (#8)"), "{v}");
-    {
-        let seen = coolify_seen.lock().unwrap();
-        let deploys: Vec<_> = seen.iter().filter(|r| r.path.starts_with("/api/v1/deploy?")).collect();
-        assert_eq!(deploys.len(), 1);
-        assert!(deploys[0].path.contains("pr=7"), "{:?}", deploys[0]);
-        assert!(
-            !seen.iter().any(|r| r.path.contains("pr=8")),
-            "fork PRs are never built"
-        );
-        let gh = github_seen.lock().unwrap();
-        let comment = gh
-            .iter()
-            .find(|r| r.path == "/repos/you/blog/issues/7/comments")
-            .unwrap();
-        assert!(
-            comment.body.contains("https://pr-7-blog.example.com"),
-            "{}",
-            comment.body
-        );
-    }
-    // Unchanged PR: no redeploy.
-    post(&a, "/v1/autodeploy/app1/check", json!({}));
-    assert_eq!(
-        coolify_seen
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|r| r.path.contains("pr=7"))
-            .count(),
-        1
-    );
-
-    // A push: deployed, reported pending then success on GitHub.
-    std::fs::write(&head, "2222222222222222222222222222222222222222").unwrap();
-    let (_, v) = post(&a, "/v1/autodeploy/app1/check", json!({}));
-    assert_eq!(v["deploys"], 1, "{v}");
-    post(&a, "/v1/autodeploy/app1/check", json!({})); // follows the deployment to "finished"
-    {
-        let gh = github_seen.lock().unwrap();
-        let statuses: Vec<_> = gh
-            .iter()
-            .filter(|r| r.path == "/repos/you/blog/statuses/2222222222222222222222222222222222222222")
-            .collect();
-        assert_eq!(statuses.len(), 2, "pending, then success");
-        assert!(statuses[0].body.contains("\"pending\""));
-        assert!(statuses[1].body.contains("\"success\"") && statuses[1].body.contains("https://blog.example.com"));
-    }
-
-    // The new version turns unhealthy: rolled back to the previous commit.
-    APP_HEALTHY.store(false, Ordering::SeqCst);
-    let (_, v) = post(&a, "/v1/autodeploy/app1/check", json!({}));
-    APP_HEALTHY.store(true, Ordering::SeqCst);
-    assert_eq!(v["rollbacks"], 1, "{v}");
-    assert_eq!(v["last_deployed_commit"], "1111111111111111111111111111111111111111");
-    {
-        let seen = coolify_seen.lock().unwrap();
-        let rb = seen
-            .iter()
-            .find(|r| r.method == "POST" && r.path == "/api/v1/applications/app1/rollback")
-            .expect("used Coolify's rollback");
-        assert!(
-            rb.body.contains("1111111111111111111111111111111111111111"),
-            "{}",
-            rb.body
-        );
-        assert!(!seen.iter().any(|r| r.method == "PATCH"), "no pinning needed");
-    }
-    let (_, alerts) = get(&a, "/v1/alerts");
-    assert!(
-        alerts["alerts"][0]["title"].as_str().unwrap().contains("rolled back"),
-        "{alerts}"
-    );
-
-    // On an older Coolify (no rollback endpoint) it pins the commit and deploys.
-    OLD_COOLIFY.store(true, Ordering::SeqCst);
-    std::fs::write(&head, "3333333333333333333333333333333333333333").unwrap();
-    post(&a, "/v1/autodeploy/app1/check", json!({})); // follows the rollback deployment, deploys 333…
-    post(&a, "/v1/autodeploy/app1/check", json!({})); // 333… finished
-    APP_HEALTHY.store(false, Ordering::SeqCst);
-    let (_, v) = post(&a, "/v1/autodeploy/app1/check", json!({}));
-    APP_HEALTHY.store(true, Ordering::SeqCst);
-    assert_eq!(v["rollbacks"], 2, "{v}");
-    {
-        let seen = coolify_seen.lock().unwrap();
-        let pin = seen
-            .iter()
-            .find(|r| r.method == "PATCH" && r.path == "/api/v1/applications/app1")
-            .expect("pinned the previous commit");
-        assert!(
-            pin.body.contains("1111111111111111111111111111111111111111"),
-            "{}",
-            pin.body
-        );
-    }
-
-    // PR 7 closes: its preview is removed.
-    PR_OPEN.store(false, Ordering::SeqCst);
-    let (_, v) = post(&a, "/v1/autodeploy/app1/check", json!({}));
-    assert_eq!(v["open_previews"].as_array().unwrap().len(), 0, "{v}");
-    assert!(coolify_seen
-        .lock()
-        .unwrap()
-        .iter()
-        .any(|r| r.method == "DELETE" && r.path == "/api/v1/applications/app1/previews/7"));
-
-    // Tokens never reach a command line (curl reads them from a 0600 file).
-    let calls = std::fs::read_to_string(&a.log).unwrap_or_default();
-    assert!(!calls.contains("ghp_feedback"), "{calls}");
-    let leftovers: Vec<_> = std::fs::read_dir(a.root.join("run"))
-        .map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name()).collect())
-        .unwrap_or_default();
-    assert!(
-        leftovers.iter().all(|n| !n.to_string_lossy().ends_with(".curl")),
-        "{leftovers:?}"
-    );
-}
-
-// A monorepo: commits 2 (docs only) and 3 (the app, but "[skip ci]") are
-// skipped; commit 4 (docs) must still deploy commit 3's change, so changes
-// are measured from what is live (1), not from the last skipped commit.
-fn fake_github_mono(r: &Seen) -> (u16, &'static str, String) {
-    const C1: &str = "1111111111111111111111111111111111111111";
-    const C2: &str = "2222222222222222222222222222222222222222";
-    const C3: &str = "3333333333333333333333333333333333333333";
-    const C4: &str = "4444444444444444444444444444444444444444";
-    let compare = |files: &[&str], msg: &str| {
-        let files: Vec<String> = files.iter().map(|f| format!(r#"{{"filename":"{f}"}}"#)).collect();
-        (
-            200,
-            "application/json",
-            format!(
-                r#"{{"commits":[{{"commit":{{"message":"{msg}"}}}}],"files":[{}]}}"#,
-                files.join(",")
-            ),
-        )
-    };
-    let p = r.path.as_str();
-    match r.method.as_str() {
-        "GET" if p == format!("/repos/you/mono/compare/{C1}...{C2}") => compare(&["docs/guide.md"], "docs"),
-        "GET" if p == format!("/repos/you/mono/compare/{C1}...{C3}") => {
-            compare(&["docs/guide.md", "apps/web/page.tsx"], "wip [skip ci]")
-        }
-        "GET" if p == format!("/repos/you/mono/compare/{C1}...{C4}") => {
-            compare(&["docs/guide.md", "apps/web/page.tsx", "docs/faq.md"], "docs: faq")
-        }
-        // What a wrong base would see: docs only.
-        "GET" if p.starts_with("/repos/you/mono/compare/") => compare(&["docs/faq.md"], "docs: faq"),
-        "GET" if p == format!("/repos/you/mono/contents/apps/web/vercel.json?ref={C4}") => {
-            // {"redirects":[{"source":"/old","destination":"/new"}],"crons":[{"path":"/api/cron","schedule":"0 5 * * *"}]}
-            let b64 = "eyJyZWRpcmVjdHMiOlt7InNvdXJjZSI6Ii9vbGQiLCJkZXN0aW5hdGlvbiI6Ii9uZXcifV0sImNyb25zIjpbeyJwYXRoIjoiL2FwaS9jcm9uIiwic2NoZWR1bGUiOiIwIDUgKiAqICoifV19";
-            (
-                200,
-                "application/json",
-                format!(r#"{{"type":"file","encoding":"base64","content":"{b64}"}}"#),
-            )
-        }
-        "POST" if p.starts_with("/repos/you/mono/statuses/") => (201, "application/json", "{}".into()),
-        _ => (404, "application/json", r#"{"message":"Not Found"}"#.into()),
-    }
-}
-
-fn fake_coolify_mono(r: &Seen) -> (u16, &'static str, String) {
-    match (r.method.as_str(), r.path.as_str()) {
-        ("POST", p) if p.starts_with("/api/v1/deploy") => (
-            200,
-            "application/json",
-            r#"{"deployments":[{"message":"queued","deployment_uuid":"d1"}]}"#.into(),
-        ),
-        ("GET", "/api/v1/deployments/d1") => (200, "application/json", r#"{"status":"finished"}"#.into()),
-        ("GET", "/api/v1/applications/web1") => (
-            200,
-            "application/json",
-            r#"{"uuid":"web1","name":"web","fqdn":"https://web.example.com","status":"running:healthy","base_directory":"/apps/web","watch_paths":"apps/web/**\n!apps/web/**/*.md\npackages/**"}"#.into(),
-        ),
-        _ => fake_coolify(r),
-    }
-}
-
-#[test]
-fn skipped_builds_and_vercel_json_follow_deploys() {
-    let (coolify_port, coolify_seen) = fake_server(fake_coolify_mono);
-    let (github_port, github_seen) = fake_server(fake_github_mono);
-    let scratch = tempfile::tempdir().unwrap();
-    let head = scratch.path().join("git-head");
-    let set_head = |c: char| std::fs::write(&head, c.to_string().repeat(40)).unwrap();
-    set_head('1');
-    let a = start_with(&[
-        ("VERCELIFY_COOLIFY_URL", format!("http://127.0.0.1:{coolify_port}")),
-        ("VERCELIFY_GITHUB_API", format!("http://127.0.0.1:{github_port}")),
-        ("STUB_GIT_HEAD_FILE", head.display().to_string()),
-    ]);
-    let (s, v) = post(
-        &a,
-        "/v1/autodeploy",
-        json!({"app_uuid": "web1", "repo": "https://github.com/you/mono.git", "branch": "main",
-               "token": "ghp_mono", "github_feedback": true}),
-    );
-    assert_eq!(s, 200, "{v}");
-    let deploys = || {
-        coolify_seen
-            .lock()
-            .unwrap()
-            .iter()
-            .filter(|r| r.path.starts_with("/api/v1/deploy?"))
-            .count()
-    };
-
-    // Baseline, then a docs-only push: not built, reported on GitHub.
-    post(&a, "/v1/autodeploy/web1/check", json!({}));
-    set_head('2');
-    let (_, v) = post(&a, "/v1/autodeploy/web1/check", json!({}));
-    assert_eq!(
-        (v["deploys"].clone(), v["skipped"].clone()),
-        (json!(0), json!(1)),
-        "{v}"
-    );
-    assert!(v["last_skip"].as_str().unwrap().contains("watch paths"), "{v}");
-    assert!(github_seen.lock().unwrap().iter().any(|r| r.path
-        == "/repos/you/mono/statuses/2222222222222222222222222222222222222222"
-        && r.body.contains("Not deployed")));
-
-    // The app changes, but the commit says [skip ci].
-    set_head('3');
-    let (_, v) = post(&a, "/v1/autodeploy/web1/check", json!({}));
-    assert_eq!(v["skipped"], 2, "{v}");
-    assert!(v["last_skip"].as_str().unwrap().contains("[skip ci]"), "{v}");
-    assert_eq!(deploys(), 0);
-
-    // A docs commit on top: compared with what is live, commit 3's change
-    // is still there, so it builds.
-    set_head('4');
-    let (_, v) = post(&a, "/v1/autodeploy/web1/check", json!({}));
-    assert_eq!(v["deploys"], 1, "{v}");
-    assert_eq!(deploys(), 1);
-    assert!(github_seen.lock().unwrap().iter().any(|r| r
-        .path
-        .ends_with("/compare/1111111111111111111111111111111111111111...4444444444444444444444444444444444444444")));
-
-    // Once it is live, vercel.json at that commit (in the app's base
-    // directory) is applied.
-    post(&a, "/v1/autodeploy/web1/check", json!({}));
-    let (s, v) = get(&a, "/v1/projects");
-    assert_eq!(s, 200, "{v}");
-    let p = &v["projects"][0];
-    assert_eq!(p["key"], "web1", "{v}");
-    assert_eq!(p["source"], "repo");
-    assert_eq!(p["commit"], "4444444444444444444444444444444444444444");
-    assert_eq!(p["summary"]["redirects"], 1);
-    assert_eq!(p["summary"]["crons"][0]["path"], "/api/cron");
-    // GitHub calls carry the token; it never reaches a command line.
-    assert!(github_seen
-        .lock()
-        .unwrap()
-        .iter()
-        .all(|r| r.headers.contains("Bearer ghp_mono")));
-    let calls = std::fs::read_to_string(&a.log).unwrap_or_default();
-    assert!(!calls.contains("ghp_mono"), "{calls}");
-}
-
 #[test]
 fn background_pass_raises_and_sends_alerts() {
     let (ntfy_port, ntfy_seen) = fake_server(|_| (200, "application/json", "{}".into()));
-    let (coolify_port, _) = fake_server(fake_coolify);
-    let a = start_with(&[
-        ("VERCELIFY_COOLIFY_URL", format!("http://127.0.0.1:{coolify_port}")),
-        ("VERCELIFY_NOTIFY_URL", format!("http://127.0.0.1:{ntfy_port}/topic")),
-    ]);
+    let a = start_with(&[("VERCELIFY_NOTIFY_URL", format!("http://127.0.0.1:{ntfy_port}/topic"))]);
     let (s, v) = post(&a, "/v1/alerts/check", json!({}));
     assert_eq!(s, 200, "{v}");
     let alerts = v["alerts"].as_array().unwrap();
@@ -1552,20 +1023,6 @@ fn events_jobs_power_guard_and_domain() {
     assert_eq!((s, one["id"].clone()), (200, job["id"].clone()));
     assert_eq!(get(&a, "/v1/jobs/nope").0, 404);
 
-    // A volume move in the background answers at once with its job.
-    let (s, v) = post(
-        &a,
-        "/v1/coolify/volumes/7/move?background=true",
-        json!({ "tier": "hdd" }),
-    );
-    assert_eq!(s, 202, "{v}");
-    assert_eq!(
-        (v["kind"].clone(), v["status"].clone()),
-        (json!("volume-move"), json!("running"))
-    );
-    let line = ev.wait_for("\"kind\":\"volume-move\",\"title\":\"Move volume 7 to the HDD\",\"status\":\"failed\"");
-    assert!(line.contains("detail"), "{line}");
-
     // Alerts arrive live.
     let (_, _) = post(&a, "/v1/alerts/check", json!({}));
     ev.wait_for("\"kind\":\"alert\"");
@@ -1625,14 +1082,14 @@ fn send(a: &Agent, method: &str, path: &str, token: &str, body: Option<Value>) -
 
 #[test]
 fn platform_api() {
-    // The Coolify engine (default): the platform API says why it is off.
+    // A server not migrated yet: the platform API says how to get it.
     let coolify = start();
     let (s, h, _) = req(&coolify, "GET", "/v1/health", None, None);
     assert_eq!(s, 200);
     assert!(!h["capabilities"].as_array().unwrap().iter().any(|c| c == "platform"));
     let (s, v) = get(&coolify, "/v1/platform/apps");
     assert_eq!(s, 503);
-    assert!(v["error"].as_str().unwrap().contains("Coolify engine"), "{v}");
+    assert!(v["error"].as_str().unwrap().contains("vercelify migrate"), "{v}");
     drop(coolify);
 
     let a = start_with(&[("VERCELIFY_ENGINE", "platform".into())]);

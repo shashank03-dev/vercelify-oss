@@ -9,10 +9,9 @@ import { notificationsWanted, setNotificationsWanted } from "../lib/notify";
 import { useSession } from "../lib/session";
 import { toCockpitError } from "../lib/transport";
 import type { Alert, PowerGuardSettings } from "../types";
-import { Toggle } from "./AutoDeploy";
 import { NeedsUpdate } from "./Hardware";
 import { useToast } from "./Toast";
-import { Button, Card, ErrorNote, Field, IconButton, InlineCode, Loading, LogView, StatusDot, TextInput } from "./ui";
+import { Button, Card, ErrorNote, Field, IconButton, InlineCode, Loading, LogView, StatusDot, TextInput, Toggle } from "./ui";
 
 export function alertHealth(a: Alert): Health {
   if (a.resolved) return "ok";
@@ -237,7 +236,7 @@ export function BackupsCard() {
     <Card
       title="Backups"
       icon={<Archive />}
-      description="Coolify's secrets, databases and volumes, encrypted"
+      description="The engine's state and secrets, databases and volumes, encrypted"
       testId="backups"
       actions={
         st?.configured ? (
@@ -410,7 +409,7 @@ export function PowerGuardCard() {
 const DOMAIN_MODE: Record<string, string> = {
   cloudflare: "Public through a Cloudflare tunnel (works behind CGNAT, no open ports)",
   direct: "Public with your own DNS records (ports 80 and 443 forwarded here)",
-  private: "Private: reachable on your tailnet only",
+  private: "Private: reachable on your Vercelify network only",
 };
 
 /** How this server's apps are reached; per-app domains are in each app's Domains tab. */

@@ -16,13 +16,13 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tauri::ipc::Channel;
-use tauri::{AppHandle, Manager, RunEvent, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Manager, RunEvent, State};
 use vercelify_core::collect::{Collector, SysPaths};
 use vercelify_core::pairing::{self, Pairing};
 use vercelify_core::stream::{moonlight_args, sender_args, MoonlightLaunch, SenderConfig};
 use vercelify_core::{
     avfoundation::CaptureScreen, CockpitConfig, CockpitSettings, DiscoveredServer, LanServer, MeshLocal, ProcessStatus,
-    SystemSnapshot, TailscaleStatus, ToolStatus,
+    SystemSnapshot, ToolStatus,
 };
 
 const SENDER: &str = "sender";
@@ -240,19 +240,21 @@ async fn mesh_local() -> MeshLocal {
         .unwrap_or_default()
 }
 
-/// Vercelify hosts on the tailnet.
+/// Vercelify servers among this computer's mesh peers.
 #[tauri::command]
 async fn discover_servers(state: State<'_, AppState>) -> CmdResult<Vec<DiscoveredServer>> {
-    let ts = tauri::async_runtime::spawn_blocking(local::tailscale_status)
+    let local = tauri::async_runtime::spawn_blocking(mesh::status)
         .await
         .map_err(|e| e.to_string())?;
-    if ts.backend_state != "Running" {
-        return Err(ts
-            .error
-            .clone()
-            .unwrap_or_else(|| format!("Tailscale is not connected on this computer ({})", ts.backend_state)));
+    if !local.running {
+        return Err(if local.installed {
+            "Vercelify's network isn't running on this computer yet: connect to a server below".into()
+        } else {
+            "This computer isn't on a Vercelify network yet: connect to a server below".into()
+        });
     }
-    Ok(discover::discover(&state.http, ts).await)
+    let client = if local.userspace { &state.mesh_http } else { &state.http };
+    Ok(discover::discover(client, local).await)
 }
 
 // --- remote APIs ------------------------------------------------------------
@@ -267,32 +269,6 @@ async fn agent_request(state: State<'_, AppState>, request: http::Request, serve
         request,
     )
     .await
-}
-
-fn coolify_base(s: &CockpitSettings) -> CmdResult<(String, String)> {
-    if s.coolify_url.trim().is_empty() {
-        return Err(format!(
-            "{} is a worker without its own Coolify — select your main server to deploy",
-            s.hostname
-        ));
-    }
-    let token = s
-        .coolify_token
-        .clone()
-        .filter(|t| !t.is_empty())
-        .ok_or("No Coolify API token — run `sudo vercelify pair --refresh` on the host and pair again")?;
-    Ok((format!("{}/api/v1", s.coolify_url.trim_end_matches('/')), token))
-}
-
-#[tauri::command]
-async fn coolify_request(
-    state: State<'_, AppState>,
-    request: http::Request,
-    server: Option<String>,
-) -> CmdResult<Value> {
-    let s = self::server(&state, server.as_deref())?;
-    let (base, token) = coolify_base(&s)?;
-    http::send(state.client_for(&base), &base, Some(&token), request).await
 }
 
 /// An agent request whose NDJSON response is delivered line by line.
@@ -348,42 +324,13 @@ async fn test_connection(state: State<'_, AppState>, settings: CockpitSettings) 
         },
     )
     .await?;
-    let coolify = if settings.coolify_url.trim().is_empty() {
-        serde_json::json!({ "ok": false, "error": "worker (no Coolify)" })
-    } else {
-        match coolify_base(&settings) {
-            Err(e) => serde_json::json!({ "ok": false, "error": e }),
-            Ok((base, token)) => http::send(
-                state.client_for(&base),
-                &base,
-                Some(&token),
-                http::Request {
-                    method: "GET".into(),
-                    path: "/version".into(),
-                    body: None,
-                    timeout: Some(10),
-                },
-            )
-            .await
-            .map(|v| serde_json::json!({ "ok": true, "version": v }))
-            .unwrap_or_else(|e| serde_json::json!({ "ok": false, "error": e })),
-        }
-    };
-    Ok(serde_json::json!({ "hostname": health["host"]["hostname"], "coolify": coolify }))
+    Ok(serde_json::json!({ "hostname": health["host"]["hostname"] }))
 }
-
 // --- this machine -----------------------------------------------------------
 
 #[tauri::command]
 async fn local_system(state: State<'_, AppState>) -> CmdResult<SystemSnapshot> {
     Ok(state.collector.snapshot(None))
-}
-
-#[tauri::command]
-async fn local_tailscale() -> TailscaleStatus {
-    tauri::async_runtime::spawn_blocking(local::tailscale_status)
-        .await
-        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -437,64 +384,6 @@ fn moonlight_status(state: State<'_, AppState>) -> ProcessStatus {
     state.procs.status(MOONLIGHT)
 }
 
-// --- embedded Coolify ---------------------------------------------------------
-
-/// Styles injected into the Coolify dashboard so it matches the cockpit.
-const COOLIFY_THEME_JS: &str = r#"
-(() => {
-  const css = `
-    :root { color-scheme: dark; }
-    html, body { background: #07080c !important; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif !important; }
-    ::-webkit-scrollbar { width: 10px; height: 10px; }
-    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    .bg-coolgray-100, .dark\:bg-coolgray-100 { background-color: rgba(255,255,255,.04) !important; backdrop-filter: blur(12px); }
-    .bg-coolgray-200, .dark\:bg-coolgray-200 { background-color: rgba(255,255,255,.06) !important; }
-    a, .text-warning { transition: color .15s ease; }
-  `;
-  const apply = () => {
-    if (document.getElementById("vercelify-theme")) return;
-    const s = document.createElement("style");
-    s.id = "vercelify-theme";
-    s.textContent = css;
-    document.head.appendChild(s);
-    document.documentElement.classList.add("dark");
-  };
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", apply); else apply();
-})();
-"#;
-
-#[tauri::command]
-async fn open_coolify(app: AppHandle, state: State<'_, AppState>, path: Option<String>) -> CmdResult<()> {
-    let s = server(&state, None)?;
-    if s.coolify_url.trim().is_empty() {
-        return Err(format!(
-            "{} is a worker — open Coolify from your main server",
-            s.hostname
-        ));
-    }
-    let mut url = s.coolify_url.trim_end_matches('/').to_string();
-    if let Some(p) = path.filter(|p| p.starts_with('/') && !p.contains("://")) {
-        url.push_str(&p);
-    }
-    let parsed: tauri::Url = url.parse().map_err(|_| format!("invalid Coolify URL: {url}"))?;
-    if let Some(w) = app.get_webview_window("coolify") {
-        w.navigate(parsed).map_err(|e| e.to_string())?;
-        w.set_focus().map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-    // Separate window with its own (persistent) cookie store, no IPC access.
-    WebviewWindowBuilder::new(&app, "coolify", WebviewUrl::External(parsed))
-        .title("Coolify — Vercelify")
-        .inner_size(1280.0, 860.0)
-        .min_inner_size(900.0, 600.0)
-        .initialization_script(COOLIFY_THEME_JS)
-        .build()
-        .map_err(|e| e.to_string())?;
-    Ok(())
-}
-
 // --- app ----------------------------------------------------------------------
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -544,12 +433,10 @@ pub fn run() {
             mesh_local,
             discover_servers,
             agent_request,
-            coolify_request,
             agent_stream,
             stream_cancel,
             test_connection,
             local_system,
-            local_tailscale,
             tools_status,
             capture_screens,
             sender_start,
@@ -558,7 +445,6 @@ pub fn run() {
             moonlight_start,
             moonlight_stop,
             moonlight_status,
-            open_coolify,
             tray_status,
         ])
         .build(tauri::generate_context!())
@@ -588,7 +474,7 @@ mod settings_tests {
         write_private(&path, "secret-token").unwrap();
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         std::fs::remove_dir_all(&dir).unwrap();
-        assert_eq!(mode, 0o600, "saved agent and Coolify credentials must be private");
+        assert_eq!(mode, 0o600, "saved agent credentials must be private");
     }
 
     #[test]

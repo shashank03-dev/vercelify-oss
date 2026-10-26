@@ -1,4 +1,4 @@
-//! Running external tools (docker, tailscale, systemctl) with timeouts.
+//! Running external tools (docker, git, systemctl) with timeouts.
 
 use std::time::Duration;
 use tokio::process::Command;

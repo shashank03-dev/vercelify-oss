@@ -3,28 +3,12 @@ import type {
   AgentEvent,
   Alert,
   AlertsStatus,
-  AppImages,
   AuditEntry,
-  AuthorizeKeyResult,
-  AutoDeployRequest,
-  AutoDeployStatus,
-  AutoDeployWatch,
   BackupStatus,
   CaptureScreen,
   CockpitConfig,
   CockpitSettings,
   ContainerInfo,
-  CoolifyApplication,
-  CoolifyDatabase,
-  CoolifyDeployment,
-  CoolifyDeploymentLog,
-  CoolifyEnv,
-  CoolifyPreview,
-  CoolifyProject,
-  CoolifyServer,
-  CoolifyVolume,
-  CoolifyWorkerKey,
-  DatabaseKind,
   DeviceToken,
   DeviceTokenCreated,
   DiscoveredServer,
@@ -41,7 +25,6 @@ import type {
   MeshNode,
   MetricsResponse,
   MoonlightLaunch,
-  MoveVolumeResult,
   Pairing,
   PowerGuardSettings,
   PowerGuardStatus,
@@ -58,7 +41,6 @@ import type {
   SleepStatus,
   StorageTier,
   SystemSnapshot,
-  TailscaleStatus,
   ToolStatus,
   UpdateStatus,
   UptimeCheck,
@@ -75,9 +57,7 @@ export const settings = {
   /** Decode a pasted code; a `vfy2.` one also joins this computer to the mesh. */
   joinPairing: (code: string) => call<Pairing>("pair_join", { code }),
   test: (s: CockpitSettings) =>
-    call<{ hostname: string; coolify: { ok: boolean; version?: string; error?: string } }>("test_connection", {
-      settings: s,
-    }),
+    call<{ hostname: string }>("test_connection", { settings: s }),
 };
 
 /** Every paired server, and switching between them. */
@@ -103,16 +83,13 @@ export function pairingToSettings(p: Pairing): CockpitSettings {
   return {
     agent_url: p.agent_url,
     agent_token: p.agent_token,
-    coolify_url: p.coolify_url,
-    coolify_token: p.coolify_token ?? null,
     hostname: p.hostname,
-    role: p.role ?? (p.coolify_url ? "main" : "worker"),
+    role: p.role ?? "main",
   };
 }
 
-/** Workers deploy nothing themselves. A main server on the platform engine has
- * no Coolify URL but says `role: "main"`; older pairings carry no role. */
-export const isWorker = (s: CockpitSettings) => s.role === "worker" || (!s.role && !s.coolify_url);
+/** Workers deploy nothing themselves (pairings without a role are main servers). */
+export const isWorker = (s: CockpitSettings) => s.role === "worker";
 
 const q = encodeURIComponent;
 
@@ -122,29 +99,18 @@ function makeAgent(server?: string) {
     call<T>("agent_request", { request: { method, path, body, timeout }, server });
   return {
     system: () => req<SystemSnapshot>("GET", "/v1/system"),
-    tailscale: () => req<TailscaleStatus>("GET", "/v1/tailscale"),
     containers: (stats = true) => req<ContainerInfo[]>("GET", `/v1/containers?stats=${stats}`),
     containerAction: (id: string, action: "start" | "stop" | "restart" | "pause" | "unpause") =>
       req<{ ok: boolean }>("POST", `/v1/containers/${q(id)}/${action}`, {}, 120),
     containerLogs: (id: string, tail = 300) => req<{ lines: string[] }>("GET", `/v1/containers/${q(id)}/logs?tail=${tail}`),
     volumes: () => req<VolumeEntry[]>("GET", "/v1/volumes"),
     createVolume: (r: VolumeRequest) => req<VolumeResult>("POST", "/v1/volumes", r),
-    coolifyVolumes: () => req<CoolifyVolume[]>("GET", "/v1/coolify/volumes"),
-    moveVolume: (id: number, tier: StorageTier) => req<MoveVolumeResult>("POST", `/v1/coolify/volumes/${id}/move`, { tier }, 600),
-    /** Agents with "jobs": answers at once; follow the job in the activity list. */
-    moveVolumeInBackground: (id: number, tier: StorageTier) =>
-      req<Job>("POST", `/v1/coolify/volumes/${id}/move?background=true`, { tier }, 30),
     display: () => req<DisplayStatus>("GET", "/v1/display"),
     receiverStart: (cfg: ReceiverConfig) => req<DisplayStatus>("POST", "/v1/display/receiver/start", cfg),
     receiverStop: () => req<DisplayStatus>("POST", "/v1/display/receiver/stop", {}),
     services: () => req<ServiceStatus[]>("GET", "/v1/services"),
     serviceAction: (name: string, action: "start" | "stop" | "restart") =>
       req<{ ok: boolean }>("POST", `/v1/services/${q(name)}/${action}`, {}, 90),
-
-    autodeploy: () => req<AutoDeployStatus>("GET", "/v1/autodeploy"),
-    autodeploySave: (r: AutoDeployRequest) => req<AutoDeployWatch>("POST", "/v1/autodeploy", r),
-    autodeployRemove: (appUuid: string) => req<{ ok: boolean }>("DELETE", `/v1/autodeploy/${q(appUuid)}`),
-    autodeployCheck: (appUuid: string) => req<AutoDeployWatch>("POST", `/v1/autodeploy/${q(appUuid)}/check`, {}, 60),
 
     llm: () => req<LlmStatus>("GET", "/v1/llm"),
     llmInstall: (tier: StorageTier) => req<LlmStatus>("POST", "/v1/llm/install", { tier }, 60),
@@ -172,7 +138,6 @@ function makeAgent(server?: string) {
     meshInvite: (kind: "server" | "device", role = "owner") =>
       req<MeshInvite>("POST", "/v1/mesh/invites", { kind, role, ttl_minutes: 60 }),
     audit: (limit = 50) => req<AuditEntry[]>("GET", `/v1/audit?limit=${limit}`),
-    images: (appUuid: string) => req<AppImages>("GET", `/v1/images/${q(appUuid)}`),
     backup: () => req<BackupStatus>("GET", "/v1/backup"),
     backupRun: () => req<BackupStatus>("POST", "/v1/backup/run", {}),
     jobs: () => req<Job[]>("GET", "/v1/jobs"),
@@ -204,9 +169,6 @@ function makeAgent(server?: string) {
     runCron: (appUuid: string, path: string) => req<Job>("POST", `/v1/projects/${q(appUuid)}/crons/run`, { path }),
     update: () => req<UpdateStatus>("GET", "/v1/update"),
     updateStart: () => req<UpdateStatus>("POST", "/v1/update", {}),
-
-    workerKey: () => req<CoolifyWorkerKey>("GET", "/v1/coolify/worker-key"),
-    authorizeKey: (publicKey: string) => req<AuthorizeKeyResult>("POST", "/v1/ssh/authorized-keys", { public_key: publicKey }),
   };
 }
 
@@ -226,103 +188,8 @@ export async function waitForJob(id: string, onProgress?: (j: Job) => void, inte
 }
 export const agentOn = (server: string) => makeAgent(server);
 
-export interface NewApp {
-  project_uuid: string;
-  server_uuid: string;
-  environment_name: string;
-  environment_uuid?: string;
-  git_repository: string;
-  git_branch: string;
-  build_pack: "nixpacks" | "static" | "dockerfile" | "dockercompose";
-  ports_exposes: string;
-  name: string;
-  instant_deploy: boolean;
-}
-
-/** Coolify API of one server (default: the selected one). */
-function makeCoolify(server?: string) {
-  const req = <T>(method: HttpRequest["method"], path: string, body?: unknown, timeout?: number) =>
-    call<T>("coolify_request", { request: { method, path, body, timeout }, server });
-  return {
-    version: () => req<string>("GET", "/version"),
-    applications: () => req<CoolifyApplication[]>("GET", "/applications"),
-    deployments: (appUuid: string, take = 10) =>
-      req<{ count: number; deployments: CoolifyDeployment[] }>("GET", `/deployments/applications/${q(appUuid)}?skip=0&take=${take}`),
-    deployment: (uuid: string) => req<CoolifyDeployment>("GET", `/deployments/${q(uuid)}`),
-    deploy: (uuid: string, force = false) =>
-      req<{ deployments: { deployment_uuid: string; message: string }[] }>("POST", `/deploy?uuid=${q(uuid)}&force=${force}`),
-    appAction: (uuid: string, action: "start" | "stop" | "restart") =>
-      req<{ message: string; deployment_uuid?: string }>("POST", `/applications/${q(uuid)}/${action}`),
-    rollback: (uuid: string, commit: string) =>
-      req<{ message: string; deployment_uuid?: string }>("POST", `/applications/${q(uuid)}/rollback`, { commit }),
-    /** Comma-separated URLs (`https://app.example.com,https://www.example.com`). */
-    setDomains: (uuid: string, domains: string) => req<{ uuid: string }>("PATCH", `/applications/${q(uuid)}`, { domains }, 60),
-    appLogs: (uuid: string, lines = 200) => req<{ logs: string }>("GET", `/applications/${q(uuid)}/logs?lines=${lines}`),
-    previews: (uuid: string) => req<CoolifyPreview[]>("GET", `/applications/${q(uuid)}/previews`),
-    envs: (uuid: string) => req<CoolifyEnv[]>("GET", `/applications/${q(uuid)}/envs`),
-    /** Create or update many variables at once (production, not previews). */
-    saveEnvs: (uuid: string, vars: { key: string; value: string }[]) =>
-      req<unknown>("PATCH", `/applications/${q(uuid)}/envs/bulk`, { data: vars.map((v) => ({ ...v, is_preview: false })) }),
-    deletePreview: (uuid: string, pr: number) => req<{ message: string }>("DELETE", `/applications/${q(uuid)}/previews/${pr}`),
-    createPublicApp: (body: NewApp) => req<{ uuid: string; domains?: string }>("POST", "/applications/public", body, 60),
-    databases: () => req<CoolifyDatabase[]>("GET", "/databases"),
-    dbAction: (uuid: string, action: "start" | "stop" | "restart") => req<{ message: string }>("POST", `/databases/${q(uuid)}/${action}`),
-    createDatabase: (
-      kind: DatabaseKind,
-      body: {
-      project_uuid: string;
-      server_uuid: string;
-      environment_name: string;
-      environment_uuid?: string;
-      name: string;
-      instant_deploy: boolean;
-    },
-    ) => req<{ uuid: string; internal_db_url?: string }>("POST", `/databases/${kind}`, body),
-    projects: () => req<CoolifyProject[]>("GET", "/projects"),
-    project: (uuid: string) => req<CoolifyProject>("GET", `/projects/${q(uuid)}`),
-    createProject: (name: string) => req<{ uuid: string }>("POST", "/projects", { name }),
-    servers: () => req<CoolifyServer[]>("GET", "/servers"),
-    createServer: (body: {
-      name: string;
-      description: string;
-      ip: string;
-      port: number;
-      user: string;
-      private_key_uuid: string;
-      is_build_server: boolean;
-      instant_validate: boolean;
-    }) => req<{ uuid: string }>("POST", "/servers", body, 60),
-  };
-}
-
-export const coolify = makeCoolify();
-export const coolifyOn = (server: string) => makeCoolify(server);
-
-/** First project + its first environment, creating a project when there is none. */
-export async function defaultTarget(
-  c = coolify,
-): Promise<{ project_uuid: string; environment_name: string; environment_uuid?: string }> {
-  const projects = await c.projects();
-  let project = projects[0];
-  if (!project) project = { uuid: (await c.createProject("default")).uuid, name: "default" };
-  const full = await c.project(project.uuid);
-  const env = full.environments?.[0];
-  // Coolify accepts either; send both when we know the uuid.
-  return { project_uuid: project.uuid, environment_name: env?.name ?? "production", ...(env?.uuid ? { environment_uuid: env.uuid } : {}) };
-}
-
-export function parseDeploymentLogs(d: CoolifyDeployment): CoolifyDeploymentLog[] {
-  if (!d.logs) return [];
-  try {
-    return (JSON.parse(d.logs) as CoolifyDeploymentLog[]).filter((l) => !l.hidden);
-  } catch {
-    return [];
-  }
-}
-
 export const local = {
   system: () => call<SystemSnapshot>("local_system"),
-  tailscale: () => call<TailscaleStatus>("local_tailscale"),
   tools: () => call<ToolStatus[]>("tools_status"),
   captureScreens: () => call<CaptureScreen[]>("capture_screens"),
   senderStart: (config: SenderConfig) => call<ProcessStatus>("sender_start", { config }),
@@ -331,5 +198,4 @@ export const local = {
   moonlightStart: (launch: MoonlightLaunch) => call<ProcessStatus>("moonlight_start", { launch }),
   moonlightStop: () => call<ProcessStatus>("moonlight_stop"),
   moonlightStatus: () => call<ProcessStatus>("moonlight_status"),
-  openCoolify: (path?: string) => call<void>("open_coolify", { path }),
 };

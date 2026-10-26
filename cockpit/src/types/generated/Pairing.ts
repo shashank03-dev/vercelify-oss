@@ -2,17 +2,9 @@
 
 export type Pairing = { 
 /**
- * e.g. `http://vercelify-host.tail1234.ts.net:7420`
+ * e.g. `http://10.77.0.1:7420` (the server's mesh address).
  */
-agent_url: string, agent_token: string, 
-/**
- * e.g. `http://vercelify-host.tail1234.ts.net:8000`
- */
-coolify_url: string, 
-/**
- * Coolify API token created by the installer (optional).
- */
-coolify_token?: string, hostname: string, 
+agent_url: string, agent_token: string, hostname: string, 
 /**
  * `main` or `worker` (absent in codes from 0.1).
  */

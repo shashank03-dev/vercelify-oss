@@ -1,8 +1,10 @@
 # Vercelify agent configuration. Restart after editing:
 #   sudo systemctl restart vercelify-agent
 
-# "tailscale" = this machine's Tailscale IPv4 (private to your tailnet).
-listen = ["tailscale", "127.0.0.1"]
+# "mesh" = this machine's address on Vercelify's private network (vfy0,
+# 10.77.x.x), once it has joined. A server that still uses Tailscale lists
+# "tailscale" too, until `sudo vercelify migrate --tailscale-off`.
+listen = ["127.0.0.1", "mesh"]
 port = 7420
 token_file = "/etc/vercelify/agent.token"
 
@@ -18,10 +20,10 @@ require_storage_mount = true
 display_backend = "auto"
 mpv_extra_args = []
 
-services = ["docker", "tailscaled", "cloudflared", "sunshine", "vercelify-power-guard", "vercelify-firewall", "vercelify-agent"]
+services = ["docker", "vercelify-mesh", "cloudflared", "sunshine", "vercelify-power-guard", "vercelify-firewall", "vercelify-agent"]
 
-# Auto-deploy: seconds between checks of watched branches (min 15; 0 = only
-# when you press "Check now").
+# Push-to-deploy: seconds between checks of each app's branch (min 15; a
+# webhook makes it instant).
 #   autodeploy_interval_secs = 60
 
 # Local AI models (Ollama). Defaults shown.
@@ -31,8 +33,6 @@ services = ["docker", "tailscaled", "cloudflared", "sunshine", "vercelify-power-
 # Sleeping apps (main server): Traefik sends visits to a sleeping app here.
 # Empty turns sleeping off. The firewall keeps the port to Docker's bridges.
 #   wake_listen = "0.0.0.0:7421"
-#   traefik_metrics_url = "http://127.0.0.1:8080/metrics"
-#   proxy_dir = "/data/coolify/proxy"
 
 # Project rules from vercel.json (apps' redirects, rewrites, firewall, cron jobs).
 # A rewrite to this machine or a private network would publish it on the app's
@@ -41,10 +41,11 @@ services = ["docker", "tailscaled", "cloudflared", "sunshine", "vercelify-power-
 #   proxy_http_port = 80          (cron jobs call apps through the proxy here)
 #   proxy_https_port = 443
 
-# Engine that builds and runs apps on a main server: "coolify" (default) or
-# "platform", Vercelify's own engine (docs/design/SYSTEM-DESIGN.md). The
-# master key seals stored secrets; it is part of every backup.
-#   engine = "coolify"
+# Vercelify's engine builds and runs apps on a main server
+# (docs/design/SYSTEM-DESIGN.md). A server installed with Coolify keeps
+# "coolify" until `sudo vercelify migrate`. The master key seals stored
+# secrets; it is part of every backup.
+engine = "platform"
 #   platform_db = "/var/lib/vercelify/platform.db"
 #   master_key_file = "/var/lib/vercelify/master.key"
 #   mesh_dir = "/var/lib/vercelify/mesh"

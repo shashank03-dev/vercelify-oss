@@ -1,6 +1,6 @@
 // Apps and databases on a server running Vercelify's own platform engine
-// (`/v1/platform`, docs/design/SYSTEM-DESIGN.md). Same layout as the Coolify
-// screens: a list, a detail sheet per app, databases underneath.
+// (`/v1/platform`, docs/design/SYSTEM-DESIGN.md): a list, a detail sheet per
+// app, databases underneath.
 
 import {
   Ban,
@@ -9,6 +9,7 @@ import {
   Copy,
   Database as DatabaseIcon,
   ExternalLink,
+  FileJson,
   Eye,
   EyeOff,
   GitBranch,
@@ -82,7 +83,9 @@ import {
 } from "../lib/platform";
 import { useSession } from "../lib/session";
 import type { App, AppKind, BuildPack, Database, DatabaseKind, Deployment, StorageTier } from "../types";
-import { ExplainFailure, MachineCard } from "./AppsView";
+import { ExplainFailure } from "../components/ExplainFailure";
+import { MachineCard } from "../components/MachineCard";
+import { ProjectPanel } from "../components/ProjectPanel";
 
 const RUNNING: Deployment["status"][] = ["queued", "building", "deploying"];
 const isRunning = (d: Deployment) => RUNNING.includes(d.status);
@@ -113,7 +116,7 @@ function useAct() {
 }
 
 type Filter = "all" | "live" | "issues";
-type DetailTab = "deployments" | "logs" | "terminal" | "env" | "domains" | "previews" | "settings";
+type DetailTab = "deployments" | "logs" | "terminal" | "env" | "domains" | "previews" | "project" | "settings";
 
 export function PlatformApps() {
   const client = useClient();
@@ -640,6 +643,7 @@ function AppDetail({
             { value: "env", label: "Variables", icon: <KeyRound />, testId: "tab-env" },
             { value: "domains", label: "Domains", icon: <Globe />, testId: "tab-domains", count: app.domains.length },
             { value: "previews", label: "Previews", icon: <GitPullRequest />, testId: "tab-previews", count: previews.data?.filter((p) => !p.closed_at).length },
+            { value: "project", label: "vercel.json", icon: <FileJson />, testId: "tab-project" },
             { value: "settings", label: "Settings", icon: <Settings2 />, testId: "tab-settings" },
           ]}
         />
@@ -656,6 +660,7 @@ function AppDetail({
         {tab === "env" && <EnvTab app={app} client={client} />}
         {tab === "domains" && <DomainsTab app={app} client={client} onChanged={onChanged} />}
         {tab === "previews" && <PreviewsTab app={app} client={client} previews={previews} onChanged={onChanged} />}
+        {tab === "project" && <ProjectPanel app={app} />}
         {tab === "settings" && <SettingsTab app={app} client={client} onChanged={onChanged} onDeleted={onClose} />}
       </div>
     </Modal>

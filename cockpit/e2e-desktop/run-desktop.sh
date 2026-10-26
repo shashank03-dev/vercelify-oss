@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
-# Desktop e2e: real Tauri binary + real agent (+ Coolify) under Xvfb.
+# Desktop e2e: real Tauri binary + real agent (Vercelify's engine) under Xvfb.
 #
-#   COOLIFY_TOKEN=... ./e2e-desktop/run-desktop.sh
+#   ./e2e-desktop/run-desktop.sh
 #
 # Needs: webkit2gtk-driver (WebKitWebDriver), xvfb, tauri-driver
 # (`cargo install tauri-driver --locked`), ffmpeg and mpv.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$(cd .. && pwd)
-: "${COOLIFY_URL:=http://127.0.0.1:8000}"
-: "${COOLIFY_TOKEN:?set COOLIFY_TOKEN}"
 : "${AGENT_PORT:=7433}"
-export AGENT_URL=http://127.0.0.1:$AGENT_PORT AGENT_TOKEN=desktop-e2e-token-$(date +%s) COOLIFY_URL COOLIFY_TOKEN
+: "${STATE:=$(mktemp -d)}"
+AGENT_URL=http://127.0.0.1:$AGENT_PORT
+AGENT_TOKEN=desktop-e2e-token-$(date +%s)
+export AGENT_URL AGENT_TOKEN
 # Fresh profile: settings (config), WebKit localStorage (data) and cache.
 export XDG_CONFIG_HOME XDG_DATA_HOME XDG_CACHE_HOME
 XDG_CONFIG_HOME=$(mktemp -d)
@@ -27,10 +28,17 @@ pids=()
 cleanup() { kill "${pids[@]}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-VERCELIFY_LISTEN=127.0.0.1 VERCELIFY_PORT=$AGENT_PORT VERCELIFY_TOKEN=$AGENT_TOKEN \
+# The display receiver streams to the host's private address; a stub stands in
+# for the mesh here.
+VERCELIFY_CONFIG=/nonexistent VERCELIFY_ENGINE=platform VERCELIFY_LISTEN=127.0.0.1 VERCELIFY_PORT=$AGENT_PORT \
+VERCELIFY_TOKEN=$AGENT_TOKEN VERCELIFY_STATE_DIR=$STATE VERCELIFY_RUN_DIR=$STATE/run \
+VERCELIFY_PLATFORM_DB=$STATE/platform.db VERCELIFY_MASTER_KEY_FILE=$STATE/master.key \
+VERCELIFY_TOKENS_FILE=$STATE/tokens.json VERCELIFY_AUDIT_LOG=$STATE/audit.log VERCELIFY_INSTALL_ENV=$STATE/install.env \
+VERCELIFY_PROXY_HTTP_PORT=18580 VERCELIFY_PROXY_HTTPS_PORT=18581 VERCELIFY_PROXY_METRICS_PORT=18582 \
+VERCELIFY_WAKE_LISTEN='' VERCELIFY_AUTODEPLOY_INTERVAL=0 \
 VERCELIFY_REQUIRE_STORAGE_MOUNT=false VERCELIFY_TAILSCALE_BIN=$ROOT/agent/tests/stubs/tailscale \
 VERCELIFY_MPV_EXTRA_ARGS="--vo=null --msg-level=all=warn,cplayer=info" \
-  "$ROOT/target/debug/vercelify-agent" --config /nonexistent >"$ROOT/e2e-logs/desktop-agent.log" 2>&1 &
+  "$ROOT/target/debug/vercelify-agent" >"$ROOT/e2e-logs/desktop-agent.log" 2>&1 &
 pids+=($!)
 
 Xvfb :99 -screen 0 1600x1000x24 >/dev/null 2>&1 &

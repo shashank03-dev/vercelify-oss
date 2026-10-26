@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, type Variants } from "framer-motion";
 import { AlertTriangle, BatteryLow, Bell, CheckCircle2, ChevronRight, ChevronUp, HardDrive, Info, Loader2, Thermometer, type LucideIcon } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { ago, pct, statusHealth } from "../lib/format";
+import { ago, pct } from "../lib/format";
 import { useLive } from "../lib/live";
 import { NAV, useNav } from "../lib/nav";
 import { useSession } from "../lib/session";
@@ -70,14 +70,14 @@ function ActivityMenu() {
   const alerts = useMemo<Item[]>(() => {
     const out: Item[] = [];
     for (const a of apps.data ?? []) {
-      if (statusHealth(a.status) !== "bad" || asleep.has(a.uuid)) continue;
+      if (a.health !== "bad" || asleep.has(a.id)) continue;
       out.push({
-        key: `app-${a.uuid}`,
+        key: `app-${a.id}`,
         icon: AlertTriangle,
         tone: "bad",
-        title: `${a.name} is ${a.status.split(":")[0]}`,
+        title: `${a.name} is not running: its deploy failed`,
         detail: "Open its deployments and logs",
-        onClick: () => go("apps", { app: a.uuid }),
+        onClick: () => go("apps", { app: a.id }),
       });
     }
     // Problems the server itself reported (power supply, disks, deploys, uptime…):

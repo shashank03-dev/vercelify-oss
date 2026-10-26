@@ -502,12 +502,12 @@ print(reply.choices[0].message.content)`,
     ollama: `# Use the Ollama CLI on your Mac with the models on ${host}
 brew install ollama
 OLLAMA_HOST=${base} ollama run ${model}`,
-    apps: `# From apps deployed on this server (Coolify network)
+    apps: `# From apps deployed on this server (they share its vfy-proxy network)
 OLLAMA_BASE_URL=http://vercelify-ollama:11434
 OPENAI_BASE_URL=http://vercelify-ollama:11434/v1`,
   };
   return (
-    <Card title="Use it from your Mac" icon={<Laptop />} description="Private to your tailnet — no API key, no cloud" testId="llm-use">
+    <Card title="Use it from your Mac" icon={<Laptop />} description="Private to your Vercelify network — no API key, no cloud" testId="llm-use">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <Segmented
           label="snippet"

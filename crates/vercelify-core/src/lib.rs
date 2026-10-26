@@ -11,7 +11,6 @@ pub mod platform;
 pub mod power;
 pub mod stream;
 pub mod sysfs;
-pub mod tailscale;
 pub mod thermal;
 pub mod volumes;
 

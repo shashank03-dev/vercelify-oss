@@ -1,6 +1,6 @@
 // Desktop end-to-end: drives the real Tauri binary through tauri-driver
 // (WebKitWebDriver) so the Rust command layer is exercised for real:
-// settings persistence, HTTP to the agent and Coolify, local tools, and the
+// settings persistence, HTTP to the agent, local tools, and the
 // ffmpeg sender streaming into the agent's mpv receiver.
 //
 // Started by e2e-desktop/run-desktop.sh.
@@ -15,8 +15,6 @@ import { Builder, By, until } from "selenium-webdriver";
 const APP = process.env.COCKPIT_BIN;
 const AGENT = process.env.AGENT_URL;
 const AGENT_TOKEN = process.env.AGENT_TOKEN;
-const COOLIFY = process.env.COOLIFY_URL;
-const COOLIFY_TOKEN = process.env.COOLIFY_TOKEN;
 const SETTINGS = `${process.env.XDG_CONFIG_HOME}/dev.vercelify.cockpit/settings.json`;
 
 let driver;
@@ -30,6 +28,15 @@ async function waitText(id, re, ms = 30_000) {
 }
 async function agentGet(path) {
   const r = await fetch(AGENT + path, { headers: { Authorization: `Bearer ${AGENT_TOKEN}` } });
+  return r.json();
+}
+async function agentSend(method, path, body) {
+  const r = await fetch(AGENT + path, {
+    method,
+    headers: { Authorization: `Bearer ${AGENT_TOKEN}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!r.ok) throw new Error(`${method} ${path}: HTTP ${r.status} ${await r.text()}`);
   return r.json();
 }
 async function startApp() {
@@ -52,7 +59,7 @@ test("pairs through Rust and persists settings with 0600 permissions", async () 
   const code =
     "vfy1." +
     Buffer.from(
-      JSON.stringify({ agent_url: AGENT, agent_token: AGENT_TOKEN, coolify_url: COOLIFY, coolify_token: COOLIFY_TOKEN, hostname: "desk" }),
+      JSON.stringify({ agent_url: AGENT, agent_token: AGENT_TOKEN, hostname: "desk", role: "main" }),
     ).toString("base64url");
   await (await find("pairing-code")).sendKeys(code);
   await (await find("pair-submit")).click();
@@ -61,10 +68,11 @@ test("pairs through Rust and persists settings with 0600 permissions", async () 
   assert.equal(statSync(SETTINGS).mode & 0o777, 0o600);
 });
 
-test("Coolify apps load via the Rust HTTP proxy", async () => {
+test("the engine's apps load via the Rust HTTP proxy", async () => {
+  await agentSend("POST", "/v1/platform/apps", { name: "desk-site", kind: "image", source: { image: "traefik/whoami:latest" } });
   await (await find("nav-apps")).click();
-  await find("app-gitapp", 30_000);
-  await waitText("app-gitapp", /Running/);
+  await find("papp-desk-site", 30_000);
+  await waitText("status-desk-site", /Not deployed/);
 });
 
 test("local tools are detected on this machine", async () => {

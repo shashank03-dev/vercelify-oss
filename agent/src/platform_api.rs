@@ -123,7 +123,7 @@ pub fn platform(s: &AppState) -> Result<Arc<Platform>, AppError> {
             AppError::unavailable("this is a worker: manage apps on its main server")
         }
         None => AppError::unavailable(
-            "this server runs the Coolify engine (agent.toml: engine = \"coolify\"); the platform API is off",
+            "Coolify still runs this server's apps: sudo vercelify migrate moves them to Vercelify's engine",
         ),
     })
 }

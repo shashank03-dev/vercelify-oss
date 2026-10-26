@@ -437,6 +437,40 @@ export function Callout({ tone = "warn", title, children, className }: { tone?: 
   );
 }
 
+/** A checkbox with a label and a one-line hint. */
+export function Toggle({
+  checked,
+  onChange,
+  label,
+  hint,
+  disabled,
+  testId,
+}: {
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  label: string;
+  hint: string;
+  disabled?: boolean;
+  testId?: string;
+}) {
+  return (
+    <label className={cx("flex cursor-pointer items-start gap-2.5 text-[13px]", disabled && "cursor-not-allowed opacity-50")}>
+      <input
+        type="checkbox"
+        className="mt-0.5 size-3.5 accent-[var(--fg)]"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        data-testid={testId}
+      />
+      <span>
+        <span className="block font-medium">{label}</span>
+        <span className="block text-xs text-fg-muted">{hint}</span>
+      </span>
+    </label>
+  );
+}
+
 export function InlineCode({ children }: { children: ReactNode }) {
   return <code className="rounded border border-line bg-surface-2 px-1 py-px font-mono text-[12px] text-fg">{children}</code>;
 }
@@ -940,7 +974,7 @@ export function Modal({
             aria-labelledby={titleId}
             className={cx(
               "flex w-full flex-col border border-line-strong bg-overlay shadow-lg",
-              sheet ? "h-full max-w-[min(860px,92vw)] border-y-0 border-r-0" : "max-h-[85vh] rounded-xl",
+              sheet ? "h-full max-w-[min(940px,92vw)] border-y-0 border-r-0" : "max-h-[85vh] rounded-xl",
               !sheet && (wide ? "max-w-5xl" : "max-w-lg"),
             )}
             initial={sheet ? { x: 40, opacity: 0 } : { y: 10, scale: 0.98, opacity: 0 }}

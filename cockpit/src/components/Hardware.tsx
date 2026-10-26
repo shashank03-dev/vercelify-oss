@@ -2,10 +2,10 @@ import { Activity, CircuitBoard, Globe } from "lucide-react";
 import { useMemo, useState } from "react";
 import { agent } from "../lib/api";
 import { hasCap } from "../lib/caps";
-import { ago, daysUntil, mediaLabel, profileLabel, type Health } from "../lib/format";
+import { ago, mediaLabel, profileLabel, type Health } from "../lib/format";
 import { usePoll } from "../lib/hooks";
 import { useLive } from "../lib/live";
-import type { HardwareInfo, MetricPoint, SystemSnapshot, TailscaleStatus } from "../types";
+import type { HardwareInfo, MetricPoint, SystemSnapshot } from "../types";
 import { Callout, Card, ErrorNote, Loading, Segmented, StatusDot, Tooltip } from "./ui";
 
 /** Shown instead of a card's content when this server's agent is too old. */
@@ -25,7 +25,7 @@ interface Fact {
 }
 
 /** What the machine is and how it copes: the facts that decide what can run on it. */
-export function hardwareFacts(hw: HardwareInfo, ts?: TailscaleStatus): Fact[] {
+export function hardwareFacts(hw: HardwareInfo): Fact[] {
   const out: Fact[] = [
     {
       label: "Machine",
@@ -72,19 +72,10 @@ export function hardwareFacts(hw: HardwareInfo, ts?: TailscaleStatus): Fact[] {
     });
   }
   out.push({ label: "Hang watchdog", value: hw.watchdog ? "armed" : "not available", health: hw.watchdog ? "ok" : "idle" });
-  const expiry = daysUntil(ts?.self_node?.key_expiry);
-  if (ts?.self_node) {
-    out.push({
-      label: "Tailscale key",
-      value: expiry == null ? "never expires" : expiry < 0 ? "expired" : `expires in ${expiry} days`,
-      health: expiry == null ? "ok" : expiry < 0 ? "bad" : expiry <= 14 ? "warn" : "ok",
-      hint: expiry != null ? "Admin console → Machines → this machine → Disable key expiry." : undefined,
-    });
-  }
   return out;
 }
 
-export function HardwareCard({ s, ts }: { s?: SystemSnapshot; ts?: TailscaleStatus }) {
+export function HardwareCard({ s }: { s?: SystemSnapshot }) {
   const hw = s?.hardware;
   return (
     <Card title="Hardware" icon={<CircuitBoard />} description={hw ? profileLabel(hw.profile) : undefined} testId="hardware">
@@ -94,7 +85,7 @@ export function HardwareCard({ s, ts }: { s?: SystemSnapshot; ts?: TailscaleStat
         <NeedsUpdate what="Hardware checks (power supply, SD card, memory limits)" />
       ) : (
         <dl className="divide-y divide-line text-[13px]">
-          {hardwareFacts(hw, ts).map((f) => (
+          {hardwareFacts(hw).map((f) => (
             <div key={f.label} className="flex items-center gap-3 py-2">
               <dt className="w-40 shrink-0 text-fg-muted">{f.label}</dt>
               <dd className="flex min-w-0 items-center gap-2">

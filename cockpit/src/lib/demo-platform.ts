@@ -119,6 +119,9 @@ const apps: App[] = [
   newApp("wiki", "git", { source: git("wiki"), desired: "sleeping" }),
 ];
 
+/** The demo's apps (agent-side demo data such as uptime, vercel.json and sleep refers to them). */
+export const demoApps = (): readonly App[] => apps;
+
 const deployments = new Map<string, Deployment[]>();
 const logs = new Map<string, LogLine[]>();
 

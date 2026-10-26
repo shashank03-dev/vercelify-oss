@@ -30,7 +30,6 @@ pub const DEVICE_PORTS: &[&str] = &[
     "7420/tcp",
     "80/tcp",
     "443/tcp",
-    "8000/tcp",
     "11434/tcp",
     "5600-5610/udp",
 ];

@@ -9,8 +9,9 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(default)]
 pub struct Config {
-    /// Addresses to listen on. `"tailscale"` resolves to this node's
-    /// Tailscale IPv4 (waiting for it if tailscaled is still starting).
+    /// Addresses to listen on. `"mesh"` is this node's mesh address (once it
+    /// has joined); `"tailscale"` its Tailscale IPv4, for servers that still
+    /// use Tailscale until `vercelify migrate --tailscale-off`.
     pub listen: Vec<String>,
     pub port: u16,
     /// File holding the bearer token (created by the installer).
@@ -38,8 +39,6 @@ pub struct Config {
     pub services: Vec<String>,
     /// Browser origins allowed via CORS (only needed for the web dev mode).
     pub cors_origins: Vec<String>,
-    /// Container running Coolify's PostgreSQL (for storage-tier moves).
-    pub coolify_db_container: String,
     /// Coolify's application container and data directory (`vercelify migrate`).
     pub coolify_container: String,
     pub coolify_data_dir: PathBuf,
@@ -53,10 +52,6 @@ pub struct Config {
     pub state_dir: PathBuf,
     /// Volatile state shared with the CLI (short pairing codes).
     pub run_dir: PathBuf,
-    /// Coolify API as seen from this machine.
-    pub coolify_url: String,
-    /// Coolify API token created by the installer.
-    pub coolify_token_file: PathBuf,
     /// Seconds between checks of watched branches (minimum 15; 0 = only on demand).
     pub autodeploy_interval_secs: u64,
     pub git_bin: String,
@@ -64,12 +59,8 @@ pub struct Config {
     pub ollama_url: String,
     pub ollama_image: String,
     pub ollama_container: String,
-    /// Port Ollama is published on (all interfaces; the firewall keeps it to the tailnet).
+    /// Port Ollama is published on (all interfaces; the firewall keeps it to the mesh).
     pub ollama_port: u16,
-    /// Where an attached main host's Coolify SSH key is authorised.
-    pub authorized_keys_file: PathBuf,
-    /// Coolify's SSH key store (main host).
-    pub coolify_ssh_keys_dir: PathBuf,
     pub ssh_keygen_bin: String,
     /// Used to tell whether the installer set up a storage disk.
     pub fstab_file: PathBuf,
@@ -94,7 +85,7 @@ pub struct Config {
     pub notify_url: Option<String>,
     /// Seconds between background health evaluations (alerts, repairs).
     pub watch_interval_secs: u64,
-    /// Check that every Coolify app's URL answers (main host).
+    /// Check that every app's URL answers (main host).
     pub uptime_checks: bool,
     /// Agent tokens issued to paired devices (hashed).
     pub tokens_file: PathBuf,
@@ -116,18 +107,20 @@ pub struct Config {
     pub wake_listen: String,
     /// Traefik's Prometheus endpoint (requests per app, to tell idle apps).
     pub traefik_metrics_url: String,
-    /// Coolify's proxy: compose file and dynamic configuration directory.
+    /// Our proxy's configuration directory (default: `<state_dir>/proxy`).
     pub proxy_dir: PathBuf,
-    /// Coolify's proxy container (its image tells the Traefik version).
+    /// Our proxy's container (its image tells the Traefik version).
     pub proxy_container: String,
     /// Where the proxy listens on this machine (cron jobs call apps through it).
     pub proxy_http_port: u16,
     pub proxy_https_port: u16,
     /// Let `vercel.json` rewrites proxy to this machine or private networks
-    /// (off: they could publish Ollama, Coolify or a database).
+    /// (off: they could publish Ollama, the agent or a database).
     pub rewrite_private_targets: bool,
-    /// What builds and runs apps on a main server: `coolify` (today) or
-    /// `platform` (Vercelify's own engine, docs/design/SYSTEM-DESIGN.md).
+    /// What builds and runs apps on a main server: `platform` (Vercelify's
+    /// own engine, docs/design/SYSTEM-DESIGN.md), or `coolify` on a server
+    /// not migrated yet (`vercelify migrate`), where the agent runs no apps.
+    /// Unset: `coolify` when Coolify is installed, else `platform`.
     pub engine: String,
     /// The platform's state (main server, engine = platform).
     pub platform_db: PathBuf,
@@ -169,7 +162,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            listen: vec!["tailscale".into(), "127.0.0.1".into()],
+            listen: vec!["127.0.0.1".into(), "mesh".into()],
             port: vercelify_core::DEFAULT_AGENT_PORT,
             token_file: "/etc/vercelify/agent.token".into(),
             token: None,
@@ -188,7 +181,7 @@ impl Default for Config {
             mpv_extra_args: vec![],
             services: [
                 "docker",
-                "tailscaled",
+                "vercelify-mesh",
                 "cloudflared",
                 "sunshine",
                 "vercelify-power-guard",
@@ -198,7 +191,6 @@ impl Default for Config {
             .map(String::from)
             .to_vec(),
             cors_origins: vec![],
-            coolify_db_container: "coolify-db".into(),
             coolify_container: "coolify".into(),
             coolify_data_dir: "/data/coolify".into(),
             docker_volumes_root: vercelify_core::SSD_VOLUME_ROOT.into(),
@@ -206,16 +198,12 @@ impl Default for Config {
             install_env: "/etc/vercelify/install.env".into(),
             state_dir: "/var/lib/vercelify".into(),
             run_dir: "/run/vercelify".into(),
-            coolify_url: "http://127.0.0.1:8000".into(),
-            coolify_token_file: "/etc/vercelify/coolify.token".into(),
             autodeploy_interval_secs: 60,
             git_bin: "git".into(),
             ollama_url: "http://127.0.0.1:11434".into(),
             ollama_image: "ollama/ollama:0.40.6".into(),
             ollama_container: "vercelify-ollama".into(),
             ollama_port: 11434,
-            authorized_keys_file: "/root/.ssh/authorized_keys".into(),
-            coolify_ssh_keys_dir: "/data/coolify/ssh/keys".into(),
             ssh_keygen_bin: "ssh-keygen".into(),
             fstab_file: "/etc/fstab".into(),
             cli_bin: "/usr/local/bin/vercelify".into(),
@@ -241,13 +229,13 @@ impl Default for Config {
             maintenance_conf: "/etc/vercelify/maintenance.conf".into(),
             power_guard_overrides: "/var/lib/vercelify/power-guard.local.conf".into(),
             wake_listen: "0.0.0.0:7421".into(),
-            traefik_metrics_url: "http://127.0.0.1:8080/metrics".into(),
-            proxy_dir: "/data/coolify/proxy".into(),
-            proxy_container: "coolify-proxy".into(),
+            traefik_metrics_url: "http://127.0.0.1:8082/metrics".into(),
+            proxy_dir: "/var/lib/vercelify/proxy".into(),
+            proxy_container: vercelify_platform::proxy::CONTAINER.into(),
             proxy_http_port: 80,
             proxy_https_port: 443,
             rewrite_private_targets: false,
-            engine: "coolify".into(),
+            engine: "platform".into(),
             platform_db: "/var/lib/vercelify/platform.db".into(),
             master_key_file: "/var/lib/vercelify/master.key".into(),
             mesh_dir: "/var/lib/vercelify/mesh".into(),
@@ -287,7 +275,8 @@ pub fn env_file_values(path: &Path) -> BTreeMap<String, String> {
 
 impl Config {
     pub fn load(path: Option<&Path>) -> anyhow_lite::Result<Self> {
-        let mut cfg = match path {
+        let mut engine_set = std::env::var("VERCELIFY_ENGINE").is_ok_and(|v| !v.is_empty());
+        let mut cfg: Config = match path {
             Some(p) if p.exists() => {
                 let raw = std::fs::read_to_string(p)
                     .map_err(|e| anyhow_lite::err(format!("reading {}: {e}", p.display())))?;
@@ -297,12 +286,17 @@ impl Config {
                         p.display()
                     );
                 }
+                engine_set |= raw.parse::<toml::Table>().is_ok_and(|t| t.contains_key("engine"));
                 toml::from_str(&raw).map_err(|e| anyhow_lite::err(format!("parsing {}: {e}", p.display())))?
             }
             _ => Config::default(),
         };
         cfg.apply_env();
-        cfg.apply_engine_defaults();
+        // A server installed with Coolify keeps it until `vercelify migrate`.
+        if !engine_set && cfg.coolify_data_dir.join("source/.env").exists() {
+            cfg.engine = "coolify".into();
+        }
+        cfg.apply_defaults();
         Ok(cfg)
     }
 
@@ -389,9 +383,6 @@ impl Config {
         if let Some(v) = var("VERCELIFY_MPV_EXTRA_ARGS") {
             self.mpv_extra_args = v.split_whitespace().map(String::from).collect();
         }
-        if let Some(v) = var("VERCELIFY_COOLIFY_DB_CONTAINER") {
-            self.coolify_db_container = v;
-        }
         if let Some(v) = var("VERCELIFY_COOLIFY_CONTAINER") {
             self.coolify_container = v;
         }
@@ -413,12 +404,6 @@ impl Config {
         if let Some(v) = var("VERCELIFY_RUN_DIR") {
             self.run_dir = v.into();
         }
-        if let Some(v) = var("VERCELIFY_COOLIFY_URL") {
-            self.coolify_url = v;
-        }
-        if let Some(v) = var("VERCELIFY_COOLIFY_TOKEN_FILE") {
-            self.coolify_token_file = v.into();
-        }
         if let Some(v) = var("VERCELIFY_AUTODEPLOY_INTERVAL").and_then(|v| v.parse().ok()) {
             self.autodeploy_interval_secs = v;
         }
@@ -427,12 +412,6 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_OLLAMA_URL") {
             self.ollama_url = v;
-        }
-        if let Some(v) = var("VERCELIFY_AUTHORIZED_KEYS") {
-            self.authorized_keys_file = v.into();
-        }
-        if let Some(v) = var("VERCELIFY_COOLIFY_SSH_KEYS_DIR") {
-            self.coolify_ssh_keys_dir = v.into();
         }
         if let Some(v) = var("VERCELIFY_SSH_KEYGEN_BIN") {
             self.ssh_keygen_bin = v;
@@ -548,18 +527,12 @@ impl Config {
     /// KEY=VALUE pairs of power-guard.conf (shell syntax, comments ignored).
     /// The power guard's settings: its config file, then what was changed
     /// from the cockpit (the guard reads them in the same order).
-    /// The platform engine runs its own proxy: where Coolify's defaults are
-    /// still in place, point at ours instead.
-    pub fn apply_engine_defaults(&mut self) {
-        if self.engine != "platform" {
-            return;
-        }
+    /// Defaults that follow other settings: the proxy's directory lives in
+    /// the state directory, its metrics on its metrics port.
+    pub fn apply_defaults(&mut self) {
         let d = Config::default();
         if self.proxy_dir == d.proxy_dir {
             self.proxy_dir = self.state_dir.join("proxy");
-        }
-        if self.proxy_container == d.proxy_container {
-            self.proxy_container = vercelify_platform::proxy::CONTAINER.into();
         }
         if self.traefik_metrics_url == d.traefik_metrics_url {
             self.traefik_metrics_url = format!("http://127.0.0.1:{}/metrics", self.proxy_metrics_port);
@@ -594,14 +567,6 @@ impl Config {
                 .map(|v| v.trim().trim_matches('"').to_string())
                 .filter(|v| !v.is_empty())
         })
-    }
-
-    /// The Coolify API token, if the installer created one.
-    pub fn coolify_token(&self) -> Option<String> {
-        std::fs::read_to_string(&self.coolify_token_file)
-            .ok()
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty())
     }
 
     /// Resolve the bearer token from config or the token file.

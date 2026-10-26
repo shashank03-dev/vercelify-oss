@@ -86,14 +86,8 @@ pub fn parse_ps(stdout: &str) -> Vec<ContainerInfo> {
         .filter_map(|l| serde_json::from_str::<PsRow>(l).ok())
         .map(|r| {
             let labels = parse_labels(&r.labels);
-            let coolify_managed =
-                labels.get("coolify.managed").is_some_and(|v| v == "true") || r.names.starts_with("coolify");
             ContainerInfo {
-                coolify_name: labels
-                    .get("coolify.resourceName")
-                    .or_else(|| labels.get("coolify.name"))
-                    .cloned(),
-                coolify_managed,
+                app: labels.get("vercelify.app-name").filter(|a| !a.is_empty()).cloned(),
                 id: r.id,
                 name: r.names,
                 image: r.image,
@@ -140,7 +134,7 @@ pub async fn list(docker: &str, with_stats: bool) -> Result<Vec<ContainerInfo>, 
         }
     }
     containers.sort_by(|a, b| {
-        (a.state != "running", !a.coolify_managed, &a.name).cmp(&(b.state != "running", !b.coolify_managed, &b.name))
+        (a.state != "running", a.app.is_none(), &a.name).cmp(&(b.state != "running", b.app.is_none(), &b.name))
     });
     Ok(containers)
 }
@@ -215,7 +209,7 @@ pub async fn volume_names(docker: &str) -> Result<Vec<String>, AppError> {
 mod tests {
     use super::*;
 
-    const PS: &str = r#"{"Command":"\"docker-entrypoint.s…\"","CreatedAt":"2026-10-18 10:00:00 +0000 UTC","ID":"a1b2c3d4e5f6","Image":"postgres:16-alpine","Labels":"coolify.managed=true,coolify.name=postgresql-abc,coolify.type=database","LocalVolumes":"1","Mounts":"postgres-data","Names":"postgresql-abc","Networks":"coolify","Ports":"5432/tcp","RunningFor":"2 hours ago","Size":"0B","State":"running","Status":"Up 2 hours (healthy)"}
+    const PS: &str = r#"{"Command":"\"docker-entrypoint.s…\"","CreatedAt":"2026-10-18 10:00:00 +0000 UTC","ID":"a1b2c3d4e5f6","Image":"postgres:16-alpine","Labels":"vercelify.managed=true,vercelify.app-name=shop,vercelify.kind=app","LocalVolumes":"1","Mounts":"postgres-data","Names":"postgresql-abc","Networks":"vfy-proxy","Ports":"5432/tcp","RunningFor":"2 hours ago","Size":"0B","State":"running","Status":"Up 2 hours (healthy)"}
 {"Command":"\"/bin/sh\"","ID":"ffffeeeedddd","Image":"alpine","Labels":"","Names":"scratch","Ports":"","State":"exited","Status":"Exited (0) 3 days ago"}"#;
 
     const STATS: &str = r#"{"BlockIO":"0B / 0B","CPUPerc":"1.25%","Container":"a1b2c3d4e5f6","ID":"a1b2c3d4e5f6","MemPerc":"0.85%","MemUsage":"64.5MiB / 7.6GiB","Name":"postgresql-abc","NetIO":"1kB / 0B","PIDs":"7"}"#;
@@ -224,9 +218,8 @@ mod tests {
     fn parses_ps_and_stats() {
         let mut c = parse_ps(PS);
         assert_eq!(c.len(), 2);
-        assert!(c[0].coolify_managed);
-        assert_eq!(c[0].coolify_name.as_deref(), Some("postgresql-abc"));
-        assert!(!c[1].coolify_managed);
+        assert_eq!(c[0].app.as_deref(), Some("shop"));
+        assert_eq!(c[1].app, None);
         merge_stats(&mut c, STATS);
         assert_eq!(c[0].cpu_pct, Some(1.25));
         assert_eq!(c[0].mem_bytes, Some(67_633_152));
@@ -244,7 +237,7 @@ mod tests {
     #[test]
     fn refs() {
         assert!(valid_ref("a1b2c3"));
-        assert!(valid_ref("coolify-proxy"));
+        assert!(valid_ref("vercelify-proxy"));
         assert!(!valid_ref("-rm"));
         assert!(!valid_ref("a b"));
         assert!(!valid_ref("../x"));

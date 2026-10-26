@@ -3,7 +3,6 @@ import { backoff, mergeJob } from "../lib/live";
 import { alertText, shouldNotify } from "../lib/notify";
 import type { Alert, Job } from "../types";
 import { jobHealth, jobLabel } from "./Activity";
-import { normalizeDomain, splitDomains } from "./AppDomains";
 
 const job = (id: string, patch: Partial<Job> = {}): Job => ({
   id,
@@ -67,21 +66,6 @@ describe("native notifications", () => {
     expect(shouldNotify(alert({ status: "ok", source: "repair:1", resolved: true }))).toBe(false);
     expect(shouldNotify(alert({ source: "test:1" }))).toBe(false);
     expect(alertText("pi5", alert({}))).toEqual({ title: "pi5: System disk: needs attention", body: "96% used" });
-  });
-});
-
-describe("app domains", () => {
-  it("splits Coolify's list", () => {
-    expect(splitDomains("https://a.dev, http://b.test:3000,")).toEqual(["https://a.dev", "http://b.test:3000"]);
-    expect(splitDomains(null)).toEqual([]);
-  });
-  it("adds https to bare hosts and refuses junk", () => {
-    expect(normalizeDomain("Blog.Example.com")).toEqual({ url: "https://blog.example.com" });
-    expect(normalizeDomain("http://a.test:8080/app")).toEqual({ url: "http://a.test:8080/app" });
-    expect(normalizeDomain("  ")).toEqual({});
-    expect(normalizeDomain("not a domain").error).toBeTruthy();
-    expect(normalizeDomain("https://user:pw@a.test").error).toBeTruthy();
-    expect(normalizeDomain("localhost").error).toBeTruthy();
   });
 });
 

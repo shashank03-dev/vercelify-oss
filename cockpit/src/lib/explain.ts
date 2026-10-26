@@ -10,7 +10,7 @@ export const EXPLAIN_MAX_TOKENS = 400;
 export const EXPLAIN_LOG_CHARS = 5000;
 
 export const EXPLAIN_SYSTEM = `You are Vercelify's deploy doctor. A deployment failed on a self-hosted Vercelify server:
-Coolify builds the app with Nixpacks or a Dockerfile inside a Linux container on an old laptop.
+Vercelify builds the app with its build pack or a Dockerfile inside a Linux container on an old laptop.
 Linux file names are case-sensitive, the build cannot see the developer's machine,
 and environment variables come only from the app's settings.
 Read the build log and answer in exactly this format, under 120 words:
@@ -52,7 +52,7 @@ export interface ExplainContext {
   vercelJson?: string | null;
 }
 
-/** Build-log lines as Coolify stores them. */
+/** Build-log lines: plain text, or lines with their stream. */
 export type ExplainLine = string | { output: string; type?: string | null };
 
 /** The chat messages for one failed build, as `vfy why` sends them. */

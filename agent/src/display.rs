@@ -2,7 +2,7 @@
 //! secondary monitor for the Mac by playing an MPEG-TS stream with mpv.
 //!
 //! The Mac side (the cockpit) captures a screen with ffmpeg + VideoToolbox
-//! and sends it over Tailscale; see `cockpit/src-tauri/src/display.rs`.
+//! and sends it over the mesh; see `cockpit/src-tauri/src/display.rs`.
 
 use crate::config::Config;
 use chrono::Utc;

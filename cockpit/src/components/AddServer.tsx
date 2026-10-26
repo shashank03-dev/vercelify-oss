@@ -1,14 +1,13 @@
 import { ArrowLeft, ArrowRight, BrainCircuit, Check, Layers, Server, Terminal } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { agentOn, isWorker } from "../lib/api";
 import { usePoll } from "../lib/hooks";
-import { attachWorker, installCommand, POOL_STEPS, validHostname } from "../lib/pool";
+import { installCommand, validHostname } from "../lib/pool";
 import { toCockpitError } from "../lib/transport";
 import type { CockpitSettings } from "../types";
 import { HealthChecks } from "./HealthChecks";
 import { PairForm } from "./PairForm";
-import { useToast } from "./Toast";
-import { Button, Callout, CodeBlock, cx, Field, InlineCode, PixelWave, Select, StatusDot, TextInput } from "./ui";
+import { Button, Callout, CodeBlock, cx, Field, InlineCode, Select, StatusDot, TextInput } from "./ui";
 
 type Kind = "server" | "worker";
 type Step = "choose" | "install" | "finish";
@@ -17,21 +16,22 @@ const KINDS: { value: Kind; title: string; text: string; icon: typeof Server }[]
   {
     value: "server",
     title: "A separate server",
-    text: "Runs its own Coolify and apps. Best with 8 GB of RAM or more. Switch to it from the sidebar.",
+    text: "Runs its own apps and databases. Best with 8 GB of RAM or more. Switch to it from the sidebar.",
     icon: Server,
   },
   {
     value: "worker",
     title: "A worker for a main server",
-    text: "Docker and the agent only — fine on 2–4 GB or a Raspberry Pi. Your main server deploys apps to it.",
+    text: "Docker and the agent only — fine on 2–4 GB or a Raspberry Pi. Your main server places apps on it.",
     icon: Layers,
   },
 ];
 
 /**
  * Adding a machine, start to finish: choose its role, run the generated
- * command on it, wait for it to show up on the tailnet, type its code,
- * pool it (workers) and see its health checks.
+ * command on it (a worker's carries its main server's invite, so it joins
+ * that server's network and runs apps for it), wait for it to show up,
+ * type its code and see its health checks.
  */
 export function AddServerWizard({
   servers,
@@ -50,6 +50,24 @@ export function AddServerWizard({
   const [installed, setInstalled] = useState(false);
   const [added, setAdded] = useState<CockpitSettings | null>(null);
   const [note, setNote] = useState<string>();
+  // A worker's main server, and the single-use invite it joins with.
+  const [main, setMain] = useState(mains[0]?.agent_url ?? "");
+  const [invite, setInvite] = useState<{ token?: string; error?: string }>({});
+  const mainS = mains.find((m) => m.agent_url === main);
+  useEffect(() => {
+    if (step !== "install" || kind !== "worker" || !mainS) return;
+    let live = true;
+    setInvite({});
+    agentOn(mainS.agent_url)
+      .meshInvite("server")
+      .then(
+        (i) => live && setInvite({ token: i.token }),
+        (e) => live && setInvite({ error: toCockpitError(e).message }),
+      );
+    return () => {
+      live = false;
+    };
+  }, [step, kind, mainS]);
 
   const reset = () => {
     setStep("choose");
@@ -112,7 +130,7 @@ export function AddServerWizard({
             })}
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Name on your tailnet (optional)" hint={validHostname(hostname.trim().toLowerCase()) ? "Defaults to the machine's hostname" : "Lowercase letters, digits and dashes"}>
+            <Field label="Name (optional)" hint={validHostname(hostname.trim().toLowerCase()) ? "Defaults to the machine's hostname" : "Lowercase letters, digits and dashes"}>
               <TextInput value={hostname} onChange={(e) => setHostname(e.target.value)} placeholder="old-dell" spellCheck={false} data-testid="new-hostname" />
             </Field>
             <label className="flex cursor-pointer items-start gap-2.5 self-end rounded-lg border border-line bg-surface-2 px-3 py-2.5 text-[13px]">
@@ -125,6 +143,18 @@ export function AddServerWizard({
               </span>
             </label>
           </div>
+          {kind === "worker" && mains.length > 1 && (
+            <label className="flex flex-col gap-1.5 text-xs font-medium text-fg-muted">
+              Main server it works for
+              <Select value={main} onChange={(e) => setMain(e.target.value)} data-testid="worker-main">
+                {mains.map((m) => (
+                  <option key={m.agent_url} value={m.agent_url}>
+                    {m.hostname}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
@@ -154,12 +184,17 @@ export function AddServerWizard({
               <div className="flex items-center gap-2 text-[13px] font-medium">
                 <Terminal className="size-3.5 text-fg-dim" /> On the new machine (Debian 12/13 or Ubuntu 22.04/24.04), run:
               </div>
-              <CodeBlock code={installCommand({ worker: kind === "worker", hostname, ai })} prompt testId="install-command" />
+              <CodeBlock code={installCommand({ worker: kind === "worker", hostname, ai, join: invite.token })} prompt testId="install-command" />
+              {kind === "worker" && invite.error && (
+                <Callout tone="bad">
+                  {mainS?.hostname} didn't make an invite ({invite.error}). On it, <InlineCode>sudo vercelify mesh invite --platform</InlineCode> prints
+                  one; add <InlineCode>--join TOKEN</InlineCode> to the command.
+                </Callout>
+              )}
               <ul className="space-y-1 text-xs text-fg-muted">
-                <li>• It asks you to approve the machine on Tailscale — use the same account as this Mac.</li>
+                {kind === "worker" && mainS && <li>• It joins {mainS.hostname}'s private network with a single-use invite (valid for an hour).</li>}
                 <li>
-                  • It takes 5–15 minutes{kind === "server" ? " (Coolify downloads about 1.5 GB)" : ""}, then prints an 8-character code. You can
-                  always get a new one with <InlineCode>sudo vercelify pair</InlineCode>.
+                  • It takes 5–15 minutes, then prints an 8-character code. You can always get a new one with <InlineCode>sudo vercelify pair</InlineCode>.
                 </li>
                 <li>• This window keeps looking for it; as soon as it's online, type the code below.</li>
               </ul>
@@ -184,46 +219,26 @@ export function AddServerWizard({
         </div>
       )}
 
-      {step === "finish" && added && <Finish server={added} mains={mains.filter((m) => m.agent_url !== added.agent_url)} note={note} onAnother={reset} onClose={onClose} />}
+      {step === "finish" && added && <Finish server={added} main={mainS} note={note} onAnother={reset} onClose={onClose} />}
     </div>
   );
 }
 
 function Finish({
   server,
-  mains,
+  main,
   note,
   onAnother,
   onClose,
 }: {
   server: CockpitSettings;
-  mains: CockpitSettings[];
+  main?: CockpitSettings;
   note?: string;
   onAnother: () => void;
   onClose: () => void;
 }) {
-  const toast = useToast();
   const worker = isWorker(server);
   const doctor = usePoll(() => agentOn(server.agent_url).doctor(), 0, [server.agent_url]);
-  const [main, setMain] = useState(mains[0]?.agent_url ?? "");
-  const [poolStep, setPoolStep] = useState(-1);
-  const [poolError, setPoolError] = useState<string>();
-  const [pooled, setPooled] = useState<boolean | null>(null);
-  const mainS = mains.find((m) => m.agent_url === main);
-
-  async function pool() {
-    if (!mainS) return;
-    setPoolError(undefined);
-    try {
-      const added = await attachWorker(server, mainS, setPoolStep);
-      setPoolStep(POOL_STEPS.length);
-      setPooled(added);
-      toast.ok(added ? `${server.hostname} joined ${mainS.hostname}'s pool` : `${server.hostname} was already in ${mainS.hostname}'s pool`);
-    } catch (e) {
-      setPoolError(toCockpitError(e).message);
-    }
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex items-center gap-2.5 rounded-lg border border-line bg-surface-2 px-3.5 py-3">
@@ -235,52 +250,14 @@ function Finish({
       {note && <Callout>{note}</Callout>}
 
       {worker && (
-        <div className="space-y-3 rounded-lg border border-line p-3.5" data-testid="wizard-pool">
-          <div className="text-[13px] font-medium">Let a main server deploy to it</div>
-          {mains.length === 0 ? (
-            <p className="text-xs text-fg-muted">Pair a main server, then use “Add to a pool” on the Servers page.</p>
-          ) : (
+        <div className="rounded-lg border border-line p-3.5 text-xs text-fg-muted" data-testid="wizard-pool">
+          {main ? (
             <>
-              <div className="flex items-end gap-2">
-                <label className="flex flex-1 flex-col gap-1.5 text-xs font-medium text-fg-muted">
-                  Main server
-                  <Select value={main} onChange={(e) => setMain(e.target.value)} disabled={poolStep >= 0 && !poolError}>
-                    {mains.map((m) => (
-                      <option key={m.agent_url} value={m.agent_url}>
-                        {m.hostname}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-                {pooled === null && (
-                  <Button variant="primary" icon={<Layers />} busy={poolStep >= 0 && !poolError} onClick={() => void pool()} data-testid="wizard-pool-run">
-                    {poolError ? "Try again" : "Add to pool"}
-                  </Button>
-                )}
-              </div>
-              {poolStep >= 0 && (
-                <ol className="space-y-1.5 text-xs">
-                  {POOL_STEPS.map((label, i) => (
-                    <li key={label} className="flex items-center gap-2">
-                      <span className="flex w-3 justify-center">
-                        {poolStep === i && !poolError ? (
-                          <PixelWave size={2} pixel={3} gap={1.5} />
-                        ) : (
-                          <StatusDot health={poolStep > i ? "ok" : poolStep === i ? "bad" : "idle"} />
-                        )}
-                      </span>
-                      <span className={poolStep >= i ? "text-fg" : "text-fg-muted"}>{label}</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-              {poolError && <Callout tone="bad">{poolError}</Callout>}
-              {pooled !== null && (
-                <p className="text-xs text-fg-muted">
-                  Done. Pick <span className="font-medium text-fg">{server.hostname}</span> under “Run on” when you create an app on {mainS?.hostname}.
-                </p>
-              )}
+              It runs apps for <span className="font-medium text-fg">{main.hostname}</span>: pick it under “Run on” when you create an app there, or
+              let {main.hostname} place apps on it.
             </>
+          ) : (
+            <>On the main server, <InlineCode>sudo vercelify mesh invite --platform</InlineCode> makes the invite it joins with.</>
           )}
         </div>
       )}

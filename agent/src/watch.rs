@@ -150,6 +150,7 @@ pub fn oom_score_for(name: &str, image: &str, pr_label: &str) -> Option<i32> {
         "minio",
     ];
     let image = image.to_lowercase();
+    // Coolify's own containers on a server not migrated yet (vercelify migrate).
     if matches!(name, "coolify-db" | "coolify-redis") || DATA.iter().any(|d| image.contains(d)) {
         Some(-500)
     } else if matches!(
@@ -717,55 +718,6 @@ struct Target {
     resolve: Option<String>,
 }
 
-/// Apps (from Coolify's DB, with the server each runs on) and pooled servers.
-async fn targets(cfg: &Config) -> Vec<Target> {
-    let sql = "select a.uuid, a.name, coalesce(a.fqdn,''), coalesce(s.ip,''), coalesce(a.status,'') \
-               from applications a \
-               left join standalone_dockers d on d.id = a.destination_id \
-               left join servers s on s.id = d.server_id \
-               where a.deleted_at is null";
-    let mut out = Vec::new();
-    // Older Coolify versions have no soft deletes.
-    let rows = match crate::coolify::query(cfg, sql).await {
-        Ok(r) => r,
-        Err(_) => crate::coolify::query(cfg, sql.trim_end_matches("where a.deleted_at is null"))
-            .await
-            .unwrap_or_default(),
-    };
-    for r in rows {
-        if r.len() < 5 || r[2].is_empty() || r[4].starts_with("exited") {
-            // Stopped on purpose: nothing to check.
-            continue;
-        }
-        let ip = match r[3].as_str() {
-            "" | "host.docker.internal" | "localhost" | "127.0.0.1" => "127.0.0.1".to_string(),
-            other => other.to_string(),
-        };
-        if let Some(url) = r[2].split(',').map(str::trim).find(|u| u.starts_with("http")) {
-            out.push(Target {
-                id: format!("app:{}", r[0]),
-                name: format!("App {}", r[1]),
-                url: url.to_string(),
-                resolve: Some(ip),
-            });
-        }
-    }
-    let servers = crate::coolify::query(cfg, "select name, ip from servers where id <> 0")
-        .await
-        .unwrap_or_default();
-    for r in servers {
-        if r.len() == 2 && !r[1].is_empty() {
-            out.push(Target {
-                id: format!("server:{}", r[0]),
-                name: format!("Server {}", r[0]),
-                url: format!("http://{}:{}/v1/health", r[1], cfg.port),
-                resolve: None,
-            });
-        }
-    }
-    out
-}
-
 /// Running platform apps (through this server's proxy) and pooled servers.
 fn platform_targets(p: &crate::platform::Platform) -> Vec<Target> {
     use vercelify_core::platform::Desired;
@@ -831,7 +783,7 @@ async fn check_uptime(
     let mut out = Vec::new();
     let targets = match platform {
         Some(p) => platform_targets(p),
-        None => targets(cfg).await,
+        None => vec![],
     };
     for t in targets {
         if t.id.strip_prefix("app:").is_some_and(|u| skip_apps.contains(u)) {

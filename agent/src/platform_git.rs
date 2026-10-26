@@ -1,16 +1,16 @@
 //! Push-to-deploy and pull request previews for the platform engine.
 //!
-//! Like `autodeploy.rs` does for Coolify apps, this polls each app's branch
-//! with `git ls-remote` (no webhook needed, so it works behind CGNAT), skips
+//! Each app's branch is polled with `git ls-remote` (no webhook needed, so it
+//! works behind CGNAT, and webhooks only make it sooner); this skips
 //! pushes that change nothing the app watches, and deploys the rest. For
 //! GitHub repositories it also keeps previews in line with open pull
 //! requests (forks are never built) and reports commit statuses and a
 //! preview comment. After every successful deployment the project rules
 //! (`vercel.json`) of the deployed commit are applied.
 
-use crate::autodeploy::{plan_previews, skip_reason};
 use crate::config::Config;
 use crate::github;
+use crate::gitpoll::{plan_previews, skip_reason};
 use std::sync::Arc;
 use std::time::Duration;
 use vercelify_core::platform::{App, AppKind, DeploymentKind, DeploymentTrigger, GitWatchStatus};

@@ -6,15 +6,8 @@ import type {
   AgentEvent,
   Alert,
   AuditEntry,
-  AutoDeployWatch,
   BackupStatus,
   ContainerInfo,
-  CoolifyApplication,
-  CoolifyDatabase,
-  CoolifyDeployment,
-  CoolifyEnv,
-  CoolifyServer,
-  CoolifyVolume,
   DeviceToken,
   DiscoveredServer,
   DoctorCheck,
@@ -33,7 +26,6 @@ import type {
   ServiceStatus,
   SleepSetting,
   SystemSnapshot,
-  TailscaleStatus,
   UpdateStatus,
   UptimeCheck,
   VolumeEntry,
@@ -41,138 +33,30 @@ import type {
 import type { HttpRequest } from "./transport";
 import { isExplainChat } from "./explain";
 import { decodePairing } from "./pairing";
-import { followPlatformLogs, platformRoute, wirePlatformDemo } from "./demo-platform";
-import failedBuildLog from "../../../cli/examples/failed-build.log?raw";
+import { demoApps, followPlatformLogs, platformRoute, wirePlatformDemo } from "./demo-platform";
 
 const GB = 1024 ** 3;
 const now = Date.now();
 const iso = (minsAgo: number) => new Date(now - minsAgo * 60_000).toISOString();
 
-const apps: CoolifyApplication[] = [
-  app("a1", "portfolio", "running:healthy", "https://shashank.dev", "shashank03-dev/portfolio", "main", "nixpacks", 4),
-  app("a2", "notes-api", "running:healthy", "https://api.notes.shashank.dev", "shashank03-dev/notes-api", "main", "dockerfile", 38),
-  app("a3", "blog", "running:healthy", "https://blog.shashank.dev", "shashank03-dev/blog", "main", "static", 220),
-  app("a4", "dashboard", "restarting:unknown", "https://dash.shashank.dev", "shashank03-dev/dashboard", "dev", "nixpacks", 1),
-  app("a5", "discord-bot", "exited:unhealthy", null, "shashank03-dev/discord-bot", "main", "dockerfile", 1440),
-  app("a6", "umami", "running:healthy", "https://stats.shashank.dev", null, null, "dockerimage", 4300),
-];
-
-function app(
-  uuid: string,
-  name: string,
-  status: string,
-  fqdn: string | null,
-  repo: string | null,
-  branch: string | null,
-  build_pack: string,
-  minsAgo: number,
-): CoolifyApplication {
-  return {
-    uuid,
-    name,
-    status,
-    fqdn,
-    git_repository: repo ? `https://github.com/${repo}` : null,
-    git_branch: branch,
-    build_pack,
-    docker_registry_image_name: repo ? null : "ghcr.io/umami-software/umami",
-    docker_registry_image_tag: repo ? null : "postgresql-latest",
-    created_at: iso(60 * 24 * 30),
-    updated_at: iso(minsAgo),
-    environment_id: 1,
-  };
-}
-
-const MESSAGES = [
-  "Add dark mode toggle to the header",
-  "Fix flaky image upload on Safari",
-  "Bump next to 15.4",
-  "Cache API responses for 60s",
-  "Rewrite landing copy",
-  "Initial commit",
-];
-
-// The seeded Next.js build that fails on Linux (cli/examples, also used by `vfy why --log`).
-const FAILED_BUILD = failedBuildLog.trimEnd().split("\n");
-
-function deployments(appUuid: string): CoolifyDeployment[] {
-  const sha = (i: number) => (appUuid.charCodeAt(1) * 7919 * (i + 3)).toString(16).padEnd(40, "a3f9");
-  const list: CoolifyDeployment[] = [];
-  const building = appUuid === "a4";
-  list.push(dep(appUuid, 0, building ? "in_progress" : "finished", sha(0), MESSAGES[0]!, 0, 2, building));
-  list.push(dep(appUuid, 1, "finished", sha(1), "Preview: new pricing page", 42, 50));
-  list.push(dep(appUuid, 2, "failed", sha(2), MESSAGES[1]!, 0, 180));
-  list.push(dep(appUuid, 3, "finished", sha(3), MESSAGES[2]!, 0, 600));
-  list.push(dep(appUuid, 4, "finished", sha(4), MESSAGES[3]!, 0, 2900));
-  list.push(dep(appUuid, 5, "finished", sha(5), MESSAGES[4]!, 0, 8000));
-  return list;
-}
-
-function dep(app: string, i: number, status: string, commit: string, msg: string, pr: number, minsAgo: number, live = false): CoolifyDeployment {
-  const created = iso(minsAgo);
-  return {
-    id: i,
-    deployment_uuid: `${app}-d${i}`,
-    status,
-    commit,
-    commit_message: msg,
-    pull_request_id: pr,
-    is_webhook: i % 3 !== 2,
-    is_api: i % 3 === 2,
-    created_at: created,
-    updated_at: created,
-    finished_at: live ? null : new Date(Date.parse(created) + (48 + i * 17) * 1000).toISOString(),
-    logs: JSON.stringify(
-      (status === "failed" ? FAILED_BUILD : [
-        "Starting deployment of shashank03-dev/portfolio:main",
-        "Pulling repository… done",
-        "Nixpacks detected Node.js 22 (npm)",
-        "npm ci — added 412 packages in 9s",
-        "npm run build",
-        "  ✓ Compiled successfully in 14.2s",
-        "Building docker image… done (sha256:9f2c…)",
-        "Rolling update: starting new container",
-        "Healthcheck passed",
-        "Deployment finished.",
-      ]).map((output, n) => ({ output, type: n === 3 && status !== "failed" ? "stderr" : "stdout", timestamp: created, hidden: false })),
-    ),
-  };
-}
-
-const dbs: CoolifyDatabase[] = [
-  db("d1", "pg-main", "standalone-postgresql", "postgres:16-alpine", "running:healthy"),
-  db("d2", "cache", "standalone-redis", "redis:7.4-alpine", "running:healthy"),
-  db("d3", "analytics", "standalone-clickhouse", "clickhouse/clickhouse-server:24", "exited:unknown"),
-];
-
-function db(uuid: string, name: string, type: string, image: string, status: string): CoolifyDatabase {
-  return {
-    uuid,
-    name,
-    status,
-    database_type: type,
-    image,
-    internal_db_url: `${type.replace("standalone-", "")}://user:••••@${uuid}:5432/${name}`,
-    is_public: false,
-    public_port: null,
-    environment_id: 1,
-  };
-}
-
 let cpu = 18;
 /** Demo servers: the same canned data, with a few differences per machine. */
-const DEMO_HOSTS: Record<string, { hostname: string; cores: number; mem: number; load: number }> = {
-  "thinkpad-t470": { hostname: "thinkpad-t470", cores: 4, mem: 8, load: 1 },
-  "dell-e7450": { hostname: "dell-e7450", cores: 4, mem: 16, load: 0.5 },
-  "pi5-worker": { hostname: "pi5-worker", cores: 4, mem: 8, load: 0.3 },
-  "hp-elitebook": { hostname: "hp-elitebook", cores: 4, mem: 4, load: 0.2 },
-  // A main server on Vercelify's own engine (no Coolify): `/v1/platform`.
-  "optiplex-7050": { hostname: "optiplex-7050", cores: 4, mem: 16, load: 0.6 },
+const DEMO_HOSTS: Record<string, { hostname: string; ip: string; cores: number; mem: number; load: number }> = {
+  "thinkpad-t470": { hostname: "thinkpad-t470", ip: "10.77.0.1", cores: 4, mem: 8, load: 1 },
+  "optiplex-7050": { hostname: "optiplex-7050", ip: "10.77.0.2", cores: 4, mem: 16, load: 0.6 },
+  "pi5-worker": { hostname: "pi5-worker", ip: "10.77.0.3", cores: 4, mem: 8, load: 0.3 },
+  "dell-e7450": { hostname: "dell-e7450", ip: "10.77.0.5", cores: 4, mem: 16, load: 0.5 },
+  "hp-elitebook": { hostname: "hp-elitebook", ip: "10.77.0.6", cores: 4, mem: 4, load: 0.2 },
+  "lenovo-x220": { hostname: "lenovo-x220", ip: "10.77.0.7", cores: 2, mem: 8, load: 0.4 },
 };
-const PLATFORM_HOST = "optiplex-7050";
+// A server Coolify still runs: the Apps page shows how to migrate it.
+const COOLIFY_HOST = "lenovo-x220";
+const isWorkerHost = (h: { hostname: string }) => h.hostname === "pi5-worker" || h.hostname === "hp-elitebook";
+/** An app by name, for demo data that refers to the platform's apps. */
+const appNamed = (name: string) => demoApps().find((a) => a.name === name)!;
 function hostFor(server: unknown) {
-  const name = typeof server === "string" ? (/\/\/([^.:/]+)/.exec(server)?.[1] ?? "") : "";
-  return DEMO_HOSTS[name] ?? DEMO_HOSTS["thinkpad-t470"]!;
+  const host = typeof server === "string" ? (/\/\/([^:/]+)/.exec(server)?.[1] ?? "") : "";
+  return Object.values(DEMO_HOSTS).find((h) => h.ip === host || h.hostname === host) ?? DEMO_HOSTS["thinkpad-t470"]!;
 }
 function system(server?: unknown): SystemSnapshot {
   cpu = Math.max(4, Math.min(92, cpu + (Math.random() - 0.48) * 14));
@@ -268,8 +152,8 @@ function metrics(server: unknown): MetricPoint[] {
 }
 
 const alerts: Alert[] = [
-  { id: 4, at: iso(38), source: "deploy:a4", status: "bad", title: "dashboard: deploy of 9f2c1e0 failed", detail: "The previous version keeps running. See the build log in the app's Deployments.", resolved: false, notified: true },
-  { id: 3, at: iso(190), source: "rollback:a2", status: "warn", title: "notes-api: rolled back to 4b1d2e7", detail: "c93a0f1 was running:unhealthy after deploying; the previous version is going back live.", resolved: false, notified: true },
+  { id: 4, at: iso(38), source: "deploy:shop", status: "bad", title: "shop: deploy of 9f2c1e0 failed", detail: "The previous version keeps running. See the build log in the app's Deployments.", resolved: false, notified: true },
+  { id: 3, at: iso(190), source: "rollback:api", status: "warn", title: "api: rolled back to 4b1d2e7", detail: "c93a0f1 was running:unhealthy after deploying; the previous version is going back live.", resolved: false, notified: true },
   { id: 2, at: iso(60 * 9), source: "temperature", status: "ok", title: "Temperature: back to normal", detail: "61 °C (builds pause at 92 °C)", resolved: true, notified: true },
   { id: 1, at: iso(60 * 9 + 12), source: "temperature", status: "warn", title: "Temperature: warning", detail: "84 °C (builds pause at 92 °C) — clean the fan and vents", resolved: false, notified: true },
 ];
@@ -281,7 +165,7 @@ const tokens: DeviceToken[] = [
 ];
 
 const audit: AuditEntry[] = [
-  { at: iso(4), actor: "3f9a1c2e", method: "POST", path: "/v1/autodeploy/a1/check", status: 200 },
+  { at: iso(4), actor: "3f9a1c2e", method: "POST", path: "/v1/platform/apps/shop/deploy", status: 200 },
   { at: iso(38), actor: "admin", method: "POST", path: "/v1/update", status: 200 },
   { at: iso(95), actor: "3f9a1c2e", method: "POST", path: "/v1/containers/redis-cache/restart", status: 200 },
 ];
@@ -298,67 +182,33 @@ const backup: BackupStatus = {
 
 function uptime(): UptimeCheck[] {
   return [
-    ...apps
-      .filter((a) => a.fqdn && !a.status.startsWith("exited"))
+    ...demoApps()
+      .filter((a) => a.url && a.desired === "running")
       .map((a) => ({
-        id: `app:${a.uuid}`,
+        id: `app:${a.id}`,
         name: `App ${a.name}`,
-        target: a.fqdn!.split(",")[0]!,
-        up: !a.status.includes("unhealthy"),
-        http_status: a.status.includes("unhealthy") ? 502 : 200,
-        latency_ms: a.status.includes("unhealthy") ? 31 : 40 + a.name.length * 9,
+        target: a.url!,
+        up: true,
+        http_status: 200,
+        latency_ms: 40 + a.name.length * 9,
         checked_at: iso(0.3),
-        since: iso(a.status.includes("unhealthy") ? 12 : 60 * 26),
+        since: iso(60 * 26),
         error: null,
       })),
-    { id: "server:pi5-worker", name: "Server pi5-worker", target: "http://100.77.3.9:7420/v1/health", up: true, http_status: 200, latency_ms: 18, checked_at: iso(0.3), since: iso(60 * 50), error: null },
+    { id: "server:pi5-worker", name: "Server pi5-worker", target: "http://10.77.0.3:7420/v1/health", up: true, http_status: 200, latency_ms: 18, checked_at: iso(0.3), since: iso(60 * 50), error: null },
   ];
 }
 
-const node = (id: string, hostname: string, os: string, ip: string, online: boolean, direct: boolean) => ({
-  id,
-  hostname,
-  dns_name: `${hostname}.tail1234.ts.net`,
-  os,
-  ips: [ip, "fd7a:115c:a1e0::1"],
-  online,
-  active: online,
-  exit_node: false,
-  relay: "blr",
-  cur_addr: direct ? "192.168.1.20:41641" : "",
-  rx_bytes: 0,
-  tx_bytes: 0,
-  last_seen: null,
-  // Tagged/expiry-disabled nodes have none; this one shows the countdown.
-  key_expiry: id === "1" ? iso(-60 * 24 * 132) : null,
-});
-
-const tailscale: TailscaleStatus = {
-  installed: true,
-  backend_state: "Running",
-  version: "1.84.2-t1234",
-  tailnet: "shashank03-dev.github",
-  magic_dns_suffix: "tail1234.ts.net",
-  auth_url: "",
-  self_node: node("1", "thinkpad-t470", "linux", "100.101.102.103", true, true),
-  peers: [
-    node("2", "macbook-air", "macOS", "100.88.12.4", true, true),
-    node("3", "pi5-worker", "linux", "100.77.3.9", true, false),
-    node("4", "iphone", "iOS", "100.66.1.2", false, false),
-  ],
-  health: [],
-  error: null,
-};
-
 const containers: ContainerInfo[] = [
-  ["coolify", "ghcr.io/coollabsio/coolify:4.0.0", "running", 2.1, 0.41],
-  ["coolify-proxy", "traefik:v3.3", "running", 0.4, 0.06],
-  ["portfolio-a1", "a1:9f2c1e0", "running", 1.2, 0.12],
-  ["notes-api-a2", "a2:77ab210", "running", 3.8, 0.21],
-  ["pg-main-d1", "postgres:16-alpine", "running", 0.9, 0.18],
-  ["cache-d2", "redis:7.4-alpine", "running", 0.2, 0.02],
-  ["discord-bot-a5", "a5:1b9e4c2", "exited", null, null],
-].map(([name, image, state, c, m]) => ({
+  ["vercelify-proxy", "traefik:v3.7", "running", 0.4, 0.06, null],
+  ["vercelify-registry", "registry:2", "running", 0.1, 0.02, null],
+  ["vfy-shop-1", "vfy/shop:9f2c1e0", "running", 1.2, 0.12, "shop"],
+  ["vfy-api-1", "vfy/api:77ab210", "running", 3.8, 0.21, "api"],
+  ["vfy-umami-1", "ghcr.io/umami-software/umami:postgresql-latest", "running", 0.9, 0.18, "umami"],
+  ["vfy-db-shop-db", "postgres:17-alpine", "running", 0.9, 0.18, "shop-db"],
+  ["vfy-db-cache", "valkey/valkey:8-alpine", "running", 0.2, 0.02, "cache"],
+  ["vfy-wiki-1", "vfy/wiki:1b9e4c2", "exited", null, null, "wiki"],
+].map(([name, image, state, c, m, app]) => ({
   id: String(name),
   name: String(name),
   image: String(image),
@@ -368,45 +218,22 @@ const containers: ContainerInfo[] = [
   cpu_pct: c as number | null,
   mem_bytes: m == null ? null : (m as number) * GB,
   mem_pct: null,
-  coolify_name: String(name).startsWith("coolify") ? null : String(name).replace(/-[ad]\d$/, ""),
-  coolify_managed: !String(name).startsWith("coolify"),
+  app: (app as string | null) ?? null,
 }));
 
 const services: ServiceStatus[] = [
   { name: "docker", active_state: "active", enabled: true },
-  { name: "tailscaled", active_state: "active", enabled: true },
+  { name: "vercelify-mesh", active_state: "active", enabled: true },
   { name: "vercelify-agent", active_state: "active", enabled: true },
   { name: "vercelify-power-guard", active_state: "active", enabled: true },
   { name: "cloudflared", active_state: "active", enabled: true },
   { name: "sunshine", active_state: "not-found", enabled: null },
 ];
 
-const volumes: CoolifyVolume[] = [
-  vol(1, "postgres-data-d1", "/var/lib/postgresql/data", "hdd", "StandalonePostgresql", "pg-main", "d1"),
-  vol(2, "redis-data-d2", "/data", "ssd", "StandaloneRedis", "cache", "d2"),
-  vol(3, "uploads-a2", "/app/uploads", "ssd", "Application", "notes-api", "a2"),
-  vol(4, "clickhouse-data-d3", "/var/lib/clickhouse", "hdd", "StandaloneClickhouse", "analytics", "d3"),
-];
-
-function vol(id: number, name: string, mount: string, tier: "ssd" | "hdd", type: string, res: string, uuid: string): CoolifyVolume {
-  return {
-    id,
-    name,
-    mount_path: mount,
-    host_path: tier === "hdd" ? `/mnt/storage/volumes/${res}` : null,
-    tier,
-    data_path: tier === "hdd" ? `/mnt/storage/volumes/${res}` : `/var/lib/docker/volumes/${name}/_data`,
-    resource_type: type,
-    resource_name: res,
-    resource_uuid: uuid,
-    movable: true,
-    in_use: true,
-  };
-}
-
 const hostVolumes: VolumeEntry[] = [
-  ...volumes.map((v) => ({ tier: v.tier, name: v.name, host_path: v.data_path, size_bytes: null })),
-  { tier: "ssd", name: "coolify-db", host_path: "/var/lib/docker/volumes/coolify-db/_data", size_bytes: null },
+  { tier: "hdd", name: "shop-db-data", host_path: "/mnt/storage/volumes/shop-db", size_bytes: null },
+  { tier: "ssd", name: "vfy-db-cache-data", host_path: "/var/lib/docker/volumes/vfy-db-cache-data/_data", size_bytes: null },
+  { tier: "hdd", name: "ollama", host_path: "/mnt/storage/volumes/ollama", size_bytes: null },
 ];
 
 const idle = { running: false, pid: null, command: null, started_at: null, last_output: [], exit_code: null };
@@ -442,7 +269,7 @@ function llm(server?: unknown): LlmStatus {
     image: "ollama/ollama:latest",
     version: installed ? "0.12.3" : null,
     port: 11434,
-    endpoints: [`http://${h.hostname}.tail1234.ts.net:11434`, "http://100.101.102.103:11434"],
+    endpoints: ["http://10.77.0.1:11434"],
     data_path: "/mnt/storage/volumes/ollama/models",
     models: installed ? llmModels.map((m) => ({ ...m })) : [],
     loaded: installed ? [{ name: "llama3.2:3b", size_bytes: 2.9 * GB, expires_at: iso(-4) }] : [],
@@ -454,72 +281,33 @@ function llm(server?: unknown): LlmStatus {
   };
 }
 
-const watches: AutoDeployWatch[] = [
-  watch("a1", "portfolio", "shashank03-dev/portfolio", "main", 7, null),
-  watch("a2", "notes-api", "shashank03-dev/notes-api", "main", 3, null),
-  watch("a4", "dashboard", "shashank03-dev/dashboard", "dev", 12, "git ls-remote failed: could not read Username — is the repository private? Add a read-only access token."),
-];
-
-function watch(app_uuid: string, name: string, repo: string, branch: string, deploys: number, last_error: string | null): AutoDeployWatch {
-  return {
-    app_uuid,
-    name,
-    repo: `https://github.com/${repo}.git`,
-    branch,
-    enabled: true,
-    has_token: false,
-    last_commit: "9f2c1e0a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a",
-    last_checked_at: iso(0.4),
-    last_deployed_commit: "9f2c1e0a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a",
-    last_deployed_at: iso(4),
-    last_error,
-    deploys,
-    previews: app_uuid === "a1",
-    auto_rollback: app_uuid !== "a4",
-    github_feedback: app_uuid === "a1",
-    open_previews:
-      app_uuid === "a1"
-        ? [{ number: 42, title: "Dark mode for the blog", head_sha: "c4e1f7a9b2c4e1f7a9b2c4e1f7a9b2c4e1f7a9b2", url: "https://pr-42-portfolio.example.com", deployed_at: iso(25) }]
-        : [],
-    rollbacks: app_uuid === "a2" ? 1 : 0,
-    skipped: app_uuid === "a1" ? 3 : 0,
-    last_skip: app_uuid === "a1" ? "4b1d2e7: no changed file is in the app's watch paths" : null,
-  };
-}
-
-const coolifyServers: CoolifyServer[] = [
-  { uuid: "s0", name: "localhost", ip: "host.docker.internal", settings: { is_reachable: true, is_usable: true } },
-  { uuid: "s1", name: "pi5-worker", ip: "100.77.3.9", settings: { is_reachable: true, is_usable: true } },
-];
-
 const DISCOVERED: DiscoveredServer[] = [
-  { hostname: "dell-e7450", dns_name: "dell-e7450.tail1234.ts.net", ip: "100.90.4.2", os: "linux", agent_url: "http://100.90.4.2:7420", version: "0.2.0", role: "main", pairing_open: true },
-  { hostname: "pi5-worker", dns_name: "pi5-worker.tail1234.ts.net", ip: "100.77.3.9", os: "linux", agent_url: "http://100.77.3.9:7420", version: "0.2.0", role: "worker", pairing_open: false },
-  { hostname: "thinkpad-t470", dns_name: "thinkpad-t470.tail1234.ts.net", ip: "100.101.102.103", os: "linux", agent_url: "http://100.101.102.103:7420", version: "0.2.0", role: "main", pairing_open: false },
-  { hostname: "optiplex-7050", dns_name: "optiplex-7050.tail1234.ts.net", ip: "100.88.1.7", os: "linux", agent_url: "http://100.88.1.7:7420", version: "0.3.0", role: "main", pairing_open: true },
+  { hostname: "dell-e7450", ip: "10.77.0.5", agent_url: "http://10.77.0.5:7420", version: "0.2.0", role: "main", pairing_open: true },
+  { hostname: "pi5-worker", ip: "10.77.0.3", agent_url: "http://10.77.0.3:7420", version: "0.3.0", role: "worker", pairing_open: false },
+  { hostname: "thinkpad-t470", ip: "10.77.0.1", agent_url: "http://10.77.0.1:7420", version: "0.3.0", role: "main", pairing_open: false },
+  { hostname: "optiplex-7050", ip: "10.77.0.2", agent_url: "http://10.77.0.2:7420", version: "0.3.0", role: "main", pairing_open: true },
+  { hostname: "lenovo-x220", ip: "10.77.0.7", agent_url: "http://10.77.0.7:7420", version: "0.3.0", role: "main", pairing_open: true },
 ];
 
 // A machine that comes online while the "Add a machine" wizard waits for it.
 let discoverCalls = 0;
 const NEW_MACHINE: DiscoveredServer = {
   hostname: "hp-elitebook",
-  dns_name: "hp-elitebook.tail1234.ts.net",
-  ip: "100.70.8.1",
-  os: "linux",
-  agent_url: "http://100.70.8.1:7420",
-  version: "0.2.0",
+  ip: "10.77.0.6",
+  agent_url: "http://10.77.0.6:7420",
+  version: "0.3.0",
   role: "worker",
   pairing_open: true,
 };
 
 function doctor(server?: unknown): DoctorReport {
   const h = hostFor(server);
-  const worker = h.hostname === "pi5-worker" || h.hostname === "hp-elitebook";
+  const worker = isWorkerHost(h);
   const c = (id: string, label: string, status: DoctorCheck["status"], detail: string, fix: string | null = null): DoctorCheck => ({ id, label, status, detail, fix });
   const checks = [
     c("docker", "Docker", "ok", "Docker 27.3.1"),
-    c("tailscale", "Tailscale", "ok", `${h.hostname}.tail1234.ts.net`),
-    ...(worker ? [] : [c("coolify", "Coolify", "ok", "dashboard and API are up"), c("coolify-token", "Coolify API token", "ok", "accepted")]),
+    c("mesh", "Vercelify network", "ok", `${h.hostname} on vfy0, the coordinator heard 3 s ago`),
+    ...(h.hostname === COOLIFY_HOST ? [c("migrate", "Coolify", "warn", "Coolify still runs this server's apps", "sudo vercelify migrate")] : []),
     c("disk", "System disk", "ok", "41% used, 141.0 GB free"),
     worker
       ? c("storage", "Storage disk", "warn", "single disk: everything lives on the system disk", "add an HDD and re-run the installer to get a storage tier")
@@ -527,7 +315,7 @@ function doctor(server?: unknown): DoctorReport {
     c("memory", "Memory", "ok", `${(h.mem - 4.8 * h.load).toFixed(1)} GB free of ${h.mem}.0 GB`),
     c("temperature", "Temperature", "ok", "54 °C"),
     c("power-guard", "Power guard", "ok", "ok"),
-    c("firewall", "Firewall", "ok", "dashboard and AI API private to the tailnet"),
+    c("firewall", "Firewall", "ok", "agent and AI API private to Vercelify's network"),
   ];
   return { role: worker ? "worker" : "main", agent_version: "0.2.0", checks };
 }
@@ -627,18 +415,20 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
       ok: true,
       version: "0.2.0",
       hostname: h.hostname,
-      role: h.hostname === "pi5-worker" || h.hostname === "hp-elitebook" ? "worker" : "main",
+      role: isWorkerHost(h) ? "worker" : "main",
       pairing_open: false,
       api_version: 2,
       capabilities: [
         "doctor", "update", "rollback", "hardware", "alerts", "metrics", "uptime", "tokens", "audit", "backup", "previews",
-        "auto-rollback", "images", "events", "jobs", "sleep", "power-guard", "domain", "projects",
-        ...(h.hostname === PLATFORM_HOST ? ["platform", "roles"] : []),
+        "auto-rollback", "events", "jobs", "sleep", "power-guard", "domain", "projects", "roles",
+        ...(h.hostname === COOLIFY_HOST || isWorkerHost(h) ? [] : ["platform"]),
       ],
     };
   }
   if (p.startsWith("/v1/platform/")) {
-    if (hostFor(server).hostname !== PLATFORM_HOST) throw new Error("404 Not Found: this server runs Coolify");
+    const h = hostFor(server);
+    if (isWorkerHost(h)) throw new Error("404 Not Found: a worker runs apps for its main server");
+    if (h.hostname === COOLIFY_HOST) throw new Error("Coolify still runs this server's apps: sudo vercelify migrate moves them to Vercelify's engine");
     return platformRoute(req);
   }
   if (p === "/v1/jobs") return jobs.map((j) => ({ ...j }));
@@ -681,7 +471,7 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
   pm = /^\/v1\/projects\/([^/]+)\/sync$/.exec(p);
   if (pm) {
     const info = projects.find((x) => x.key === pm![1]);
-    if (!info || info.source !== "repo") throw new Error("no vercel.json or vercelify.json on main of shashank03-dev/" + (apps.find((a) => a.uuid === pm![1])?.name ?? "app"));
+    if (!info || info.source !== "repo") throw new Error("no vercel.json or vercelify.json on main of shashank03-dev/" + (demoApps().find((a) => a.id === pm![1])?.name ?? "app"));
     info.updated_at = iso(0);
     return structuredClone(info);
   }
@@ -704,7 +494,7 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
       updated_at: iso(0),
       summary: demoSummary(files),
       routes_active: true,
-      hosts: [(apps.find((a) => a.uuid === pm![1])?.fqdn ?? "").replace(/^https?:\/\//, "")],
+      hosts: [(demoApps().find((a) => a.id === pm![1])?.url ?? "").replace(/^https?:\/\//, "")],
       error: null,
     };
     const i = projects.findIndex((x) => x.key === info.key);
@@ -733,7 +523,6 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
     return { ok: true };
   }
   if (p === "/v1/audit") return audit;
-  if (p.startsWith("/v1/images/")) return { repository: p.split("/").pop(), tags: ["9f2c1e0a3f9a3f9a3f9a3f9a3f9a3f9a3f9a3f9a", "4b1d2e7", "latest"] };
   if (p === "/v1/backup") return backup;
   if (p === "/v1/backup/run") {
     backup.running = true;
@@ -763,94 +552,14 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
     return { ok: true };
   }
   if (p.startsWith("/v1/llm")) return llm(server);
-  if (p === "/v1/autodeploy" && req.method === "GET") return { interval_secs: 60, coolify_configured: true, watches: watches.map((w) => ({ ...w })) };
-  if (p === "/v1/autodeploy") {
-    const b = req.body as { app_uuid: string; name?: string; repo: string; branch: string; enabled?: boolean };
-    const existing = watches.find((w) => w.app_uuid === b.app_uuid);
-    const w = { ...(existing ?? watch(b.app_uuid, b.name ?? b.app_uuid, "", b.branch, 0, null)), repo: b.repo, branch: b.branch, enabled: b.enabled ?? true, last_error: null };
-    if (existing) Object.assign(existing, w);
-    else watches.push(w);
-    return w;
-  }
-  if (/^\/v1\/autodeploy\/[^/]+\/check$/.test(p)) {
-    const w = watches.find((x) => p.includes(x.app_uuid));
-    if (w) w.last_checked_at = new Date().toISOString();
-    return w;
-  }
-  if (p.startsWith("/v1/autodeploy/") && req.method === "DELETE") {
-    const i = watches.findIndex((w) => p.endsWith(w.app_uuid));
-    if (i >= 0) watches.splice(i, 1);
-    return { ok: true };
-  }
-  if (p === "/v1/coolify/worker-key") return { public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIHkLyFOm2v3pq6tYp2kQ0Q8Xc1sR2mJ3dZy7vC9p0Abc coolify", private_key_uuid: "k1" };
-  if (p === "/v1/ssh/authorized-keys") return { added: true };
-  if (p === "/v1/tailscale") return tailscale;
   if (p === "/v1/containers") return containers.map((c) => (c.cpu_pct == null ? c : { ...c, cpu_pct: c.cpu_pct * (0.7 + Math.random() * 0.6) }));
   if (p.endsWith("/logs")) return { lines: ["listening on :3000", "GET / 200 4ms", "GET /api/notes 200 11ms"] };
   if (p === "/v1/services") return services;
-  if (p === "/v1/coolify/volumes") return volumes;
   if (p === "/v1/volumes" && req.method === "GET") return hostVolumes;
   if (p === "/v1/volumes") return { host_path: "/mnt/storage/volumes/demo/data", created: true };
   if (p === "/v1/display")
     return { receiver: idle, receiver_config: null, receiver_url: null, mpv_installed: true, sunshine: services[5] };
   return { ok: true };
-}
-
-const envs: Record<string, CoolifyEnv[]> = {};
-
-function coolifyRoute(req: HttpRequest): unknown {
-  const p = req.path.split("?")[0]!;
-  if (p === "/servers" && req.method === "GET") return coolifyServers.map((x) => ({ ...x }));
-  if (p === "/servers") {
-    const b = req.body as { name: string; ip: string };
-    coolifyServers.push({ uuid: `s${coolifyServers.length}`, name: b.name, ip: b.ip, settings: { is_reachable: true, is_usable: true } });
-    return { uuid: `s${coolifyServers.length - 1}` };
-  }
-  if (p === "/applications/public") {
-    const b = req.body as { name: string; git_repository: string; git_branch: string; build_pack: string };
-    const uuid = `n${apps.length + 1}`;
-    apps.push(app(uuid, b.name, "starting:unknown", `https://${b.name}.shashank.dev`, b.git_repository.replace(/^https:\/\/github\.com\//, "").replace(/\.git$/, ""), b.git_branch, b.build_pack, 0));
-    return { uuid, domains: `https://${b.name}.shashank.dev` };
-  }
-  if (p === "/projects" && req.method === "GET") return [{ uuid: "p1", name: "default" }];
-  if (p === "/projects/p1") return { uuid: "p1", name: "default", environments: [{ id: 1, name: "production", uuid: "e1" }] };
-  // Fresh objects each time, like a real API (React skips identical state).
-  if (p === "/applications") return apps.map((x) => ({ ...x }));
-  if (p === "/databases") return dbs;
-  let m = /^\/deployments\/applications\/(\w+)$/.exec(p);
-  if (m) return { count: 6, deployments: deployments(m[1]!) };
-  m = /^\/deployments\/(\w+)-d(\d+)$/.exec(p);
-  if (m) return deployments(m[1]!)[Number(m[2])];
-  m = /^\/applications\/(\w+)\/envs(\/bulk)?$/.exec(p);
-  if (m) {
-    const list = (envs[m[1]!] ??= [
-      { uuid: `${m[1]}-e1`, key: "NODE_ENV", value: "production", is_preview: false },
-      { uuid: `${m[1]}-e2`, key: "DATABASE_URL", value: "postgres://app:••••@pg-main:5432/app", is_preview: false },
-    ]);
-    if (m[2] && req.method === "PATCH") {
-      for (const v of (req.body as { data: { key: string; value: string }[] }).data) {
-        const found = list.find((e) => e.key === v.key);
-        if (found) found.value = v.value;
-        else list.push({ uuid: `${m[1]}-e${list.length + 1}`, key: v.key, value: v.value, is_preview: false });
-      }
-      return { message: "Environment variables updated." };
-    }
-    return list.map((e) => ({ ...e }));
-  }
-  m = /^\/applications\/(\w+)\/previews$/.exec(p);
-  if (m)
-    return m[1] === "a1"
-      ? [{ uuid: "p1", pull_request_id: 42, pull_request_html_url: null, status: "running:healthy", fqdn: "https://pr-42-shashank.dev", created_at: iso(50) }]
-      : [];
-  if (/\/logs$/.test(p)) return { logs: "▲ Next.js 15.4.0\n- Local: http://localhost:3000\n✓ Ready in 412ms\nGET / 200 in 18ms\nGET /about 200 in 9ms" };
-  if (/^\/applications\/\w+$/.test(p) && req.method === "PATCH") {
-    const a = apps.find((x) => p.endsWith(x.uuid));
-    const domains = (req.body as { domains?: string }).domains;
-    if (a && domains !== undefined) a.fqdn = domains || null;
-    return { uuid: a?.uuid };
-  }
-  if (p === "/version") return "4.0.0";
-  return { message: "ok" };
 }
 
 export async function demoCall(cmd: string, args: Record<string, unknown>): Promise<unknown> {
@@ -859,8 +568,6 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
   switch (cmd) {
     case "agent_request":
       return agentRoute(req, args.server);
-    case "coolify_request":
-      return coolifyRoute(req);
     case "discover_servers":
       // The new machine "finishes installing" after a few scans.
       return ++discoverCalls >= 3 ? [NEW_MACHINE, ...DISCOVERED] : DISCOVERED;
@@ -868,17 +575,14 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
       const d = [NEW_MACHINE, ...DISCOVERED].find((x) => x.agent_url === args.agentUrl) ?? DISCOVERED[0]!;
       if (String(args.code).replace(/[\s-]/g, "").length !== 8) throw new Error("wrong pairing code (4 attempts left)");
       return {
-        agent_url: `http://${d.dns_name}:7420`,
+        agent_url: d.agent_url,
         agent_token: "demo-token-0123456789",
-        // Workers and servers on the platform engine have no Coolify.
-        coolify_url: d.role === "worker" || d.hostname === PLATFORM_HOST ? "" : `http://${d.dns_name}:8000`,
-        coolify_token: d.role === "worker" || d.hostname === PLATFORM_HOST ? undefined : "demo",
         hostname: d.hostname,
         role: d.role,
       };
     }
     case "test_connection":
-      return { hostname: "thinkpad-t470", coolify: { ok: true, version: "4.0.0" } };
+      return { hostname: "thinkpad-t470" };
     case "pair_join":
       return decodePairing(String(args.code ?? ""));
     case "mesh_local":
@@ -890,7 +594,6 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
       return {
         agent_url: "http://10.77.0.6:7420",
         agent_token: "demo-token-0123456789",
-        coolify_url: "",
         hostname: "hp-elitebook",
         role: "main",
         mesh_join: "vfyj1.demo",
@@ -899,11 +602,8 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
     case "tools_status":
       return [
         { name: "ffmpeg", installed: true, path: "/opt/homebrew/bin/ffmpeg", install_hint: "brew install ffmpeg" },
-        { name: "tailscale", installed: true, path: "/Applications/Tailscale.app", install_hint: "" },
         { name: "moonlight", installed: false, path: null, install_hint: "brew install --cask moonlight" },
       ];
-    case "local_tailscale":
-      return { ...tailscale, self_node: tailscale.peers[0], peers: [] };
     case "capture_screens":
       return [{ index: 1, name: "Built-in Retina Display" }];
     case "sender_status":
@@ -918,8 +618,8 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
 // --- jobs, live events, sleeping apps, power guard ---------------------------------
 
 const jobs: Job[] = [
-  { id: "j3", kind: "sleep", title: "pr-42-shashank.dev went to sleep", status: "ok", started_at: iso(35), finished_at: iso(35), detail: "no requests for 30 minutes; wakes on the next one", progress: null, target: "a1" },
-  { id: "j2", kind: "deploy", title: "Deploy portfolio (9f2c1e0 on main)", status: "ok", started_at: iso(4), finished_at: iso(3), detail: "live at https://shashank.dev", progress: 100, target: "a1" },
+  { id: "j3", kind: "sleep", title: "wiki went to sleep", status: "ok", started_at: iso(35), finished_at: iso(35), detail: "no requests for 30 minutes; wakes on the next one", progress: null, target: appNamed("wiki").id },
+  { id: "j2", kind: "deploy", title: "Deploy shop (9f2c1e0 on main)", status: "ok", started_at: iso(4), finished_at: iso(3), detail: `live at ${appNamed("shop").url}`, progress: 100, target: appNamed("shop").id },
   { id: "j1", kind: "backup", title: "Backup", status: "ok", started_at: iso(600), finished_at: iso(596), detail: "backed up", progress: 100, target: null },
 ];
 const eventListeners = new Set<(e: AgentEvent) => void>();
@@ -988,8 +688,8 @@ function demoSummary(files: { content: string }[]): ProjectSummary {
 
 const projects: ProjectInfo[] = [
   {
-    key: "a1",
-    app_uuid: "a1",
+    key: appNamed("shop").id,
+    app_uuid: appNamed("shop").id,
     pull_request_id: 0,
     source: "repo",
     files: ["vercel.json"],
@@ -1012,12 +712,12 @@ const projects: ProjectInfo[] = [
       ],
     },
     routes_active: true,
-    hosts: ["shashank.dev"],
+    hosts: [appNamed("shop").domains[0]!.host],
     error: null,
   },
   {
-    key: "a1-pr-42",
-    app_uuid: "a1",
+    key: `${appNamed("shop").id}-pr-42`,
+    app_uuid: appNamed("shop").id,
     pull_request_id: 42,
     source: "repo",
     files: ["vercel.json"],
@@ -1025,12 +725,12 @@ const projects: ProjectInfo[] = [
     updated_at: iso(25),
     summary: { redirects: 5, rewrites: 1, headers: 2, firewall_rules: 0, clean_urls: true, trailing_slash: false, crons: [], warnings: [] },
     routes_active: true,
-    hosts: ["pr-42-shashank.dev"],
+    hosts: [`pr-42.${appNamed("shop").domains[0]!.host}`],
     error: null,
   },
 ];
 
-const sleepSettings: SleepSetting[] = [{ app_uuid: "a3", enabled: true, idle_minutes: 30, previews: false }];
+const sleepSettings: SleepSetting[] = [{ app_uuid: appNamed("wiki").id, enabled: true, idle_minutes: 30, previews: false }];
 
 function sleepStatus() {
   return {
@@ -1040,10 +740,10 @@ function sleepStatus() {
       key: x.app_uuid,
       app_uuid: x.app_uuid,
       pull_request_id: 0,
-      hosts: [(apps.find((a) => a.uuid === x.app_uuid)?.fqdn ?? "").replace(/^https?:\/\//, "")],
-      state: x.app_uuid === "a3" ? "asleep" : "awake",
+      hosts: [(demoApps().find((a) => a.id === x.app_uuid)?.url ?? "").replace(/^https?:\/\//, "")],
+      state: x.app_uuid === appNamed("wiki").id ? "asleep" : "awake",
       last_request_at: iso(95),
-      asleep_since: x.app_uuid === "a3" ? iso(65) : null,
+      asleep_since: x.app_uuid === appNamed("wiki").id ? iso(65) : null,
     })),
     error: null,
   };
@@ -1096,9 +796,8 @@ const DEMO_EXPLANATION = `(Demo mode: canned answer, no model ran.)
 **Check:** \`git ls-files components\` then \`npm run build\`.`;
 
 export const DEMO_SETTINGS = {
-  agent_url: "http://thinkpad-t470.tail1234.ts.net:7420",
+  agent_url: "http://10.77.0.1:7420",
   agent_token: "demo",
-  coolify_url: "http://thinkpad-t470.tail1234.ts.net:8000",
-  coolify_token: "demo",
   hostname: "thinkpad-t470",
+  role: "main",
 };

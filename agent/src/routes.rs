@@ -1,4 +1,3 @@
-use crate::autodeploy::AutoDeploy;
 use crate::config::Config;
 use crate::display::{self, Receiver};
 use crate::error::{ApiResult, AppError};
@@ -6,7 +5,7 @@ use crate::json::Json;
 use crate::llm::{self, Llm};
 use crate::pairing::{self, Claims};
 use crate::tokens::Actor;
-use crate::{auth, coolify, docker, doctor, services, ssh, tailscale, update, volumes};
+use crate::{auth, docker, doctor, services, update, volumes};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderValue, Method};
 use axum::response::{IntoResponse, Response};
@@ -27,7 +26,6 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub collector: Arc<Collector>,
     pub receiver: Receiver,
-    pub autodeploy: Arc<AutoDeploy>,
     pub llm: Arc<Llm>,
     pub claims: Arc<Claims>,
     pub doctor: Arc<doctor::DoctorState>,
@@ -70,16 +68,12 @@ impl AppState {
         let events = Arc::new(crate::events::Events::default());
         let jobs = Arc::new(crate::events::Jobs::load(&config, events.clone()));
         let watcher = Arc::new(crate::watch::Watcher::load(config.clone(), events.clone()));
-        let autodeploy = Arc::new(AutoDeploy::load(config.clone()));
-        autodeploy.set_watcher(watcher.clone());
-        autodeploy.set_jobs(jobs.clone());
         let projects = Arc::new(crate::projects::Projects::load(
             config.clone(),
             events.clone(),
             jobs.clone(),
         ));
         projects.set_watcher(watcher.clone());
-        autodeploy.set_projects(projects.clone());
         let (platform, platform_error) = crate::platform::Platform::open_if_enabled(&config);
         let mut platform_git = None;
         if let Some(p) = &platform {
@@ -115,7 +109,6 @@ impl AppState {
         llm.set_jobs(jobs.clone());
         Self {
             tokens: Arc::new(crate::tokens::Tokens::new(token.clone())),
-            autodeploy,
             llm,
             sleep: {
                 let s = Arc::new(crate::sleep::Sleep::load(config.clone(), events.clone(), jobs.clone()));
@@ -147,7 +140,6 @@ impl AppState {
 pub fn router(state: AppState) -> Router {
     let api = Router::new()
         .route("/system", get(system))
-        .route("/tailscale", get(tailscale_status))
         .route("/containers", get(containers))
         .route("/containers/{id}/logs", get(container_logs))
         .route("/containers/{id}/{action}", post(container_action))
@@ -155,20 +147,13 @@ pub fn router(state: AppState) -> Router {
         .route("/display", get(display_status))
         .route("/display/receiver/start", post(receiver_start))
         .route("/display/receiver/stop", post(receiver_stop))
-        .route("/coolify/volumes", get(coolify_volumes))
-        .route("/coolify/volumes/{id}/move", post(coolify_move_volume))
         .route("/services", get(list_services))
         .route("/services/{name}/{action}", post(service_action))
-        .route("/autodeploy", get(autodeploy_status).post(autodeploy_upsert))
-        .route("/autodeploy/{app}", delete(autodeploy_remove))
-        .route("/autodeploy/{app}/check", post(autodeploy_check))
         .route("/llm", get(llm_status))
         .route("/llm/install", post(llm_install))
         .route("/llm/models/pull", post(llm_pull))
         .route("/llm/models/delete", post(llm_delete_model))
         .route("/llm/{action}", post(llm_action))
-        .route("/coolify/worker-key", get(coolify_worker_key))
-        .route("/ssh/authorized-keys", post(authorize_key))
         .route("/doctor", get(doctor_report))
         .route("/tokens", get(tokens_list).post(tokens_create))
         .route("/tokens/{id}", delete(tokens_revoke))
@@ -179,7 +164,6 @@ pub fn router(state: AppState) -> Router {
         .route("/alerts/check", post(alerts_check))
         .route("/metrics", get(metrics))
         .route("/uptime", get(uptime))
-        .route("/images/{repository}", get(app_images))
         .route("/backup", get(backup_status))
         .route("/backup/run", post(backup_run))
         .route("/update", get(update_status).post(update_start))
@@ -386,35 +370,6 @@ async fn uptime(State(s): State<AppState>) -> Json<Vec<UptimeCheck>> {
     Json(s.watcher.uptime().await)
 }
 
-/// Image tags kept for an app (Coolify names images after the app uuid).
-async fn app_images(State(s): State<AppState>, Path(repository): Path<String>) -> ApiResult<AppImages> {
-    if !crate::autodeploy::valid_app_uuid(&repository) {
-        return Err(AppError::bad_request("invalid repository name"));
-    }
-    let out = crate::exec::run(
-        &s.config.docker_bin,
-        &["images", "--format", "{{.Tag}}", &repository],
-        Duration::from_secs(20),
-    )
-    .await?;
-    if !out.success() {
-        return Err(AppError::unavailable(format!(
-            "docker images failed: {}",
-            out.stderr.trim()
-        )));
-    }
-    Ok(Json(AppImages {
-        repository,
-        tags: out
-            .stdout
-            .lines()
-            .map(str::trim)
-            .filter(|t| !t.is_empty() && *t != "<none>")
-            .map(String::from)
-            .collect(),
-    }))
-}
-
 async fn backup_status(State(s): State<AppState>) -> Json<BackupStatus> {
     Json(crate::update::backup_status(&s.config).await)
 }
@@ -450,10 +405,6 @@ async fn system(State(s): State<AppState>) -> ApiResult<SystemSnapshot> {
         .await
         .map_err(|e| AppError::internal(e.to_string()))?;
     Ok(Json(snap))
-}
-
-async fn tailscale_status(State(s): State<AppState>) -> Json<TailscaleStatus> {
-    Json(tailscale::status(s.config.tailscale_bin.as_deref()).await)
 }
 
 #[derive(Deserialize)]
@@ -495,7 +446,7 @@ async fn create_volume(State(s): State<AppState>, Json(req): Json<VolumeRequest>
 
 async fn build_display_status(s: &AppState) -> DisplayStatus {
     let (receiver, receiver_config) = s.receiver.status().await;
-    let host = tailscale::ipv4(s.config.tailscale_bin.as_deref()).await;
+    let host = crate::mesh::private_ipv4(&s.config).await;
     let receiver_url = match (&receiver_config, host) {
         (Some(c), Some(h)) => Some(display::sender_url(c, &h)),
         _ => None,
@@ -538,72 +489,6 @@ async fn service_action(State(s): State<AppState>, Path((name, action)): Path<(S
     Ok(Json(json!({ "ok": true })))
 }
 
-async fn coolify_volumes(State(s): State<AppState>) -> ApiResult<Vec<CoolifyVolume>> {
-    Ok(Json(coolify::list(&s.config).await?))
-}
-
-#[derive(Deserialize)]
-struct BackgroundQuery {
-    #[serde(default)]
-    background: bool,
-}
-
-/// `?background=true`: answer with the job right away (large volumes on an
-/// HDD take longer than a request may).
-async fn coolify_move_volume(
-    State(s): State<AppState>,
-    Path(id): Path<u64>,
-    Query(q): Query<BackgroundQuery>,
-    Json(req): Json<MoveVolumeRequest>,
-) -> Result<Response, AppError> {
-    if !q.background {
-        return Ok(Json(coolify::move_volume(&s.config, id, req.tier).await?).into_response());
-    }
-    let target = id.to_string();
-    if s.jobs.running("volume-move", Some(&target)).is_some() {
-        return Err(AppError::conflict("this volume is already being moved"));
-    }
-    let tier = req.tier;
-    let job = s.jobs.start(
-        "volume-move",
-        format!(
-            "Move volume {id} to the {}",
-            if tier == StorageTier::Hdd { "HDD" } else { "SSD" }
-        ),
-        Some(&target),
-    );
-    job.progress("stopping the app and copying", None);
-    let snapshot = job.snapshot();
-    let cfg = s.config.clone();
-    let events = s.events.clone();
-    tokio::spawn(async move {
-        let r = coolify::move_volume(&cfg, id, tier).await;
-        job.finish(r.map(|m| m.note).map_err(|e| e.message));
-        events.changed("volumes");
-    });
-    Ok((axum::http::StatusCode::ACCEPTED, Json(snapshot)).into_response())
-}
-
-async fn autodeploy_status(State(s): State<AppState>) -> Json<AutoDeployStatus> {
-    Json(s.autodeploy.status().await)
-}
-
-async fn autodeploy_upsert(
-    State(s): State<AppState>,
-    Json(req): Json<AutoDeployRequest>,
-) -> ApiResult<AutoDeployWatch> {
-    Ok(Json(s.autodeploy.upsert(req).await?))
-}
-
-async fn autodeploy_remove(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<Value> {
-    s.autodeploy.remove(&app).await?;
-    Ok(Json(json!({ "ok": true })))
-}
-
-async fn autodeploy_check(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<AutoDeployWatch> {
-    Ok(Json(s.autodeploy.check_now(&app).await?))
-}
-
 async fn llm_status(State(s): State<AppState>) -> Json<LlmStatus> {
     Json(s.llm.status().await)
 }
@@ -644,26 +529,6 @@ async fn llm_chat(State(s): State<AppState>, Json(req): Json<LlmChatRequest>) ->
         axum::body::Body::new(resp.into_body()),
     )
         .into_response())
-}
-
-async fn coolify_worker_key(State(s): State<AppState>) -> ApiResult<CoolifyWorkerKey> {
-    if s.config.role() == "worker" {
-        return Err(AppError::conflict(
-            "this machine is a worker; ask the main host for its key",
-        ));
-    }
-    Ok(Json(coolify::worker_key(&s.config).await?))
-}
-
-async fn authorize_key(
-    State(s): State<AppState>,
-    Json(req): Json<AuthorizeKeyRequest>,
-) -> ApiResult<AuthorizeKeyResult> {
-    let file = s.config.authorized_keys_file.clone();
-    let added = tokio::task::spawn_blocking(move || ssh::authorize(&file, &req.public_key))
-        .await
-        .map_err(|e| AppError::internal(e.to_string()))??;
-    Ok(Json(AuthorizeKeyResult { added }))
 }
 
 #[derive(Deserialize)]
@@ -805,35 +670,28 @@ async fn projects_remove(State(s): State<AppState>, Path(app): Path<String>) -> 
 }
 
 /// Read vercel.json from the app's repository now (GitHub), at the branch
-/// auto-deploy follows or the one Coolify builds.
+/// it deploys.
 async fn projects_sync(State(s): State<AppState>, Path(app): Path<String>) -> ApiResult<ProjectInfo> {
-    if !crate::autodeploy::valid_app_uuid(&app) {
-        return Err(AppError::bad_request("invalid app uuid"));
-    }
-    let coolify = s.autodeploy.coolify_app(&app).await;
-    let field = |k: &str| {
-        coolify
-            .as_ref()
-            .and_then(|a| a.get(k)?.as_str().map(String::from))
-            .unwrap_or_default()
-    };
-    let (repo, branch, token) = match s.autodeploy.source_of(&app).await {
-        Some(src) => src,
-        None => (field("git_repository"), field("git_branch"), None),
-    };
+    let p = s
+        .platform
+        .as_ref()
+        .ok_or_else(|| AppError::unavailable("project rules need the platform engine: sudo vercelify migrate"))?;
+    let a = p
+        .store
+        .with(|c| vercelify_platform::apps::find(c, &app))
+        .map_err(|e| AppError::not_found(e.to_string()))?;
+    let repo = a.source.repository.clone().unwrap_or_default();
+    let branch = a.source.branch.clone().unwrap_or_default();
     let slug = crate::github::repo_slug(&repo)
-        .or_else(|| crate::github::repo_slug(&format!("https://github.com/{}", repo.trim_matches('/'))))
         .ok_or_else(|| AppError::conflict("only GitHub repositories can be read; upload the file instead"))?;
-    // No branch known: the repository's default branch.
-    if !branch.is_empty() && !crate::autodeploy::valid_branch(&branch) {
-        return Err(AppError::bad_request("invalid branch"));
-    }
+    let token = p.engine.api_token(a.source.git_source_id.as_deref(), &repo).await;
+    let base = a.build.context.clone().unwrap_or_default();
     let on = if branch.is_empty() {
         "default branch"
     } else {
         branch.as_str()
     };
-    let files = crate::projects::fetch_github(&s.config, &slug, &field("base_directory"), &branch, token.as_deref())
+    let files = crate::projects::fetch_github(&s.config, &slug, &base, &branch, token.as_deref())
         .await
         .map_err(AppError::unavailable)?;
     if files.is_empty() {
@@ -841,9 +699,9 @@ async fn projects_sync(State(s): State<AppState>, Path(app): Path<String>) -> Ap
             "no vercel.json or vercelify.json on {on} of {slug}"
         )));
     }
-    s.projects.set_from_repo(&app, 0, files, on).await;
+    s.projects.set_from_repo(&a.id, 0, files, on).await;
     s.projects
-        .get(&app)
+        .get(&a.id)
         .await
         .filter(|p| p.source == "repo")
         .map(Json)
@@ -912,18 +770,13 @@ async fn domain_info(State(s): State<AppState>) -> Json<DomainInfo> {
         (Some(_), Some("cloudflare")) => "cloudflare",
         (Some(_), _) => "direct",
     };
-    let wildcard = if cfg.role() == "worker" {
-        None
-    } else {
-        coolify::query(
-            cfg,
-            "select coalesce(wildcard_domain, '') from server_settings where server_id = 0",
-        )
-        .await
-        .ok()
-        .and_then(|r| r.first()?.first().cloned())
-        .filter(|w| !w.is_empty())
-    };
+    let wildcard = s.platform.as_ref().and_then(|p| {
+        p.store
+            .with(vercelify_platform::apps::domain_settings)
+            .ok()?
+            .wildcard
+            .filter(|w| !w.is_empty())
+    });
     let tunnel_active = if mode == "cloudflare" {
         Some(services::status(&cfg.systemctl_bin, "cloudflared").await.active_state == "active")
     } else {

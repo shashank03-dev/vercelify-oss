@@ -1,5 +1,4 @@
 #!/bin/sh
 case "$1" in
-  status) cat "$(dirname "$0")/../../../crates/vercelify-core/tests/fixtures/tailscale-status.json" ;;
   ip) echo "127.0.0.1" ;;
 esac

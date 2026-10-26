@@ -1,11 +1,10 @@
-//! Things that run on the cockpit's own machine: its Tailscale status,
-//! local disks, and the external tools used for display streaming.
+//! Things that run on the cockpit's own machine: local disks and the
+//! external tools used for display streaming.
 
 use std::path::PathBuf;
 use std::process::Command;
 use vercelify_core::avfoundation::{parse_screens, CaptureScreen};
-use vercelify_core::tailscale::{parse_status, unavailable, CLI_CANDIDATES};
-use vercelify_core::{TailscaleStatus, ToolStatus};
+use vercelify_core::ToolStatus;
 
 /// GUI apps on macOS don't inherit the shell PATH, so look in the usual places.
 fn find(candidates: &[&str]) -> Option<PathBuf> {
@@ -61,15 +60,6 @@ pub fn tools() -> Vec<ToolStatus> {
     };
     vec![
         entry(
-            "tailscale",
-            find(CLI_CANDIDATES),
-            if mac {
-                "Install Tailscale from the Mac App Store or tailscale.com/download"
-            } else {
-                "curl -fsSL https://tailscale.com/install.sh | sh"
-            },
-        ),
-        entry(
             "ffmpeg",
             ffmpeg(),
             if mac {
@@ -88,19 +78,6 @@ pub fn tools() -> Vec<ToolStatus> {
             },
         ),
     ]
-}
-
-pub fn tailscale_status() -> TailscaleStatus {
-    let Some(bin) = find(CLI_CANDIDATES) else {
-        return unavailable(false, "Tailscale is not installed on this computer");
-    };
-    match Command::new(&bin).args(["status", "--json"]).output() {
-        Err(e) => unavailable(true, e.to_string()),
-        Ok(o) => match parse_status(&String::from_utf8_lossy(&o.stdout)) {
-            Ok(s) => s,
-            Err(_) => unavailable(true, String::from_utf8_lossy(&o.stderr).trim().to_string()),
-        },
-    }
 }
 
 /// Screens ffmpeg can capture (macOS AVFoundation).

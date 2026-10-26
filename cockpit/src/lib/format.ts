@@ -27,7 +27,7 @@ export function duration(secs: number): string {
   return `${Math.floor(h / 24)}d ${h % 24}h`;
 }
 
-/** "3 minutes ago". Accepts ISO strings and Coolify's "YYYY-MM-DD HH:MM:SS" (UTC). */
+/** "3 minutes ago". Accepts ISO strings and SQLite's "YYYY-MM-DD HH:MM:SS" (UTC). */
 export function ago(ts: string | null | undefined, now = Date.now()): string {
   if (!ts) return "never";
   const iso = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(ts) ? ts.replace(" ", "T") + "Z" : ts;
@@ -43,32 +43,9 @@ export function ago(ts: string | null | undefined, now = Date.now()): string {
 
 export type Health = "ok" | "warn" | "bad" | "idle";
 
-/** Map Coolify/Docker status strings to a traffic light. */
-export function statusHealth(status: string | null | undefined): Health {
-  const s = (status ?? "").toLowerCase();
-  if (s.startsWith("running")) return s.includes("unhealthy") ? "warn" : "ok";
-  if (s.startsWith("restarting") || s.startsWith("starting") || s.includes("progress") || s === "queued") return "warn";
-  if (s.startsWith("exited") || s.startsWith("dead") || s === "failed" || s.includes("degraded")) return "bad";
-  if (s === "finished") return "ok";
-  return "idle";
-}
-
-export function statusLabel(status: string | null | undefined): string {
-  const s = status ?? "unknown";
-  const [state, health] = s.split(":");
-  if (!health || health === "unknown") return state ?? s;
-  return `${state} · ${health}`;
-}
-
 export function shortSha(sha: string | null | undefined): string {
   if (!sha || sha === "HEAD") return sha ?? "";
   return sha.slice(0, 7);
-}
-
-/** First URL of a Coolify comma-separated fqdn list. */
-export function primaryUrl(fqdn: string | null | undefined): string | null {
-  const first = (fqdn ?? "").split(",").map((s) => s.trim()).find(Boolean);
-  return first ?? null;
 }
 
 export function hostOf(url: string): string {
@@ -109,11 +86,4 @@ export function profileLabel(profile: string | null | undefined): string {
     default:
       return "Unknown machine";
   }
-}
-
-/** Days until an ISO time (negative when past, rounded down). */
-export function daysUntil(ts: string | null | undefined, now = Date.now()): number | null {
-  if (!ts) return null;
-  const t = Date.parse(ts);
-  return Number.isFinite(t) ? Math.floor((t - now) / 86_400_000) : null;
 }

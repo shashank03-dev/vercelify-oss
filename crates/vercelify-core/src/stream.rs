@@ -184,7 +184,7 @@ pub fn sender_args(cfg: &SenderConfig) -> Result<Vec<String>, StreamError> {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct MoonlightLaunch {
-    /// Host running Sunshine (Tailscale name or IP).
+    /// Host running Sunshine (mesh or LAN address).
     pub host: String,
     /// Sunshine application, usually `Desktop`.
     pub app: String,

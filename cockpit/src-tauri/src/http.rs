@@ -1,4 +1,4 @@
-//! HTTP from Rust to the host agent and the Coolify API. Doing this in
+//! HTTP from Rust to the host agents. Doing this in
 //! Rust (not the webview) avoids CORS and keeps tokens out of page JS fetches.
 
 use serde::Deserialize;
@@ -67,7 +67,7 @@ fn unreachable(base: &str, e: reqwest::Error) -> String {
     if (e.is_connect() || e.is_timeout()) && crate::mesh::on_mesh(base) {
         format!("HTTP 0: cannot reach {base} over Vercelify's network — is vercelify-mesh running on this Mac?")
     } else if e.is_connect() || e.is_timeout() {
-        format!("HTTP 0: cannot reach {base} — is Tailscale connected on both machines?")
+        format!("HTTP 0: cannot reach {base} — is the server on and on the same network?")
     } else {
         format!("HTTP 0: {e}")
     }

@@ -7,9 +7,8 @@
 
 use crate::config::Config;
 use crate::exec::run;
-use crate::http::{self, Req};
 use crate::routes::AppState;
-use crate::{coolify, services, tailscale, volumes};
+use crate::{services, volumes};
 use std::path::Path;
 use std::sync::Mutex;
 use std::time::{Duration, Instant, SystemTime};
@@ -64,10 +63,10 @@ pub struct BackupFact {
 pub struct Facts {
     pub role: String,
     pub docker: Result<String, String>,
-    pub tailscale_state: String,
-    pub tailscale_name: String,
-    /// Days until the node key expires (negative = expired). None = never.
-    pub key_expiry_days: Option<i64>,
+    /// This node's mesh address (None: not on the mesh).
+    pub mesh_ip: Option<String>,
+    /// The `vercelify-mesh` daemon runs.
+    pub mesh_daemon: bool,
     pub system_disk: Option<(u64, u64)>,
     /// The installer set up a storage disk (fstab marker).
     pub storage_expected: bool,
@@ -79,20 +78,13 @@ pub struct Facts {
     pub power_guard: Option<String>,
     pub firewall_active: bool,
     pub power_guard_active: bool,
-    /// Main only: Coolify answers `/api/health`.
-    pub coolify_healthy: Option<bool>,
+    /// Main only: Coolify still runs the apps (not migrated yet).
+    pub coolify_engine: bool,
     /// The platform engine's database: Ok(schema version) or why it failed.
     /// None = this server doesn't run the platform engine.
     pub platform: Option<Result<u32, String>>,
-    /// Main only: the stored API token is accepted (None = no token).
-    pub coolify_token_ok: Option<bool>,
-    /// Main only: required columns missing from Coolify's database.
-    pub coolify_schema_missing: Option<Vec<String>>,
-    pub coolify_auto_update: Option<bool>,
-    /// Main only: localhost server row has an SSH user.
-    pub coolify_ssh_user_ok: Option<bool>,
     pub proxy_health: Option<String>,
-    /// Main only: Coolify's wildcard domain is set.
+    /// Main only: the platform's wildcard domain is set.
     pub wildcard_set: Option<bool>,
     /// None = no tunnel installed.
     pub tunnel_active: Option<bool>,
@@ -100,6 +92,7 @@ pub struct Facts {
     pub lid_handled: Option<bool>,
     /// None = Ollama not installed.
     pub ollama_ready: Option<bool>,
+    /// Apps whose branch can't be checked (push-to-deploy).
     pub autodeploy_errors: usize,
     pub hardware: Option<HardwareInfo>,
     /// Hours since the OOM killer last struck (None = not seen while running).
@@ -150,45 +143,30 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
             Some("sudo systemctl restart docker; journalctl -u docker -n 50"),
         ),
     });
-    out.push(if f.tailscale_state == "Running" {
-        check("tailscale", "Tailscale", Fine, f.tailscale_name.clone(), None)
-    } else {
-        check(
-            "tailscale",
-            "Tailscale",
+    out.push(match (&f.mesh_ip, f.mesh_daemon) {
+        (Some(ip), true) => check("mesh", "Network", Fine, format!("on Vercelify's network as {ip}"), None),
+        (Some(_), false) => check(
+            "mesh",
+            "Network",
             Bad,
-            format!("not connected ({})", f.tailscale_state),
-            Some("sudo tailscale up"),
-        )
+            "vercelify-mesh isn't running: devices and servers can't reach this one",
+            Some("sudo systemctl restart vercelify-mesh; journalctl -u vercelify-mesh -n 50"),
+        ),
+        (None, _) if main => check(
+            "mesh",
+            "Network",
+            Warn,
+            "not on Vercelify's network yet",
+            Some("sudo vercelify mesh init"),
+        ),
+        (None, _) => check(
+            "mesh",
+            "Network",
+            Bad,
+            "not on the main server's network",
+            Some("on the main server: sudo vercelify mesh invite; then here: sudo vercelify mesh join …"),
+        ),
     });
-    if let Some(days) = f.key_expiry_days {
-        let fix = Some("Tailscale admin console → Machines → this machine → Disable key expiry (or re-authenticate: sudo tailscale up --force-reauth)");
-        out.push(if days < 0 {
-            check(
-                "tailscale-key",
-                "Tailscale key",
-                Bad,
-                "expired — this machine has left your tailnet",
-                fix,
-            )
-        } else if days <= 14 {
-            check(
-                "tailscale-key",
-                "Tailscale key",
-                Warn,
-                format!("expires in {days} day{}", if days == 1 { "" } else { "s" }),
-                fix,
-            )
-        } else {
-            check(
-                "tailscale-key",
-                "Tailscale key",
-                Fine,
-                format!("expires in {days} days"),
-                None,
-            )
-        });
-    }
     match &f.platform {
         Some(Ok(v)) => out.push(check(
             "platform",
@@ -206,80 +184,19 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
         )),
         None => {}
     }
-    let platform = f.platform.is_some();
-    if main && !platform {
-        out.push(match f.coolify_healthy {
-            Some(true) => check("coolify", "Coolify", Fine, "dashboard and API are up", None),
-            _ => check(
-                "coolify",
-                "Coolify",
-                Bad,
-                "not answering on port 8000",
-                Some("docker logs coolify --tail 50 (Coolify's web server needs IPv6 enabled)"),
-            ),
-        });
-        out.push(match f.coolify_token_ok {
-            Some(true) => check("coolify-token", "Coolify API token", Fine, "accepted", None),
-            Some(false) => check(
-                "coolify-token",
-                "Coolify API token",
-                Bad,
-                "rejected by Coolify",
-                Some("sudo vercelify pair --refresh, then pair again"),
-            ),
-            None => check(
-                "coolify-token",
-                "Coolify API token",
-                Warn,
-                "none stored — deploys from the Mac app and auto-deploy won't work",
-                Some("sudo vercelify pair --refresh"),
-            ),
-        });
-        if let Some(missing) = &f.coolify_schema_missing {
-            out.push(if missing.is_empty() {
-                check(
-                    "coolify-schema",
-                    "Coolify version",
-                    Fine,
-                    "compatible with Vercelify",
-                    None,
-                )
-            } else {
-                check(
-                    "coolify-schema",
-                    "Coolify version",
-                    Bad,
-                    format!("missing {} — storage moves and pools may fail", missing.join(", ")),
-                    Some("sudo vercelify update (a newer Vercelify may support this Coolify)"),
-                )
-            });
-        }
-        if f.coolify_auto_update == Some(true) {
-            out.push(check(
-                "coolify-autoupdate",
-                "Coolify auto-update",
-                Warn,
-                "on — a Coolify release could change what Vercelify relies on while you're away",
-                Some("re-run the installer (turns it off); upgrade with: sudo vercelify coolify upgrade"),
-            ));
-        }
-        if f.coolify_ssh_user_ok == Some(false) {
-            out.push(check(
-                "coolify-ssh",
-                "Coolify SSH user",
-                Bad,
-                "empty — every deployment fails",
-                Some("re-run the installer (sets it to root)"),
-            ));
-        }
+    if main && f.coolify_engine {
+        out.push(check(
+            "migrate",
+            "Platform engine",
+            Warn,
+            "Coolify still runs this server's apps: Vercelify's app features (deploys, previews, sleep) need its own engine",
+            Some("sudo vercelify migrate (shows what would happen first)"),
+        ));
     }
     if main {
         if let Some(h) = &f.proxy_health {
-            let fix = if platform {
-                "docker logs vercelify-proxy --tail 50; the agent recreates it: sudo systemctl restart vercelify-agent"
-            } else {
-                "Coolify → Servers → localhost → Proxy → Restart"
-            };
+            let fix =
+                "docker logs vercelify-proxy --tail 50; the agent recreates it: sudo systemctl restart vercelify-agent";
             out.push(if h == "healthy" || h == "running" {
                 check("proxy", "Traefik proxy", Fine, h.clone(), None)
             } else {
@@ -323,7 +240,7 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
                 Fine
             },
             format!("{pct}% used, {} free", gb(free)),
-            Some("docker system prune -af (keeps volumes), or Coolify → Servers → Docker cleanup"),
+            Some("docker system prune -af (keeps volumes)"),
         ));
     }
     if let Some(hw) = &f.hardware {
@@ -425,7 +342,7 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
                         format!("{h} h ago")
                     }
                 ),
-                Some("set memory limits on apps (Coolify → app → Resource limits) or move one to another server"),
+                Some("set memory limits on apps (the app → Settings → Memory) or move one to another server"),
             ));
         }
     }
@@ -539,7 +456,7 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
             "firewall",
             "Firewall",
             Fine,
-            "dashboard and AI API private to the tailnet",
+            "the agent and the AI API are private to the mesh",
             None,
         )
     } else {
@@ -547,7 +464,7 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
             "firewall",
             "Firewall",
             Warn,
-            "off — Coolify and Ollama ports are reachable from the local network",
+            "off — the agent's and Ollama's ports are reachable from the local network",
             Some("sudo systemctl enable --now vercelify-firewall"),
         )
     });
@@ -650,11 +567,12 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
             "Auto-deploy",
             Warn,
             format!(
-                "{} branch watch{} reporting errors",
+                "{} app{} can't check {} branch",
                 f.autodeploy_errors,
-                if f.autodeploy_errors == 1 { "" } else { "es" }
+                if f.autodeploy_errors == 1 { "" } else { "s" },
+                if f.autodeploy_errors == 1 { "its" } else { "their" }
             ),
-            Some("open the app's Auto-deploy tab, or: sudo vercelify autodeploy list"),
+            Some("open the app's Deploy on push card for the error (a revoked token, a renamed branch)"),
         ));
     }
     out
@@ -664,12 +582,6 @@ fn fstab_has_storage(fstab: &Path, mount: &str) -> bool {
     std::fs::read_to_string(fstab)
         .map(|s| s.lines().any(|l| l.trim() == format!("# vercelify {mount}")))
         .unwrap_or(false)
-}
-
-/// Whole days from now until an RFC 3339 time (negative when past).
-pub fn days_until(rfc3339: &str, now: chrono::DateTime<chrono::Utc>) -> Option<i64> {
-    let t = chrono::DateTime::parse_from_rfc3339(rfc3339).ok()?;
-    Some((t.with_timezone(&chrono::Utc) - now).num_hours().div_euclid(24))
 }
 
 /// Parse `smartctl -H -A -j` output.
@@ -689,33 +601,9 @@ pub fn parse_smart(device: &str, json: &str) -> Option<SmartFact> {
     })
 }
 
-async fn coolify_facts(cfg: &Config) -> (Option<bool>, Option<bool>) {
-    let base = cfg.coolify_url.trim_end_matches('/');
-    let health_url = format!("{base}/api/health");
-    let healthy = match http::call(Req::get(&health_url).timeout(Duration::from_secs(5))).await {
-        Ok((s, body)) => s.is_success() && String::from_utf8_lossy(&body).trim() == "OK",
-        Err(_) => false,
-    };
-    let token_ok = match cfg.coolify_token() {
-        None => None,
-        Some(t) => {
-            let url = format!("{base}/api/v1/version");
-            match http::call(Req::get(&url).bearer(&t).timeout(Duration::from_secs(5))).await {
-                Ok((s, _)) => Some(s.is_success()),
-                // Coolify down: the health check already says so.
-                Err(_) => healthy.then_some(false),
-            }
-        }
-    };
-    (Some(healthy), token_ok)
-}
-
 /// Facts that are expensive to collect, refreshed at most once an hour.
 #[derive(Debug, Clone, Default)]
 pub struct SlowFacts {
-    pub schema_missing: Option<Vec<String>>,
-    pub auto_update: Option<bool>,
-    pub ssh_user_ok: Option<bool>,
     pub wildcard_set: Option<bool>,
     pub smart: Vec<SmartFact>,
 }
@@ -739,28 +627,6 @@ impl DoctorState {
         }
         g.1.and_then(|t| t.elapsed().ok()).map(|d| d.as_secs() / 3600)
     }
-}
-
-async fn psql_value(cfg: &Config, sql: &str) -> Option<String> {
-    let out = run(
-        &cfg.docker_bin,
-        &[
-            "exec",
-            &cfg.coolify_db_container,
-            "psql",
-            "-U",
-            "coolify",
-            "-d",
-            "coolify",
-            "-At",
-            "-c",
-            sql,
-        ],
-        Duration::from_secs(15),
-    )
-    .await
-    .ok()?;
-    out.success().then(|| out.stdout.trim().to_string())
 }
 
 async fn smart_facts(cfg: &Config, snap: Option<&SystemSnapshot>) -> Vec<SmartFact> {
@@ -800,26 +666,13 @@ async fn slow_facts(s: &AppState, role: &str, snap: Option<&SystemSnapshot>) -> 
         smart: smart_facts(cfg, snap).await,
         ..Default::default()
     };
-    if role != "worker" && cfg.platform_engine() {
-        // The platform engine keeps its domain setting itself.
+    if role != "worker" {
         f.wildcard_set = s.platform.as_ref().and_then(|p| {
             p.store
                 .with(vercelify_platform::apps::domain_settings)
                 .ok()
                 .map(|d| d.wildcard.is_some_and(|w| !w.is_empty()))
         });
-    } else if role != "worker" {
-        f.schema_missing = coolify::schema_missing(cfg).await.ok();
-        f.auto_update = coolify::auto_update_enabled(cfg).await;
-        f.ssh_user_ok = psql_value(cfg, "select coalesce(\"user\",'') from servers where id=0")
-            .await
-            .map(|u| !u.is_empty());
-        f.wildcard_set = psql_value(
-            cfg,
-            "select coalesce(wildcard_domain,'') from server_settings where server_id=0",
-        )
-        .await
-        .map(|w| !w.is_empty());
     }
     *s.doctor.slow.lock().unwrap_or_else(|e| e.into_inner()) = Some((Instant::now(), f.clone()));
     f
@@ -857,14 +710,7 @@ pub async fn gather(s: &AppState) -> Facts {
         Ok(o) => Err(format!("not running: {}", o.stderr.trim().lines().last().unwrap_or(""))),
         Err(e) => Err(e.to_string()),
     };
-    let ts = tailscale::status(cfg.tailscale_bin.as_deref()).await;
     let main = role != "worker";
-    let coolify_engine = main && !cfg.platform_engine();
-    let (coolify_healthy, coolify_token_ok) = if coolify_engine {
-        coolify_facts(cfg).await
-    } else {
-        (None, None)
-    };
     let slow = slow_facts(s, &role, snap.as_ref()).await;
     let proxy_health = if main {
         run(
@@ -917,13 +763,8 @@ pub async fn gather(s: &AppState) -> Facts {
     Facts {
         role: role.clone(),
         docker,
-        tailscale_state: ts.backend_state.clone(),
-        tailscale_name: ts.self_node.as_ref().map(|n| n.dns_name.clone()).unwrap_or_default(),
-        key_expiry_days: ts
-            .self_node
-            .as_ref()
-            .and_then(|n| n.key_expiry.as_deref())
-            .and_then(|k| days_until(k, chrono::Utc::now())),
+        mesh_ip: crate::mesh::own_ipv4(cfg).map(|ip| ip.to_string()),
+        mesh_daemon: active(services::status(&cfg.systemctl_bin, "vercelify-mesh").await),
         system_disk: snap
             .as_ref()
             .and_then(|s| s.disks.iter().find(|d| d.mount_point == "/"))
@@ -940,29 +781,28 @@ pub async fn gather(s: &AppState) -> Facts {
         power_guard: pg.map(|p| p.state),
         firewall_active: active(services::status(&cfg.systemctl_bin, "vercelify-firewall").await),
         power_guard_active: active(services::status(&cfg.systemctl_bin, "vercelify-power-guard").await),
-        coolify_healthy,
+        coolify_engine: main && cfg.engine == "coolify",
         platform: match (&s.platform, &s.platform_error) {
             (Some(p), _) => Some(p.store.schema_version().map_err(|e| e.to_string())),
             (None, Some(e)) => Some(Err(e.0.clone())),
             (None, None) => None,
         },
-        coolify_token_ok,
-        coolify_schema_missing: slow.schema_missing,
-        coolify_auto_update: slow.auto_update,
-        coolify_ssh_user_ok: slow.ssh_user_ok,
         proxy_health,
         wildcard_set: slow.wildcard_set,
         tunnel_active,
         lid_handled: (profile == "laptop").then(|| cfg.logind_dropin.exists()),
         ollama_ready: llm.installed.then_some(llm.ready),
-        autodeploy_errors: s
-            .autodeploy
-            .status()
-            .await
-            .watches
-            .iter()
-            .filter(|w| w.enabled && w.last_error.is_some())
-            .count(),
+        autodeploy_errors: s.platform.as_ref().map_or(0, |p| {
+            p.store
+                .with(|c| {
+                    Ok(c.query_row(
+                        "SELECT count(*) FROM git_watch WHERE enabled = 1 AND coalesce(last_error, '') <> ''",
+                        [],
+                        |r| r.get::<_, i64>(0),
+                    )?)
+                })
+                .unwrap_or(0) as usize
+        }),
         oom_recent_hours: s.doctor.observe_oom(hardware.as_ref().and_then(|h| h.oom_kills)),
         hardware,
         clock_synced,
@@ -1062,9 +902,8 @@ mod tests {
         Facts {
             role: "main".into(),
             docker: Ok("27.3.1".into()),
-            tailscale_state: "Running".into(),
-            tailscale_name: "laptop.tail1234.ts.net".into(),
-            key_expiry_days: None,
+            mesh_ip: Some("10.77.0.1".into()),
+            mesh_daemon: true,
             system_disk: Some((40 << 30, 238 << 30)),
             storage_expected: true,
             storage_mounted: true,
@@ -1075,12 +914,8 @@ mod tests {
             power_guard: Some("ok".into()),
             firewall_active: true,
             power_guard_active: true,
-            coolify_healthy: Some(true),
-            platform: None,
-            coolify_token_ok: Some(true),
-            coolify_schema_missing: Some(vec![]),
-            coolify_auto_update: Some(false),
-            coolify_ssh_user_ok: Some(true),
+            coolify_engine: false,
+            platform: Some(Ok(3)),
             proxy_health: Some("healthy".into()),
             wildcard_set: Some(true),
             tunnel_active: None,
@@ -1127,30 +962,47 @@ mod tests {
     }
 
     #[test]
-    fn platform_engine_skips_coolify_checks() {
-        let f = Facts {
-            platform: Some(Ok(1)),
-            coolify_healthy: None,
-            coolify_token_ok: None,
-            proxy_health: Some("exited".into()),
+    fn a_server_not_migrated_is_told_how() {
+        let c = evaluate(&Facts {
+            coolify_engine: true,
+            platform: None,
             ..healthy_main()
-        };
-        let checks = evaluate(&f);
-        assert!(
-            !checks.iter().any(|c| c.id.starts_with("coolify")),
-            "no Coolify on this engine"
-        );
-        let proxy = checks.iter().find(|c| c.id == "proxy").unwrap();
-        assert_eq!(proxy.status, CheckStatus::Bad);
-        assert!(proxy.fix.as_deref().unwrap().contains("vercelify-proxy"));
+        });
+        let m = c.iter().find(|c| c.id == "migrate").unwrap();
+        assert_eq!(m.status, Warn);
+        assert!(m.fix.as_deref().unwrap().contains("vercelify migrate"));
+        assert_eq!(status_of(&evaluate(&healthy_main()), "migrate"), None);
+    }
+
+    #[test]
+    fn the_mesh() {
+        let off = evaluate(&Facts {
+            mesh_ip: None,
+            ..healthy_main()
+        });
+        assert_eq!(status_of(&off, "mesh"), Some(Warn));
+        let down = evaluate(&Facts {
+            mesh_daemon: false,
+            ..healthy_main()
+        });
+        assert_eq!(status_of(&down, "mesh"), Some(Bad));
+        let worker = evaluate(&Facts {
+            role: "worker".into(),
+            mesh_ip: None,
+            ..healthy_main()
+        });
+        assert_eq!(status_of(&worker, "mesh"), Some(Bad));
     }
 
     #[test]
     fn platform_database_check() {
-        let none = evaluate(&healthy_main());
+        let none = evaluate(&Facts {
+            platform: None,
+            ..healthy_main()
+        });
         assert!(
             !none.iter().any(|c| c.id == "platform"),
-            "not shown on the Coolify engine"
+            "not shown without the platform engine"
         );
         let ok = evaluate(&Facts {
             platform: Some(Ok(1)),
@@ -1171,18 +1023,13 @@ mod tests {
     fn problems_come_with_fixes() {
         let f = Facts {
             docker: Err("not running: Cannot connect to the Docker daemon".into()),
-            tailscale_state: "NeedsLogin".into(),
-            key_expiry_days: Some(3),
+            mesh_daemon: false,
             storage_mounted: false,
             system_disk: Some((230 << 30, 238 << 30)),
             memory: (8 << 30, 300 << 20),
             max_temp_c: Some(85.0),
             on_battery: true,
             firewall_active: false,
-            coolify_token_ok: None,
-            coolify_schema_missing: Some(vec!["servers.user".into()]),
-            coolify_auto_update: Some(true),
-            coolify_ssh_user_ok: Some(false),
             proxy_health: Some("unhealthy".into()),
             wildcard_set: Some(false),
             tunnel_active: Some(false),
@@ -1209,18 +1056,13 @@ mod tests {
         let c = evaluate(&f);
         for (id, want) in [
             ("docker", Bad),
-            ("tailscale", Bad),
-            ("tailscale-key", Warn),
+            ("mesh", Bad),
             ("storage", Bad),
             ("disk", Bad),
             ("memory", Bad),
             ("temperature", Warn),
             ("power", Warn),
             ("firewall", Warn),
-            ("coolify-token", Warn),
-            ("coolify-schema", Bad),
-            ("coolify-autoupdate", Warn),
-            ("coolify-ssh", Bad),
             ("proxy", Bad),
             ("wildcard", Warn),
             ("tunnel", Bad),
@@ -1239,7 +1081,7 @@ mod tests {
             .find(|c| c.id == "autodeploy")
             .unwrap()
             .detail
-            .starts_with("2 branch watches"));
+            .starts_with("2 apps can't check their branch"));
         assert!(c.iter().filter(|c| c.status != Fine).all(|c| c.fix.is_some()));
         assert!(c
             .iter()
@@ -1252,18 +1094,17 @@ mod tests {
     }
 
     #[test]
-    fn workers_skip_coolify_and_backups_and_single_disk_is_a_warning() {
+    fn workers_skip_backups_and_single_disk_is_a_warning() {
         let f = Facts {
             role: "worker".into(),
             storage_expected: false,
             storage_mounted: false,
-            coolify_healthy: None,
+            coolify_engine: true,
             backup: None,
             ..healthy_main()
         };
         let c = evaluate(&f);
-        assert_eq!(status_of(&c, "coolify"), None);
-        assert_eq!(status_of(&c, "coolify-token"), None);
+        assert_eq!(status_of(&c, "migrate"), None);
         assert_eq!(status_of(&c, "backup"), None);
         assert_eq!(status_of(&c, "storage"), Some(Warn));
     }
@@ -1359,21 +1200,6 @@ mod tests {
         assert_eq!(t.battery_shutdown_pct, 25);
         let pi = Thresholds::from_config(&Config::default(), "pi5");
         assert_eq!(pi.pause_c, 78.0);
-    }
-
-    #[test]
-    fn key_expiry_days() {
-        let now = chrono::DateTime::parse_from_rfc3339("2026-10-20T00:00:00Z")
-            .unwrap()
-            .with_timezone(&chrono::Utc);
-        assert_eq!(days_until("2026-10-30T12:00:00Z", now), Some(10));
-        assert_eq!(days_until("2026-10-19T12:00:00Z", now), Some(-1));
-        assert_eq!(days_until("nonsense", now), None);
-        let c = evaluate(&Facts {
-            key_expiry_days: Some(-1),
-            ..healthy_main()
-        });
-        assert_eq!(status_of(&c, "tailscale-key"), Some(Bad));
     }
 
     #[test]

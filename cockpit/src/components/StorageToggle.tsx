@@ -10,7 +10,7 @@ import { Button, CodeBlock, cx, Field, Segmented, Select, TextInput } from "./ui
 
 /**
  * Volume creation assistant: pick SSD or HDD and get the exact Docker
- * Compose volume definition (and Coolify directory-mount values), optionally
+ * Compose volume definition (and the bind mount's paths), optionally
  * creating the folder on the host with the right owner.
  */
 export function StorageToggle({ disks }: { disks?: DiskInfo[] }) {
@@ -146,7 +146,7 @@ export function StorageToggle({ disks }: { disks?: DiskInfo[] }) {
           <>
             <CodeBlock code={result.snippet} testId="compose-snippet" />
             <div className="rounded-lg border border-line bg-surface-2 p-3.5 text-[13px]">
-              <div className="mb-2 text-xs font-medium text-fg-muted">In Coolify: Storages → Add → Directory mount</div>
+              <div className="mb-2 text-xs font-medium text-fg-muted">As a bind mount (a compose app's volumes, or docker run -v)</div>
               <div className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 font-mono text-xs">
                 <span className="text-fg-dim">Source</span>
                 <span className="selectable truncate" data-testid="host-path">

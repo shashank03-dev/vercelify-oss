@@ -1,13 +1,13 @@
 //! Proxy routes for an app's project rules (see `project.rs`).
 //!
-//! Coolify gives every domain of an app a Traefik router through Docker
-//! labels (`http-0-<uuid>`, `https-0-<uuid>`, with its service and
-//! middlewares: gzip, basic auth, www redirects). For each of those we add
-//! routers with the same rule at a higher priority through Traefik's file
-//! provider, reusing Coolify's service and middlewares, so everything Coolify
-//! configures keeps working and our rules run first. When the app's container
-//! is gone (asleep, redeploying) its service disappears, Traefik skips our
-//! routers as broken and the request falls through as before.
+//! The platform engine gives every domain of an app a Traefik router in its
+//! base route file (`vfy-<app>-<n>`, with its service and the basic-auth
+//! middleware). For each of those we add routers with the same rule at a
+//! higher priority through Traefik's file provider, reusing that service and
+//! middlewares, so the base routes keep working and our rules run first.
+//! When the app's base route is gone (asleep, redeploying) its service
+//! disappears, Traefik skips our routers as broken and the request falls
+//! through as before.
 //!
 //! Traefik picks one router per request, so rules are placed like this:
 //! - conditional middlewares go on every router: redirects (a regex over the
@@ -25,9 +25,9 @@ use crate::project::{net_regex, FirewallAction, Net, Pattern, Plan, RewriteTo};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
-/// One of the routers Coolify created for an app (from container labels).
+/// One of an app's base routers (`projects::platform_routers`).
 #[derive(Debug, Clone, PartialEq)]
-pub struct CoolifyRouter {
+pub struct AppRouter {
     pub name: String,
     pub rule: String,
     pub entry_points: Vec<String>,
@@ -96,96 +96,6 @@ pub fn traefik_version(image: &str) -> Option<(u32, u32)> {
     let major = it.next()?.parse().ok()?;
     let minor = it.next().and_then(|m| m.parse().ok()).unwrap_or(0);
     Some((major, minor))
-}
-
-fn provider(name: &str) -> String {
-    if name.contains('@') {
-        name.to_string()
-    } else {
-        format!("{name}@docker")
-    }
-}
-
-/// Coolify's routers in a container's labels, and why any were left out.
-pub fn coolify_routers(labels: &BTreeMap<String, String>) -> (Vec<CoolifyRouter>, Vec<String>) {
-    let mut props: BTreeMap<&str, BTreeMap<String, &str>> = BTreeMap::new();
-    let mut services: Vec<&str> = Vec::new();
-    for (k, v) in labels {
-        if let Some(rest) = k.strip_prefix("traefik.http.routers.") {
-            if let Some((name, prop)) = rest.split_once('.') {
-                props
-                    .entry(name)
-                    .or_default()
-                    .insert(prop.to_ascii_lowercase(), v.as_str());
-            }
-        } else if let Some(rest) = k.strip_prefix("traefik.http.services.") {
-            if let Some((name, _)) = rest.split_once('.') {
-                if !services.contains(&name) {
-                    services.push(name);
-                }
-            }
-        }
-    }
-    let mut out = Vec::new();
-    let mut skipped = Vec::new();
-    for (name, p) in props {
-        let Some(rule) = p.get("rule").map(|r| r.trim()).filter(|r| !r.is_empty()) else {
-            continue;
-        };
-        let middlewares: Vec<String> = p
-            .get("middlewares")
-            .map(|m| {
-                m.split(',')
-                    .map(str::trim)
-                    .filter(|m| !m.is_empty())
-                    .map(provider)
-                    .collect()
-            })
-            .unwrap_or_default();
-        // Only sends visitors to https; the https router does the work.
-        if middlewares.iter().any(|m| m.starts_with("redirect-to-https@")) {
-            continue;
-        }
-        if let Some(i) = rule.find("PathPrefix(`") {
-            let path = &rule[i + 12..];
-            if !path.starts_with("/`") {
-                skipped.push(format!(
-                    "{name}: the app is served under a sub-path; project rules apply to whole domains only"
-                ));
-                continue;
-            }
-        }
-        let service = match p.get("service") {
-            Some(s) => *s,
-            None if services.len() == 1 => services[0],
-            None => {
-                skipped.push(format!("{name}: no service to route to"));
-                continue;
-            }
-        };
-        let tls = match (p.get("tls.certresolver"), p.get("tls")) {
-            (Some(r), _) => Some(json!({ "certResolver": r })),
-            (None, Some(t)) if t.eq_ignore_ascii_case("true") => Some(json!({})),
-            _ => None,
-        };
-        out.push(CoolifyRouter {
-            name: name.to_string(),
-            rule: rule.to_string(),
-            entry_points: p
-                .get("entrypoints")
-                .map(|e| {
-                    e.split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect()
-                })
-                .unwrap_or_default(),
-            service: provider(service),
-            middlewares,
-            tls,
-        });
-    }
-    (out, skipped)
 }
 
 /// The connection comes from this machine (where the Cloudflare tunnel runs).
@@ -316,7 +226,7 @@ fn tidy_middlewares(prefix: &str, plan: &Plan) -> Vec<(String, Value)> {
     out
 }
 
-/// Priority bands: Coolify's routers sit around 50-200 (the rule's length).
+/// Priority bands: the base routers sit at 100.
 const P_FIREWALL: i64 = 50_000;
 const P_REDIRECT: i64 = 40_000;
 const P_REWRITE: i64 = 30_000;
@@ -337,7 +247,7 @@ struct Shared<'a> {
 
 impl Shared<'_> {
     /// Middlewares every router for paths of `pat` (None: any path) carries.
-    fn chain(&self, pat: Option<&Pattern>, r: &CoolifyRouter) -> Vec<String> {
+    fn chain(&self, pat: Option<&Pattern>, r: &AppRouter) -> Vec<String> {
         let mut v = self.global_rates.clone();
         if let Some(p) = pat {
             v.extend(
@@ -372,7 +282,7 @@ fn dedup(v: Vec<String>) -> Vec<String> {
 
 /// The Traefik dynamic configuration for one app or preview (`key`), and
 /// notes on what couldn't be applied exactly. None: nothing to route.
-pub fn config(key: &str, routers: &[CoolifyRouter], plan: &Plan, proxy: &Proxy) -> (Option<Value>, Vec<String>) {
+pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (Option<Value>, Vec<String>) {
     let mut notes = Vec::new();
     if routers.is_empty() || !plan.routes_anything() {
         return (None, notes);
@@ -498,7 +408,7 @@ pub fn config(key: &str, routers: &[CoolifyRouter], plan: &Plan, proxy: &Proxy) 
     });
 
     for (ri, r) in routers.iter().enumerate() {
-        // Errors middlewares need a service: one per Coolify router.
+        // Errors middlewares need a service: one per base router.
         let fallback = |i: usize, dest: &str, mws: &mut Map<String, Value>| -> String {
             let name = format!("{pre}-fb{i}-{ri}");
             let mut e = json!({ "status": ["404"], "service": r.service, "query": dest });
@@ -667,123 +577,8 @@ mod tests {
     use super::*;
     use crate::project;
 
-    /// Labels as Coolify 4.4.6 writes them for an app with an https domain,
-    /// "force https" on, gzip and basic auth.
-    fn coolify_labels(uuid: &str) -> BTreeMap<String, String> {
-        [
-            ("traefik.enable", "true".to_string()),
-            ("traefik.http.middlewares.gzip.compress", "true".into()),
-            (
-                "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme",
-                "https".into(),
-            ),
-            (
-                &*format!("traefik.http.middlewares.http-basic-auth-{uuid}.basicauth.users"),
-                "u:$2y$10$x".into(),
-            ),
-            (
-                &*format!("traefik.http.routers.http-0-{uuid}.rule"),
-                "Host(`app.example.com`) && PathPrefix(`/`)".into(),
-            ),
-            (
-                &*format!("traefik.http.routers.http-0-{uuid}.entryPoints"),
-                "http".into(),
-            ),
-            (
-                &*format!("traefik.http.routers.http-0-{uuid}.service"),
-                format!("http-0-{uuid}"),
-            ),
-            (
-                &*format!("traefik.http.routers.http-0-{uuid}.middlewares"),
-                "redirect-to-https".into(),
-            ),
-            (
-                &*format!("traefik.http.services.http-0-{uuid}.loadbalancer.server.port"),
-                "3000".into(),
-            ),
-            (
-                &*format!("traefik.http.routers.https-0-{uuid}.rule"),
-                "Host(`app.example.com`) && PathPrefix(`/`)".into(),
-            ),
-            (
-                &*format!("traefik.http.routers.https-0-{uuid}.entryPoints"),
-                "https".into(),
-            ),
-            (
-                &*format!("traefik.http.routers.https-0-{uuid}.service"),
-                format!("https-0-{uuid}"),
-            ),
-            (
-                &*format!("traefik.http.routers.https-0-{uuid}.middlewares"),
-                format!("gzip,http-basic-auth-{uuid}"),
-            ),
-            (&*format!("traefik.http.routers.https-0-{uuid}.tls"), "true".into()),
-            (
-                &*format!("traefik.http.routers.https-0-{uuid}.tls.certresolver"),
-                "letsencrypt".into(),
-            ),
-            (
-                &*format!("traefik.http.services.https-0-{uuid}.loadbalancer.server.port"),
-                "3000".into(),
-            ),
-            (
-                &*format!("traefik.http.routers.http-1-{uuid}.rule"),
-                "Host(`other.example.com`) && PathPrefix(`/docs`)".into(),
-            ),
-            (
-                &*format!("traefik.http.routers.http-1-{uuid}.service"),
-                format!("http-1-{uuid}"),
-            ),
-            ("coolify.applicationUuid", uuid.into()),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v))
-        .collect()
-    }
-
-    #[test]
-    fn reads_coolifys_routers() {
-        let (routers, skipped) = coolify_routers(&coolify_labels("abc"));
-        // http-0 only redirects to https; http-1 is under a sub-path.
-        assert_eq!(routers.len(), 1);
-        let r = &routers[0];
-        assert_eq!(r.name, "https-0-abc");
-        assert_eq!(r.service, "https-0-abc@docker");
-        assert_eq!(r.middlewares, vec!["gzip@docker", "http-basic-auth-abc@docker"]);
-        assert_eq!(r.entry_points, vec!["https"]);
-        assert_eq!(r.tls, Some(json!({"certResolver": "letsencrypt"})));
-        assert_eq!(skipped.len(), 1);
-        assert!(skipped[0].contains("sub-path"));
-    }
-
-    #[test]
-    fn local_networks() {
-        let n = |s: &str| crate::project::parse_net(s).unwrap();
-        assert_eq!(
-            local_nets(None),
-            vec![n("127.0.0.0/8"), n("::1/128"), n("172.16.0.0/12")]
-        );
-        // A proxy on the host network: only loopback.
-        assert_eq!(local_nets(Some(&[])), vec![n("127.0.0.0/8"), n("::1/128")]);
-        assert_eq!(
-            local_nets(Some(&parse_subnets(
-                "10.0.1.0/24 \n192.168.32.0/20 garbage 127.0.0.0/8"
-            ))),
-            vec![n("127.0.0.0/8"), n("::1/128"), n("10.0.1.0/24"), n("192.168.32.0/20")]
-        );
-    }
-
-    #[test]
-    fn traefik_versions() {
-        assert_eq!(traefik_version("traefik:v3.7"), Some((3, 7)));
-        assert_eq!(traefik_version("traefik:3.4.1"), Some((3, 4)));
-        assert_eq!(traefik_version("docker.io/library/traefik:v2.11"), Some((2, 11)));
-        assert_eq!(traefik_version("traefik:latest").map(|v| v.0), Some(u32::MAX));
-        assert_eq!(traefik_version("traefik"), None);
-    }
-
-    fn router() -> CoolifyRouter {
-        CoolifyRouter {
+    fn router() -> AppRouter {
+        AppRouter {
             name: "http-0-abc".into(),
             rule: "Host(`a.test`) && PathPrefix(`/`)".into(),
             entry_points: vec!["http".into()],

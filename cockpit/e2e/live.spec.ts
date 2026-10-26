@@ -1,45 +1,61 @@
 import { expect, test, type Page } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import http from "node:http";
 
-// Live end-to-end: started by e2e/run-live.sh with a real agent and a real
-// Coolify. Each test drives the production UI like a user would.
+// Live end-to-end: started by e2e/run-live.sh with a real agent running
+// Vercelify's engine on this machine's Docker. Each test drives the
+// production UI like a user would.
 
+const AGENT_URL = process.env.E2E_AGENT_URL!;
 const AGENT_TOKEN = process.env.E2E_AGENT_TOKEN!;
-const COOLIFY_TOKEN = process.env.COOLIFY_TOKEN!;
 const HDD = process.env.E2E_HDD!;
+const IMAGE = process.env.E2E_IMAGE!;
+const PROXY_HTTP = process.env.E2E_PROXY_HTTP!;
+const WILDCARD = "e2e.localhost";
 
 function pairingCode(): string {
-  const json = JSON.stringify({
-    agent_url: "http://vercelify-host.tail1234.ts.net:7420",
-    agent_token: AGENT_TOKEN,
-    coolify_url: "http://vercelify-host.tail1234.ts.net:8000",
-    coolify_token: COOLIFY_TOKEN,
-    hostname: "vercelify-host",
-  });
+  // The browser preview reaches the agent through its /__agent proxy, so the
+  // address in the code is only shown.
+  const json = JSON.stringify({ agent_url: "http://10.77.0.1:7420", agent_token: AGENT_TOKEN, hostname: "vercelify-host", role: "main" });
   return "vfy1." + Buffer.from(json).toString("base64url");
 }
 
-async function coolifyApi<T = unknown>(method: string, path: string): Promise<T> {
-  const r = await fetch(`${process.env.COOLIFY_URL}/api/v1${path}`, { method, headers: { Authorization: `Bearer ${COOLIFY_TOKEN}` } });
-  return (await r.json()) as T;
+async function platformApi<T = unknown>(method: string, path: string, body?: unknown): Promise<T> {
+  const r = await fetch(`${AGENT_URL}/v1/platform${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${AGENT_TOKEN}`, "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await r.text();
+  if (!r.ok) throw new Error(`${method} ${path}: HTTP ${r.status} ${text}`);
+  return (text ? JSON.parse(text) : null) as T;
 }
 
-/** The app's live page, fetched through its domain (Coolify's proxy). */
-async function sitePage(name: string): Promise<string> {
-  const apps = await coolifyApi<{ name: string; fqdn: string | null }[]>("GET", "/applications");
-  const url = apps.find((a) => a.name === name)?.fqdn?.split(",")[0];
-  if (!url) throw new Error(`${name} has no domain`);
+/** An app's page through Vercelify's own proxy, by its host name (fetch can't set Host). */
+function sitePage(name: string): Promise<string> {
+  return new Promise((resolve) => {
+    const req = http.get({ host: "127.0.0.1", port: Number(PROXY_HTTP), path: "/", headers: { Host: `${name}.${WILDCARD}` }, timeout: 5_000 }, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => resolve(res.statusCode === 200 ? body : ""));
+    });
+    req.on("error", () => resolve(""));
+    req.on("timeout", () => req.destroy());
+  });
+}
+
+function docker(...args: string[]): string {
   try {
-    return await (await fetch(url, { signal: AbortSignal.timeout(5_000) })).text();
+    return execFileSync("docker", args).toString().trim();
   } catch {
     return "";
   }
 }
 
-function pgContainerHealthy(): boolean {
-  const out = execFileSync("docker", ["ps", "--filter", "label=coolify.resourceName=pg-main", "--format", "{{.Status}}"]).toString();
-  return out.includes("(healthy)");
+/** A command in a Redis/Valkey database's container, with its password. */
+function redis(db: string, cmd: string): string {
+  return docker("exec", `vfy-db-${db}`, "sh", "-c", `REDISCLI_AUTH="$VFY_PASSWORD" "$(command -v valkey-cli || echo redis-cli)" ${cmd}`);
 }
 
 async function shot(page: Page, name: string) {
@@ -56,6 +72,12 @@ async function paired(page: Page) {
   await expect(page.getByTestId("nav-apps")).toBeVisible();
 }
 
+test.beforeAll(async () => {
+  // Apps get <name>.e2e.localhost, served over plain HTTP by the proxy. (Each
+  // run starts with a fresh engine database: run-live.sh.)
+  await platformApi("PUT", "/settings/domain", { wildcard: WILDCARD, https: false, edge_tls: false });
+});
+
 test("onboarding rejects a bad code, then pairs", async ({ page }) => {
   await page.goto("/");
   await page.evaluate(() => localStorage.clear());
@@ -67,70 +89,65 @@ test("onboarding rejects a bad code, then pairs", async ({ page }) => {
   await expect(page.getByRole("alert")).toContainText("base64");
   await page.getByTestId("pairing-code").fill(pairingCode());
   await page.getByTestId("pair-submit").click();
-  await expect(page.getByTestId("host-status")).toContainText("via vercelify-host.tail1234.ts.net");
+  await expect(page.getByTestId("host-status")).toContainText("via 10.77.0.1");
+  await expect(page.getByTestId("platform-apps")).toBeVisible();
 });
 
-test("apps: list, deploy, deployments, build log, rollback, runtime logs", async ({ page }) => {
+test("apps: create from an image, live log, served by the proxy, redeploy, roll back, runtime logs", async ({ page }) => {
   await paired(page);
-  const app = page.getByTestId("app-gitapp");
-  await expect(app).toBeVisible();
-  await expect(app.getByTestId("app-status")).toContainText("Running");
-  await expect(page.getByTestId("app-whoami")).toBeVisible();
-  await shot(page, "02-apps");
+  await page.getByTestId("new-app").click();
+  await page.getByTestId("kind-image").click();
+  await page.getByTestId("new-image").fill(IMAGE);
+  await page.getByTestId("new-name").fill("e2e-whoami");
+  await page.getByTestId("new-port").fill("80");
+  await page.getByTestId("create-app").click();
+  await expect(page.getByTestId("app-detail")).toContainText("e2e-whoami");
+  // an image app deploys when asked (a Git app's first build starts by itself)
+  await page.getByTestId("deploy-now").click();
+  await expect(page.getByTestId("deployment-1")).toContainText("Live", { timeout: 150_000 });
+  await expect(page.getByTestId("deploy-log")).toContainText("healthy: http://e2e-whoami.e2e.localhost");
+  await shot(page, "02-deployed");
+  await expect.poll(() => sitePage("e2e-whoami"), { timeout: 60_000 }).toContain("Hostname:");
 
-  await page.getByTestId("deploy-gitapp").click();
-  await expect(page.getByText("Deployment of gitapp queued")).toBeVisible();
+  // a second deployment, then back to the first
+  await page.getByTestId("deploy-now").click();
+  await expect(page.getByTestId("deployment-2")).toContainText("Live", { timeout: 150_000 });
+  const second = docker("ps", "--filter", "label=vercelify.app-name=e2e-whoami", "--format", "{{.Names}}");
+  await page.getByTestId("rollback-1").click();
+  await expect(page.getByTestId("deployment-3")).toContainText("Live", { timeout: 150_000 });
+  await expect.poll(() => docker("ps", "--filter", "label=vercelify.app-name=e2e-whoami", "--format", "{{.Names}}"), { timeout: 60_000 }).not.toBe(second);
+  await expect.poll(() => sitePage("e2e-whoami"), { timeout: 60_000 }).toContain("Hostname:");
+  await shot(page, "03-rolled-back");
 
-  await app.getByTestId("app-open").click();
-  const rows = page.getByTestId("deployment-row");
-  await expect(rows.first()).toBeVisible();
-  // the deploy we just triggered finishes (Dockerfile build from git)
-  await expect(rows.first()).toContainText("Ready", { timeout: 150_000 });
-  await expect(page.getByTestId("rollback").first()).toBeVisible();
-  await shot(page, "03-deployments");
-
-  await rows.first().getByRole("button", { name: "Logs" }).click();
-  await expect(page.getByTestId("build-log")).toContainText("Rolling update completed");
-  await shot(page, "04-build-log");
+  // what the app itself prints
+  await page.getByTestId("tab-logs").click();
+  await expect(page.getByTestId("runtime-log")).toBeVisible();
   await page.keyboard.press("Escape");
-
-  // Roll back to the previous commit and check the live site really serves it.
-  const before = await sitePage("gitapp");
-  const target = page.getByTestId("deployment-row").filter({ has: page.getByTestId("rollback") }).first();
-  const sha = (await target.locator("code").first().textContent())!.trim();
-  await target.getByTestId("rollback").click();
-  await expect(page.getByText(`Rolling back gitapp to ${sha}`)).toBeVisible();
-  await expect(rows.first()).toContainText("Current", { timeout: 150_000 });
-  await expect(rows.first()).toContainText(sha);
-  await expect(rows.first()).toContainText("Ready");
-  await expect.poll(() => sitePage("gitapp"), { timeout: 60_000 }).not.toBe(before);
-  await shot(page, "04b-rolled-back");
-
-  await page.getByTestId("detail-tab-logs").click();
-  await expect(page.locator("pre").first()).toContainText(/nginx|worker/);
-  await page.getByTestId("detail-tab-previews").click();
-  await expect(page.getByText(/No preview deployments|PR #/)).toBeVisible();
+  await expect(page.getByTestId("status-e2e-whoami")).toContainText("Live");
 });
 
-test("one-click database provisioning", async ({ page }) => {
+test("databases: one-click Redis, its URL, a backup (or why not)", async ({ page }) => {
   await paired(page);
-  const name = `e2e-redis-${Date.now().toString(36)}`;
-  await page.getByTestId("new-database").click();
+  await page.getByTestId("new-db").click();
   await page.getByTestId("db-kind").selectOption("redis");
-  await page.getByTestId("db-name").fill(name);
+  await page.getByTestId("db-name").fill("e2e-cache");
   await page.getByTestId("db-create").click();
-  await expect(page.getByText(`${name} is starting`)).toBeVisible();
-  const row = page.getByTestId(`db-${name}`);
-  await expect(row).toBeVisible();
-  await expect(row).toContainText("Running", { timeout: 120_000 });
-  await expect(row.getByRole("button", { name: "Copy URL" })).toBeVisible();
-  await shot(page, "05-databases");
-  // clean up through the API so repeated runs don't pile up databases
-  const dbs = await coolifyApi<{ uuid: string; name: string }[]>("GET", "/databases");
-  for (const d of dbs.filter((x) => x.name.startsWith("e2e-redis-"))) await coolifyApi("DELETE", `/databases/${d.uuid}`);
+  await expect(page.getByTestId("db-detail")).toContainText("e2e-cache");
+  await expect(page.getByTestId("db-url")).toContainText("redis://");
+  await expect.poll(() => redis("e2e-cache", "ping"), { timeout: 120_000 }).toContain("PONG");
+  await page.getByTestId("db-backup").click();
+  // Backups go to the server's restic repository: without one, it says how to set it up.
+  if (process.env.E2E_RESTIC) await expect(page.getByTestId("db-backups")).toContainText("just now", { timeout: 60_000 });
+  else await expect(page.getByText("backups aren't set up on this server: sudo vercelify backup setup")).toBeVisible();
+  await shot(page, "04-database");
 });
 
-test("storage: tiers, assistant, move a live Postgres between SSD and HDD", async ({ page }) => {
+test("storage: tiers, assistant, move a live database between SSD and HDD", async ({ page }) => {
+  // its own database, with a key to find again after the moves
+  await platformApi("POST", "/databases", { name: "e2e-store", kind: "redis" });
+  await expect.poll(() => redis("e2e-store", "ping"), { timeout: 120_000 }).toContain("PONG");
+  redis("e2e-store", "set e2e survives");
+  redis("e2e-store", "save");
   await paired(page);
   await page.getByTestId("nav-storage").click();
   await expect(page.getByTestId("tier-card-ssd")).toContainText("free");
@@ -147,51 +164,35 @@ test("storage: tiers, assistant, move a live Postgres between SSD and HDD", asyn
   expect(existsSync(`${HDD}/volumes/e2e-postgres/data`)).toBe(true);
   await page.getByTestId("service-name").fill("Bad Name");
   await expect(page.getByRole("alert")).toContainText("Service name");
-  await shot(page, "06-storage");
+  await shot(page, "05-storage");
 
-  // Move pg-main (whichever tier it is on) and back, checking the data survives.
-  const pg = page.locator('[data-testid^="volume-postgres-data-"]').first();
-  await expect(pg).toBeVisible();
+  // Move the database's data (whichever tier it is on) and back; it survives.
+  const row = page.getByTestId("pvolume-e2e-store-data");
+  await expect(row).toBeVisible();
   for (let i = 0; i < 2; i++) {
-    const button = pg.getByRole("button", { name: /Move to/ });
+    const button = row.getByRole("button", { name: /Move to/ });
     const target = (await button.textContent())!.includes("HDD") ? "HDD" : "SSD";
     await button.click();
-    await page.getByTestId("move-confirm").click();
-    await expect(page.getByTestId("move-steps").locator("svg.text-ok")).toHaveCount(4, { timeout: 150_000 });
-    await shot(page, `07-move-${target.toLowerCase()}`);
-    await page.getByRole("button", { name: "Close", exact: true }).last().click();
-    await expect(pg.getByText(target, { exact: true })).toBeVisible();
-    // the restart has been queued; wait until Postgres is really up again
-    await expect.poll(() => pgContainerHealthy(), { timeout: 120_000 }).toBe(true);
+    await page.getByTestId("pmove-run").click();
+    await expect(page.getByText(`is on the ${target} now`)).toBeVisible({ timeout: 150_000 });
+    await expect(row.getByText(target, { exact: true })).toBeVisible();
+    await shot(page, `06-move-${target.toLowerCase()}`);
   }
-  // Wait for Postgres to be healthy, then check the row written before any move.
-  const container = execFileSync("docker", ["ps", "--filter", "label=coolify.resourceName=pg-main", "--format", "{{.Names}}"]).toString().trim();
   await expect
-    .poll(
-      () => {
-        try {
-          return execFileSync("docker", ["exec", container, "psql", "-U", "postgres", "-tAc", "select v from t"]).toString().trim();
-        } catch {
-          return "";
-        }
-      },
-      { timeout: 90_000 },
-    )
-    .toBe("survives the move");
+    .poll(() => redis("e2e-store", "get e2e"), { timeout: 90_000 })
+    .toBe("survives");
 });
 
-test("node health: resources, power, tailscale, containers, logs, services", async ({ page }) => {
+test("node health: resources, power, containers, logs, services", async ({ page }) => {
   await paired(page);
   await page.getByTestId("nav-health").click();
   await expect(page.getByTestId("resources")).toContainText("CPU");
   await expect(page.getByTestId("power-source")).toBeVisible();
-  await expect(page.getByTestId("ts-host")).toContainText("vercelify-host.tail1234.ts.net");
-  await expect(page.getByTestId("ts-peer")).toHaveCount(2);
-  const coolifyRow = page.getByTestId("container-coolify");
-  await expect(coolifyRow).toBeVisible();
-  await expect(coolifyRow).toContainText("%");
-  await shot(page, "08-health");
-  await coolifyRow.getByRole("button", { name: "Logs" }).click();
+  const proxy = page.getByTestId("container-vercelify-proxy");
+  await expect(proxy).toBeVisible();
+  await expect(proxy).toContainText("%");
+  await shot(page, "07-health");
+  await proxy.getByRole("button", { name: "Logs" }).click();
   await expect(page.getByTestId("container-logs")).not.toBeEmpty();
   await expect(page.getByTestId("container-logs")).not.toHaveText("Loading…");
   await page.keyboard.press("Escape");
@@ -208,7 +209,7 @@ test("screencast: host receiver starts; desktop-only sender is reported clearly"
   // roll back the receiver it started on the host.
   await expect(page.getByText("Available in the desktop app only")).toBeVisible();
   await expect(page.getByTestId("start-extend")).toBeVisible();
-  await shot(page, "09-screencast");
+  await shot(page, "08-screencast");
 });
 
 test("settings: unpair returns to onboarding", async ({ page }) => {

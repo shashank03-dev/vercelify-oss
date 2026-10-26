@@ -30,7 +30,7 @@ export function useSession(): Session {
   return s;
 }
 
-/** Host part of the agent URL, e.g. "vercelify-host.tail1234.ts.net". */
+/** Host part of the agent URL, e.g. "10.77.0.1". */
 export function agentHost(s: CockpitSettings): string {
   try {
     return new URL(s.agent_url).hostname;

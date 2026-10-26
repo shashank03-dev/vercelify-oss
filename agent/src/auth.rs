@@ -176,7 +176,7 @@ mod tests {
             "/v1/backup/run",
             "/v1/services/docker/restart",
             "/v1/platform/projects",
-            "/v1/coolify/volumes/3/move",
+            "/v1/volumes",
         ] {
             assert!(!can(d, Method::POST, p), "{p}");
         }

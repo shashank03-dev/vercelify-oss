@@ -17,15 +17,9 @@ pub const PREFIX_MESH: &str = "vfy2.";
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct Pairing {
-    /// e.g. `http://vercelify-host.tail1234.ts.net:7420`
+    /// e.g. `http://10.77.0.1:7420` (the server's mesh address).
     pub agent_url: String,
     pub agent_token: String,
-    /// e.g. `http://vercelify-host.tail1234.ts.net:8000`
-    pub coolify_url: String,
-    /// Coolify API token created by the installer (optional).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub coolify_token: Option<String>,
     pub hostname: String,
     /// `main` or `worker` (absent in codes from 0.1).
     #[serde(default, skip_serializing_if = "Option::is_none")]

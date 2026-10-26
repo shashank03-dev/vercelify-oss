@@ -108,7 +108,7 @@ fn save(cfg: &Config, s: &State) -> Result<(), String> {
 fn platform_cfg(cfg: &Config) -> Config {
     let mut c = cfg.clone();
     c.engine = "platform".into();
-    c.apply_engine_defaults();
+    c.apply_defaults();
     c
 }
 
@@ -516,7 +516,7 @@ fn copy_volume(cfg: &Config, v: &VolumeCopy, st: &mut State) -> Result<(), Strin
 /// Coolify's Let's Encrypt certificates, for our proxy (its resolver
 /// renamed to ours). Never over certificates of our own.
 fn take_certificates(cfg: &Config) -> Result<bool, String> {
-    let src = cfg.proxy_dir.join("acme.json");
+    let src = cfg.coolify_data_dir.join("proxy").join("acme.json");
     // Traefik's placeholder before its first certificate is empty.
     let Some(raw) = std::fs::read_to_string(&src).ok().filter(|r| !r.trim().is_empty()) else {
         return Ok(false);
@@ -835,14 +835,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut cfg = Config {
             state_dir: dir.path().join("state"),
-            proxy_dir: dir.path().join("coolify-proxy"),
+            coolify_data_dir: dir.path().join("coolify"),
             ..Config::default()
         };
         cfg.engine = "coolify".into();
+        cfg.apply_defaults();
         assert!(!take_certificates(&cfg).unwrap(), "no Coolify certificates");
-        std::fs::create_dir_all(&cfg.proxy_dir).unwrap();
+        let theirs = cfg.coolify_data_dir.join("proxy");
+        std::fs::create_dir_all(&theirs).unwrap();
         std::fs::write(
-            cfg.proxy_dir.join("acme.json"),
+            theirs.join("acme.json"),
             r#"{"letsencrypt": {"Account": {"Email": "a@b.c"}, "Certificates": [{"domain": {"main": "x.test"}}]}}"#,
         )
         .unwrap();

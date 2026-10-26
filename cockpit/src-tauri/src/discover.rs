@@ -1,43 +1,33 @@
-//! Finding Vercelify hosts on the tailnet: every online Linux peer is asked
-//! for `/v1/health` on the agent port (unauthenticated, tiny, 2 s timeout).
+//! Finding Vercelify servers among this computer's mesh peers: every server
+//! peer is asked for `/v1/health` on the agent port (unauthenticated, tiny,
+//! 2 s timeout).
 
 use std::time::Duration;
-use vercelify_core::{DiscoveredServer, Health, TailscaleNode, TailscaleStatus, DEFAULT_AGENT_PORT};
+use vercelify_core::{DiscoveredServer, Health, MeshLocal, MeshPeer, DEFAULT_AGENT_PORT};
 
-/// Peers worth probing: online, not this machine, and not phones or Macs.
-pub fn candidates(ts: &TailscaleStatus) -> Vec<&TailscaleNode> {
-    ts.peers
+/// Peers worth probing: servers with an IPv4 mesh address (devices such as
+/// phones and other Macs run no agent).
+pub fn candidates(local: &MeshLocal) -> Vec<(&MeshPeer, &str)> {
+    local
+        .peers
         .iter()
-        .filter(|p| p.online && !p.ips.is_empty())
-        .filter(|p| {
-            let os = p.os.to_ascii_lowercase();
-            os.is_empty() || os == "linux"
+        .filter(|p| p.kind.as_deref().unwrap_or("server") == "server")
+        .filter_map(|p| {
+            p.addresses
+                .iter()
+                .find(|a| a.parse::<std::net::Ipv4Addr>().is_ok())
+                .map(|ip| (p, ip.as_str()))
         })
         .collect()
 }
 
-fn ipv4(node: &TailscaleNode) -> Option<&str> {
-    node.ips
-        .iter()
-        .find(|ip| ip.parse::<std::net::Ipv4Addr>().is_ok())
-        .or_else(|| node.ips.first())
-        .map(String::as_str)
-}
-
-pub async fn discover(client: &reqwest::Client, ts: TailscaleStatus) -> Vec<DiscoveredServer> {
+pub async fn discover(client: &reqwest::Client, local: MeshLocal) -> Vec<DiscoveredServer> {
     let mut set = tokio::task::JoinSet::new();
-    for peer in candidates(&ts) {
-        let Some(ip) = ipv4(peer).map(String::from) else {
-            continue;
-        };
-        let host = if ip.contains(':') {
-            format!("[{ip}]")
-        } else {
-            ip.clone()
-        };
-        let agent_url = format!("http://{host}:{DEFAULT_AGENT_PORT}");
+    for (peer, ip) in candidates(&local) {
+        let agent_url = format!("http://{ip}:{DEFAULT_AGENT_PORT}");
         let client = client.clone();
-        let peer = peer.clone();
+        let name = peer.name.clone();
+        let ip = ip.to_string();
         set.spawn(async move {
             let health: Health = client
                 .get(format!("{agent_url}/v1/health"))
@@ -50,13 +40,11 @@ pub async fn discover(client: &reqwest::Client, ts: TailscaleStatus) -> Vec<Disc
                 .ok()?;
             health.ok.then(|| DiscoveredServer {
                 hostname: if health.hostname.is_empty() {
-                    peer.hostname.clone()
+                    name
                 } else {
                     health.hostname
                 },
-                dns_name: peer.dns_name.clone(),
                 ip,
-                os: peer.os.clone(),
                 agent_url,
                 version: health.version,
                 role: if health.role.is_empty() {
@@ -83,33 +71,33 @@ pub async fn discover(client: &reqwest::Client, ts: TailscaleStatus) -> Vec<Disc
 mod tests {
     use super::*;
 
-    fn node(name: &str, os: &str, online: bool, ips: &[&str]) -> TailscaleNode {
-        TailscaleNode {
-            hostname: name.into(),
-            os: os.into(),
-            online,
-            ips: ips.iter().map(|s| s.to_string()).collect(),
-            ..Default::default()
+    fn peer(name: &str, kind: Option<&str>, addresses: &[&str]) -> MeshPeer {
+        MeshPeer {
+            name: name.into(),
+            kind: kind.map(String::from),
+            addresses: addresses.iter().map(|s| s.to_string()).collect(),
+            path: "lan".into(),
+            endpoint: None,
+            rtt_ms: None,
+            handshake_secs: None,
         }
     }
 
     #[test]
-    fn picks_online_linux_peers() {
-        let ts = TailscaleStatus {
+    fn picks_server_peers() {
+        let local = MeshLocal {
             peers: vec![
-                node("laptop", "linux", true, &["fd7a:115c::1", "100.64.0.2"]),
-                node("phone", "iOS", true, &["100.64.0.3"]),
-                node("old", "linux", false, &["100.64.0.4"]),
-                node("pi", "", true, &["100.64.0.5"]),
-                node("mac", "macOS", true, &["100.64.0.6"]),
+                peer("laptop", Some("server"), &["fd76:6679:6d65::2", "10.77.0.2"]),
+                peer("phone", Some("device"), &["10.77.0.3"]),
+                peer("pi", None, &["10.77.0.4"]),
+                peer("v6only", Some("server"), &["fd76:6679:6d65::5"]),
             ],
             ..Default::default()
         };
-        let c = candidates(&ts);
+        let c = candidates(&local);
         assert_eq!(
-            c.iter().map(|n| n.hostname.as_str()).collect::<Vec<_>>(),
-            ["laptop", "pi"]
+            c.iter().map(|(p, ip)| (p.name.as_str(), *ip)).collect::<Vec<_>>(),
+            [("laptop", "10.77.0.2"), ("pi", "10.77.0.4")]
         );
-        assert_eq!(ipv4(c[0]), Some("100.64.0.2"), "IPv4 preferred");
     }
 }

@@ -2,14 +2,15 @@
 //! keeping the proxy's routes in line with it, and running its cron jobs.
 //!
 //! The configuration comes from the repository at the deployed commit (read
-//! through GitHub's API when auto-deploy deploys a branch or a pull request),
+//! when the platform deploys a branch or a pull request),
 //! or is uploaded from the app or `vfy` (any Git host). An upload wins until
 //! it is removed.
 //!
-//! Once a minute (and right after a change) the agent reads the labels of the
-//! app's container, builds the routes (`routing.rs`) and writes one file per
-//! app or preview into Coolify's proxy configuration folder, where Traefik
-//! picks it up without a restart. Nothing runs when no app has rules.
+//! Once a minute (and right after a change) the agent reads the app's base
+//! routes from the platform engine, builds the routes (`routing.rs`) and
+//! writes one file per app or preview into our proxy's configuration
+//! folder, where Traefik picks it up without a restart. Nothing runs when no
+//! app has rules.
 //!
 //! Cron jobs run like on Vercel: a GET to the production URL at the scheduled
 //! minute (UTC) with `Authorization: Bearer $CRON_SECRET` when the app has
@@ -22,7 +23,7 @@ use crate::error::AppError;
 use crate::events::{Events, JobHandle, Jobs};
 use crate::exec::run;
 use crate::project::{self, Plan};
-use crate::routing::{self, CoolifyRouter, Proxy};
+use crate::routing::{self, AppRouter, Proxy};
 use crate::watch::{Change, Watcher};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap, HashSet};
@@ -106,63 +107,6 @@ pub fn key_for(app_uuid: &str, pr: u64) -> String {
 
 // --- pure helpers -----------------------------------------------------------
 
-/// One of Coolify's app containers, from `docker inspect`.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Container {
-    pub id: String,
-    pub key: String,
-    pub running: bool,
-    /// Creation time (seconds since the epoch, UTC).
-    pub created: i64,
-    pub labels: BTreeMap<String, String>,
-    pub env: Vec<String>,
-}
-
-/// `docker inspect` lines: id, running, created (RFC 3339, UTC), labels and
-/// environment as JSON (tab-separated; JSON never holds a raw tab).
-pub const INSPECT_FORMAT: &str =
-    "{{.Id}}\t{{.State.Running}}\t{{.Created}}\t{{json .Config.Labels}}\t{{json .Config.Env}}";
-
-pub fn parse_inspect(out: &str) -> Vec<Container> {
-    out.lines()
-        .filter_map(|l| {
-            let f: Vec<&str> = l.splitn(5, '\t').collect();
-            if f.len() != 5 {
-                return None;
-            }
-            let labels: BTreeMap<String, String> = serde_json::from_str(f[3]).ok()?;
-            let uuid = labels.get("coolify.applicationUuid").filter(|u| !u.is_empty())?;
-            let pr = labels
-                .get("coolify.pullRequestId")
-                .and_then(|p| p.parse().ok())
-                .unwrap_or(0);
-            Some(Container {
-                id: f[0].to_string(),
-                key: key_for(uuid, pr),
-                running: f[1] == "true",
-                created: chrono::DateTime::parse_from_rfc3339(f[2]).map_or(0, |t| t.timestamp()),
-                env: serde_json::from_str(f[4]).unwrap_or_default(),
-                labels,
-            })
-        })
-        .collect()
-}
-
-/// The container whose labels count for each key: a running one, else the
-/// newest (its labels are what Coolify will start next).
-pub fn pick(containers: Vec<Container>) -> HashMap<String, Container> {
-    let mut best: HashMap<String, Container> = HashMap::new();
-    for c in containers {
-        let better = best
-            .get(&c.key)
-            .is_none_or(|b| (c.running, c.created) > (b.running, b.created));
-        if better {
-            best.insert(c.key.clone(), c);
-        }
-    }
-    best
-}
-
 /// `Host(`a`) || Host(`b`)` → [a, b].
 pub fn hosts_in(rule: &str) -> Vec<String> {
     let mut out = Vec::new();
@@ -178,7 +122,7 @@ pub fn hosts_in(rule: &str) -> Vec<String> {
 }
 
 /// Where cron jobs call the app: its https address when it has one.
-pub fn cron_base(routers: &[CoolifyRouter]) -> Option<String> {
+pub fn cron_base(routers: &[AppRouter]) -> Option<String> {
     let pick = routers.iter().find(|r| r.tls.is_some()).or_else(|| routers.first())?;
     let host = hosts_in(&pick.rule).into_iter().next()?;
     let scheme = if pick.tls.is_some() { "https" } else { "http" };
@@ -200,13 +144,6 @@ pub fn curl_config(base: &str, path: &str, secret: Option<&str>, http_port: u16,
         c.push_str(&format!("header = \"Authorization: Bearer {}\"\n", clean(s)));
     }
     c
-}
-
-/// `KEY=value` from a container's environment list.
-pub fn env_value(env: &[String], key: &str) -> Option<String> {
-    env.iter()
-        .find_map(|e| e.strip_prefix(key)?.strip_prefix('=').map(String::from))
-        .filter(|v| !v.is_empty())
 }
 
 /// Uploaded files: known names only, small, valid. Returned in the order
@@ -286,16 +223,16 @@ pub struct Projects {
     events: Arc<Events>,
     jobs: Arc<Jobs>,
     watcher: OnceLock<Arc<Watcher>>,
-    /// The platform engine, when this server runs it instead of Coolify.
+    /// The platform engine (none on a server not migrated yet).
     engine: OnceLock<Arc<vercelify_platform::engine::Engine>>,
 }
 
 /// A platform app's base routers and its `CRON_SECRET`.
-type PlatformRoutes = (Vec<CoolifyRouter>, Option<String>);
+type PlatformRoutes = (Vec<AppRouter>, Option<String>);
 
 /// The base routers of a platform app or preview, in the shape the
 /// `vercel.json` layer copies (it sits above them at higher priorities).
-pub fn platform_routers(route: &vercelify_platform::proxy::Route) -> Vec<CoolifyRouter> {
+pub fn platform_routers(route: &vercelify_platform::proxy::Route) -> Vec<AppRouter> {
     use vercelify_platform::proxy::{router_name, service_name, RESOLVER};
     let auth = (!route.basic_auth.is_empty()).then(|| format!("vfy-{}-auth@file", route.key));
     route
@@ -303,7 +240,7 @@ pub fn platform_routers(route: &vercelify_platform::proxy::Route) -> Vec<Coolify
         .iter()
         .enumerate()
         .filter(|(_, h)| h.redirect_to.is_none())
-        .map(|(i, h)| CoolifyRouter {
+        .map(|(i, h)| AppRouter {
             name: router_name(&route.key, i, h.https),
             rule: format!("Host(`{}`)", h.host),
             entry_points: vec![if h.https { "websecure" } else { "web" }.to_string()],
@@ -343,7 +280,6 @@ impl Projects {
         }
     }
 
-    /// Route the platform engine's apps instead of Coolify's.
     pub fn set_engine(&self, e: Arc<vercelify_platform::engine::Engine>) {
         let _ = self.engine.set(e);
     }
@@ -501,8 +437,8 @@ impl Projects {
 
     /// Upload from the app or `vfy` (production).
     pub async fn upload(&self, app_uuid: &str, files: Vec<(String, String)>) -> Result<ProjectInfo, AppError> {
-        if !crate::autodeploy::valid_app_uuid(app_uuid) {
-            return Err(AppError::bad_request("invalid app uuid"));
+        if !crate::sleep::valid_app_id(app_uuid) {
+            return Err(AppError::bad_request("invalid app id"));
         }
         let files = check_upload(&files).map_err(AppError::bad_request)?;
         self.put(app_uuid, 0, "upload", files, None).await;
@@ -570,17 +506,6 @@ impl Projects {
         any
     }
 
-    pub async fn preview_keys(&self, app_uuid: &str) -> Vec<(u64, String)> {
-        self.store
-            .lock()
-            .await
-            .projects
-            .iter()
-            .filter(|p| p.app_uuid == app_uuid && p.pr != 0)
-            .map(|p| (p.pr, p.key.clone()))
-            .collect()
-    }
-
     // --- proxy routes -------------------------------------------------------
 
     async fn docker(&self, args: &[&str]) -> Option<String> {
@@ -589,28 +514,6 @@ impl Projects {
             .ok()
             .filter(|o| o.success())
             .map(|o| o.stdout)
-    }
-
-    /// The chosen container for each key. None: Docker couldn't be asked
-    /// (then nothing is changed).
-    async fn containers(&self) -> Option<HashMap<String, Container>> {
-        let ids = self
-            .docker(&["ps", "-aq", "--no-trunc", "--filter", "label=coolify.applicationUuid"])
-            .await?;
-        let ids: Vec<&str> = ids.split_whitespace().collect();
-        if ids.is_empty() {
-            return Some(HashMap::new());
-        }
-        let mut args = vec!["inspect", "--format", INSPECT_FORMAT];
-        args.extend(ids);
-        // A container removed since `ps` (a deploy finishing) fails the
-        // command but the others are still printed.
-        let out = run(&self.cfg.docker_bin, &args, Duration::from_secs(20)).await.ok()?;
-        let found = parse_inspect(&out.stdout);
-        if found.is_empty() && !out.success() {
-            return None;
-        }
-        Some(pick(found))
     }
 
     /// The proxy's image and the subnets of its Docker networks (None: they
@@ -649,7 +552,7 @@ impl Projects {
                 }
                 if !dir.is_dir() {
                     return Err(format!(
-                        "Coolify's proxy folder {} is missing — open Coolify → Servers → Proxy once",
+                        "the proxy's folder {} is missing (the agent creates it when the proxy starts)",
                         dir.display()
                     ));
                 }
@@ -709,7 +612,7 @@ impl Projects {
         let too_old = version.is_some_and(|v| v.0 < 3);
         *self.error.lock().await = if too_old {
             Some(format!(
-                "Coolify's proxy runs {}; project rules need Traefik 3 (Coolify → Servers → Proxy → upgrade)",
+                "the proxy runs {}; project rules need Traefik 3 (sudo vercelify update)",
                 image.clone().unwrap_or_default()
             ))
         } else if image.is_none() {
@@ -717,29 +620,13 @@ impl Projects {
         } else {
             None
         };
-        let platform = match self.engine.get() {
-            Some(e) => match self.platform_routes(e) {
-                Some(m) => Some(m),
-                None => {
-                    *self.error.lock().await =
-                        Some("can't read the platform's apps right now; routes are unchanged".into());
-                    return;
-                }
-            },
-            None => None,
+        let Some(engine) = self.engine.get() else {
+            *self.error.lock().await = Some("project rules need the platform engine: sudo vercelify migrate".into());
+            return;
         };
-        let containers = if platform.is_some() {
-            HashMap::new()
-        } else {
-            match self.containers().await {
-                Some(c) => c,
-                None => {
-                    // Leave the routes as they are rather than drop them all.
-                    *self.error.lock().await =
-                        Some("can't read Docker's containers right now; routes are unchanged".into());
-                    return;
-                }
-            }
+        let Some(platform) = self.platform_routes(engine) else {
+            *self.error.lock().await = Some("can't read the platform's apps right now; routes are unchanged".into());
+            return;
         };
         let mut live = HashMap::new();
         for p in &projects {
@@ -753,28 +640,16 @@ impl Projects {
                     continue;
                 }
             };
-            let from_platform = platform.as_ref().map(|m| m.get(&p.key));
-            let (routers, skipped) = match (from_platform, containers.get(&p.key)) {
-                (Some(Some((routers, secret))), _) => {
+            let routers = match platform.get(&p.key) {
+                Some((routers, secret)) => {
                     l.cron_secret = secret.clone();
-                    (routers.clone(), vec![])
+                    routers.clone()
                 }
-                (Some(None), _) => {
+                None => {
                     l.error = Some("this app isn't deployed yet (or it runs on another server)".into());
-                    (vec![], vec![])
-                }
-                (None, Some(c)) => {
-                    l.cron_secret = env_value(&c.env, "CRON_SECRET");
-                    routing::coolify_routers(&c.labels)
-                }
-                (None, None) => {
-                    l.error = Some(
-                        "no container for this app on this server yet (deploy it, or it runs on another server)".into(),
-                    );
-                    (vec![], vec![])
+                    vec![]
                 }
             };
-            l.notes.extend(skipped);
             l.hosts = routers.iter().flat_map(|r| hosts_in(&r.rule)).collect();
             l.hosts.sort();
             l.hosts.dedup();
@@ -1031,35 +906,6 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn picks_running_then_newest() {
-        let line = |id: &str, running: bool, created: &str, uuid: &str, pr: &str| {
-            format!(
-                "{id}\t{running}\t{created}\t{{\"coolify.applicationUuid\":\"{uuid}\",\"coolify.pullRequestId\":\"{pr}\",\"x\":\"a\\tb\"}}\t[\"CRON_SECRET=s\"]"
-            )
-        };
-        let out = [
-            line("a1", false, "2026-10-20T10:00:00.5Z", "u1", ""),
-            line("a2", true, "2026-10-19T10:00:00Z", "u1", "0"),
-            line("a3", false, "2026-10-21T10:00:00Z", "u1", ""),
-            // Docker prints a variable number of fraction digits: compared as times.
-            line("b1", false, "2026-10-21T10:00:00.9Z", "u1", "7"),
-            line("b2", false, "2026-10-21T10:00:00.12345Z", "u1", "7"),
-            line("c1", true, "2026-10-21T10:00:00Z", "", ""),
-            "garbage".to_string(),
-        ]
-        .join("\n");
-        let found = parse_inspect(&out);
-        assert_eq!(found.len(), 5);
-        assert_eq!(found[0].env, vec!["CRON_SECRET=s"]);
-        assert_eq!(found[0].labels.get("x").map(String::as_str), Some("a\tb"));
-        let p = pick(found);
-        assert_eq!(p.get("u1").map(|c| c.id.as_str()), Some("a2"));
-        // Same second: the later fraction wins regardless of its length.
-        assert_eq!(p.get("u1-pr-7").map(|c| c.id.as_str()), Some("b1"));
-        assert_eq!(p.len(), 2);
-    }
-
-    #[test]
     fn platform_base_routers() {
         use vercelify_platform::proxy::{Route, RouteHost};
         let r = Route {
@@ -1103,7 +949,7 @@ mod tests {
             hosts_in("(Host(`A.test`) || Host(`b.test`)) && PathPrefix(`/`)"),
             vec!["a.test", "b.test"]
         );
-        let r = |tls: bool, host: &str| CoolifyRouter {
+        let r = |tls: bool, host: &str| AppRouter {
             name: "x".into(),
             rule: format!("Host(`{host}`) && PathPrefix(`/`)"),
             entry_points: vec![],
@@ -1127,10 +973,6 @@ mod tests {
         assert!(c.contains("header = \"Authorization: Bearer s3cret\""));
         assert!(c.contains("user-agent = \"vercel-cron/1.0\""));
         assert!(!curl_config("http://a", "/", None, 80, 443).contains("Authorization"));
-        let env = vec!["PATH=/bin".to_string(), "CRON_SECRET=abc=def".into(), "EMPTY=".into()];
-        assert_eq!(env_value(&env, "CRON_SECRET").as_deref(), Some("abc=def"));
-        assert_eq!(env_value(&env, "EMPTY"), None);
-        assert_eq!(env_value(&env, "CRON"), None);
     }
 
     #[test]
@@ -1263,7 +1105,7 @@ mod tests {
         std::fs::create_dir_all(cfg.proxy_dir.join("dynamic")).unwrap();
         // Left over from an app that no longer has rules.
         std::fs::write(cfg.proxy_dir.join("dynamic/vercelify-routes-gone.yaml"), "x").unwrap();
-        std::fs::write(cfg.proxy_dir.join("dynamic/coolify.yaml"), "keep").unwrap();
+        std::fs::write(cfg.proxy_dir.join("dynamic/base-blog.yaml"), "keep").unwrap();
         let events = Arc::new(Events::default());
         let jobs = Arc::new(Jobs::load(&cfg, events.clone()));
         let p = Projects::load(cfg.clone(), events.clone(), jobs.clone());
@@ -1272,18 +1114,20 @@ mod tests {
         assert_eq!(info.source, "upload");
         assert!(info.summary.clean_urls);
         assert!(!info.routes_active);
-        // Docker can't be asked here: routes are left alone, and that is said.
+        // No platform engine here: routes are left alone, and that is said.
         assert!(info.error.is_none());
-        assert!(p.status().await.error.is_some_and(|e| e.contains("Docker")));
+        assert!(p.status().await.error.is_some_and(|e| e.contains("platform engine")));
         assert!(!cfg.proxy_dir.join("dynamic/vercelify-routes-gone.yaml").exists());
-        assert!(cfg.proxy_dir.join("dynamic/coolify.yaml").exists());
+        assert!(
+            cfg.proxy_dir.join("dynamic/base-blog.yaml").exists(),
+            "not ours to remove"
+        );
         // An upload wins over the repository.
         p.set_from_repo("abc123", 0, vec![("vercel.json".into(), "{}".into())], "deadbeef")
             .await;
         assert_eq!(p.get("abc123").await.unwrap().source, "upload");
         // Previews come from the repository.
         p.set_from_repo("abc123", 7, files.clone(), "cafe").await;
-        assert_eq!(p.preview_keys("abc123").await, vec![(7, "abc123-pr-7".to_string())]);
         assert_eq!(p.get("abc123-pr-7").await.unwrap().commit.as_deref(), Some("cafe"));
         // The file was deleted from the branch: its rules go too.
         p.set_from_repo("abc123", 7, vec![], "beef").await;

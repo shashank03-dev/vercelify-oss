@@ -2,7 +2,7 @@
 
 export type Health = { ok: boolean, version: string, hostname: string, 
 /**
- * `main` (runs Coolify) or `worker` (Docker + agent only).
+ * `main` (runs the platform engine) or `worker` (runs apps for it).
  */
 role: string, 
 /**

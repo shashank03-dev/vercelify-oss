@@ -784,7 +784,7 @@ container block). A database's public port changing bumps the map version.
   rebuilds two chains for both address families: `VERCELIFY-MESH` (jumped to from INPUT for
   `vfy0`) and `VERCELIFY-MESH-FWD` (from `DOCKER-USER`, matching published ports with
   `conntrack --ctorigdstport`). Servers: accept all. Devices: accept only their
-  `allowed_ports` (`DEVICE_PORTS`: 7420, 80, 443, 8000 (Coolify, until M10), 11434/tcp, 5600–5610/udp). Anything else
+  `allowed_ports` (`DEVICE_PORTS`: 7420, 80, 443, 11434/tcp, 5600–5610/udp). Anything else
   from the mesh: drop. Plain iptables rules, no ipset: a mesh has tens of devices, not
   thousands. `vfy0` joins `tailscale0` in the container isolation rules (containers can't
   reach the mesh).
@@ -967,3 +967,29 @@ The state file's phases are `importing` → `imported` → `switched` →
 `finished`, or `rolled_back`; a step interrupted halfway is rolled back
 rather than resumed, except `imported`, which resumes at the switch. Tested
 against a real Coolify 4.4.6 by `host/tests/contract/migrate.sh`.
+
+### 18.1 After the switch
+
+Vercelify's engine is the only one. What the agent still knows about Coolify
+is what the migration needs: `coolify_container`, `coolify_data_dir` and the
+export script. A server that still runs Coolify (an `agent.toml` without
+`engine`, and Coolify's `.env` present) reports no `platform` capability: its
+apps keep running, the cockpit's Apps page shows how to migrate, and project
+rules, sleeping apps and push-to-deploy say they need the engine. The
+Coolify, SSH-key and Tailscale integrations of the agent (`coolify.rs`,
+`autodeploy.rs`, `ssh.rs`, `tailscale.rs`) and of the cockpit
+(`types/coolify.ts`, the embedded Coolify window, pools of Coolify servers) are
+gone.
+
+Tailscale is not required anywhere. Two things still accept it on a server
+that has it, so nobody is cut off mid-move: the `"tailscale"` entry of the
+agent's `listen` list, and a private address taken from `tailscale ip -4`
+when the server is on no mesh (`pair --tailscale`, the display receiver's
+address, the AI endpoint). The cockpit finds servers among its own mesh
+peers (`discover_servers` probes each server peer's `/v1/health`) and on the
+LAN (mDNS); a worker joins with the invite its install command carries
+(`--join`).
+
+The proxy's container is recreated when the directory it mounts changes, not
+only its configuration: a proxy that reads another directory never sees our
+routes.

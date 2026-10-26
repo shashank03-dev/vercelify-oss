@@ -25,9 +25,7 @@ export function SettingsView() {
     try {
       const res = await settingsApi.test(s);
       await update({ ...s, hostname: res.hostname || s.hostname });
-      // Workers and servers on the platform engine have no Coolify to test.
-      const noCoolify = !s.coolify_url.trim();
-      toast.ok(res.coolify.ok ? "Connected to the agent and Coolify" : noCoolify ? "Connected to the agent" : `Agent OK, but Coolify said: ${res.coolify.error}`);
+      toast.ok(`Connected to ${res.hostname || s.hostname}`);
     } catch (e) {
       toast.bad((e as Error).message);
     } finally {
@@ -98,12 +96,6 @@ export function SettingsView() {
                 <Field label="Agent token">
                   <TextInput type="password" value={form.agent_token} onChange={(e) => setForm({ ...form, agent_token: e.target.value })} />
                 </Field>
-                <Field label="Coolify URL">
-                  <TextInput value={form.coolify_url} onChange={(e) => setForm({ ...form, coolify_url: e.target.value })} spellCheck={false} />
-                </Field>
-                <Field label="Coolify API token">
-                  <TextInput type="password" value={form.coolify_token ?? ""} onChange={(e) => setForm({ ...form, coolify_token: e.target.value })} />
-                </Field>
                 <div className="flex justify-between border-t border-line pt-3.5">
                   <Button variant="danger" icon={<LogOut />} onClick={() => void unpair()} data-testid="unpair">
                     {servers.length > 1 ? `Remove ${settings.hostname}` : "Unpair"}
@@ -117,8 +109,7 @@ export function SettingsView() {
 
             <Card title="Pair again" icon={<KeyRound />}>
               <p className="mb-3 text-[13px] text-fg-muted">
-                Paste a fresh code from <InlineCode>sudo vercelify pair</InlineCode>. Add <InlineCode>--refresh</InlineCode> for a new Coolify
-                token.
+                Paste a fresh code from <InlineCode>sudo vercelify pair</InlineCode>.
               </p>
               <div className="flex gap-2">
                 <TextInput placeholder="vfy1.…" value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} className="font-mono" />

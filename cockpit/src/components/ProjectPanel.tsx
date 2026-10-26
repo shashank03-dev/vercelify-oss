@@ -7,7 +7,7 @@ import { usePoll } from "../lib/hooks";
 import { useLive, useLiveTopic } from "../lib/live";
 import { cronState, projectFileName, summaryLine, untilLabel } from "../lib/project";
 import { toCockpitError } from "../lib/transport";
-import type { CoolifyApplication, ProjectFile, ProjectInfo } from "../types";
+import type { ProjectFile, ProjectInfo } from "../types";
 import { NeedsUpdate } from "./Hardware";
 import { useToast } from "./Toast";
 import { Button, Callout, EmptyState, InlineCode, Loading, StatusText } from "./ui";
@@ -27,7 +27,7 @@ function liveState(p: ProjectInfo): { health: "ok" | "warn" | "bad" | "idle"; la
 }
 
 /** An app's vercel.json: what the proxy and the cron runner do with it. */
-export function ProjectPanel({ app }: { app: CoolifyApplication }) {
+export function ProjectPanel({ app }: { app: { id: string; name: string } }) {
   const toast = useToast();
   const { health } = useLive();
   const withProjects = hasCap(health.data, "projects");
@@ -36,8 +36,8 @@ export function ProjectPanel({ app }: { app: CoolifyApplication }) {
   const [busy, setBusy] = useState<string | null>(null);
   const file = useRef<HTMLInputElement>(null);
 
-  const info = status.data?.projects.find((p) => p.key === app.uuid);
-  const previews = (status.data?.projects ?? []).filter((p) => p.app_uuid === app.uuid && p.pull_request_id > 0);
+  const info = status.data?.projects.find((p) => p.key === app.id);
+  const previews = (status.data?.projects ?? []).filter((p) => p.app_uuid === app.id && p.pull_request_id > 0);
 
   async function run(what: string, fn: () => Promise<unknown>, ok?: string) {
     setBusy(what);
@@ -63,7 +63,7 @@ export function ProjectPanel({ app }: { app: CoolifyApplication }) {
       }
       files.push({ name, content: await f.text() });
     }
-    await run("upload", () => agent.uploadProject(app.uuid, files), `${files.map((f) => f.name).join(" and ")} applied to ${app.name}`);
+    await run("upload", () => agent.uploadProject(app.id, files), `${files.map((f) => f.name).join(" and ")} applied to ${app.name}`);
   }
 
   if (!health.data || (withProjects && status.loading && !status.data)) return <Loading rows={3} />;
@@ -110,7 +110,7 @@ export function ProjectPanel({ app }: { app: CoolifyApplication }) {
           </EmptyState>
         )}
         <div className="flex flex-wrap items-center gap-1.5">
-          <Button size="sm" icon={<RefreshCw />} busy={busy === "sync"} onClick={() => void run("sync", () => agent.syncProject(app.uuid), "Read vercel.json from the repository")} data-testid="project-sync">
+          <Button size="sm" icon={<RefreshCw />} busy={busy === "sync"} onClick={() => void run("sync", () => agent.syncProject(app.id), "Read vercel.json from the repository")} data-testid="project-sync">
             Read from repository
           </Button>
           <Button size="sm" variant="ghost" icon={<Upload />} busy={busy === "upload"} onClick={() => file.current?.click()} data-testid="project-upload">
@@ -134,7 +134,7 @@ export function ProjectPanel({ app }: { app: CoolifyApplication }) {
               variant="ghost"
               icon={<Trash2 />}
               busy={busy === "remove"}
-              onClick={() => void run("remove", () => agent.removeProject(app.uuid), `${app.name} is served as Coolify configures it`)}
+              onClick={() => void run("remove", () => agent.removeProject(app.id), `${app.name} is served without its rules`)}
               data-testid="project-remove"
             >
               Remove rules
@@ -166,7 +166,7 @@ export function ProjectPanel({ app }: { app: CoolifyApplication }) {
                     icon={<Play />}
                     busy={busy === `cron-${i}`}
                     disabled={c.running}
-                    onClick={() => void run(`cron-${i}`, () => agent.runCron(app.uuid, c.path), `Running ${c.path}`)}
+                    onClick={() => void run(`cron-${i}`, () => agent.runCron(app.id, c.path), `Running ${c.path}`)}
                     data-testid={`cron-run-${i}`}
                   >
                     Run now

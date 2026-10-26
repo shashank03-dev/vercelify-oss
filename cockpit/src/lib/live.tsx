@@ -1,11 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import type { AgentEvent, AlertsStatus, CoolifyApplication, Health, Job, SystemSnapshot } from "../types";
-import { agent, coolify, isWorker } from "./api";
+import type { AgentEvent, AlertsStatus, Health, Job, SystemSnapshot } from "../types";
+import { agent, isWorker } from "./api";
 import { hasCap } from "./caps";
 import { usePoll, type Polled } from "./hooks";
 import { alertText, notify, shouldNotify } from "./notify";
-import { isPlatform, listedApp, platform } from "./platform";
+import { listedApp, platform, type ListedApp } from "./platform";
 import { useSession } from "./session";
 import { inTauri } from "./transport";
 import type { Alert } from "../types";
@@ -17,7 +17,7 @@ interface Live {
   system: Polled<SystemSnapshot>;
   /** Its apps every 15 s (always empty on a worker); on the platform engine
    * mapped to the same shape. */
-  apps: Polled<CoolifyApplication[]>;
+  apps: Polled<ListedApp[]>;
   /** Version and capabilities of its agent, every minute. */
   health: Polled<Health>;
   /** Alerts the server raised (power, disks, deploys…). */
@@ -75,11 +75,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
   const { settings } = useSession();
   const main = !isWorker(settings);
   const system = usePoll(() => agent.system(), 10_000, [settings.agent_url]);
-  const own = isPlatform(settings);
   const apps = usePoll(
-    (): Promise<CoolifyApplication[]> => (!main ? Promise.resolve([]) : own ? platform.apps().then((l) => l.map(listedApp)) : coolify.applications()),
+    (): Promise<ListedApp[]> => (!main ? Promise.resolve([]) : platform.apps().then((l) => l.map(listedApp))),
     main ? 15_000 : 0,
-    [settings.agent_url, main, own],
+    [settings.agent_url, main],
   );
   const health = usePoll(() => agent.health(), 60_000, [settings.agent_url]);
   const withAlerts = hasCap(health.data, "alerts");
@@ -178,10 +177,10 @@ export function LiveProvider({ children }: { children: ReactNode }) {
 
   const refreshApps = apps.refresh;
   useEffect(() => {
-    if (!own) return;
+    if (!main) return;
     const off = [subscribe("apps", () => void refreshApps()), subscribe("deployments", () => void refreshApps())];
     return () => off.forEach((f) => f());
-  }, [own, subscribe, refreshApps]);
+  }, [main, subscribe, refreshApps]);
 
   const withSleep = main && hasCap(health.data, "sleep");
   const sleep = usePoll(() => (withSleep ? agent.sleep() : Promise.resolve(null)), withSleep ? 60_000 : 0, [settings.agent_url, withSleep]);

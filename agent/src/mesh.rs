@@ -43,7 +43,7 @@ pub struct Coordinator {
     pub relay: crate::mesh_relay::RelayHub,
 }
 
-fn hostname() -> String {
+pub fn hostname() -> String {
     let h = std::fs::read_to_string("/etc/hostname").unwrap_or_default();
     let h: String = h
         .trim()
@@ -644,6 +644,33 @@ async fn status(State(s): State<AppState>) -> ApiResult<Value> {
 }
 
 /// This node's mesh address, once it has joined (for `listen = ["mesh"]`).
+/// This node's Tailscale IPv4: a server not migrated yet keeps listening
+/// (and pairing) there until `vercelify migrate --tailscale-off`.
+pub async fn tailscale_ipv4(bin: Option<&str>) -> Option<String> {
+    let out = crate::exec::run(
+        bin.unwrap_or("tailscale"),
+        &["ip", "-4"],
+        std::time::Duration::from_secs(5),
+    )
+    .await
+    .ok()
+    .filter(|o| o.success())?;
+    out.stdout
+        .lines()
+        .map(str::trim)
+        .find(|l| l.parse::<std::net::Ipv4Addr>().is_ok())
+        .map(str::to_string)
+}
+
+/// Where this server is reached privately: its mesh address, else (not
+/// migrated yet) its Tailscale address.
+pub async fn private_ipv4(cfg: &Config) -> Option<String> {
+    match own_ipv4(cfg) {
+        Some(ip) => Some(ip.to_string()),
+        None => tailscale_ipv4(cfg.tailscale_bin.as_deref()).await,
+    }
+}
+
 pub fn own_ipv4(cfg: &Config) -> Option<IpAddr> {
     NodeState::load(&cfg.mesh_dir)
         .ok()

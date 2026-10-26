@@ -1,11 +1,9 @@
 //! vercelify-agent — runs on the Linux host (and optional Raspberry Pi
-//! workers) and exposes host state to the cockpit over Tailscale.
+//! workers) and exposes host state to the cockpit over Vercelify's mesh.
 
 mod auth;
-mod autodeploy;
 mod cli;
 mod config;
-mod coolify;
 mod cron;
 mod display;
 mod docker;
@@ -15,6 +13,7 @@ mod events;
 mod exec;
 mod github;
 mod github_app;
+mod gitpoll;
 mod http;
 mod json;
 mod llm;
@@ -34,9 +33,7 @@ mod routing;
 mod runtime_api;
 mod services;
 mod sleep;
-mod ssh;
 mod standby;
-mod tailscale;
 mod terminal;
 mod tokens;
 mod update;
@@ -84,15 +81,6 @@ fn mesh_pairing(cfg: &Config, token: &str, ttl_secs: u64) -> Result<vercelify_co
     Ok(vercelify_core::pairing::Pairing {
         agent_url: format!("http://{}:{}", own.ipv4, cfg.port),
         agent_token: token.to_string(),
-        coolify_url: if cfg.platform_engine() {
-            String::new()
-        } else {
-            format!("http://{}:8000", own.ipv4)
-        },
-        coolify_token: std::fs::read_to_string(&cfg.coolify_token_file)
-            .ok()
-            .map(|t| t.trim().to_string())
-            .filter(|t| !t.is_empty() && !cfg.platform_engine()),
         hostname: own.name,
         role: Some(cfg.role()),
         mesh_join: Some(invite.token),
@@ -158,9 +146,6 @@ async fn main() {
         }
         Cmd::Pair {
             host,
-            coolify_port,
-            coolify_url,
-            coolify_token_file,
             short,
             with_code,
             ttl,
@@ -177,55 +162,25 @@ async fn main() {
                     cfg.tokens_file.display()
                 )),
             };
-            let mesh_pairing = if cfg.mesh_coordinator && cfg.role() != "worker" && !tailscale {
+            let mesh_pairing = if cfg.mesh_coordinator && cfg.role() != "worker" && !tailscale && host.is_none() {
                 Some(mesh_pairing(&cfg, &token, ttl).unwrap_or_else(|e| fatal(&e)))
             } else {
                 None
             };
-            let ts = tailscale::status(cfg.tailscale_bin.as_deref()).await;
-            let host = host
-                .or_else(|| {
-                    ts.self_node
-                        .as_ref()
-                        .map(|n| n.dns_name.clone())
-                        .filter(|s| !s.is_empty())
-                })
-                .or_else(|| vercelify_core::tailscale::self_ipv4(&ts))
-                .or_else(|| {
-                    let lan = lan_ipv4()?;
-                    eprintln!(
-                        "vercelify-agent: Tailscale is not connected — this code uses the LAN address {lan}, \
-                         which works only if agent.toml also listens there (e.g. listen = [\"tailscale\", \"127.0.0.1\", \"{lan}\"]). \
-                         Recommended: `sudo tailscale up`, then `sudo vercelify pair` again."
-                    );
-                    Some(lan)
-                })
-                .unwrap_or_else(|| fatal("no network address found; pass --host"));
-            let hostname = ts
-                .self_node
-                .as_ref()
-                .map(|n| n.hostname.clone())
-                .unwrap_or_else(|| host.clone());
-            let role = cfg.role();
-            let worker = role == "worker";
-            // Servers on the platform engine have no Coolify to hand out.
-            let no_coolify = worker || cfg.platform_engine();
-            let token_file = coolify_token_file.unwrap_or_else(|| cfg.coolify_token_file.clone());
+            // Without the mesh: the address given, Tailscale's (a server not
+            // migrated yet), or the LAN's.
+            let host = match host {
+                Some(h) => h,
+                None if tailscale => mesh::tailscale_ipv4(cfg.tailscale_bin.as_deref())
+                    .await
+                    .unwrap_or_else(|| fatal("Tailscale has no IPv4 address here (is `tailscale up` done?)")),
+                None => lan_ipv4().unwrap_or_else(|| fatal("no network address found; pass --host")),
+            };
             let pairing = vercelify_core::pairing::Pairing {
                 agent_url: format!("http://{host}:{}", cfg.port),
                 agent_token: token,
-                // Workers run no Coolify: the main host deploys to them.
-                coolify_url: match (coolify_url, no_coolify) {
-                    (Some(u), _) => u,
-                    (None, true) => String::new(),
-                    (None, false) => format!("http://{host}:{coolify_port}"),
-                },
-                coolify_token: std::fs::read_to_string(&token_file)
-                    .ok()
-                    .map(|t| t.trim().to_string())
-                    .filter(|t| !t.is_empty() && !no_coolify),
-                hostname,
-                role: Some(role),
+                hostname: mesh::hostname(),
+                role: Some(cfg.role()),
                 mesh_join: None,
             };
             let pairing = mesh_pairing.unwrap_or(pairing);
@@ -310,17 +265,13 @@ async fn serve(cfg: Config) {
     let tailscale_bin = cfg.tailscale_bin.clone();
     let state = routes::AppState::new(cfg, token);
     let app = routes::router(state.clone());
-    tokio::spawn(state.autodeploy.clone().run());
     tokio::spawn(state.projects.clone().run());
     tokio::spawn(state.projects.clone().run_crons());
     tokio::spawn(state.watcher.clone().run(state.clone()));
     tokio::spawn(update::resume_update_job(state.config.clone(), state.jobs.clone()));
     if let Some(p) = &state.platform {
         // Databases' public ports listen on the private network only.
-        let private = match mesh::own_ipv4(&state.config) {
-            Some(ip) => Some(ip.to_string()),
-            None => tailscale::ipv4(state.config.tailscale_bin.as_deref()).await,
-        };
+        let private = mesh::private_ipv4(&state.config).await;
         p.engine.set_private_ip(private);
         // Tests run with the background loops off (watch interval 0).
         let every = if state.config.watch_interval_secs == 0 { 0 } else { 30 };
@@ -361,7 +312,7 @@ async fn serve(cfg: Config) {
     }
 
     let mut tasks = tokio::task::JoinSet::new();
-    // Sleeping apps: Coolify's proxy forwards their requests here.
+    // Sleeping apps: our proxy forwards their requests here.
     let wake = state.config.wake_listen.trim().to_string();
     if !wake.is_empty() && state.config.role() != "worker" {
         match wake.parse::<SocketAddr>() {
@@ -468,7 +419,7 @@ async fn resolve_listen(spec: &str, ts_bin: Option<&str>, cfg: &config::Config) 
     }
     let mut warned = false;
     loop {
-        if let Some(ip) = tailscale::ipv4(ts_bin).await.and_then(|s| s.parse().ok()) {
+        if let Some(ip) = mesh::tailscale_ipv4(ts_bin).await.and_then(|s| s.parse().ok()) {
             return ip;
         }
         if !warned {

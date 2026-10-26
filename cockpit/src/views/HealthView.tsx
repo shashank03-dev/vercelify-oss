@@ -5,14 +5,12 @@ import {
   Cpu,
   HardDrive,
   MemoryStick,
-  Network,
   Play,
   PlugZap,
   RefreshCw,
   RotateCcw,
   ScrollText,
   Server,
-  AlertTriangle,
   ShieldCheck,
   Square,
   Thermometer,
@@ -21,17 +19,14 @@ import { useEffect, useState } from "react";
 import { ActivityCard } from "../components/Activity";
 import { HardwareCard, HistoryCard, UptimeCard } from "../components/Hardware";
 import { useToast } from "../components/Toast";
-import { Button, Card, cx, EmptyState, ErrorNote, IconButton, Loading, LogView, Meter, Modal, PageHeader, StatusDot, StatusText } from "../components/ui";
-import { agent, local } from "../lib/api";
+import { Button, Card, cx, EmptyState, ErrorNote, IconButton, Loading, LogView, Meter, Modal, PageHeader, StatusText } from "../components/ui";
+import { agent } from "../lib/api";
 import { bytes, duration, mediaLabel, pct, type Health } from "../lib/format";
 import { usePoll } from "../lib/hooks";
-import { inTauri } from "../lib/transport";
-import type { ContainerInfo, PowerGuardState, SystemSnapshot, TailscaleNode, TailscaleStatus } from "../types";
+import type { ContainerInfo, PowerGuardState, SystemSnapshot } from "../types";
 
 export function HealthView() {
   const sys = usePoll(() => agent.system(), 3000);
-  const ts = usePoll(() => agent.tailscale(), 10_000);
-  const mine = usePoll(() => local.tailscale(), inTauri ? 15_000 : 0);
   // `docker stats` samples every container for ~2 s: keep it modest on a Pi.
   const containers = usePoll(() => agent.containers(true), 15_000);
   const services = usePoll(() => agent.services(), 10_000);
@@ -52,7 +47,7 @@ export function HealthView() {
           )
         }
         actions={
-          <IconButton label="Refresh" onClick={() => void Promise.all([sys.refresh(), ts.refresh(), containers.refresh(), services.refresh()])}>
+          <IconButton label="Refresh" onClick={() => void Promise.all([sys.refresh(), containers.refresh(), services.refresh()])}>
             <RefreshCw />
           </IconButton>
         }
@@ -62,7 +57,7 @@ export function HealthView() {
       <Vitals s={s} history={history} />
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <HardwareCard s={s} ts={ts.data} />
+        <HardwareCard s={s} />
         <HistoryCard />
       </div>
 
@@ -71,17 +66,6 @@ export function HealthView() {
           {!s ? <Loading rows={4} /> : <Machine s={s} />}
         </Card>
         <PowerCard s={s} />
-      </div>
-
-      <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <TailscaleCard title="Host on the tailnet" status={ts.data} error={ts.error} testId="ts-host" />
-        <TailscaleCard
-          title="This computer"
-          status={mine.data}
-          error={mine.error}
-          compact
-          testId="ts-local"
-        />
       </div>
 
       <div className="mb-6 grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -301,96 +285,6 @@ function PowerCard({ s }: { s?: SystemSnapshot }) {
   );
 }
 
-function TailscaleCard({
-  title,
-  status,
-  error,
-  compact,
-  testId,
-}: {
-  title: string;
-  status?: TailscaleStatus;
-  error?: { message: string };
-  compact?: boolean;
-  testId?: string;
-}) {
-  const me = status?.self_node;
-  const ok = status?.backend_state === "Running";
-  return (
-    <Card
-      title={title}
-      icon={<Network />}
-      testId={testId}
-      actions={status && <StatusText health={ok ? "ok" : status.installed ? "warn" : "idle"} label={status.backend_state} className="text-[12px] text-fg-muted" />}
-    >
-      <ErrorNote error={error} />
-      {!status ? (
-        <Loading rows={2} />
-      ) : !ok ? (
-        <div className="text-[13px] text-fg-muted">
-          {status.error ?? (status.backend_state === "NeedsLogin" ? "Run `sudo tailscale up` and sign in." : "Tailscale is not running.")}
-          {status.auth_url && (
-            <div className="mt-1">
-              Login link: <span className="selectable font-mono text-fg">{status.auth_url}</span>
-            </div>
-          )}
-        </div>
-      ) : (
-        <>
-          <div className="mb-3 grid grid-cols-2 gap-3 text-xs">
-            <KV k="MagicDNS" v={me?.dns_name ?? "—"} />
-            <KV k="Tailscale IP" v={me?.ips.find((i) => i.includes(".")) ?? "—"} />
-            <KV k="Tailnet" v={status.tailnet || status.magic_dns_suffix} />
-            <KV k="Version" v={status.version.split("-")[0] ?? ""} />
-          </div>
-          {!compact && (
-            <div className="-mx-2 max-h-52 space-y-0.5 overflow-auto border-t border-line pt-2">
-              {status.peers.map((p) => (
-                <Peer key={p.id || p.hostname} p={p} />
-              ))}
-              {!status.peers.length && <div className="px-2 text-xs text-fg-dim">No other devices yet.</div>}
-            </div>
-          )}
-          {status.health.length > 0 && (
-            <div className="mt-3 space-y-1 text-[11px] text-warn">
-              {status.health.map((h) => (
-                <div key={h} className="flex gap-1.5">
-                  <AlertTriangle className="mt-px size-3 shrink-0" />
-                  {h}
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-    </Card>
-  );
-}
-
-function KV({ k, v }: { k: string; v: string }) {
-  return (
-    <div className="min-w-0">
-      <div className="text-fg-dim">{k}</div>
-      <div className="selectable truncate font-mono text-fg" title={v}>
-        {v}
-      </div>
-    </div>
-  );
-}
-
-function Peer({ p }: { p: TailscaleNode }) {
-  const direct = !!p.cur_addr;
-  return (
-    <div className="flex items-center gap-3 rounded-md px-2 py-1.5 text-[13px] hover:bg-fg/[0.03]" data-testid="ts-peer">
-      <StatusDot health={p.online ? "ok" : "idle"} />
-      <span className="min-w-0 flex-1 truncate">{p.hostname}</span>
-      <span className="text-[11px] text-fg-dim">{p.os}</span>
-      <span className="w-28 truncate text-right font-mono text-[11px] text-fg-muted">{p.ips.find((i) => i.includes(".")) ?? ""}</span>
-      <span className="w-20 text-right text-[11px] text-fg-dim">{p.online ? (direct ? "direct" : `relay · ${p.relay}`) : "offline"}</span>
-    </div>
-  );
-}
-
 const CONTAINER_GRID = "grid items-center gap-4 px-4 grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)_64px_80px_96px]";
 
 function ContainersCard({
@@ -444,9 +338,9 @@ function ContainersCard({
                 <div className="min-w-0 leading-tight">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-medium" title={c.name}>
-                      {c.coolify_name ?? c.name}
+                      {c.app ?? c.name}
                     </span>
-                    {c.coolify_managed && <span className="shrink-0 text-[11px] text-fg-dim">via Coolify</span>}
+                    {c.app && c.app !== c.name && <span className="shrink-0 text-[11px] text-fg-dim">{c.name}</span>}
                   </div>
                   <StatusText
                     health={c.state === "running" ? "ok" : c.state === "paused" ? "warn" : "idle"}
@@ -489,7 +383,7 @@ function ContainersCard({
 function ContainerLogs({ c, onClose }: { c: ContainerInfo; onClose: () => void }) {
   const logs = usePoll(() => agent.containerLogs(c.id, 400), 3000, [c.id]);
   return (
-    <Modal open onClose={onClose} wide title={`Logs · ${c.coolify_name ?? c.name}`} description={<span className="font-mono">{c.image}</span>}>
+    <Modal open onClose={onClose} wide title={`Logs · ${c.app ?? c.name}`} description={<span className="font-mono">{c.image}</span>}>
       <ErrorNote error={logs.error} />
       <LogView testId="container-logs">{logs.data?.lines.join("\n") || (logs.loading ? "Loading…" : "No output.")}</LogView>
     </Modal>

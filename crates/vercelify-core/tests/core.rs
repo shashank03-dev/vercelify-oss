@@ -79,46 +79,10 @@ fn thermal_zones_and_hwmon() {
 }
 
 #[test]
-fn tailscale_running() {
-    let s = tailscale::parse_status(include_str!("fixtures/tailscale-status.json")).unwrap();
-    assert_eq!(s.backend_state, "Running");
-    assert_eq!(s.tailnet, "someone@example.com");
-    assert_eq!(s.magic_dns_suffix, "tail1234.ts.net");
-    let me = s.self_node.as_ref().unwrap();
-    assert_eq!(me.dns_name, "vercelify-host.tail1234.ts.net");
-    assert_eq!(me.last_seen, None);
-    assert_eq!(tailscale::self_ipv4(&s).as_deref(), Some("100.101.102.103"));
-    // online peers sort first
-    assert_eq!(s.peers[0].hostname, "MacBook-Pro");
-    assert_eq!(s.peers[0].cur_addr, "203.0.113.5:41641");
-    assert_eq!(s.peers[1].hostname, "raspberrypi");
-    assert_eq!(s.peers[1].last_seen.as_deref(), Some("2026-10-01T10:00:00Z"));
-    assert_eq!(s.health.len(), 1);
-}
-
-#[test]
-fn tailscale_needs_login() {
-    let s = tailscale::parse_status(include_str!("fixtures/tailscale-needs-login.json")).unwrap();
-    assert_eq!(s.backend_state, "NeedsLogin");
-    assert_eq!(s.auth_url, "https://login.tailscale.com/a/abc123");
-    assert!(s.peers.is_empty());
-    assert_eq!(tailscale::self_ipv4(&s), None);
-}
-
-#[test]
-fn tailscale_garbage() {
-    assert!(tailscale::parse_status("not json").is_err());
-    let u = tailscale::unavailable(false, "not found");
-    assert_eq!(u.backend_state, "NotInstalled");
-}
-
-#[test]
 fn pairing_roundtrip() {
     let p = pairing::Pairing {
-        agent_url: "http://vercelify-host.tail1234.ts.net:7420".into(),
+        agent_url: "http://192.168.1.20:7420".into(),
         agent_token: "0123456789abcdef0123456789abcdef".into(),
-        coolify_url: "http://vercelify-host.tail1234.ts.net:8000".into(),
-        coolify_token: Some("1|abc".into()),
         hostname: "vercelify-host".into(),
         role: Some("main".into()),
         mesh_join: None,
@@ -135,7 +99,6 @@ fn pairing_roundtrip() {
     // On the mesh: vfy2., with the join token, and only together.
     let mut m = p.clone();
     m.agent_url = "http://10.77.0.1:7420".into();
-    m.coolify_url = String::new();
     m.mesh_join = Some("vfyj1.eyJ2IjoxfQ".into());
     let code = pairing::encode(&m);
     assert!(code.starts_with("vfy2."));
@@ -194,11 +157,11 @@ fn live_snapshot_smoke() {
 
 #[test]
 fn pairing_fixture_from_agent_cli() {
-    // Produced by `vercelify-agent pair`; the cockpit's TS decoder reads the same file.
+    // Produced by `vercelify-agent pair` before the platform engine (it
+    // carries Coolify's URL and token, which are ignored now); the cockpit's
+    // TS decoder reads the same file.
     let p = pairing::decode(include_str!("fixtures/pairing-code.txt")).unwrap();
     assert_eq!(p.agent_url, "http://vercelify-host.tail1234.ts.net:7420");
-    assert_eq!(p.coolify_url, "http://vercelify-host.tail1234.ts.net:8000");
-    assert_eq!(p.coolify_token.as_deref(), Some("1|coolifytoken"));
     assert_eq!(p.hostname, "vercelify-host");
 }
 
@@ -264,8 +227,6 @@ fn cockpit_config_migrates_and_switches() {
     let b = CockpitSettings {
         agent_url: "http://b:7420".into(),
         agent_token: "t".into(),
-        coolify_url: String::new(),
-        coolify_token: None,
         hostname: "b".into(),
         role: Some("worker".into()),
     };

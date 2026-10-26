@@ -17,7 +17,7 @@ function withHost(url: string, host: string): string {
 }
 
 /**
- * Connect to a server: pick it from the tailnet and type the 8-character
+ * Connect to a server: pick it from the LAN or the mesh and type the 8-character
  * code from `sudo vercelify pair`, or paste the full code.
  */
 export function PairForm({
@@ -31,7 +31,7 @@ export function PairForm({
   paired?: string[];
   /** Keep looking for new machines (while one is being installed). */
   autoScanMs?: number;
-  /** Only the tailnet list and address entry (the add-a-machine wizard). */
+  /** Only the server lists and address entry (the add-a-machine wizard). */
   hidePaste?: boolean;
 }) {
   const [found, setFound] = useState<DiscoveredServer[]>();
@@ -49,8 +49,6 @@ export function PairForm({
   const [form, setForm] = useState<CockpitSettings>({
     agent_url: "http://",
     agent_token: "",
-    coolify_url: "http://",
-    coolify_token: "",
     hostname: "",
   });
   const [busy, setBusy] = useState(false);
@@ -101,7 +99,7 @@ export function PairForm({
       try {
         res = await settingsApi.test(candidate);
       } catch (e) {
-        // MagicDNS off on this Mac: the IP we discovered still works.
+        // The name doesn't resolve from this Mac: the IP we found still works.
         const host = (() => {
           try {
             return new URL(s.agent_url).hostname;
@@ -113,14 +111,12 @@ export function PairForm({
         candidate = {
           ...s,
           agent_url: withHost(s.agent_url, fallbackHost),
-          coolify_url: s.coolify_url ? withHost(s.coolify_url, fallbackHost) : s.coolify_url,
         };
         res = await settingsApi.test(candidate);
       }
       const final = { ...candidate, hostname: candidate.hostname || res.hostname };
       await settingsApi.save(final);
-      const worker = !final.coolify_url;
-      onPaired(final, !worker && !res.coolify.ok ? `Connected to the agent, but Coolify said: ${res.coolify.error ?? "unavailable"}` : undefined);
+      onPaired(final);
     } catch (e) {
       setError(toCockpitError(e));
     } finally {
@@ -241,7 +237,7 @@ export function PairForm({
                     <div className="mt-2 pl-7">
                       <p className="text-xs text-fg-muted">
                         On {d.name} run <InlineCode>sudo vercelify pair</InlineCode> and type the 8-character code it shows. This computer joins its
-                        network; no Tailscale needed.
+                        network.
                       </p>
                       {shortForm(() => null, d.name, () => void claimLan(d))}
                     </div>
@@ -254,7 +250,7 @@ export function PairForm({
       )}
       <section data-testid="discovered">
         <div className="mb-2 flex items-center justify-between">
-          <div className="text-[13px] font-medium">Servers on your tailnet</div>
+          <div className="text-[13px] font-medium">Servers on your Vercelify network</div>
           <IconButton label="Scan again" onClick={() => void scan()} disabled={scanning}>
             {scanning ? <Spinner /> : <RefreshCw />}
           </IconButton>
@@ -266,7 +262,7 @@ export function PairForm({
             </div>
           ) : found.length === 0 ? (
             <div className="px-3.5 py-3 text-[13px] text-fg-muted">
-              {scanError ?? "No servers found yet. Is the installer finished, and is Tailscale signed in on both machines?"}
+              {scanError ?? "No servers found yet. Is the installer finished? A server on this Wi-Fi shows up above; one elsewhere, by its address below."}
             </div>
           ) : (
             <ul className="divide-y divide-line">
@@ -287,7 +283,7 @@ export function PairForm({
                             </span>
                           )}
                         </div>
-                        <div className="truncate font-mono text-[11px] text-fg-dim">{d.dns_name || d.ip}</div>
+                        <div className="truncate font-mono text-[11px] text-fg-dim">{d.ip} · Vercelify network</div>
                       </div>
                       {already ? (
                         <span className="flex items-center gap-1.5 text-xs text-fg-muted">
@@ -323,8 +319,8 @@ export function PairForm({
           </button>
         ) : (
           <div className="mt-2 rounded-lg border border-line bg-surface p-3">
-            <Field label="Tailscale name or IP" hint="e.g. old-thinkpad or 100.101.102.103">
-              <TextInput value={address} onChange={(e) => setAddress(e.target.value)} placeholder="old-thinkpad" spellCheck={false} data-testid="pair-address" />
+            <Field label="Name or address" hint="e.g. old-thinkpad.local, 192.168.1.20 or 10.77.0.1">
+              <TextInput value={address} onChange={(e) => setAddress(e.target.value)} placeholder="old-thinkpad.local" spellCheck={false} data-testid="pair-address" />
             </Field>
             {shortForm(typedTarget, address || "the server")}
             <button type="button" className="mt-2 text-xs text-fg-dim underline-offset-2 hover:text-fg-muted hover:underline" onClick={() => setByAddress(false)}>
@@ -367,17 +363,11 @@ export function PairForm({
               void connect(form);
             }}
           >
-            <Field label="Agent URL" hint="http://<host>.<tailnet>.ts.net:7420">
+            <Field label="Agent URL" hint="http://10.77.0.1:7420 (the server's mesh or LAN address)">
               <TextInput value={form.agent_url} onChange={(e) => setForm({ ...form, agent_url: e.target.value })} />
             </Field>
             <Field label="Agent token" hint="/etc/vercelify/agent.token">
               <TextInput type="password" value={form.agent_token} onChange={(e) => setForm({ ...form, agent_token: e.target.value })} />
-            </Field>
-            <Field label="Coolify URL" hint="http://<host>:8000 (empty for a worker)">
-              <TextInput value={form.coolify_url} onChange={(e) => setForm({ ...form, coolify_url: e.target.value })} />
-            </Field>
-            <Field label="Coolify API token" hint="Coolify → Keys & Tokens → API tokens">
-              <TextInput type="password" value={form.coolify_token ?? ""} onChange={(e) => setForm({ ...form, coolify_token: e.target.value })} />
             </Field>
             <div className="col-span-2 flex justify-end">
               <Button type="submit" variant="primary" busy={busy}>

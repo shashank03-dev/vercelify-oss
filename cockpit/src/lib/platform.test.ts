@@ -26,14 +26,14 @@ const app = (over: Partial<App> = {}): App => ({
 });
 
 describe("platform helpers", () => {
-  it("tells platform mains from workers and Coolify mains", () => {
-    const base = { agent_url: "http://h:7420", agent_token: "t", coolify_token: null, hostname: "h" };
-    expect(isPlatform({ ...base, coolify_url: "", role: "main" })).toBe(true);
-    expect(isWorker({ ...base, coolify_url: "", role: "main" })).toBe(false);
-    expect(isPlatform({ ...base, coolify_url: "http://h:8000", role: "main" })).toBe(false);
-    expect(isPlatform({ ...base, coolify_url: "", role: "worker" })).toBe(false);
-    // pairings from before roles: no Coolify means a worker
-    expect(isWorker({ ...base, coolify_url: "" })).toBe(true);
+  it("tells main servers from workers", () => {
+    const base = { agent_url: "http://h:7420", agent_token: "t", hostname: "h" };
+    expect(isPlatform({ ...base, role: "main" })).toBe(true);
+    expect(isWorker({ ...base, role: "main" })).toBe(false);
+    expect(isPlatform({ ...base, role: "worker" })).toBe(false);
+    expect(isWorker({ ...base, role: "worker" })).toBe(true);
+    // pairings from before roles are main servers
+    expect(isPlatform(base)).toBe(true);
   });
 
   it("derives an app's state from what it should do and its last deployment", () => {
@@ -48,9 +48,9 @@ describe("platform helpers", () => {
 
   it("maps apps to the list shape the chrome uses", () => {
     const l = listedApp(app({ last_status: "failed", current_deployment_id: null }));
-    expect(l).toMatchObject({ uuid: "app_1", name: "shop", fqdn: "https://shop.example.com", status: "exited:unhealthy" });
-    expect(listedApp(app()).status).toBe("running:healthy");
-    expect(listedApp(app({ kind: "image" })).build_pack).toBe("dockerimage");
+    expect(l).toEqual({ id: "app_1", name: "shop", url: "https://shop.example.com", health: "bad", kind: "auto" });
+    expect(listedApp(app()).health).toBe("ok");
+    expect(listedApp(app({ kind: "image" })).kind).toBe("image");
   });
 
   it("validates names and repositories like the agent", () => {

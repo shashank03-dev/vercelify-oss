@@ -2,7 +2,7 @@
 //
 // Inside the desktop app calls go to Rust commands (src-tauri/src/lib.rs).
 // In a plain browser (dev server, end-to-end tests) the same commands are
-// emulated here: HTTP goes through Vite's /__agent and /__coolify proxies and
+// emulated here: HTTP goes through Vite's /__agent proxy and
 // settings live in localStorage.
 
 import { Channel, invoke } from "@tauri-apps/api/core";
@@ -255,30 +255,15 @@ async function webCall<T>(cmd: string, args: Record<string, unknown>): Promise<T
       const s = requireSettings(args.server);
       return r(await webHttp("/__agent", s.agent_token, args.request as HttpRequest));
     }
-    case "coolify_request": {
-      const s = requireSettings(args.server);
-      if (!s.coolify_url) throw new CockpitError(`${s.hostname} is a worker without its own Coolify — select your main server to deploy`);
-      if (!s.coolify_token) throw new CockpitError("No Coolify API token");
-      return r(await webHttp("/__coolify/api/v1", s.coolify_token, args.request as HttpRequest));
-    }
     case "test_connection": {
       const s = args.settings as CockpitSettings;
       const sys = (await webHttp("/__agent", s.agent_token, { method: "GET", path: "/v1/system", timeout: 10 })) as {
         host: { hostname: string };
       };
-      let coolify: Record<string, unknown> = { ok: false, error: s.coolify_url ? "no token" : "worker (no Coolify)" };
-      if (s.coolify_token && s.coolify_url) {
-        try {
-          const version = await webHttp("/__coolify/api/v1", s.coolify_token, { method: "GET", path: "/version", timeout: 10 });
-          coolify = { ok: true, version };
-        } catch (e) {
-          coolify = { ok: false, error: (e as Error).message };
-        }
-      }
-      return r({ hostname: sys.host.hostname, coolify });
+      return r({ hostname: sys.host.hostname });
     }
     case "discover_servers":
-      throw new CockpitError("Finding servers on your tailnet needs the desktop app — paste a pairing code instead");
+      throw new CockpitError("Finding servers on your network needs the desktop app — paste a pairing code instead");
     case "pair_join": {
       const p = decodePairing(String(args.code ?? ""));
       if (p.mesh_join) throw new CockpitError("Joining Vercelify's network needs the desktop app (it runs vercelify-mesh)");
@@ -294,27 +279,9 @@ async function webCall<T>(cmd: string, args: Record<string, unknown>): Promise<T
       return r([]);
     case "capture_screens":
       return r([]);
-    case "local_tailscale":
-      return r({
-        installed: false,
-        backend_state: "Unavailable",
-        version: "",
-        tailnet: "",
-        magic_dns_suffix: "",
-        auth_url: "",
-        self_node: null,
-        peers: [],
-        health: [],
-        error: DESKTOP_ONLY,
-      });
     case "sender_status":
     case "moonlight_status":
       return r({ running: false, pid: null, command: null, started_at: null, last_output: [], exit_code: null });
-    case "open_coolify": {
-      const s = requireSettings();
-      window.open(s.coolify_url + ((args.path as string | undefined) ?? ""), "_blank", "noopener");
-      return r(null);
-    }
     default:
       throw new CockpitError(DESKTOP_ONLY);
   }

@@ -3,7 +3,7 @@
 /**
  * Cockpit connection settings (stored on the Mac with 0600 permissions).
  */
-export type CockpitSettings = { agent_url: string, agent_token: string, coolify_url: string, coolify_token: string | null, hostname: string, 
+export type CockpitSettings = { agent_url: string, agent_token: string, hostname: string, 
 /**
  * `main` or `worker`; missing in settings written by older versions.
  */

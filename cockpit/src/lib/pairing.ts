@@ -22,12 +22,16 @@ export function decodePairing(code: string): Pairing {
   } catch {
     throw new Error("pairing code is not valid base64");
   }
-  let p: Pairing;
+  let raw: Pairing;
   try {
-    p = JSON.parse(json) as Pairing;
+    raw = JSON.parse(json) as Pairing;
   } catch (e) {
     throw new Error(`pairing code payload is invalid: ${(e as Error).message}`);
   }
+  // Only the fields the Rust decoder knows (older codes also carried Coolify's URL and token).
+  const p: Pairing = { agent_url: raw.agent_url, agent_token: raw.agent_token, hostname: raw.hostname };
+  if (raw.role) p.role = raw.role;
+  if (raw.mesh_join) p.mesh_join = raw.mesh_join;
   if (!/^https?:\/\//.test(p.agent_url ?? "")) throw new Error("pairing code payload is invalid: agent_url must be http(s)");
   if ((p.agent_token ?? "").length < 16) throw new Error("pairing code payload is invalid: agent_token too short");
   if (mesh !== Boolean(p.mesh_join)) throw new Error("pairing code payload is invalid: a vfy2. code carries a mesh join token, a vfy1. code doesn't");
