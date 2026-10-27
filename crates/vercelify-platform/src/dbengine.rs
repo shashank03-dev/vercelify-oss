@@ -546,8 +546,14 @@ async fn pipe(
 /// Copy a directory tree keeping owners, permissions and links (`cp -a`),
 /// replacing what is at `to`.
 pub(crate) async fn copy_tree(from: &Path, to: &Path) -> Result<()> {
-    if !from.is_dir() {
-        return Err(Error::NotFound(format!("{} doesn't exist", from.display())));
+    // Not `is_dir`: a source we may not read isn't a missing one.
+    match std::fs::metadata(from) {
+        Ok(m) if m.is_dir() => {}
+        Ok(_) => return Err(Error::Invalid(format!("{} is not a directory", from.display()))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(Error::NotFound(format!("{} doesn't exist", from.display())))
+        }
+        Err(e) => return Err(Error::Internal(format!("can't read {}: {e}", from.display()))),
     }
     std::fs::create_dir_all(to)?;
     let script = "set -e; find \"$2\" -mindepth 1 -delete; cp -a \"$1\"/. \"$2\"/";
@@ -568,6 +574,31 @@ pub(crate) async fn copy_tree(from: &Path, to: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn copy_tree_says_why_a_source_is_unreadable() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let locked = temp.path().join("volumes");
+        let from = locked.join("vfy-db-x-data").join("_data");
+        let to = temp.path().join("hdd");
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = std::fs::metadata(&from).is_err();
+        let result = copy_tree(&from, &to).await;
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !denied {
+            eprintln!("skipped: permissions don't apply to this user (root)");
+            return;
+        }
+        let e = result.unwrap_err();
+        assert!(!matches!(e, Error::NotFound(_)), "{e:?}");
+        assert!(e.to_string().contains("can't read"), "{e}");
+        assert!(!to.exists());
+        let missing = copy_tree(&temp.path().join("nope"), &to).await.unwrap_err();
+        assert!(matches!(missing, Error::NotFound(_)), "{missing:?}");
+    }
 
     #[test]
     fn restic_settings() {
