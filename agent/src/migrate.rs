@@ -95,6 +95,13 @@ fn load(cfg: &Config) -> Option<State> {
     serde_json::from_str(&std::fs::read_to_string(state_file(cfg)).ok()?).ok()
 }
 
+/// A move from Coolify is under way (until `finish` or `rollback`):
+/// push-to-deploy holds new commits and previews meanwhile, so the switch
+/// builds nothing and a rollback finds Coolify's apps as they were.
+pub fn in_progress(cfg: &Config) -> bool {
+    load(cfg).is_some_and(|s| matches!(s.phase, Phase::Importing | Phase::Imported | Phase::Switched))
+}
+
 fn save(cfg: &Config, s: &State) -> Result<(), String> {
     let p = state_file(cfg);
     std::fs::create_dir_all(p.parent().unwrap_or(Path::new("/"))).map_err(|e| e.to_string())?;
@@ -828,6 +835,38 @@ mod tests {
         };
         save(&cfg, &s).unwrap();
         assert_eq!(load(&cfg), Some(s));
+    }
+
+    #[test]
+    fn push_to_deploy_waits_until_the_move_is_finished() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config {
+            state_dir: dir.path().to_path_buf(),
+            ..Config::default()
+        };
+        assert!(!in_progress(&cfg), "never migrated");
+        let mut s = State {
+            phase: Phase::Importing,
+            started_at: "now".into(),
+            coolify_version: "4.4.6".into(),
+            imported: Imported::default(),
+            stopped: vec![],
+            tags: vec![],
+            copied: vec![],
+            acme: false,
+            notes: vec![],
+        };
+        for (phase, held) in [
+            (Phase::Importing, true),
+            (Phase::Imported, true),
+            (Phase::Switched, true),
+            (Phase::RolledBack, false),
+            (Phase::Finished, false),
+        ] {
+            s.phase = phase;
+            save(&cfg, &s).unwrap();
+            assert_eq!(in_progress(&cfg), held, "{phase:?}");
+        }
     }
 
     #[test]

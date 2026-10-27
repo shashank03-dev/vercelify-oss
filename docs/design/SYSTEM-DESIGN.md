@@ -972,6 +972,9 @@ runs it around the agent restart.
    check (D12). `migrate check` waits for every first deployment and asks each
    domain through our proxy (404 tolerated only after 30 s: Traefik answers 404
    until it has read new routes); then the phase is `switched`.
+   Until `finish` (or a rollback), push-to-deploy holds new commits and
+   previews of the migrated apps (`migrate::in_progress`), so the switch
+   builds nothing; a commit pushed meanwhile deploys after `finish`.
 4. **Rollback** (until finish): our containers of the migrated resources and our
    proxy removed, the records (`import::remove`), copies and tags deleted,
    Coolify's containers started with their restart policies, database first,
