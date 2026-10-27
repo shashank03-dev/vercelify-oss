@@ -182,7 +182,6 @@ fn agent_cmd(
         .env("VERCELIFY_REQUIRE_STORAGE_MOUNT", "false")
         .env("VERCELIFY_POWER_GUARD_STATE", pg)
         .env("VERCELIFY_DOCKER_BIN", stubs.join("docker"))
-        .env("VERCELIFY_TAILSCALE_BIN", stubs.join("tailscale"))
         .env("VERCELIFY_SYSTEMCTL_BIN", stubs.join("systemctl"))
         .env("VERCELIFY_MPV_BIN", stubs.join("mpv"))
         .env("VERCELIFY_CORS_ORIGINS", "http://localhost:1420")
@@ -194,9 +193,8 @@ fn agent_cmd(
         .env("VERCELIFY_STATE_DIR", dir.join("state"))
         .env("VERCELIFY_RUN_DIR", dir.join("run"))
         .env("VERCELIFY_INSTALL_ENV", dir.join("install.env"))
-        // A server not on the platform engine, unless a test says so.
-        .env("VERCELIFY_ENGINE", "coolify")
-        .env("VERCELIFY_COOLIFY_DATA_DIR", dir.join("coolify"))
+        // No platform engine, unless a test says so.
+        .env("VERCELIFY_ENGINE", "none")
         .env("VERCELIFY_TOKENS_FILE", dir.join("tokens.json"))
         .env("VERCELIFY_AUDIT_LOG", dir.join("state/audit.log"))
         .env("VERCELIFY_POWER_GUARD_CONF", dir.join("power-guard.conf"))
@@ -572,7 +570,7 @@ fn agent_end_to_end() {
     );
     assert_eq!(s, 200, "{v}");
     assert_eq!(v["receiver"]["running"], true, "{v}");
-    assert_eq!(v["receiver_url"], "udp://127.0.0.1:5600?pkt_size=1316");
+    assert_eq!(v["receiver_url"], Value::Null, "no mesh address to send to yet");
     let (_, v) = get(&a, "/v1/display");
     assert_eq!(v["receiver"]["last_output"][0], "[stub] waiting for stream");
     let (s, _) = post(
@@ -864,10 +862,7 @@ fn pairing_llm_and_doctor() {
     assert_eq!(v["models"][0]["name"], "gemma3:1b");
     assert_eq!(v["models"][0]["parameter_size"], "999.89M");
     assert_eq!(v["data_path"], "/var/lib/docker/volumes/ollama-models/_data");
-    assert_eq!(
-        v["endpoints"][0], "http://127.0.0.1:11434",
-        "Tailscale's address, without the mesh"
-    );
+    assert_eq!(v["endpoints"], json!([]), "no mesh address yet");
 
     let (s, v) = post(&a, "/v1/llm/models/pull", json!({"model": "qwen2.5:3b"}));
     assert_eq!(s, 200, "{v}");
@@ -981,8 +976,6 @@ fn pairing_llm_and_doctor() {
     assert_eq!(by_id("docker")["status"], "ok", "{v}");
     assert_eq!(by_id("docker")["detail"], "Docker 27.3.1");
     assert_eq!(by_id("mesh")["status"], "warn", "not on the mesh yet");
-    assert_eq!(by_id("migrate")["status"], "warn", "{v}");
-    assert!(by_id("migrate")["fix"].as_str().unwrap().contains("vercelify migrate"));
     assert_eq!(by_id("storage")["status"], "warn", "single disk");
     assert_eq!(by_id("firewall")["status"], "warn");
     assert!(by_id("firewall")["fix"]
@@ -1039,14 +1032,10 @@ fn worker_role_and_missing_ollama() {
     ]);
     let (_, v, _) = req(&a, "GET", "/v1/health", None, None);
     assert_eq!(v["role"], "worker");
-    let out = a.cli(&["pair", "--tailscale"]);
+    let out = a.cli(&["pair", "--host", "127.0.0.1"]);
     let p = vercelify_core::pairing::decode(String::from_utf8(out.stdout).unwrap().trim()).unwrap();
     assert_eq!(p.role.as_deref(), Some("worker"));
-    assert_eq!(
-        p.agent_url.split(':').nth(1),
-        Some("//127.0.0.1"),
-        "Tailscale's address"
-    );
+    assert_eq!(p.agent_url.split(':').nth(1), Some("//127.0.0.1"), "the address given");
 
     let (s, v) = get(&a, "/v1/llm");
     assert_eq!(s, 200);
@@ -1266,15 +1255,15 @@ fn send(a: &Agent, method: &str, path: &str, token: &str, body: Option<Value>) -
 
 #[test]
 fn platform_api() {
-    // A server not migrated yet: the platform API says how to get it.
-    let coolify = start();
-    let (s, h, _) = req(&coolify, "GET", "/v1/health", None, None);
+    // The engine turned off: the platform API says so.
+    let off = start();
+    let (s, h, _) = req(&off, "GET", "/v1/health", None, None);
     assert_eq!(s, 200);
     assert!(!h["capabilities"].as_array().unwrap().iter().any(|c| c == "platform"));
-    let (s, v) = get(&coolify, "/v1/platform/apps");
+    let (s, v) = get(&off, "/v1/platform/apps");
     assert_eq!(s, 503);
-    assert!(v["error"].as_str().unwrap().contains("vercelify migrate"), "{v}");
-    drop(coolify);
+    assert!(v["error"].as_str().unwrap().contains("engine is off"), "{v}");
+    drop(off);
 
     let a = start_with(&[("VERCELIFY_ENGINE", "platform".into())]);
     let (_, h, _) = req(&a, "GET", "/v1/health", None, None);

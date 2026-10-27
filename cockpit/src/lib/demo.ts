@@ -49,8 +49,9 @@ const DEMO_HOSTS: Record<string, { hostname: string; ip: string; cores: number; 
   "hp-elitebook": { hostname: "hp-elitebook", ip: "10.77.0.6", cores: 4, mem: 4, load: 0.2 },
   "lenovo-x220": { hostname: "lenovo-x220", ip: "10.77.0.7", cores: 2, mem: 8, load: 0.4 },
 };
-// A server Coolify still runs: the Apps page shows how to migrate it.
-const COOLIFY_HOST = "lenovo-x220";
+// A server whose engine didn't start: the Apps page says why.
+const ENGINE_DOWN_HOST = "lenovo-x220";
+const ENGINE_DOWN = "the platform database can't be opened: database disk image is malformed";
 const isWorkerHost = (h: { hostname: string }) => h.hostname === "pi5-worker" || h.hostname === "hp-elitebook";
 /** An app by name, for demo data that refers to the platform's apps. */
 const appNamed = (name: string) => demoApps().find((a) => a.name === name)!;
@@ -307,7 +308,7 @@ function doctor(server?: unknown): DoctorReport {
   const checks = [
     c("docker", "Docker", "ok", "Docker 27.3.1"),
     c("mesh", "Vercelify network", "ok", `${h.hostname} on vfy0, the coordinator heard 3 s ago`),
-    ...(h.hostname === COOLIFY_HOST ? [c("migrate", "Coolify", "warn", "Coolify still runs this server's apps", "sudo vercelify migrate")] : []),
+    ...(h.hostname === ENGINE_DOWN_HOST ? [c("platform", "Platform engine", "warn", ENGINE_DOWN, "sudo vercelify restore-state restores the last good copy")] : []),
     c("disk", "System disk", "ok", "41% used, 141.0 GB free"),
     worker
       ? c("storage", "Storage disk", "warn", "single disk: everything lives on the system disk", "add an HDD and re-run the installer to get a storage tier")
@@ -421,14 +422,14 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
       capabilities: [
         "doctor", "update", "rollback", "hardware", "alerts", "metrics", "uptime", "tokens", "audit", "backup", "previews",
         "auto-rollback", "events", "jobs", "sleep", "power-guard", "domain", "projects", "roles",
-        ...(h.hostname === COOLIFY_HOST || isWorkerHost(h) ? [] : ["platform"]),
+        ...(h.hostname === ENGINE_DOWN_HOST || isWorkerHost(h) ? [] : ["platform"]),
       ],
     };
   }
   if (p.startsWith("/v1/platform/")) {
     const h = hostFor(server);
     if (isWorkerHost(h)) throw new Error("404 Not Found: a worker runs apps for its main server");
-    if (h.hostname === COOLIFY_HOST) throw new Error("Coolify still runs this server's apps: sudo vercelify migrate moves them to Vercelify's engine");
+    if (h.hostname === ENGINE_DOWN_HOST) throw new Error(`the platform engine failed to start: ${ENGINE_DOWN}`);
     return platformRoute(req);
   }
   if (p === "/v1/jobs") return jobs.map((j) => ({ ...j }));
@@ -583,6 +584,8 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
     }
     case "test_connection":
       return { hostname: "thinkpad-t470" };
+    case "pair_pending":
+      return null;
     case "pair_join":
       return decodePairing(String(args.code ?? ""));
     case "mesh_local":

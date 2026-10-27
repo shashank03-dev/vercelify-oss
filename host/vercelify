@@ -6,7 +6,7 @@ SELF=$(readlink -f "${BASH_SOURCE[0]}")
 HOST_DIR=$(dirname "$SELF")
 # shellcheck disable=SC2034 # read by the libraries (systemd units, binaries)
 VERCELIFY_SRC=$(dirname "$HOST_DIR")
-for lib in common system hardware storage docker platform mesh cloudflare agent backup registry maintenance standby migrate; do
+for lib in common system hardware storage docker platform mesh cloudflare agent backup registry maintenance standby remote; do
   # shellcheck source=/dev/null
   . "$HOST_DIR/lib/$lib.sh"
 done
@@ -20,10 +20,12 @@ Usage: sudo vercelify <command> [args]
 
   status                 One-screen overview of every component
   doctor                 Check everything and explain how to fix problems
-  pair [--tailscale]     Show a one-time 8-character code for the Mac app (and the full
-                         pairing code); --tailscale on a server not migrated yet
+  pair [--host HOST]     Show a one-time 8-character code for the Mac app (and the full
+                         pairing code); --host: a LAN address instead of the network
   domain [DOMAIN] [--cloudflare-token TOKEN] [--force-dns]
                          Set or change the public domain (no args: back to private sslip.io)
+  remote [status|on|off] Reach this server from anywhere: the router forwards the network's
+                         two ports by itself (UPnP/NAT-PMP), no Cloudflare needed
   llm [status|install [ssd|hdd]|pull MODEL|rm MODEL|chat MODEL PROMPT|start|stop|restart]
                          Local AI models (Ollama) on this machine
   backup [status|setup [--to REPO]…|run|list|restore [SNAP] [--instance]]
@@ -43,9 +45,6 @@ Usage: sudo vercelify <command> [args]
   standby [NAME|off]     A worker that keeps a sealed copy of this main server (every 5 min)
   promote [--force]      On the standby: become the main server when the old one is gone
   demote [--force]       On a main server a standby replaced: step back, to rejoin as a worker
-  migrate [--apply|--check|--rollback|--finish [--purge]|--tailscale-off]
-                         From Coolify and Tailscale to Vercelify's own engine and network
-                         (no flag: show what would happen, change nothing)
   tokens [list|revoke ID]
                          Devices paired with this server; revoke a lost one
   sleep [list|on APP [MINUTES] [--previews]|off APP]
@@ -97,7 +96,7 @@ cmd_status() {
       proxy=$(docker inspect -f '{{.State.Status}}' vercelify-proxy 2>/dev/null || echo missing)
       line "Proxy (Traefik)" "$proxy" "ports 80/443"
     else
-      line Coolify warn "runs this server's apps — move them: sudo vercelify migrate"
+      line "Platform engine" warn "off (engine = \"none\" in $VERCELIFY_ETC/agent.toml)"
     fi
     [[ -f "$SYSTEMD_DIR/cloudflared.service" ]] && line "Cloudflare tunnel" "$(svc_state cloudflared)" "${domain:+*.$domain}"
   fi
@@ -167,11 +166,11 @@ cmd_doctor() {
 cmd_pair() {
   need_root pair
   local code short both extra=()
-  # --tailscale: a server not migrated yet, paired over Tailscale.
+  # --host: an address the Mac reaches directly (no mesh), e.g. on the LAN.
   case "${1:-}" in
     "") ;;
-    --tailscale) extra=(--tailscale) ;;
-    *) die "usage: vercelify pair [--tailscale]" ;;
+    --host) [[ -n "${2:-}" ]] || die "usage: vercelify pair [--host HOST]"; extra=(--host "$2") ;;
+    *) die "usage: vercelify pair [--host HOST]" ;;
   esac
   # One call, one device token for both codes (agents before 0.2.1: two calls).
   if both=$("$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" pair "${extra[@]}" --short --with-code 2>/dev/null) &&
@@ -188,6 +187,7 @@ cmd_pair() {
     printf '  (the app finds it on the same Wi-Fi; elsewhere, paste the full code)\n' >&2
   fi
   printf '\n  Or paste the full pairing code:\n\n  %s\n\n' "$code" >&2
+  printf '  A Mac without the app: install it and pair in one go:\n\n  curl -fsSL https://raw.githubusercontent.com/%s/main/install-mac.sh | bash -s -- --pair %s\n\n' "$VERCELIFY_REPO" "$code" >&2
   if have qrencode && [[ -t 1 ]]; then qrencode -t ansiutf8 -m 1 "$code"; fi
   printf '%s\n' "$code"
 }
@@ -325,7 +325,7 @@ cmd_domain() {
     esac
     shift
   done
-  platform_engine || die "Coolify still sets this server's domains — move it to Vercelify's engine first: sudo vercelify migrate"
+  platform_engine || die "the platform engine is off on this server (engine in $VERCELIFY_ETC/agent.toml)"
   local wildcard ip
   if [[ -z "$new" ]]; then
     ip=$(jq -r '.ipv4 // empty' "${MESH_DIR}/state.json" 2>/dev/null || true)
@@ -508,7 +508,7 @@ cmd_uninstall() {
   done
   # Vercelify's own containers (data stays): without the firewall, Ollama's
   # API would answer anyone on the network.
-  for c in "${OLLAMA_CONTAINER:-vercelify-ollama}" "${REGISTRY_CONTAINER:-vercelify-registry}"; do
+  for c in "${OLLAMA_CONTAINER:-vercelify-ollama}" "${REGISTRY_CONTAINER:-vfy-registry}"; do
     docker inspect "$c" >/dev/null 2>&1 || continue
     docker rm -f "$c" >/dev/null && info "removed the $c container (its data stays)"
   done
@@ -516,7 +516,8 @@ cmd_uninstall() {
     systemctl disable --now "$u" >/dev/null 2>&1 || true
     rm -f "$SYSTEMD_DIR/$u.service"
   done
-  for u in vercelify-backup vercelify-routes vercelify-maintenance; do
+  [[ -r "${REMOTE_ENV:-$VERCELIFY_ETC/remote.env}" ]] && remote_unmap
+  for u in vercelify-backup vercelify-maintenance vercelify-remote; do
     systemctl disable --now "$u.timer" >/dev/null 2>&1 || true
     rm -f "$SYSTEMD_DIR/$u.timer" "$SYSTEMD_DIR/$u.service"
   done
@@ -539,18 +540,16 @@ main() {
     backup|backups) need_root backup; backup_cli "$@" ;;
     restore-state) cmd_restore_state "$@" ;;
     registry) need_root registry; registry_cli "$@" ;;
-    add-worker|autodeploy|auto-deploy|coolify|routes)
-      die "'$cmd' was part of running Vercelify on Coolify. On Vercelify's engine: workers join with sudo vercelify mesh invite, apps deploy on push by themselves, and the tunnel routes every app" ;;
     maintenance) need_root maintenance; maintenance_cli "$@" ;;
     sleep) cmd_sleep "$@" ;;
     mesh) mesh_cli "$@" ;;
+    remote) [[ "${1:-status}" == status ]] || need_root remote; remote_cli "$@" ;;
     standby) need_root standby; standby_cli "$@" ;;
     github-app) need_root github-app; platform_github_app "$@" ;;
     git-source) need_root git-source; platform_git_source "$@" ;;
     webhook) need_root webhook; platform_webhook "$@" ;;
     promote) cmd_promote "$@" ;;
     demote) cmd_demote "$@" ;;
-    migrate) migrate_cli "$@" ;;
     tokens) need_root tokens; "$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" tokens "$@" ;;
     update) cmd_update "$@" ;;
     rollback) cmd_rollback ;;

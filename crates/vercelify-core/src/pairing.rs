@@ -81,7 +81,7 @@ pub fn decode(code: &str) -> Result<Pairing, PairingError> {
 // --- short codes ----------------------------------------------------------------
 //
 // `sudo vercelify pair` also prints a short one-time code like `K7QF-M2XD`.
-// The cockpit finds the host on the tailnet and trades the short code for
+// The cockpit finds the host on the LAN (mDNS) and trades the short code for
 // the full pairing code at `POST /v1/pair/claim`. 8 symbols from a 31-symbol
 // alphabet; together with a 15 minute lifetime and a 5-attempt
 // limit that is far out of reach of guessing.

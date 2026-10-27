@@ -72,11 +72,6 @@ result() { jq -r .result "$T/state/maintenance.json"; }
   run "$CLI" maintenance run
   [ "$(result)" = skipped ]; jq -r .detail "$T/state/maintenance.json" | grep -q 'deployment is building'
   echo '[{"name":"shop","last_status":"healthy"}]' >"$T/apps"
-  # a server still on Coolify
-  echo 'ghcr.io/coollabsio/coolify-helper:1.0.8' >"$T/images"
-  run "$CLI" maintenance run
-  jq -r .detail "$T/state/maintenance.json" | grep -q 'deployment is building'
-  rm "$T/images"
   ACTIVE_UNITS=vercelify-backup run "$CLI" maintenance run
   jq -r .detail "$T/state/maintenance.json" | grep -q 'backup is running'
   echo '{"state":"warning","reason":"running on battery (60%)","updated_at":"x"}' >"$POWER_GUARD_STATE"

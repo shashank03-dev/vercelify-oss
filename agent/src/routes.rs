@@ -446,7 +446,7 @@ async fn create_volume(State(s): State<AppState>, Json(req): Json<VolumeRequest>
 
 async fn build_display_status(s: &AppState) -> DisplayStatus {
     let (receiver, receiver_config) = s.receiver.status().await;
-    let host = crate::mesh::private_ipv4(&s.config).await;
+    let host = crate::mesh::private_ipv4(&s.config);
     let receiver_url = match (&receiver_config, host) {
         (Some(c), Some(h)) => Some(display::sender_url(c, &h)),
         _ => None,
@@ -675,7 +675,7 @@ async fn projects_sync(State(s): State<AppState>, Path(app): Path<String>) -> Ap
     let p = s
         .platform
         .as_ref()
-        .ok_or_else(|| AppError::unavailable("project rules need the platform engine: sudo vercelify migrate"))?;
+        .ok_or_else(|| AppError::unavailable("project rules need the platform engine, which isn't running here"))?;
     let a = p
         .store
         .with(|c| vercelify_platform::apps::find(c, &app))

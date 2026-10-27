@@ -1,8 +1,7 @@
 [Unit]
 Description=Vercelify host agent (the engine and the app's API)
 Documentation=https://github.com/shashank03-dev/vercelify-oss
-# tailscaled only for ordering: a server that still has it may listen on it.
-After=network-online.target docker.service vercelify-mesh.service tailscaled.service
+After=network-online.target docker.service vercelify-mesh.service
 Wants=network-online.target
 
 [Service]

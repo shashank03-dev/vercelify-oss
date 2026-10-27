@@ -258,8 +258,8 @@ mod tests {
             "srt://0.0.0.0:5600?mode=listener&latency=80000"
         );
         assert_eq!(
-            sender_url(&rc(StreamTransport::Udp), "100.1.2.3"),
-            "udp://100.1.2.3:5600?pkt_size=1316"
+            sender_url(&rc(StreamTransport::Udp), "10.77.0.1"),
+            "udp://10.77.0.1:5600?pkt_size=1316"
         );
     }
 

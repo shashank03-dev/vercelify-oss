@@ -26,12 +26,10 @@ export function newestVersion(versions: (string | undefined)[]): string | undefi
 
 /**
  * Why a server without the `platform` capability has no engine, from the
- * agent's answer to a platform request. Undefined: Coolify still runs its
- * apps (older agents say nothing more). Otherwise the engine is configured
- * but didn't start (a promoted standby replaced the server, its database
- * can't be opened…) and migrating is not the way out.
+ * agent's answer to a platform request: the engine didn't start (a promoted
+ * standby replaced the server, its database can't be opened…) or is off.
  */
 export function engineDownReason(platformError: string | undefined): string | undefined {
   const prefix = "the platform engine failed to start: ";
-  return platformError?.startsWith(prefix) ? platformError.slice(prefix.length) : undefined;
+  return platformError?.startsWith(prefix) ? platformError.slice(prefix.length) : platformError;
 }

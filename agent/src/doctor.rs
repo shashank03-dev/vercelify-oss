@@ -78,8 +78,6 @@ pub struct Facts {
     pub power_guard: Option<String>,
     pub firewall_active: bool,
     pub power_guard_active: bool,
-    /// Main only: Coolify still runs the apps (not migrated yet).
-    pub coolify_engine: bool,
     /// The platform engine's database: Ok(schema version) or why it failed.
     /// None = this server doesn't run the platform engine.
     pub platform: Option<Result<u32, String>>,
@@ -183,15 +181,6 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
             Some("journalctl -u vercelify-agent -n 50; sudo vercelify restore-state restores the last good copy"),
         )),
         None => {}
-    }
-    if main && f.coolify_engine {
-        out.push(check(
-            "migrate",
-            "Platform engine",
-            Warn,
-            "Coolify still runs this server's apps: Vercelify's app features (deploys, previews, sleep) need its own engine",
-            Some("sudo vercelify migrate (shows what would happen first)"),
-        ));
     }
     if main {
         if let Some(h) = &f.proxy_health {
@@ -781,7 +770,6 @@ pub async fn gather(s: &AppState) -> Facts {
         power_guard: pg.map(|p| p.state),
         firewall_active: active(services::status(&cfg.systemctl_bin, "vercelify-firewall").await),
         power_guard_active: active(services::status(&cfg.systemctl_bin, "vercelify-power-guard").await),
-        coolify_engine: main && cfg.engine == "coolify",
         platform: match (&s.platform, &s.platform_error) {
             (Some(p), _) => Some(p.store.schema_version().map_err(|e| e.to_string())),
             (None, Some(e)) => Some(Err(e.0.clone())),
@@ -914,7 +902,6 @@ mod tests {
             power_guard: Some("ok".into()),
             firewall_active: true,
             power_guard_active: true,
-            coolify_engine: false,
             platform: Some(Ok(3)),
             proxy_health: Some("healthy".into()),
             wildcard_set: Some(true),
@@ -959,19 +946,6 @@ mod tests {
         assert!(c.iter().all(|c| c.fix.is_none()));
         assert_eq!(status_of(&c, "ollama"), None, "no AI check when Ollama isn't installed");
         assert_eq!(status_of(&c, "smart-sda"), Some(Fine));
-    }
-
-    #[test]
-    fn a_server_not_migrated_is_told_how() {
-        let c = evaluate(&Facts {
-            coolify_engine: true,
-            platform: None,
-            ..healthy_main()
-        });
-        let m = c.iter().find(|c| c.id == "migrate").unwrap();
-        assert_eq!(m.status, Warn);
-        assert!(m.fix.as_deref().unwrap().contains("vercelify migrate"));
-        assert_eq!(status_of(&evaluate(&healthy_main()), "migrate"), None);
     }
 
     #[test]
@@ -1099,12 +1073,10 @@ mod tests {
             role: "worker".into(),
             storage_expected: false,
             storage_mounted: false,
-            coolify_engine: true,
             backup: None,
             ..healthy_main()
         };
         let c = evaluate(&f);
-        assert_eq!(status_of(&c, "migrate"), None);
         assert_eq!(status_of(&c, "backup"), None);
         assert_eq!(status_of(&c, "storage"), Some(Warn));
     }

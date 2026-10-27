@@ -1,7 +1,6 @@
-Starting deployment of shashank03-dev/blog:main to localhost.
-Preparing container with helper image: ghcr.io/coollabsio/coolify-helper:1.0.8.
-Importing shashank03-dev/blog:main (commit sha 4b1d000) to /artifacts/qk8s0w4g.
-Generating nixpacks configuration with: nixpacks plan -f toml /artifacts/qk8s0w4g
+Deployment #7 of blog (production) from shashank03-dev/blog:main.
+Cloning shashank03-dev/blog at 4b1d000 into /var/lib/vercelify/builds/dpl_qk8s0w4g.
+Generating nixpacks configuration with: nixpacks plan -f toml /var/lib/vercelify/builds/dpl_qk8s0w4g
 Found application type: node.
 If you need further customization, please check the documentation of Nixpacks: https://nixpacks.com/docs/providers/node
 Final Nixpacks plan:

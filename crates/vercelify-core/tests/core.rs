@@ -157,12 +157,12 @@ fn live_snapshot_smoke() {
 
 #[test]
 fn pairing_fixture_from_agent_cli() {
-    // Produced by `vercelify-agent pair` before the platform engine (it
-    // carries Coolify's URL and token, which are ignored now); the cockpit's
-    // TS decoder reads the same file.
+    // As `vercelify-agent pair --host 192.168.1.20` prints it (no mesh);
+    // the cockpit's TS decoder reads the same file.
     let p = pairing::decode(include_str!("fixtures/pairing-code.txt")).unwrap();
-    assert_eq!(p.agent_url, "http://vercelify-host.tail1234.ts.net:7420");
+    assert_eq!(p.agent_url, "http://192.168.1.20:7420");
     assert_eq!(p.hostname, "vercelify-host");
+    assert_eq!(p.role.as_deref(), Some("main"));
 }
 
 #[test]
@@ -170,9 +170,7 @@ fn pairing_without_role_still_decodes() {
     // Codes printed by 0.1 have no `role`.
     let code = format!(
         "vfy1.{}",
-        base64_url(
-            r#"{"agent_url":"http://h:7420","agent_token":"0123456789abcdef","coolify_url":"http://h:8000","hostname":"h"}"#
-        )
+        base64_url(r#"{"agent_url":"http://h:7420","agent_token":"0123456789abcdef","hostname":"h"}"#)
     );
     let p = pairing::decode(&code).unwrap();
     assert_eq!(p.role, None);
@@ -219,7 +217,7 @@ fn short_codes() {
 
 #[test]
 fn cockpit_config_migrates_and_switches() {
-    let old = r#"{"agent_url":"http://a:7420","agent_token":"t","coolify_url":"http://a:8000","coolify_token":null,"hostname":"a"}"#;
+    let old = r#"{"agent_url":"http://a:7420","agent_token":"t","hostname":"a"}"#;
     let mut c = CockpitConfig::from_json(old).unwrap();
     assert_eq!(c.servers.len(), 1);
     assert_eq!(c.active_server().unwrap().hostname, "a");

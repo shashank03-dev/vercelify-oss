@@ -93,7 +93,7 @@ os() { printf 'ID=%s\nVERSION_ID="%s"\nPRETTY_NAME="%s"\nID_LIKE="%s"\n' "$1" "$
   [ "$(grep -c '^# vercelify /mnt/storage' "$FSTAB_FILE")" -eq 1 ]
 }
 
-@test "daemon.json: created with Coolify-compatible keys" {
+@test "daemon.json: created with log limits, address pools and a shutdown timeout" {
   DOCKER_POOL=10.0.0.0/8 strict docker_daemon_config
   [ "$(jq -r '."log-opts"."max-size"' "$DOCKER_DAEMON_JSON")" = 10m ]
   [ "$(jq -r '."default-address-pools"[0].base' "$DOCKER_DAEMON_JSON")" = 10.0.0.0/8 ]
@@ -134,11 +134,10 @@ os() { printf 'ID=%s\nVERSION_ID="%s"\nPRETTY_NAME="%s"\nID_LIKE="%s"\n' "$1" "$
   [ "$ROLE" = worker ] && [ "$JOIN_TOKEN" = vfyj1.abc ] && [ "$MACHINE_NAME" = pi5 ] && [ "$WITH_AI" = 1 ]
 }
 
-@test "options of the Coolify and Tailscale installers are accepted and ignored" {
-  run parse_args --tailscale-authkey tskey-x --coolify-pubkey 'ssh-ed25519 AAA' --admin-email a@b.c -y
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"--tailscale-authkey is not needed any more"* ]]
-  [[ "$output" == *"--admin-email is not needed any more"* ]]
+@test "unknown options are refused" {
+  run parse_args --bogus-option -y
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"unknown option: --bogus-option"* ]]
 }
 
 @test "app wildcard per domain mode" {
@@ -281,15 +280,4 @@ stub_destructive_tools() {
   ROLE=worker JOIN_TOKEN=vfyj1.abc
   run setup_network
   [[ "$output" == *"on the network as 10.77.0.4"* && "$output" != *mesh_join* ]]
-}
-
-@test "a server Coolify still runs keeps it until vercelify migrate" {
-  export VERCELIFY_ETC="$T/etc" COOLIFY_DATA_DIR="$T/coolify"
-  mkdir -p "$VERCELIFY_ETC"
-  ROLE=main
-  run not_migrated; [ "$status" -ne 0 ]
-  mkdir -p "$T/coolify/source" && touch "$T/coolify/source/.env"
-  run not_migrated; [ "$status" -eq 0 ]
-  ROLE=worker
-  run not_migrated; [ "$status" -ne 0 ]
 }

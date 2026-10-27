@@ -10,8 +10,7 @@ use std::path::{Path, PathBuf};
 #[serde(default)]
 pub struct Config {
     /// Addresses to listen on. `"mesh"` is this node's mesh address (once it
-    /// has joined); `"tailscale"` its Tailscale IPv4, for servers that still
-    /// use Tailscale until `vercelify migrate --tailscale-off`.
+    /// has joined).
     pub listen: Vec<String>,
     pub port: u16,
     /// File holding the bearer token (created by the installer).
@@ -26,7 +25,6 @@ pub struct Config {
     pub sys_block: PathBuf,
     pub power_guard_state: PathBuf,
     pub docker_bin: String,
-    pub tailscale_bin: Option<String>,
     pub systemctl_bin: String,
     pub mpv_bin: String,
     /// `drm` (no desktop; draws straight to the panel), `x11`, `wayland` or `auto`.
@@ -39,9 +37,6 @@ pub struct Config {
     pub services: Vec<String>,
     /// Browser origins allowed via CORS (only needed for the web dev mode).
     pub cors_origins: Vec<String>,
-    /// Coolify's application container and data directory (`vercelify migrate`).
-    pub coolify_container: String,
-    pub coolify_data_dir: PathBuf,
     /// Docker's named-volume directory (SSD tier).
     pub docker_volumes_root: PathBuf,
     /// `main` or `worker`. Unset: read `role=` from `install_env`.
@@ -120,9 +115,8 @@ pub struct Config {
     /// (off: they could publish Ollama, the agent or a database).
     pub rewrite_private_targets: bool,
     /// What builds and runs apps on a main server: `platform` (Vercelify's
-    /// own engine, docs/design/SYSTEM-DESIGN.md), or `coolify` on a server
-    /// not migrated yet (`vercelify migrate`), where the agent runs no apps.
-    /// Unset: `coolify` when Coolify is installed, else `platform`.
+    /// own engine, docs/design/SYSTEM-DESIGN.md), or `none` for an agent
+    /// that only reports and manages the machine (tests).
     pub engine: String,
     /// The platform's state (main server, engine = platform).
     pub platform_db: PathBuf,
@@ -175,7 +169,6 @@ impl Default for Config {
             sys_block: "/sys/block".into(),
             power_guard_state: "/run/vercelify/power-guard.state".into(),
             docker_bin: "docker".into(),
-            tailscale_bin: None,
             systemctl_bin: "systemctl".into(),
             mpv_bin: "mpv".into(),
             display_backend: "auto".into(),
@@ -193,8 +186,6 @@ impl Default for Config {
             .map(String::from)
             .to_vec(),
             cors_origins: vec![],
-            coolify_container: "coolify".into(),
-            coolify_data_dir: "/data/coolify".into(),
             docker_volumes_root: vercelify_core::SSD_VOLUME_ROOT.into(),
             role: None,
             install_env: "/etc/vercelify/install.env".into(),
@@ -278,7 +269,6 @@ pub fn env_file_values(path: &Path) -> BTreeMap<String, String> {
 
 impl Config {
     pub fn load(path: Option<&Path>) -> anyhow_lite::Result<Self> {
-        let mut engine_set = std::env::var("VERCELIFY_ENGINE").is_ok_and(|v| !v.is_empty());
         let mut cfg: Config = match path {
             Some(p) if p.exists() => {
                 let raw = std::fs::read_to_string(p)
@@ -289,16 +279,11 @@ impl Config {
                         p.display()
                     );
                 }
-                engine_set |= raw.parse::<toml::Table>().is_ok_and(|t| t.contains_key("engine"));
                 toml::from_str(&raw).map_err(|e| anyhow_lite::err(format!("parsing {}: {e}", p.display())))?
             }
             _ => Config::default(),
         };
         cfg.apply_env();
-        // A server installed with Coolify keeps it until `vercelify migrate`.
-        if !engine_set && cfg.coolify_data_dir.join("source/.env").exists() {
-            cfg.engine = "coolify".into();
-        }
         cfg.apply_defaults();
         Ok(cfg)
     }
@@ -371,9 +356,6 @@ impl Config {
         if let Some(v) = var("VERCELIFY_DOCKER_BIN") {
             self.docker_bin = v;
         }
-        if let Some(v) = var("VERCELIFY_TAILSCALE_BIN") {
-            self.tailscale_bin = Some(v);
-        }
         if let Some(v) = var("VERCELIFY_SYSTEMCTL_BIN") {
             self.systemctl_bin = v;
         }
@@ -385,12 +367,6 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_MPV_EXTRA_ARGS") {
             self.mpv_extra_args = v.split_whitespace().map(String::from).collect();
-        }
-        if let Some(v) = var("VERCELIFY_COOLIFY_CONTAINER") {
-            self.coolify_container = v;
-        }
-        if let Some(v) = var("VERCELIFY_COOLIFY_DATA_DIR") {
-            self.coolify_data_dir = v.into();
         }
         if let Some(v) = var("VERCELIFY_DOCKER_VOLUMES_ROOT") {
             self.docker_volumes_root = v.into();

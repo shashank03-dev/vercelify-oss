@@ -61,7 +61,7 @@ pub struct Engine {
     running: Mutex<HashMap<String, CancelHandle>>,
     busy: Mutex<HashSet<String>>,
     listener: Mutex<Option<Listener>>,
-    /// This server's private address (mesh/Tailscale): where databases'
+    /// This server's private address (mesh): where databases'
     /// public ports listen unless opened to everyone.
     private_ip: Mutex<Option<String>>,
     /// Where the image registry keeps its data, and the addresses it is

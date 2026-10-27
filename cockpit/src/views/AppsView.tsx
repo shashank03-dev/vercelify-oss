@@ -1,4 +1,4 @@
-import { ArrowRightLeft, Boxes, ServerCrash } from "lucide-react";
+import { Boxes, ServerCrash } from "lucide-react";
 import { MachineCard } from "../components/MachineCard";
 import { Button, Callout, Card, CopyButton, EmptyState, InlineCode, PageHeader } from "../components/ui";
 import { isWorker } from "../lib/api";
@@ -41,18 +41,11 @@ export function AppsView() {
   return <PlatformApps />;
 }
 
-const STEPS: { cmd: string; what: string }[] = [
-  { cmd: "sudo vercelify update", what: "Get the version that can migrate." },
-  { cmd: "sudo vercelify migrate", what: "See what would happen: every app, database and service, nothing changed yet." },
-  { cmd: "sudo vercelify migrate --apply", what: "Move them. Coolify's built images are reused, so nothing rebuilds; the switch takes about a minute." },
-];
-
-/** No engine here: Coolify still runs the apps, or the engine didn't start, and the agent says why. */
+/** No engine here: it didn't start or is turned off, and the agent says why. */
 function NoEngine({ hostname }: { hostname: string }) {
   const why = usePoll(() => platform.apps().then(() => undefined, (e) => toCockpitError(e).message), 0);
   if (why.loading) return <PageHeader title="Apps" />;
-  const down = engineDownReason(why.data);
-  if (!down) return <NotMigrated hostname={hostname} />;
+  const down = engineDownReason(why.data) ?? "the agent didn't say why";
   return (
     <>
       <PageHeader title="Apps" subtitle={`Vercelify's engine isn't running on ${hostname}, so its apps can't be managed from here.`} />
@@ -66,43 +59,6 @@ function NoEngine({ hostname }: { hostname: string }) {
             <InlineCode>sudo vercelify doctor</InlineCode>
             <CopyButton text="sudo vercelify doctor" />
           </div>
-        </Card>
-        <MachineCard />
-      </div>
-    </>
-  );
-}
-
-/** A server whose apps Coolify still runs: how to move them. */
-function NotMigrated({ hostname }: { hostname: string }) {
-  return (
-    <>
-      <PageHeader title="Apps" subtitle={`Coolify still runs ${hostname}'s apps. Vercelify's own engine takes them over in one step.`} />
-      <div className="grid gap-6 @4xl:grid-cols-[minmax(0,1fr)_300px]">
-        <Card
-          title="Move this server to Vercelify's engine"
-          description="Push to deploy, previews, sleeping apps and the rest of this page need it. Coolify is kept until you remove it, so you can go back."
-          icon={<ArrowRightLeft />}
-        >
-          <ol className="space-y-3" data-testid="apps-migrate">
-            {STEPS.map((s, i) => (
-              <li key={s.cmd} className="flex items-start gap-3">
-                <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full border border-line-strong text-[11px] text-fg-muted tabular-nums">
-                  {i + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <InlineCode>{s.cmd}</InlineCode>
-                    <CopyButton text={s.cmd} />
-                  </div>
-                  <p className="mt-1 text-[12px] text-fg-muted">{s.what}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
-          <Callout tone="idle" className="mt-4" title="If something isn't right">
-            <InlineCode>sudo vercelify migrate --rollback</InlineCode> starts Coolify again as it was. Once every app answers, <InlineCode>sudo vercelify migrate --finish</InlineCode> removes Coolify and frees its memory.
-          </Callout>
         </Card>
         <MachineCard />
       </div>

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Vercelify's own private network (design §13, instead of Tailscale):
+# Vercelify's own private network (design §13):
 # `vercelify mesh …`. The coordinator lives in the agent of the main server;
 # `vercelify-mesh` (a separate daemon, so the network survives agent
 # restarts) runs WireGuard on vfy0 on every node.

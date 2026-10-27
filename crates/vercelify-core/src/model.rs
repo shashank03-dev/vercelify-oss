@@ -537,14 +537,14 @@ pub struct LlmStatus {
     pub image: String,
     pub version: Option<String>,
     pub port: u16,
-    /// URLs other machines on the tailnet can use, e.g. `http://laptop.tail1234.ts.net:11434`.
+    /// URLs other machines on the mesh can use, e.g. `http://10.77.0.1:11434`.
     pub endpoints: Vec<String>,
     /// Where models are stored on the host.
     pub data_path: Option<String>,
     pub models: Vec<LlmModel>,
     pub loaded: Vec<LlmLoaded>,
     pub tasks: Vec<LlmTask>,
-    /// The Vercelify firewall keeps port 11434 private to the tailnet.
+    /// The Vercelify firewall keeps port 11434 private to the mesh.
     pub firewall_active: bool,
     pub memory_total_bytes: u64,
     pub memory_available_bytes: u64,

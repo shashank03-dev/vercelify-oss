@@ -1,4 +1,4 @@
-//! The Vercelify platform: everything Coolify used to do for us, as a library
+//! The Vercelify platform: builds, deploys, routing, databases and previews, as a library
 //! the agent mounts on the main server.
 //!
 //! Design: `docs/design/SYSTEM-DESIGN.md`. This crate owns the state
@@ -25,7 +25,6 @@ pub mod git_watch;
 pub mod health;
 pub mod hooks;
 pub mod ids;
-pub mod import;
 pub mod instances;
 pub mod logs;
 pub mod mesh_registry;

@@ -94,11 +94,9 @@ mem() { printf 'MemTotal: %d kB\n' "$(( $1 * 1024 ))" >"$MEMINFO_FILE"; }
   [ "$(jq -r '."cgroup-parent" // "none"' "$DOCKER_DAEMON_JSON")" = none ]
 }
 
-@test "the Coolify-era registry commands point at the engine's own registry" {
+@test "the registry command only sets up cross-CPU builds" {
   . "$BATS_TEST_DIRNAME/../lib/registry.sh"
   run registry_cli install
   [ "$status" -ne 0 ]
-  [[ "$output" == *"its own registry"* ]]
-  run registry_cli trust laptop:5000
-  [ "$status" -ne 0 ]
+  [[ "$output" == *"usage: vercelify registry multiarch"* ]]
 }

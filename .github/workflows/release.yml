@@ -125,6 +125,7 @@ jobs:
       - run: npm ci
         working-directory: cockpit
       - uses: tauri-apps/tauri-action@v0
+        id: tauri
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -136,3 +137,14 @@ jobs:
             **Host:** `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash`
             **Mac:** download the `.dmg` below (or `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install-mac.sh | bash`). If this release isn't signed: right-click → Open the first time.
           releaseDraft: false
+      # install-mac.sh refuses a disk image without its checksum.
+      - name: Checksums for the disk images
+        if: runner.os == 'macOS'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+        run: |
+          jq -r '.[]' <<<"$PATHS" | grep '\.dmg$' | while read -r f; do
+            (cd "$(dirname "$f")" && shasum -a 256 "$(basename "$f")" >"$(basename "$f").sha256")
+            gh release upload "${{ github.ref_name }}" "$f.sha256" --clobber
+          done

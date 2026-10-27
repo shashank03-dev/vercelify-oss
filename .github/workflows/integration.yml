@@ -2,9 +2,6 @@ name: Integration
 
 # Slower checks against real software, run when the code they cover changes,
 # every Monday (to catch upstream changes early) and on demand:
-#   - the migration: `vercelify migrate` takes a shop (database, apps, a
-#     service, their data) over from a real Coolify — the version servers were
-#     installed with, and Coolify's newest release as an early warning
 #   - project rules (vercel.json) on the engine's own proxy: redirects,
 #     rewrites, headers, firewall and cron jobs through the agent
 #   - the mesh: four nodes in network namespaces with the real agent and
@@ -24,9 +21,6 @@ on:
       - host/lib/**
       - host/tests/contract/**
       - host/tests/integration/**
-      - agent/src/migrate.rs
-      - agent/src/migrate_export.php
-      - crates/vercelify-platform/src/import.rs
       - crates/vercelify-platform/src/databases.rs
       - agent/src/sleep.rs
       - agent/src/watch.rs
@@ -58,29 +52,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  migration:
-    name: Migration from Coolify (${{ matrix.version }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 40
-    strategy:
-      fail-fast: false
-      matrix:
-        version: [pinned, newest]
-    # The newest Coolify is an early warning, not a gate.
-    continue-on-error: ${{ matrix.version == 'newest' }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build -p vercelify-agent
-      - name: Pick the Coolify version
-        run: |
-          if [ "${{ matrix.version }}" = newest ]; then
-            echo "COOLIFY_VERSION=$(curl -fsSL https://cdn.coollabs.io/coolify/versions.json | jq -r .coolify.v4.version)" >>"$GITHUB_ENV"
-          fi
-      - name: vercelify migrate
-        run: sudo -E env "PATH=$PATH" AGENT_BIN="$PWD/target/debug/vercelify-agent" host/tests/contract/migrate.sh
-
   routing-contract:
     name: Project rules on the proxy (${{ matrix.traefik }})
     runs-on: ubuntu-24.04

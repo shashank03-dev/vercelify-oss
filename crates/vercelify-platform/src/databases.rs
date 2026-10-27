@@ -223,7 +223,7 @@ pub fn console_command(kind: DatabaseKind) -> Vec<String> {
         Mongodb => {
             "exec mongosh -u \"$MONGO_INITDB_ROOT_USERNAME\" -p \"$MONGO_INITDB_ROOT_PASSWORD\" --authenticationDatabase admin \"$MONGO_INITDB_DATABASE\""
         }
-        // Valkey, or Redis in a database taken over from Coolify.
+        // Valkey, or a Redis image (`redis-cli`).
         Redis => "REDISCLI_AUTH=\"$VFY_PASSWORD\" exec \"$(command -v valkey-cli || echo redis-cli)\"",
         Keydb => "REDISCLI_AUTH=\"$VFY_PASSWORD\" exec keydb-cli",
         // Dragonfly's image ships no CLI; a shell is the best it has.
@@ -383,20 +383,6 @@ pub fn create(c: &Connection, key: &MasterKey, req: &DatabaseCreate) -> Result<D
         database: name.replace('-', "_"),
     };
     insert(c, key, req, cred, None, "mesh")
-}
-
-/// A database whose data exists already (taken over from Coolify): its
-/// credentials, its exact image (the data directory's version), and its
-/// public port open on every interface as it was.
-pub fn adopt(
-    c: &Connection,
-    key: &MasterKey,
-    req: &DatabaseCreate,
-    cred: Credentials,
-    image: &str,
-) -> Result<Database> {
-    crate::validate::image(image)?;
-    insert(c, key, req, cred, Some(image), "all")
 }
 
 fn insert(

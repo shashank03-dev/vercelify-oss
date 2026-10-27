@@ -5,14 +5,11 @@
 # What is saved: the engine's state (a consistent copy of platform.db and the
 # master key that unseals every stored secret), /etc/vercelify, consistent
 # dumps of every database container, and the data of app volumes on both
-# tiers. The live platform.db is never read: SQLite may be mid-write. A server
-# still on Coolify (not migrated) also gets Coolify's database and .env.
+# tiers. The live platform.db is never read: SQLite may be mid-write.
 
 : "${VERCELIFY_STATE:=/var/lib/vercelify}"
 : "${BACKUP_ENV_FILE:=$VERCELIFY_ETC/backup.env}"
 : "${BACKUP_STAGE:=$VERCELIFY_STATE/backup-stage}"
-: "${COOLIFY_DATA:=/data/coolify}"
-: "${COOLIFY_DB_CONTAINER:=coolify-db}"
 : "${PLATFORM_DB:=$VERCELIFY_STATE/platform.db}"
 : "${SQLITE3:=sqlite3}"
 : "${DOCKER_VOLUMES_DIR:=/var/lib/docker/volumes}"
@@ -141,17 +138,8 @@ dump_databases() {
       rm -f "$stage/platform.db"
     fi
   fi
-  # A server not migrated yet: Coolify's own database.
-  if docker inspect "$COOLIFY_DB_CONTAINER" >/dev/null 2>&1; then
-    if docker exec "$COOLIFY_DB_CONTAINER" pg_dump -U coolify -Fc coolify >"$stage/databases/coolify.dump"; then
-      n=$((n + 1))
-    else
-      err "dumping Coolify's database failed"
-      failed+=(coolify)
-    fi
-  fi
   while read -r id name image; do
-    [[ -n "$id" && "$name" != "$COOLIFY_DB_CONTAINER" ]] || continue
+    [[ -n "$id" ]] || continue
     local rc=0
     case "$image" in
       *postgres*|*postgis*)
@@ -181,7 +169,7 @@ dump_databases() {
 
 backup_paths() {
   local p
-  for p in "$COOLIFY_DATA/source/.env" "$COOLIFY_DATA/ssh" "$VERCELIFY_ETC" "$VERCELIFY_STATE" "$(master_key_file)" \
+  for p in "$VERCELIFY_ETC" "$VERCELIFY_STATE" "$(master_key_file)" \
            "$STORAGE_MOUNT/volumes" "$DOCKER_VOLUMES_DIR" "$BACKUP_STAGE"; do
     [[ -e "$p" ]] && printf '%s\n' "$p"
   done
@@ -258,9 +246,6 @@ backup_restore() {
   }
   [[ $ROLE == main ]] || die "--instance restores a main server; on a worker copy what you need from $target"
   local t=$target db=''
-  if [[ -f "$t$BACKUP_STAGE/databases/coolify.dump" ]]; then
-    die "this snapshot is from before the move to Vercelify's engine (Coolify). Its files are in $t; restore it on a server running Coolify, then: sudo vercelify migrate"
-  fi
   if [[ -f "$t$BACKUP_STAGE/platform.db" ]]; then
     db="$t$BACKUP_STAGE/platform.db"
   elif [[ -f "$t$PLATFORM_DB.bak" ]]; then

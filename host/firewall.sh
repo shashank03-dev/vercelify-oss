@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
 # vercelify firewall — keep the control plane private to the mesh.
 #
-# Docker publishes Ollama's API (11434) on every interface and bypasses ufw
-# (as it does for Coolify's ports, 8000, 6001/6002 and 8080, and the old
-# image registry, 5000, on a server not migrated yet). Rules in the
-# DOCKER-USER chain are the supported way to filter that traffic.
+# Docker publishes Ollama's API (11434) on every interface and bypasses ufw.
+# Rules in the DOCKER-USER chain are the supported way to filter that traffic.
 # Public app traffic on 80/443 is untouched.
 #
 # Containers are also kept from reaching the rest of the mesh (your Mac,
 # other servers' agents and AI models): app code — a pull request preview,
 # a compromised dependency — must not become a way into your network. What
 # they may reach on other servers (every proxy, the databases' public
-# ports) comes from the mesh's ACL file below. A Tailscale network still
-# attached gets the same block, with its DNS allowed. Widen it in
+# ports) comes from the mesh's ACL file below. Widen it in
 # /etc/vercelify/firewall.conf.
 #
 # On the mesh (vfy0, design §13.8) servers may reach each other on any port,
@@ -27,21 +24,22 @@ set -euo pipefail
 : "${FIREWALL_CONF:=/etc/vercelify/firewall.conf}"
 # shellcheck disable=SC1090
 [[ -r "$FIREWALL_CONF" ]] && . "$FIREWALL_CONF"
-# block | allow — containers reaching other machines on the mesh (or tailnet).
-: "${CONTAINER_TAILNET:=block}"
+# block | allow — containers reaching other machines on the mesh.
+: "${CONTAINER_MESH:=block}"
 # TCP ports containers may still reach there, beyond the mesh's ACL.
-: "${CONTAINER_TAILNET_ALLOW_TCP:=}"
+: "${CONTAINER_MESH_ALLOW_TCP:=}"
 : "${DOCKER_BRIDGES:=docker0 br-+}"
 
-: "${PRIVATE_TCP_PORTS:=8000 6001 6002 8080 11434 5000}"
+# Ollama's API and the engine's image registry (published on the mesh address).
+: "${PRIVATE_TCP_PORTS:=11434 5055}"
 # Display stream receiver (mpv) listens on UDP 5600-5610.
 : "${PRIVATE_UDP_RANGE:=5600:5610}"
 # The agent's wake listener for sleeping apps (only the proxy, from a Docker
 # bridge, needs it).
 : "${PRIVATE_INPUT_TCP:=7421}"
-: "${TRUSTED_IFACES:=tailscale0 vfy0 lo docker0 br-+}"
-# Private networks containers are kept off (the tailnet, the mesh).
-: "${PRIVATE_NET_IFACES:=tailscale0 vfy0}"
+: "${TRUSTED_IFACES:=vfy0 lo docker0 br-+}"
+# Private networks containers are kept off (the mesh).
+: "${PRIVATE_NET_IFACES:=vfy0}"
 : "${MESH_ACL:=/run/vercelify/mesh-acl.json}"
 : "${MESH_IFACE:=vfy0}"
 
@@ -61,14 +59,12 @@ apply_family() {
   if have_chain DOCKER-USER; then
     have_chain "$FWD" || ipt -N "$FWD"
     ipt -F "$FWD"
-    if [[ "$CONTAINER_TAILNET" == block ]]; then
-      local b p o dns=100.100.100.100
-      [[ "$IPT" == ip6tables ]] && dns=fd7a:115c:a1e0::53
+    if [[ "$CONTAINER_MESH" == block ]]; then
+      local b p o
       for o in $PRIVATE_NET_IFACES; do
         ipt -A "$FWD" -o "$o" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
         for b in $DOCKER_BRIDGES; do
-          [[ "$o" == tailscale0 ]] && ipt -A "$FWD" -i "$b" -o "$o" -d "$dns" -j RETURN
-          for p in $CONTAINER_TAILNET_ALLOW_TCP; do
+          for p in $CONTAINER_MESH_ALLOW_TCP; do
             ipt -A "$FWD" -i "$b" -o "$o" -p tcp --dport "$p" -j RETURN
           done
           ipt -A "$FWD" -i "$b" -o "$o" -j DROP
@@ -147,7 +143,7 @@ apply_mesh_family() {
     ipt -A "$MESH_FWD" -j DROP
     ipt -C DOCKER-USER -i "$MESH_IFACE" -j "$MESH_FWD" 2>/dev/null || ipt -I DOCKER-USER 1 -i "$MESH_IFACE" -j "$MESH_FWD"
     # Containers out to other servers: only what the map lists; the rest
-    # falls through to the tailnet/mesh block in VERCELIFY-FWD.
+    # falls through to the mesh block in VERCELIFY-FWD.
     ipt -n -L "$MESH_OUT" >/dev/null 2>&1 || ipt -N "$MESH_OUT"
     ipt -F "$MESH_OUT"
     while IFS= read -r rule; do
@@ -175,9 +171,9 @@ case "${1:-}" in
     apply_family iptables
     command -v ip6tables >/dev/null && apply_family ip6tables || true
     echo "vercelify firewall: ports ${PRIVATE_TCP_PORTS// /,}/tcp and ${PRIVATE_UDP_RANGE/:/-}/udp limited to: $TRUSTED_IFACES"
-    if [[ "$CONTAINER_TAILNET" == block ]]; then
-      if [[ -n "${CONTAINER_TAILNET_ALLOW_TCP// /}" ]]; then
-        echo "vercelify firewall: containers reach other servers only through the mesh's ACL and on tcp ${CONTAINER_TAILNET_ALLOW_TCP// /,}"
+    if [[ "$CONTAINER_MESH" == block ]]; then
+      if [[ -n "${CONTAINER_MESH_ALLOW_TCP// /}" ]]; then
+        echo "vercelify firewall: containers reach other servers only through the mesh's ACL and on tcp ${CONTAINER_MESH_ALLOW_TCP// /,}"
       else
         echo "vercelify firewall: containers reach other servers only through the mesh's ACL"
       fi

@@ -23,32 +23,31 @@ STUB
 
 teardown() { rm -rf "$T"; }
 
-@test "firewall keeps the AI API private along with the dashboard" {
-  grep -q 'PRIVATE_TCP_PORTS:=8000 6001 6002 8080 11434 5000' "$FW"
+@test "firewall keeps the AI API and the image registry private" {
+  grep -q 'PRIVATE_TCP_PORTS:=11434 5055' "$FW"
 }
 
-@test "containers can't reach the mesh (or a tailnet) beyond its ACL, except Tailscale's DNS" {
+@test "containers can't reach the mesh beyond its ACL" {
   run "$FW" apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"containers reach other servers only through the mesh's ACL"* ]]
-  grep -q -- '^iptables -w -A VERCELIFY-FWD -i br-+ -o tailscale0 -d 100.100.100.100 -j RETURN$' "$RULES"
   run ! grep -q -- '--dport 22 -j RETURN' "$RULES"
   grep -q -- '^iptables -w -A VERCELIFY-FWD -i br-+ -o vfy0 -j DROP$' "$RULES"
-  grep -q -- '^iptables -w -A VERCELIFY-FWD -i docker0 -o tailscale0 -j DROP$' "$RULES"
-  grep -q -- '^ip6tables -w -A VERCELIFY-FWD -i br-+ -o tailscale0 -d fd7a:115c:a1e0::53 -j RETURN$' "$RULES"
+  grep -q -- '^iptables -w -A VERCELIFY-FWD -i docker0 -o vfy0 -j DROP$' "$RULES"
+  grep -q -- '^ip6tables -w -A VERCELIFY-FWD -i br-+ -o vfy0 -j DROP$' "$RULES"
   # The isolation comes before the trusted-interface shortcut, or it would never apply.
-  drop=$(grep -n -- '-i br-+ -o tailscale0 -j DROP' "$RULES" | head -1 | cut -d: -f1)
+  drop=$(grep -n -- '-i br-+ -o vfy0 -j DROP' "$RULES" | head -1 | cut -d: -f1)
   trusted=$(grep -n -- '-A VERCELIFY-FWD -i br-+ -j RETURN' "$RULES" | head -1 | cut -d: -f1)
   [ "$drop" -lt "$trusted" ]
   grep -q -- '-I DOCKER-USER 1 -j VERCELIFY-FWD' "$RULES"
 }
 
 @test "the isolation can be turned off or widened in firewall.conf" {
-  echo 'CONTAINER_TAILNET=allow' >"$FIREWALL_CONF"
+  echo 'CONTAINER_MESH=allow' >"$FIREWALL_CONF"
   "$FW" apply >/dev/null
-  run ! grep -q -- '-o tailscale0' "$RULES"
+  run ! grep -q -- '-o vfy0 -j DROP' "$RULES"
   : >"$RULES"
-  echo 'CONTAINER_TAILNET_ALLOW_TCP="22 5432"' >"$FIREWALL_CONF"
+  echo 'CONTAINER_MESH_ALLOW_TCP="22 5432"' >"$FIREWALL_CONF"
   "$FW" apply >/dev/null
   grep -q -- '--dport 5432 -j RETURN' "$RULES"
 }

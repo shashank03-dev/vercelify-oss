@@ -486,7 +486,6 @@ pub enum DeploymentTrigger {
     Webhook,
     Rollback,
     AutoRollback,
-    Migration,
     /// The reconciler re-created a missing container from its image.
     Recover,
 }
@@ -500,7 +499,6 @@ impl DeploymentTrigger {
             Self::Webhook => "webhook",
             Self::Rollback => "rollback",
             Self::AutoRollback => "auto-rollback",
-            Self::Migration => "migration",
             Self::Recover => "recover",
         }
     }
@@ -513,7 +511,6 @@ impl DeploymentTrigger {
             "webhook" => Self::Webhook,
             "rollback" => Self::Rollback,
             "auto-rollback" => Self::AutoRollback,
-            "migration" => Self::Migration,
             "recover" => Self::Recover,
             _ => return None,
         })
@@ -1175,7 +1172,6 @@ mod tests {
             DeploymentTrigger::Webhook,
             DeploymentTrigger::Rollback,
             DeploymentTrigger::AutoRollback,
-            DeploymentTrigger::Migration,
             DeploymentTrigger::Recover,
         ] {
             assert_eq!(serde_json::to_value(t).unwrap(), t.as_str());

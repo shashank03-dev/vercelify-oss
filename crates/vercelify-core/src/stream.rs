@@ -293,7 +293,7 @@ mod tests {
     #[test]
     fn moonlight() {
         let m = MoonlightLaunch {
-            host: "vercelify-host.tail1234.ts.net".into(),
+            host: "vercelify-host.vfy".into(),
             app: "Desktop".into(),
             resolution: Some("2560x1600".into()),
             fps: Some(60),
@@ -303,7 +303,7 @@ mod tests {
             moonlight_args(&m).unwrap(),
             [
                 "stream",
-                "vercelify-host.tail1234.ts.net",
+                "vercelify-host.vfy",
                 "Desktop",
                 "--resolution",
                 "2560x1600",

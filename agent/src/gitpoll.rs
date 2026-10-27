@@ -44,8 +44,7 @@ pub fn plan_previews(open: &[github::PullRequest], live: &[(u64, String)], max: 
     plan
 }
 
-/// Watch-path globs (as Coolify's `Application::globToRegex`, so the
-/// patterns of a migrated app mean the same): `*` and `?`
+/// Watch-path globs: `*` and `?`
 /// stay within a directory, `**` (and `**/`) cross them, `[…]`/`[!…]` are
 /// classes.
 pub fn glob_match(pattern: &str, path: &str) -> bool {

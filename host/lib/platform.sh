@@ -1,18 +1,13 @@
 #!/usr/bin/env bash
-# Vercelify's own platform engine (instead of Coolify): helpers for the CLI.
+# Vercelify's platform engine: helpers for the CLI.
 # The engine lives in the agent; the CLI talks to it through agent_api.
 
 # platform_engine — true when this server runs Vercelify's engine, decided
-# as the agent does: agent.toml's `engine`, else Coolify's .env on disk means
-# a server installed with Coolify that isn't migrated yet.
+# as the agent does: agent.toml's `engine`, `platform` unless set.
 platform_engine() {
   local cfg=${AGENT_CONFIG:-$VERCELIFY_ETC/agent.toml} engine
   engine=$(sed -n -E 's/^[[:space:]]*engine[[:space:]]*=[[:space:]]*"([a-z]+)".*/\1/p' "$cfg" 2>/dev/null | head -1)
-  if [[ -n "$engine" ]]; then
-    [[ "$engine" == platform ]]
-    return
-  fi
-  [[ ! -f "${COOLIFY_DATA_DIR:-/data/coolify}/source/.env" ]]
+  [[ -z "$engine" || "$engine" == platform ]]
 }
 
 # platform_domain_json WILDCARD_URL EDGE_TLS — the body of
@@ -57,7 +52,7 @@ platform_github_app() {
 platform_git_source() {
   local sub=${1:-list} name provider=github auth=token token='' out id
   (( $# )) && shift
-  platform_engine || die "git sources are part of the platform engine: sudo vercelify migrate"
+  platform_engine || die "git sources are part of the platform engine, which is off on this server"
   case "$sub" in
     list|ls)
       agent_api GET /v1/platform/git-sources | jq -r '.[] | [.name, .provider, .auth, (if .webhook then "webhook" else "" end), .id] | @tsv' |

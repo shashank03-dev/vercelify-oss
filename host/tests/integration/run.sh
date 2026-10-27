@@ -84,7 +84,6 @@ check "vercelify CLI works" 'vercelify status && vercelify pair | grep -q "^vfy2
 check "summary written 0600" '[[ $(stat -c %a /etc/vercelify/summary.txt) == 600 ]]'
 T='-H "Authorization: Bearer $(cat /etc/vercelify/agent.token)"'
 check "the agent runs Vercelify's engine" "curl -fsS $T http://127.0.0.1:7420/v1/health | jq -e '.capabilities | index(\"platform\")'"
-check "no Coolify, no Tailscale" '! docker inspect coolify >/dev/null 2>&1 && ! command -v tailscale'
 check "the mesh: this server coordinates it as 10.77.0.1" 'systemctl is-active --quiet vercelify-mesh && ip -4 addr show vfy0 | grep -q "inet 10.77.0.1/"'
 check "the agent listens on the mesh" 'curl -fsS http://10.77.0.1:7420/v1/health'
 check "apps get <name>.10.77.0.1.sslip.io" "curl -fsS $T http://127.0.0.1:7420/v1/platform/settings/domain | jq -e '.wildcard == \"10.77.0.1.sslip.io\"'"

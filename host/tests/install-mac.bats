@@ -33,13 +33,23 @@ teardown() { rm -rf "$T"; }
 }
 
 @test "options" {
-  # --no-tailscale (from older instructions) is accepted and changes nothing
-  parse_args --with-display --from-source --no-tailscale --dest "$T/apps" -y
+  parse_args --with-display --from-source --dest "$T/apps" -y
   [ "$WITH_DISPLAY" = 1 ] && [ "$FROM_SOURCE" = 1 ] && [ "$ASSUME_YES" = 1 ]
   [ "$(app_dest)" = "$T/apps" ]
   run parse_args --bogus
   [ "$status" -ne 0 ]
   [[ "$output" == *"unknown option: --bogus"* ]]
+}
+
+@test "--pair leaves the code for the app, readable by this user only" {
+  run parse_args --pair 'not a code'
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"needs the full code"* ]]
+  parse_args --pair vfy2.abc_DEF-123
+  [ "$PAIR_CODE" = vfy2.abc_DEF-123 ]
+  VERCELIFY_APP_CONFIG="$T/cfg" leave_pairing "$PAIR_CODE"
+  [ "$(cat "$T/cfg/pending-pairing")" = vfy2.abc_DEF-123 ]
+  [ "$(ls -l "$T/cfg/pending-pairing" | cut -c1-10)" = "-rw-------" ]
 }
 
 @test "falls back to ~/Applications when /Applications is not writable" {

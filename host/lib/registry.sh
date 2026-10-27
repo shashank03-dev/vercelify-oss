@@ -12,7 +12,6 @@ registry_multiarch() {
 registry_cli() {
   case "${1:-}" in
     multiarch) registry_multiarch ;;
-    install|trust) die "Vercelify's engine runs its own registry on the main server: workers pull from it over the mesh, with nothing to set up" ;;
     *) die "usage: vercelify registry multiarch" ;;
   esac
 }

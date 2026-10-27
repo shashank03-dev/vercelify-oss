@@ -28,6 +28,8 @@ VERSION=${VERSION:-dev}
 . "$VERCELIFY_SRC/host/lib/cloudflare.sh"
 # shellcheck source=lib/agent.sh
 . "$VERCELIFY_SRC/host/lib/agent.sh"
+# shellcheck source=lib/remote.sh
+. "$VERCELIFY_SRC/host/lib/remote.sh"
 # shellcheck source=lib/backup.sh
 . "$VERCELIFY_SRC/host/lib/backup.sh"
 # shellcheck source=lib/maintenance.sh
@@ -54,6 +56,9 @@ Network & domain
   --cloudflare-token TOK   Cloudflare API token: creates a tunnel + DNS for you
                            (no port forwarding, works behind CGNAT)
   --force-dns              Replace existing DNS records for *.DOMAIN and DOMAIN
+  --remote                 Reach this server from anywhere without Cloudflare: the
+                           router forwards two ports by itself (UPnP/NAT-PMP)
+  --no-remote              Don't ask about it (LAN only, or a Cloudflare domain)
 
 Storage
   --storage-device DEV     Disk for databases/volumes, mounted at /mnt/storage
@@ -91,6 +96,8 @@ DOMAIN=''
 DOMAIN_MODE=''
 CF_API_TOKEN=${CF_API_TOKEN:-}
 FORCE_DNS=0
+# 1 on, 0 off, '' ask (main server without a Cloudflare domain)
+REMOTE=''
 STORAGE_DEVICE=auto
 FORMAT_STORAGE=0
 WITH_FIREWALL=1
@@ -110,11 +117,10 @@ parse_args() {
       --domain) DOMAIN=${2:?}; shift ;;
       --cloudflare-token) CF_API_TOKEN=${2:?}; shift ;;
       --force-dns) FORCE_DNS=1 ;;
+      --remote) REMOTE=1 ;;
+      --no-remote) REMOTE=0 ;;
       --storage-device) STORAGE_DEVICE=${2:?}; shift ;;
       --format-storage) FORMAT_STORAGE=1 ;;
-      # Options of installers before Vercelify's own engine: nothing to do now.
-      --tailscale-authkey|--coolify-pubkey|--admin-email|--admin-password)
-        warn "$1 is not needed any more (Vercelify runs without Coolify and Tailscale) — ignored"; shift ;;
       --no-firewall) WITH_FIREWALL=0 ;;
       --no-power-guard) WITH_POWER_GUARD=0 ;;
       --no-display) WITH_DISPLAY=0 ;;
@@ -192,6 +198,10 @@ wizard() {
   if [[ -n "$DOMAIN" && -z "$CF_API_TOKEN" && -z "$DOMAIN_MODE" ]]; then
     printf '\n  Is %s on Cloudflare? Paste an API token and Vercelify creates a tunnel + DNS\n  records for you — no router port forwarding, works on any ISP.\n  Create one at https://dash.cloudflare.com/profile/api-tokens with:\n    Account › Cloudflare Tunnel › Edit, Zone › DNS › Edit, Zone › Zone › Read\n' "$DOMAIN" >&2
     ask_secret CF_API_TOKEN "Cloudflare API token (blank = I'll point DNS/ports myself):"
+  fi
+  if [[ -z "$REMOTE" && -z "$CF_API_TOKEN" && "$DOMAIN_MODE" != cloudflare && ! -r "$REMOTE_ENV" ]]; then
+    printf '\n  Use your Mac (or add servers) away from home? Vercelify can ask your router to\n  forward its private network'"'"'s two ports here (UPnP/NAT-PMP). Only Vercelify'"'"'s\n  encrypted network answers there; your apps and its API stay private.\n' >&2
+    if confirm "Reach this server from anywhere?" y; then REMOTE=1; else REMOTE=0; fi
   fi
 }
 
@@ -289,16 +299,12 @@ setup_network() {
   fi
 }
 
-# A server whose apps Coolify still runs: the update leaves Coolify (and
-# Tailscale) as they are until `vercelify migrate`.
-not_migrated() { [[ $ROLE == main ]] && ! platform_engine; }
-
 MAC_INSTALL="curl -fsSL https://raw.githubusercontent.com/$VERCELIFY_REPO/main/install-mac.sh | bash"
 
 summary() {
   local ip pair='' short='' summary_file="$VERCELIFY_ETC/summary.txt" wildcard=''
   ip=$(mesh_ipv4 || true)
-  [[ $ROLE == main ]] && ! not_migrated && wildcard=$(app_wildcard)
+  [[ $ROLE == main ]] && platform_engine && wildcard=$(app_wildcard)
   if [[ "$VERCELIFY_DRY_RUN" != 1 ]] && [[ -x "$AGENT_BIN" ]]; then
     # One device token for both codes; the short one lasts long enough to
     # install the Mac app first.
@@ -320,20 +326,14 @@ summary() {
     printf '  %sNetwork%s            %s\n' "$C_BOLD" "$C_RESET" "${ip:+$(hostname -s) at $ip (vfy0)}${ip:-not on a Vercelify network yet}"
     printf '  %sStorage%s            %s\n' "$C_BOLD" "$C_RESET" "$(findmnt -no SOURCE,SIZE "$STORAGE_MOUNT" 2>/dev/null || echo "single disk ($STORAGE_MOUNT on /)")"
     (( WITH_AI )) && printf '  %sAI models%s          http://%s:11434 (Ollama, OpenAI-compatible at /v1)\n' "$C_BOLD" "$C_RESET" "${ip:-<this server>}"
-    if not_migrated; then
-      printf '\n  %sCoolify still runs this server'"'"'s apps.%s Move them to Vercelify'"'"'s engine (it shows\n  every step first and keeps Coolify until you remove it):  sudo vercelify migrate\n' "$C_BOLD" "$C_RESET"
-    fi
     if [[ -n "$pair" && $ROLE == main ]]; then
-      printf '\n  %sConnect your Mac%s\n' "$C_BOLD" "$C_RESET"
-      printf '    1. Install the app:\n         %s\n' "$MAC_INSTALL"
+      printf '\n  %sConnect your Mac%s — run this in its Terminal (installs the app and pairs it):\n' "$C_BOLD" "$C_RESET"
+      printf '    %s -s -- --pair %s\n' "$MAC_INSTALL" "$pair"
       if [[ -n "$short" ]]; then
-        printf '    2. Open Vercelify: on the same Wi-Fi pick %s%s%s and type the code   %s%s%s   (valid 1 hour)\n' \
+        printf '  App already installed? On the same Wi-Fi pick %s%s%s and type   %s%s%s   (valid 1 hour)\n' \
           "$C_BOLD" "$(hostname -s)" "$C_RESET" "$C_BOLD" "$short" "$C_RESET"
-        printf '       or, anywhere, paste the full code:\n         %s\n' "$pair"
-      else
-        printf '    2. Open Vercelify and paste this code:\n         %s\n' "$pair"
       fi
-      printf '\n  New code any time: sudo vercelify pair\n'
+      printf '  New code any time: sudo vercelify pair\n'
     fi
     if [[ $ROLE == worker ]]; then
       if [[ -n "$ip" ]]; then
@@ -403,8 +403,12 @@ main() {
     setup_cloudflare_domain "$DOMAIN" "$CF_API_TOKEN" "vercelify-$MACHINE_NAME" "$FORCE_DNS"
   fi
   setup_network
+  if [[ $ROLE == main && "$REMOTE" == 1 && "$VERCELIFY_DRY_RUN" != 1 ]]; then
+    step "Remote access"
+    ( remote_on ) || warn "not reachable from outside your network yet — later: sudo vercelify remote on"
+  fi
   if [[ $ROLE == main ]]; then
-    if ! not_migrated; then
+    if platform_engine; then
       step "App addresses"
       local edge=false
       [[ "$(domain_mode)" == cloudflare ]] && edge=true

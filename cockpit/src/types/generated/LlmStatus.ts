@@ -13,7 +13,7 @@ installed: boolean, running: boolean,
  */
 ready: boolean, container_state: string | null, image: string, version: string | null, port: number, 
 /**
- * URLs other machines on the tailnet can use, e.g. `http://laptop.tail1234.ts.net:11434`.
+ * URLs other machines on the mesh can use, e.g. `http://10.77.0.1:11434`.
  */
 endpoints: Array<string>, 
 /**
@@ -21,6 +21,6 @@ endpoints: Array<string>,
  */
 data_path: string | null, models: Array<LlmModel>, loaded: Array<LlmLoaded>, tasks: Array<LlmTask>, 
 /**
- * The Vercelify firewall keeps port 11434 private to the tailnet.
+ * The Vercelify firewall keeps port 11434 private to the mesh.
  */
 firewall_active: boolean, memory_total_bytes: number, memory_available_bytes: number, error: string | null, };

@@ -16,16 +16,8 @@ commands:
       --with-code               with --short: print the full code on a second line too
       --ttl SECONDS             lifetime of the short code
       --name NAME               name of the device token minted for it
-      --tailscale               pair over Tailscale (a server not migrated yet)
   tokens [list | revoke ID]   device tokens
   promote [--force]           on the standby: take over as the main server (see: vercelify promote)
-  migrate [STEP]              from Coolify to the platform engine (see: vercelify migrate)
-      plan [--json]             what would happen (default)
-      apply [--force]           take over Coolify's apps and data, stop Coolify
-      check [--wait S] [--json] after the restart: every app answers?
-      rollback                  back to Coolify
-      finish [--purge]          remove Coolify
-      status [--json]
 
 options:
   -c, --config FILE   config file (default: $VERCELIFY_CONFIG or /etc/vercelify/agent.toml)
@@ -51,7 +43,6 @@ pub enum Cmd {
         with_code: bool,
         ttl: u64,
         name: Option<String>,
-        tailscale: bool,
     },
     TokensList,
     TokensRevoke {
@@ -60,7 +51,6 @@ pub enum Cmd {
     Promote {
         force: bool,
     },
-    Migrate(crate::migrate::Step),
     Version,
     Help,
 }
@@ -140,7 +130,7 @@ pub fn parse(args: impl IntoIterator<Item = String>, env_config: Option<String>)
         }
         "pair" => {
             let mut host = None;
-            let (mut short, mut with_code, mut tailscale) = (false, false, false);
+            let (mut short, mut with_code) = (false, false);
             let mut ttl = vercelify_core::pairing::SHORT_CODE_TTL_SECS;
             let mut name = None;
             while let Some(arg) = a.next() {
@@ -151,7 +141,6 @@ pub fn parse(args: impl IntoIterator<Item = String>, env_config: Option<String>)
                     "--name" => name = Some(a.value(&k, inline)?),
                     "--short" => short = true,
                     "--with-code" => with_code = true,
-                    "--tailscale" => tailscale = true,
                     _ => return Err(unknown(&arg)),
                 }
             }
@@ -164,7 +153,6 @@ pub fn parse(args: impl IntoIterator<Item = String>, env_config: Option<String>)
                 with_code,
                 ttl,
                 name,
-                tailscale,
             }
         }
         "promote" => match a.next().as_deref() {
@@ -172,30 +160,6 @@ pub fn parse(args: impl IntoIterator<Item = String>, env_config: Option<String>)
             Some("--force") if a.next().is_none() => Cmd::Promote { force: true },
             Some(x) => return Err(unknown(x)),
         },
-        "migrate" => {
-            use crate::migrate::Step;
-            let step = a.next().unwrap_or_else(|| "plan".into());
-            let (mut json, mut force, mut purge, mut wait) = (false, false, false, 300);
-            while let Some(arg) = a.next() {
-                let (k, inline) = split(&arg);
-                match (k.as_str(), step.as_str()) {
-                    ("--json", "plan" | "check" | "status") => json = true,
-                    ("--force", "apply") => force = true,
-                    ("--purge", "finish") => purge = true,
-                    ("--wait", "check") => wait = number(&k, &a.value(&k, inline)?)?,
-                    _ => return Err(unknown(&arg)),
-                }
-            }
-            Cmd::Migrate(match step.as_str() {
-                "plan" => Step::Plan { json },
-                "apply" => Step::Apply { force },
-                "check" => Step::Check { wait_secs: wait, json },
-                "rollback" => Step::Rollback,
-                "finish" => Step::Finish { purge },
-                "status" => Step::Status { json },
-                other => return Err(unknown(other)),
-            })
-        }
         "tokens" => match (a.next().as_deref(), a.next()) {
             (None | Some("list"), None) => Cmd::TokensList,
             (Some("revoke"), Some(id)) if a.next().is_none() => Cmd::TokensRevoke { id },
@@ -240,16 +204,10 @@ mod tests {
             } => assert!(short && with_code && ttl == 3600),
             other => panic!("{other:?}"),
         }
-        match p(&["pair", "--host=10.77.0.1", "--name", "Mac", "--tailscale"])
-            .unwrap()
-            .cmd
-        {
-            Cmd::Pair {
-                host, name, tailscale, ..
-            } => {
+        match p(&["pair", "--host=10.77.0.1", "--name", "Mac"]).unwrap().cmd {
+            Cmd::Pair { host, name, .. } => {
                 assert_eq!(host.as_deref(), Some("10.77.0.1"));
                 assert_eq!(name.as_deref(), Some("Mac"));
-                assert!(tailscale);
             }
             other => panic!("{other:?}"),
         }
@@ -266,21 +224,6 @@ mod tests {
             Cmd::TokensRevoke { id: "tok_1".into() }
         );
         assert_eq!(p(&["promote", "--force"]).unwrap().cmd, Cmd::Promote { force: true });
-        use crate::migrate::Step;
-        assert_eq!(p(&["migrate"]).unwrap().cmd, Cmd::Migrate(Step::Plan { json: false }));
-        assert_eq!(
-            p(&["migrate", "check", "--wait=60", "--json"]).unwrap().cmd,
-            Cmd::Migrate(Step::Check {
-                wait_secs: 60,
-                json: true
-            })
-        );
-        assert_eq!(
-            p(&["migrate", "finish", "--purge"]).unwrap().cmd,
-            Cmd::Migrate(Step::Finish { purge: true })
-        );
-        assert!(p(&["migrate", "apply", "--purge"]).is_err());
-        assert!(p(&["migrate", "sideways"]).is_err());
         assert_eq!(p(&["--version"]).unwrap().cmd, Cmd::Version);
         assert_eq!(p(&["pair", "-h"]).unwrap().cmd, Cmd::Help);
     }

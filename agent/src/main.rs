@@ -20,7 +20,6 @@ mod llm;
 mod mdns;
 mod mesh;
 mod mesh_relay;
-mod migrate;
 mod pairing;
 mod platform;
 mod platform_api;
@@ -60,7 +59,7 @@ fn log_filter(default: &str) -> tracing_subscriber::filter::Targets {
 fn mesh_pairing(cfg: &Config, token: &str, ttl_secs: u64) -> Result<vercelify_core::pairing::Pairing, String> {
     let own = vercelify_mesh::state::State::load(&cfg.mesh_dir)
         .map_err(|e| e.to_string())?
-        .ok_or("the mesh isn't set up on this server yet: sudo vercelify mesh init (or pair with --tailscale)")?;
+        .ok_or("the mesh isn't set up on this server yet: sudo vercelify mesh init (or pair with --host)")?;
     let key = vercelify_mesh::keys::NodeKey::load_or_create(&vercelify_mesh::state::key_path(&cfg.mesh_dir))
         .map_err(|e| e.to_string())?;
     let store = vercelify_platform::Store::open(&cfg.platform_db).map_err(|e| e.to_string())?;
@@ -150,7 +149,6 @@ async fn main() {
             with_code,
             ttl,
             name,
-            tailscale,
         } => {
             // Each pairing gets its own token, so a lost Mac can be revoked
             // alone (`vercelify tokens revoke`).
@@ -162,18 +160,14 @@ async fn main() {
                     cfg.tokens_file.display()
                 )),
             };
-            let mesh_pairing = if cfg.mesh_coordinator && cfg.role() != "worker" && !tailscale && host.is_none() {
+            let mesh_pairing = if cfg.mesh_coordinator && cfg.role() != "worker" && host.is_none() {
                 Some(mesh_pairing(&cfg, &token, ttl).unwrap_or_else(|e| fatal(&e)))
             } else {
                 None
             };
-            // Without the mesh: the address given, Tailscale's (a server not
-            // migrated yet), or the LAN's.
+            // Without the mesh: the address given, or the LAN's.
             let host = match host {
                 Some(h) => h,
-                None if tailscale => mesh::tailscale_ipv4(cfg.tailscale_bin.as_deref())
-                    .await
-                    .unwrap_or_else(|| fatal("Tailscale has no IPv4 address here (is `tailscale up` done?)")),
                 None => lan_ipv4().unwrap_or_else(|| fatal("no network address found; pass --host")),
             };
             let pairing = vercelify_core::pairing::Pairing {
@@ -202,11 +196,6 @@ async fn main() {
             Ok(m) => println!("{m}"),
             Err(e) => fatal(&e),
         },
-        Cmd::Migrate(step) => {
-            if let Err(e) = migrate::run(&cfg, step) {
-                fatal(&e)
-            }
-        }
         Cmd::TokensList => {
             let all = tokens::list(&cfg);
             if all.is_empty() {
@@ -262,7 +251,6 @@ async fn serve(cfg: Config) {
     let token = cfg.resolve_token().unwrap_or_else(|e| fatal(&e.to_string()));
     let port = cfg.port;
     let listen = cfg.listen.clone();
-    let tailscale_bin = cfg.tailscale_bin.clone();
     let state = routes::AppState::new(cfg, token);
     let app = routes::router(state.clone());
     tokio::spawn(state.projects.clone().run());
@@ -271,7 +259,7 @@ async fn serve(cfg: Config) {
     tokio::spawn(update::resume_update_job(state.config.clone(), state.jobs.clone()));
     if let Some(p) = &state.platform {
         // Databases' public ports listen on the private network only.
-        let private = mesh::private_ipv4(&state.config).await;
+        let private = mesh::private_ipv4(&state.config);
         p.engine.set_private_ip(private);
         // Tests run with the background loops off (watch interval 0).
         let every = if state.config.watch_interval_secs == 0 { 0 } else { 30 };
@@ -362,12 +350,11 @@ async fn serve(cfg: Config) {
     }
     for spec in listen {
         let app = app.clone();
-        let ts_bin = tailscale_bin.clone();
         let cfg = state.config.clone();
         tasks.spawn(async move {
-            let ip = resolve_listen(&spec, ts_bin.as_deref(), &cfg).await;
+            let ip = resolve_listen(&spec, &cfg).await;
             let addr = SocketAddr::new(ip, port);
-            // tailscaled may hold the address briefly after (re)start; retry.
+            // vercelify-mesh may put the address on vfy0 a moment later; retry.
             let listener = loop {
                 match tokio::net::TcpListener::bind(addr).await {
                     Ok(l) => break l,
@@ -396,7 +383,7 @@ async fn serve(cfg: Config) {
     .await;
 }
 
-async fn resolve_listen(spec: &str, ts_bin: Option<&str>, cfg: &config::Config) -> IpAddr {
+async fn resolve_listen(spec: &str, cfg: &config::Config) -> IpAddr {
     if spec == "mesh" {
         // The mesh address, once this node has joined (the bind retries
         // until vercelify-mesh has put it on vfy0).
@@ -412,22 +399,8 @@ async fn resolve_listen(spec: &str, ts_bin: Option<&str>, cfg: &config::Config) 
             tokio::time::sleep(Duration::from_secs(5)).await;
         }
     }
-    if spec != "tailscale" {
-        return spec
-            .parse()
-            .unwrap_or_else(|_| fatal(&format!("invalid listen address `{spec}`")));
-    }
-    let mut warned = false;
-    loop {
-        if let Some(ip) = mesh::tailscale_ipv4(ts_bin).await.and_then(|s| s.parse().ok()) {
-            return ip;
-        }
-        if !warned {
-            tracing::warn!("waiting for a Tailscale IPv4 address (is `tailscale up` done?)");
-            warned = true;
-        }
-        tokio::time::sleep(Duration::from_secs(5)).await;
-    }
+    spec.parse()
+        .unwrap_or_else(|_| fatal(&format!("invalid listen address `{spec}`")))
 }
 
 async fn shutdown() {

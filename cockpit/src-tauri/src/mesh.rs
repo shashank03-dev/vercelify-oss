@@ -342,7 +342,7 @@ mod tests {
         assert!(on_mesh("http://main.vfy:7420/v1"));
         assert!(on_mesh("http://[fd76:6679:6d65::1]:7420"));
         assert!(!on_mesh("http://100.101.102.103:7420"));
-        assert!(!on_mesh("http://old-thinkpad.tail1234.ts.net:7420"));
+        assert!(!on_mesh("http://old-thinkpad.lan:7420"));
         assert!(!on_mesh("http://10.7.0.1:7420"));
     }
 

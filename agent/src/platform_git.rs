@@ -128,8 +128,7 @@ impl PlatformGit {
         };
         let slug = github_slug(&repo);
         let token = self.token(app).await;
-        let migrating = crate::migrate::in_progress(&self.cfg);
-        if app.previews.enabled && !migrating {
+        if app.previews.enabled {
             if let Some(slug) = &slug {
                 self.sync_previews(app, slug, token.as_deref()).await;
             }
@@ -162,13 +161,6 @@ impl PlatformGit {
                     app.name,
                     short(pin)
                 )),
-            );
-            return self.status(app);
-        }
-        if migrating {
-            self.hold(
-                app,
-                "new commit waiting: the move from Coolify isn't finished (vercelify migrate --finish)",
             );
             return self.status(app);
         }
@@ -339,10 +331,7 @@ impl PlatformGit {
                     .await;
             }
         }
-        if matches!(
-            deployment.trigger,
-            DeploymentTrigger::Recover | DeploymentTrigger::Migration
-        ) {
+        if matches!(deployment.trigger, DeploymentTrigger::Recover) {
             return;
         }
         let (state, desc) = if ok {

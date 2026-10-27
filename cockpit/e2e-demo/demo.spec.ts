@@ -44,11 +44,10 @@ test("onboarding finds servers on the network and pairs with a short code", asyn
   await expect(page.getByTestId("platform-apps")).toBeVisible();
 });
 
-test("a server Coolify still runs says how to move it to Vercelify's engine", async ({ page }) => {
+test("a server whose engine didn't start says why", async ({ page }) => {
   await page.goto("/");
   await pairFound(page, "lenovo-x220");
-  await expect(page.getByTestId("apps-migrate")).toContainText("sudo vercelify migrate --apply");
-  await expect(page.getByText("sudo vercelify migrate --rollback")).toBeVisible();
+  await expect(page.getByTestId("engine-down")).toContainText("database disk image is malformed");
   await page.getByTestId("nav-servers").click();
   await expect(page.getByTestId("checks-lenovo-x220")).toContainText("1 warning");
 });

@@ -211,6 +211,27 @@ async fn pair_join(code: String) -> CmdResult<Pairing> {
     Ok(p)
 }
 
+/// A pairing code `install-mac.sh --pair CODE` left for the app: read once
+/// and removed, so the first start pairs by itself. Older than a day (the
+/// code's own lifetime) it is dropped.
+#[tauri::command]
+fn pair_pending(app: AppHandle) -> CmdResult<Option<String>> {
+    let dir = app.path().app_config_dir().map_err(|e| e.to_string())?;
+    Ok(take_pending(&dir.join("pending-pairing")))
+}
+
+fn take_pending(path: &std::path::Path) -> Option<String> {
+    let fresh = std::fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.elapsed().ok())
+        .is_some_and(|age| age < std::time::Duration::from_secs(24 * 3600));
+    let code = std::fs::read_to_string(path).ok();
+    let _ = std::fs::remove_file(path);
+    let code = code?.trim().to_string();
+    (fresh && pairing::decode(&code).is_ok()).then_some(code)
+}
+
 /// Vercelify servers on this LAN (mDNS), to pair with a short code.
 #[tauri::command]
 async fn mesh_discover() -> CmdResult<Vec<LanServer>> {
@@ -480,6 +501,7 @@ pub fn run() {
             pair_decode,
             pair_claim,
             pair_join,
+            pair_pending,
             mesh_discover,
             mesh_pair,
             mesh_local,
@@ -543,5 +565,24 @@ mod settings_tests {
         std::fs::remove_dir_all(&dir).unwrap();
         assert_eq!(original, "keep me");
         assert_eq!(saved, "new settings");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::take_pending;
+
+    #[test]
+    fn a_pending_code_is_taken_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pending-pairing");
+        let code = include_str!("../../../crates/vercelify-core/tests/fixtures/pairing-code.txt").trim();
+        std::fs::write(&path, format!("{code}\n")).unwrap();
+        assert_eq!(take_pending(&path).as_deref(), Some(code));
+        assert!(!path.exists());
+        assert_eq!(take_pending(&path), None);
+        std::fs::write(&path, "not a code").unwrap();
+        assert_eq!(take_pending(&path), None);
+        assert!(!path.exists());
     }
 }

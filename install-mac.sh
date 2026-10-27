@@ -10,6 +10,7 @@
 #   --no-mesh        skip vercelify-mesh, Vercelify's network (needed to reach servers off your LAN)
 #   --mesh-system    run vercelify-mesh as root with a real interface (*.vfy for every app;
 #                    asks for your password) instead of in the app's user session
+#   --pair CODE      pair with a server right away (the full code its installer printed)
 #   --dest DIR       install the app into DIR (default: /Applications, else ~/Applications)
 #   -y, --yes        never ask
 #
@@ -28,6 +29,7 @@ WITH_MESH=1
 MESH_SYSTEM=0
 MESH_LABEL=dev.vercelify.mesh
 DEST=''
+PAIR_CODE=''
 ASSUME_YES=0
 
 if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
@@ -69,17 +71,19 @@ parse_args() {
     case "$1" in
       --with-display) WITH_DISPLAY=1 ;;
       --from-source) FROM_SOURCE=1 ;;
-      # Older instructions passed it: nothing to skip now.
-      --no-tailscale) ;;
       --no-mesh) WITH_MESH=0 ;;
       --mesh-system) MESH_SYSTEM=1 ;;
       --dest) DEST=${2:?--dest needs a directory}; shift ;;
+      --pair) PAIR_CODE=${2:?--pair needs the code the server printed}; shift ;;
       -y|--yes) ASSUME_YES=1 ;;
       -h|--help) usage; exit 0 ;;
       *) die "unknown option: $1 (see --help)" ;;
     esac
     shift
   done
+  if [[ -n "$PAIR_CODE" ]]; then
+    [[ "$PAIR_CODE" =~ ^vfy[12]\.[A-Za-z0-9_-]+$ ]] || die "--pair needs the full code (vfy2.…) from: sudo vercelify pair"
+  fi
 }
 
 # Where the app goes: /Applications when writable (admin users), else ~/Applications.
@@ -143,6 +147,10 @@ install_from_release() {
   tag=$(release_tag "$json")
   info "downloading $APP_NAME ${tag:-latest} ($(basename "$url"))…"
   curl -fL --retry 3 --progress-bar -o "$WORK/app.dmg" "$url" || die "download failed: $url"
+  # The quarantine flag comes off below, so the image must be the one released.
+  curl -fsSL --retry 3 -o "$WORK/app.dmg.sha256" "$url.sha256" || die "no checksum published for $(basename "$url"): not installing it"
+  [[ "$(shasum -a 256 "$WORK/app.dmg" | cut -d' ' -f1)" == "$(cut -d' ' -f1 "$WORK/app.dmg.sha256")" ]] || die "$(basename "$url"): checksum mismatch"
+  ok "checksum verified"
   mnt="$WORK/mnt"
   mkdir -p "$mnt"
   hdiutil attach -nobrowse -readonly -quiet -mountpoint "$mnt" "$WORK/app.dmg" || die "could not open the disk image"
@@ -289,6 +297,13 @@ install_mesh() {
   fi
 }
 
+# The app reads this once at start (and removes it): only this user can read it.
+leave_pairing() {
+  local dir="${VERCELIFY_APP_CONFIG:-$HOME/Library/Application Support/dev.vercelify.cockpit}"
+  mkdir -p "$dir"
+  ( umask 077; printf '%s\n' "$1" >"$dir/pending-pairing" )
+}
+
 install_display_tools() {
   step "Display streaming tools"
   have brew || { warn "Homebrew is needed for ffmpeg and Moonlight: https://brew.sh"; return 0; }
@@ -321,7 +336,12 @@ main() {
   install_cli
 
   printf '\n%s%s✔ Done.%s Opening %s…\n\n' "$B" "$G" "$N" "$APP_NAME" >&2
-  printf '  Next: on your old laptop run the server installer, then pick it in the app\n  and type the 8-character code it shows.\n%s    curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh | sudo bash%s\n\n' "$D" "$REPO" "$N" >&2
+  if [[ -n "$PAIR_CODE" ]]; then
+    leave_pairing "$PAIR_CODE"
+    printf '  The app pairs with your server as it opens.\n\n' >&2
+  else
+    printf '  Next: on your old laptop run the server installer, then pick it in the app\n  and type the 8-character code it shows.\n%s    curl -fsSL https://raw.githubusercontent.com/%s/main/install.sh | sudo bash%s\n\n' "$D" "$REPO" "$N" >&2
+  fi
   open "$dest/$APP_NAME.app" 2>/dev/null || true
 }
 

@@ -39,7 +39,7 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   run "$CLI" llm status
   [ "$status" -eq 0 ]
   [[ "$output" == *"Ollama"*"running"*"0.12.3"* ]]
-  [[ "$output" == *"endpoint  http://laptop.tail1234.ts.net:11434"* ]]
+  [[ "$output" == *"endpoint  http://10.77.0.1:11434"* ]]
   [[ "$output" == *"model     llama3.2:3b"* ]]
 
   run "$CLI" llm chat llama3.2:3b "say hi"
@@ -79,14 +79,6 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   [ -s "$T/curl-argv" ]
   run ! grep -q -- 'test-agent-token' "$T/curl-argv"
   grep -q -- '-K -' "$BATS_TEST_DIRNAME/../lib/agent.sh"
-}
-
-@test "Coolify-era commands say what took their place" {
-  for c in autodeploy add-worker coolify routes; do
-    run "$CLI" "$c"
-    [ "$status" -ne 0 ]
-    [[ "$output" == *"Coolify"*"mesh invite"* ]]
-  done
 }
 
 @test "without the token file the CLI asks for sudo" {
@@ -218,14 +210,14 @@ STUB
   [[ "$output" == *"unknown provider"* ]]
 }
 
-@test "pair --tailscale reaches the agent; anything else is refused" {
-  printf '#!/bin/sh\necho "$*" >>"$T_CALLS"\nprintf "ABCD-EFGH\\nvfy1.ts\\n"\n' >"$T/agent"
+@test "pair --host reaches the agent; anything else is refused" {
+  printf '#!/bin/sh\necho "$*" >>"$T_CALLS"\nprintf "ABCD-EFGH\\nvfy1.lan\\n"\n' >"$T/agent"
   chmod +x "$T/agent"
   export T_CALLS="$T/calls"
-  AGENT_BIN="$T/agent" VERCELIFY_TEST=1 run "$CLI" pair --tailscale
+  AGENT_BIN="$T/agent" VERCELIFY_TEST=1 run "$CLI" pair --host 192.168.1.20
   [ "$status" -eq 0 ]
-  grep -q 'pair --tailscale --short --with-code' "$T/calls"
+  grep -q 'pair --host 192.168.1.20 --short --with-code' "$T/calls"
   AGENT_BIN="$T/agent" VERCELIFY_TEST=1 run "$CLI" pair --bogus
   [ "$status" -ne 0 ]
-  [[ "$output" == *"usage: vercelify pair [--tailscale]"* ]]
+  [[ "$output" == *"usage: vercelify pair [--host HOST]"* ]]
 }

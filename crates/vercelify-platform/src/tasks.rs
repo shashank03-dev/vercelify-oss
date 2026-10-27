@@ -1,5 +1,5 @@
 //! Scheduled tasks: a command run in the app's container on a cron schedule
-//! (UTC), like Coolify's Scheduled Tasks. The agent's minute loop runs the
+//! (UTC). The agent's minute loop runs the
 //! due ones (the schedule is checked with the agent's cron parser).
 
 use crate::ids::new_id;

@@ -150,15 +150,11 @@ pub fn oom_score_for(name: &str, image: &str, pr_label: &str) -> Option<i32> {
         "minio",
     ];
     let image = image.to_lowercase();
-    // Coolify's own containers on a server not migrated yet (vercelify migrate).
-    if matches!(name, "coolify-db" | "coolify-redis") || DATA.iter().any(|d| image.contains(d)) {
+    if DATA.iter().any(|d| image.contains(d)) {
         Some(-500)
-    } else if matches!(
-        name,
-        "coolify" | "coolify-proxy" | "coolify-realtime" | "coolify-sentinel" | "vercelify-proxy"
-    ) {
+    } else if name == "vercelify-proxy" {
         Some(-300)
-    } else if image.contains("coolify-helper") || image.contains("moby/buildkit") {
+    } else if image.contains("moby/buildkit") {
         Some(900)
     } else if !pr_label.is_empty() && pr_label != "0" {
         Some(600)
@@ -654,7 +650,7 @@ async fn set_oom_priorities(cfg: &Config) {
         &[
             "ps",
             "--format",
-            "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Label \"coolify.pullRequestId\"}}{{.Label \"vercelify.pr\"}}",
+            "{{.ID}}\t{{.Names}}\t{{.Image}}\t{{.Label \"vercelify.pr\"}}",
         ],
         Duration::from_secs(15),
     )
@@ -954,19 +950,13 @@ mod tests {
 
     #[test]
     fn oom_classes() {
-        assert_eq!(oom_score_for("coolify-db", "postgres:15", ""), Some(-500));
         assert_eq!(oom_score_for("pg-abc", "postgres:16-alpine", ""), Some(-500));
-        assert_eq!(oom_score_for("coolify-proxy", "traefik:v3", ""), Some(-300));
         assert_eq!(oom_score_for("vercelify-proxy", "traefik:v3.7", ""), Some(-300));
         assert_eq!(
             oom_score_for("buildx_buildkit_vercelify0", "moby/buildkit:v0.18.2", ""),
             Some(900)
         );
         assert_eq!(oom_score_for("vfy-blog-pr3-abc", "vfy/blog:abc", "3"), Some(600));
-        assert_eq!(
-            oom_score_for("x1y2", "ghcr.io/coollabsio/coolify-helper:1.0", ""),
-            Some(900)
-        );
         assert_eq!(oom_score_for("app-pr-4", "app:abc", "4"), Some(600));
         assert_eq!(oom_score_for("app", "app:abc", "0"), None);
         assert_eq!(oom_score_for("vercelify-ollama", "ollama/ollama:0.12.3", ""), Some(500));

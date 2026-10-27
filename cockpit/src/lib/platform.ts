@@ -276,8 +276,8 @@ export function parseLogLines(raw: unknown): LogLine[] {
 
 /**
  * A main server: it runs Vercelify's engine (the agent serves
- * `/v1/platform`). One not migrated yet says so in its health (no
- * `platform` capability) until `vercelify migrate`.
+ * `/v1/platform`). One whose engine didn't start has no `platform`
+ * capability in its health.
  */
 export const isPlatform = (s: CockpitSettings) => s.role !== "worker";
 
@@ -342,7 +342,6 @@ export const TRIGGER_LABEL: Record<Deployment["trigger"], string> = {
   webhook: "Webhook",
   rollback: "Rollback",
   "auto-rollback": "Automatic rollback",
-  migration: "Migration",
   recover: "Recovered",
 };
 

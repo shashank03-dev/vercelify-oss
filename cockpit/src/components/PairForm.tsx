@@ -72,6 +72,20 @@ export function PairForm({
     void scan();
   }, [scan]);
 
+  // Installed with `install-mac.sh --pair CODE`: pair with it right away.
+  useEffect(() => {
+    if (hidePaste) return;
+    void settingsApi.pendingPairing().then(
+      (c) => {
+        if (!c) return;
+        setCode(c);
+        void pairWithCode(c);
+      },
+      () => {},
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // While a machine is being installed, rescan until it shows up; open the
   // code field for the first unpaired machine that has a code waiting.
   useEffect(() => {
@@ -151,11 +165,11 @@ export function PairForm({
     }
   }
 
-  async function pairWithCode() {
+  async function pairWithCode(given = code) {
     try {
       // A vfy2. code also puts this computer on the server's mesh.
       setBusy(true);
-      const p = await settingsApi.joinPairing(code);
+      const p = await settingsApi.joinPairing(given);
       setBusy(false);
       await connect(pairingToSettings(p));
     } catch (e) {

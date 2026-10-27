@@ -47,7 +47,7 @@ body:
     id: env
     attributes:
       label: Environment
-      description: Server hardware and OS, Mac model and macOS version, Coolify version.
+      description: Server hardware and OS, Mac model and macOS version, Vercelify version (vercelify status).
   - type: textarea
     id: logs
     attributes:

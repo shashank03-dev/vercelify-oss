@@ -44,9 +44,9 @@ load_libs() {
 @test "toml_list_add adds once, to existing, empty or missing lists" {
   load_libs
   f="$T/agent.toml"
-  printf 'listen = ["tailscale", "127.0.0.1"]\n' >"$f"
+  printf 'listen = ["192.168.1.20", "127.0.0.1"]\n' >"$f"
   toml_list_add listen mesh "$f"
-  grep -qx 'listen = \["tailscale", "127.0.0.1", "mesh"\]' "$f"
+  grep -qx 'listen = \["192.168.1.20", "127.0.0.1", "mesh"\]' "$f"
   toml_list_add listen mesh "$f"
   [ "$(grep -o '"mesh"' "$f" | wc -l)" -eq 1 ]
   printf 'listen = []\n' >"$f"
@@ -176,11 +176,12 @@ JSON
 }
 
 @test "github-app and webhook (platform engine)" {
-  # a server still on Coolify (not migrated)
-  mkdir -p "$T/coolify/source" && touch "$T/coolify/source/.env"
-  COOLIFY_DATA_DIR="$T/coolify" run "$CLI" github-app
+  # the engine turned off
+  printf 'engine = "none"\n' >"$T/etc/agent.toml"
+  run "$CLI" github-app
   [ "$status" -ne 0 ]
   [[ "$output" == *"part of the platform engine"* ]]
+  rm "$T/etc/agent.toml"
   run "$CLI" github-app --org acme
   [ "$status" -eq 0 ]
   [[ "$output" == *"https://mesh.example.com/v1/github-app/start?state=s-acme"* ]]

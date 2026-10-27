@@ -1387,8 +1387,8 @@ mod tests {
         for o in [
             "http://127.0.0.1:11434",
             "http://localhost:3000",
-            "http://coolify:8080",
-            "http://coolify-db",
+            "http://vercelify-proxy:8080",
+            "http://vfy-db-pg",
             "https://10.0.0.5",
             "http://192.168.1.2",
             "http://172.20.0.3",

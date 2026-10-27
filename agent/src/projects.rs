@@ -621,7 +621,7 @@ impl Projects {
             None
         };
         let Some(engine) = self.engine.get() else {
-            *self.error.lock().await = Some("project rules need the platform engine: sudo vercelify migrate".into());
+            *self.error.lock().await = Some("project rules need the platform engine, which isn't running here".into());
             return;
         };
         let Some(platform) = self.platform_routes(engine) else {

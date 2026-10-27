@@ -1,7 +1,7 @@
 //! HTTP API of the platform engine: `/v1/platform/…` (design doc §12).
 //!
 //! Handlers validate nothing themselves: the platform crate's repositories
-//! own every rule, so the API, the CLI and the migration share them. Writes
+//! own every rule, so the API and the CLI share them. Writes
 //! nudge the cockpit through a `changed` event.
 
 use crate::error::{ApiResult, AppError};
@@ -123,7 +123,7 @@ pub fn platform(s: &AppState) -> Result<Arc<Platform>, AppError> {
             AppError::unavailable("this is a worker: manage apps on its main server")
         }
         None => AppError::unavailable(
-            "Coolify still runs this server's apps: sudo vercelify migrate moves them to Vercelify's engine",
+            "the platform engine is off on this server (engine = \"none\" in /etc/vercelify/agent.toml)",
         ),
     })
 }

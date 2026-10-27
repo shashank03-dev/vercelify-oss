@@ -41,7 +41,7 @@ def llm_status(tick=True):
         "ready": state["installed"],
         "image": "ollama/ollama:latest",
         "version": "0.12.3" if state["installed"] else None,
-        "endpoints": ["http://laptop.tail1234.ts.net:11434"],
+        "endpoints": ["http://10.77.0.1:11434"],
         "models": state["models"],
         "loaded": [],
         "tasks": [{k: v for k, v in t.items() if k != "polls"} for t in state["tasks"]],

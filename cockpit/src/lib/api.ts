@@ -56,6 +56,8 @@ export const settings = {
   decodePairing: (code: string) => call<Pairing>("pair_decode", { code }),
   /** Decode a pasted code; a `vfy2.` one also joins this computer to the mesh. */
   joinPairing: (code: string) => call<Pairing>("pair_join", { code }),
+  /** A code `install-mac.sh --pair` left for the first start (read once). */
+  pendingPairing: () => call<string | null>("pair_pending"),
   test: (s: CockpitSettings) =>
     call<{ hostname: string }>("test_connection", { settings: s }),
 };

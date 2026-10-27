@@ -1,5 +1,5 @@
 //! The service catalogue: self-hosted tools as ready-made compose apps,
-//! replacing Coolify's one-click services (plan §4.13). Each template is a
+//! one-click services (plan §4.13). Each template is a
 //! compose file whose secrets (`${VAR}`) are generated when the app is
 //! created and kept as the app's secret variables; `VERCELIFY_URL` is the
 //! app's own address. Picked for machines with 8 GB of memory.

@@ -197,7 +197,7 @@ pub struct Sleep {
     reloaded: Mutex<Option<Instant>>,
     events: Arc<Events>,
     jobs: Arc<Jobs>,
-    /// The platform engine (none on a server not migrated yet).
+    /// The platform engine (none on a worker, or when it didn't start).
     engine: std::sync::OnceLock<Arc<vercelify_platform::engine::Engine>>,
 }
 
@@ -384,7 +384,7 @@ impl Sleep {
         }
         if self.engine.get().is_none() {
             return Err(AppError::unavailable(
-                "apps sleep on the platform engine: sudo vercelify migrate",
+                "apps sleep on the platform engine, which isn't running here",
             ));
         }
         let idle = req.idle_minutes.unwrap_or(DEFAULT_IDLE_MINUTES);
@@ -776,7 +776,7 @@ traefik_entrypoint_requests_total{code="200",entrypoint="web"} 99
         assert_eq!(per.get("blog"), Some(&5.0));
         assert_eq!(per.get("blog-pr-7"), Some(&10.0));
         assert_eq!(per.len(), 2);
-        assert_eq!(router_key("http-0-u1@docker"), None, "Coolify's routers aren't ours");
+        assert_eq!(router_key("http-0-u1@docker"), None, "other routers aren't ours");
     }
 
     #[test]

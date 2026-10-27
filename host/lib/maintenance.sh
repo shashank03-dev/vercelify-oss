@@ -60,7 +60,7 @@ reboot_blocker() {
     echo "the power guard reports: $(sed -E 's/.*"reason":"([^"]*)".*/\1/' "$POWER_GUARD_STATE")"
     return
   fi
-  if deployment_running || docker ps --format '{{.Image}}' 2>/dev/null | grep -q 'coolify-helper'; then
+  if deployment_running; then
     echo "a deployment is building"
     return
   fi

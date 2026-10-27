@@ -51,7 +51,6 @@ pub fn usable_interface(name: &str) -> bool {
         || name.starts_with("docker")
         || name.starts_with("br-")
         || name.starts_with("veth")
-        || name.starts_with("tailscale")
         || name.starts_with("virbr")
         || name.starts_with("cni")
         || name.starts_with("flannel"))
@@ -64,7 +63,7 @@ mod tests {
     #[test]
     fn interfaces() {
         assert!(usable_interface("eth0") && usable_interface("wlan0") && usable_interface("enp3s0"));
-        for n in ["lo", "vfy0", "docker0", "br-1a2b", "veth9", "tailscale0"] {
+        for n in ["lo", "vfy0", "docker0", "br-1a2b", "veth9"] {
             assert!(!usable_interface(n), "{n}");
         }
         assert!(local_ipv4s(None).iter().all(|ip| !ip.is_loopback()));

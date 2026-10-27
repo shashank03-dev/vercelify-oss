@@ -2,12 +2,13 @@ import fixture from "../../../crates/vercelify-core/tests/fixtures/pairing-code.
 import { decodePairing, encodePairing } from "./pairing";
 
 describe("pairing codes", () => {
-  it("decodes a code from before the platform engine, dropping Coolify's fields", () => {
+  it("decodes a code printed by the agent", () => {
     const p = decodePairing(fixture);
     expect(p).toEqual({
-      agent_url: "http://vercelify-host.tail1234.ts.net:7420",
+      agent_url: "http://192.168.1.20:7420",
       agent_token: "0123456789abcdef0123456789abcdef",
       hostname: "vercelify-host",
+      role: "main",
     });
   });
 

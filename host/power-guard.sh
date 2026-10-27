@@ -35,12 +35,12 @@ LOCAL_CONFIG_FILE=${POWER_GUARD_LOCAL_CONFIG:-/var/lib/vercelify/power-guard.loc
 : "${INTERVAL:=20}"
 : "${CONTAINER_STOP_TIMEOUT:=60}"
 : "${CHARGE_STOP_THRESHOLD:=}"
-# The core: never frozen, stopped last (and Coolify's on a server not migrated yet).
-: "${PROTECTED_CONTAINERS:=vercelify-proxy vfy-registry coolify coolify-db coolify-redis coolify-realtime coolify-proxy coolify-sentinel}"
+# The core: never frozen, stopped last.
+: "${PROTECTED_CONTAINERS:=vercelify-proxy vfy-registry}"
 # Images that hold data: never frozen while hot.
 : "${DATA_IMAGE_PATTERN:=postgres|postgis|mysql|mariadb|mongo|redis|valkey|keydb|dragonfly|clickhouse|minio}"
-# Build containers (BuildKit; Coolify's helper image) and the local AI server.
-: "${BUILD_IMAGE_PATTERN:=coolify-helper|buildx_buildkit_vercelify|moby/buildkit|vercelify-ollama|ollama/ollama}"
+# Build containers (BuildKit) and the local AI server.
+: "${BUILD_IMAGE_PATTERN:=buildx_buildkit_vercelify|moby/buildkit|vercelify-ollama|ollama/ollama}"
 : "${SHUTDOWN_CMD:=systemctl poweroff}"
 : "${POWER_SUPPLY_DIR:=/sys/class/power_supply}"
 : "${SYS_CLASS_DIR:=/sys/class}"

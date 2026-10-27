@@ -1,6 +1,6 @@
 //! Short pairing codes. `vercelify-agent pair --short` (run by
 //! `sudo vercelify pair`) writes a one-time code to the run directory; the
-//! cockpit, having found this host on the tailnet, trades it for the full
+//! cockpit, having found this host on the LAN (mDNS), trades it for the full
 //! pairing code at the unauthenticated `POST /v1/pair/claim`.
 
 use crate::config::Config;

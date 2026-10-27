@@ -274,7 +274,6 @@ impl Llm {
         };
         let port = self.cfg.ollama_port;
         let endpoints: Vec<String> = crate::mesh::private_ipv4(&self.cfg)
-            .await
             .map(|ip| format!("http://{ip}:{port}"))
             .into_iter()
             .collect();

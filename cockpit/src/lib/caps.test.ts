@@ -16,13 +16,13 @@ describe("capabilities and versions", () => {
     expect(newestVersion(["0.1.0", undefined, "0.2.0", "0.1.9"])).toBe("0.2.0");
     expect(newestVersion([])).toBeUndefined();
   });
-  it("tells an engine that didn't start from Coolify", () => {
+  it("says why the engine isn't running", () => {
     expect(
       engineDownReason(
         "the platform engine failed to start: this server was replaced as the main server by pi5 (epoch 2): sudo vercelify demote, then join it as a worker",
       ),
     ).toBe("this server was replaced as the main server by pi5 (epoch 2): sudo vercelify demote, then join it as a worker");
-    expect(engineDownReason("Coolify still runs this server's apps: sudo vercelify migrate moves them to Vercelify's engine")).toBeUndefined();
+    expect(engineDownReason("the platform engine is off on this server")).toBe("the platform engine is off on this server");
     expect(engineDownReason(undefined)).toBeUndefined();
   });
 });

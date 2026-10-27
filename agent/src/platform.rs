@@ -189,7 +189,7 @@ mod tests {
     #[test]
     fn opens_only_for_the_platform_engine() {
         let dir = tempfile::tempdir().unwrap();
-        let (p, e) = Platform::open_if_enabled(&cfg(dir.path(), "coolify"));
+        let (p, e) = Platform::open_if_enabled(&cfg(dir.path(), "none"));
         assert!(p.is_none() && e.is_none());
         assert!(!dir.path().join("platform.db").exists());
 

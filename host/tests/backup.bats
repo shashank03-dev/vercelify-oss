@@ -4,8 +4,7 @@ bats_require_minimum_version 1.5.0
 
 setup() {
   T=$(mktemp -d)
-  mkdir -p "$T/bin" "$T/etc" "$T/state" "$T/systemd" "$T/coolify/source" "$T/coolify/ssh" "$T/volumes" "$T/storage/volumes/app"
-  echo 'APP_KEY=base64:secret' >"$T/coolify/source/.env"
+  mkdir -p "$T/bin" "$T/etc" "$T/state" "$T/systemd" "$T/volumes" "$T/storage/volumes/app"
   printf 'role=main\nversion=test\n' >"$T/etc/install.env"
   cat >"$T/bin/restic" <<'STUB'
 #!/usr/bin/env bash
@@ -23,7 +22,7 @@ STUB
 #!/usr/bin/env bash
 echo "docker $*" >>"$CALLS"
 case "$1" in
-  inspect) [[ "$*" == *Mounts* ]] && printf 'coolify-db\n\n'; exit 0 ;;
+  inspect) exit 0 ;;
   ps) if [[ "$*" == *'{{.Names}}' ]]; then printf 'vercelify-proxy\npg-main\nweb\n'
       else printf 'a1 pg-main postgres:16\nb2 web node:22\nc3 cache redis:7\nd4 maria mariadb:11\n'; fi ;;
   exec) if [[ "$*" == *psql* ]]; then echo 1; else echo "-- dump of $2"; fi ;;
@@ -36,7 +35,7 @@ STUB
   chmod +x "$T/bin/"*
   export CALLS="$T/calls" PATH="$T/bin:$PATH" NO_COLOR=1 VERCELIFY_TEST=1
   export VERCELIFY_ETC="$T/etc" VERCELIFY_STATE="$T/state" VERCELIFY_LOG="$T/setup.log" SYSTEMD_DIR="$T/systemd"
-  export COOLIFY_DATA="$T/coolify" DOCKER_VOLUMES_DIR="$T/volumes" STORAGE_MOUNT="$T/storage"
+  export DOCKER_VOLUMES_DIR="$T/volumes" STORAGE_MOUNT="$T/storage"
   : >"$CALLS"
   CLI="$BATS_TEST_DIRNAME/../vercelify"
 }
@@ -68,14 +67,13 @@ teardown() { rm -rf "$T"; }
   : >"$CALLS"
   run "$CLI" backup run
   [ "$status" -eq 0 ]
-  grep -q 'docker exec coolify-db pg_dump -U coolify -Fc coolify' "$CALLS"
   grep -q 'docker exec a1 sh -c pg_dumpall' "$CALLS"
   grep -q 'docker exec d4 sh -c exec mariadb-dump' "$CALLS"
   grep -q 'docker exec c3 sh -c REDISCLI_AUTH=' "$CALLS"
   grep -q "sqlite3 $T/state/platform.db .backup '$T/state/backup-stage/platform.db'" "$CALLS"
   run ! grep -q 'docker exec b2' "$CALLS"   # not a database
   line=$(grep '^restic backup' "$CALLS")
-  [[ "$line" == *"$T/coolify/source/.env"* && "$line" == *"$T/coolify/ssh"* && "$line" == *"$T/etc"* ]]
+  [[ "$line" == *"$T/etc"* && "$line" == *"$T/state"* ]]
   [[ "$line" == *"$T/storage/volumes"* && "$line" == *"--exclude $T/volumes/ollama-models"* ]]
   # never the live database (SQLite may be mid-write)
   [[ "$line" == *"--exclude $T/state/platform.db --exclude $T/state/platform.db-wal"* ]]
@@ -100,7 +98,7 @@ teardown() { rm -rf "$T"; }
   [ "$status" -eq 0 ]
   grep -q "restic restore 1a2b3c4d --target $T/out" "$CALLS"
   [[ "$output" == *"--instance"* ]]
-  run ! grep -q 'docker stop coolify' "$CALLS"
+  run ! grep -q 'docker stop' "$CALLS"
   run "$CLI" backup restore '../x'
   [ "$status" -ne 0 ]
 }
@@ -124,17 +122,6 @@ teardown() { rm -rf "$T"; }
   # the engine stops first, the apps' containers before their volumes are
   # rewritten; the fresh copy (not the 5-minute one) becomes platform.db
   [[ "$calls" == *"systemctl stop vercelify-agent"*"docker stop pg-main web"*"install -m 0600 $T/out$T/state/master.key $T/state/master.key"*"install -m 0600 $T/out$T/state/backup-stage/platform.db $T/state/platform.db"*"rsync"*"$T/volumes/"*"docker start pg-main web"*"systemctl start vercelify-agent"* ]]
-}
-
-@test "--instance: a snapshot from Coolify days is not put over the engine" {
-  "$CLI" backup setup --to "$T/repo" >/dev/null 2>&1
-  : >"$CALLS"
-  mkdir -p "$T/out$T/state/backup-stage/databases"
-  touch "$T/out$T/state/backup-stage/databases/coolify.dump"
-  ASSUME_YES=1 run "$CLI" backup restore latest --instance --target "$T/out"
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"vercelify migrate"* ]]
-  run ! grep -q 'systemctl stop' "$CALLS"
 }
 
 @test "not set up: clear message" {

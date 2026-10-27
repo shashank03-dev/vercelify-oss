@@ -28,7 +28,7 @@ export function decodePairing(code: string): Pairing {
   } catch (e) {
     throw new Error(`pairing code payload is invalid: ${(e as Error).message}`);
   }
-  // Only the fields the Rust decoder knows (older codes also carried Coolify's URL and token).
+  // Only the fields the Rust decoder knows: anything else in the payload is dropped.
   const p: Pairing = { agent_url: raw.agent_url, agent_token: raw.agent_token, hostname: raw.hostname };
   if (raw.role) p.role = raw.role;
   if (raw.mesh_join) p.mesh_join = raw.mesh_join;

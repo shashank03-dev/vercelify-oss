@@ -175,11 +175,5 @@ setup_cloudflare_domain() {
   # Kept (0600) so the routes can be reapplied (mesh coordinator changes).
   printf 'CF_API_TOKEN=%s\nCF_ACCOUNT=%s\nCF_TUNNEL=%s\nCF_DOMAIN=%s\n' "$CF_TOKEN" "$account" "$tunnel" "$domain" |
     write_file "$VERCELIFY_ETC/cloudflare.env" 0600 || true
-  # The Coolify-era timer that followed apps on pooled servers.
-  if [[ -e "$SYSTEMD_DIR/vercelify-routes.timer" ]]; then
-    run_cmd systemctl disable --now vercelify-routes.timer >/dev/null 2>&1 || true
-    run_cmd rm -f "$SYSTEMD_DIR/vercelify-routes.timer" "$SYSTEMD_DIR/vercelify-routes.service"
-    run_cmd systemctl daemon-reload
-  fi
   ok "cloudflared running — https://anything.$domain now reaches this server's apps (and those on other servers)"
 }

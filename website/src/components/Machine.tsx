@@ -53,7 +53,7 @@ function Health() {
   );
 }
 
-/** How the pieces connect: Mac ↔ tailnet ↔ laptop ↔ tunnel ↔ visitors. */
+/** How the pieces connect: Mac ↔ mesh ↔ laptop ↔ tunnel ↔ visitors. */
 export function Network() {
   return (
     <Section id="network" className="pb-20 sm:pb-32">
