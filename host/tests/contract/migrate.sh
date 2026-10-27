@@ -190,6 +190,11 @@ ok "site and the it-tools service answer; the service's data was copied"
 ag /platform/apps/web/tasks | jq -e '.[0].name == "cleanup" and .[0].schedule == "0 0 * * *"' >/dev/null || fail "web's task"
 ok "web's scheduled task (daily → 0 0 * * *)"
 jq -e '.phase == "switched"' "$work/state/migrate/state.json" >/dev/null || fail "phase: $(jq -r .phase "$work/state/migrate/state.json")"
+# site's branch is past the commit Coolify built: push-to-deploy holds it
+# until the move is finished (nothing is built that a rollback would drop).
+held() { ag /platform/apps/site/git | jq -e '(.waiting | startswith("new commit waiting: the move")) and .last_error == ""'; }
+until_ok 150 held || fail "site's new commit isn't held: $(ag /platform/apps/site/git)"
+ok "a new commit waits for the move to finish (not reported as an error)"
 
 echo "==> rollback"
 stop_agent
@@ -213,5 +218,10 @@ ok "migrated a second time"
 until_ok 60 answers web.shop.test -u shop:open-sesame || fail "web after finish"
 until_ok 60 answers "$tools_host" || fail "it-tools after finish"
 ok "Coolify removed; the apps keep answering"
+# The commit held during the move deploys now (a real build of site's branch).
+built() { ag /platform/apps/site/deployments | jq -e --arg s "$sha" 'any(.[]; .commit_sha != $s and .commit_sha != "" and .status == "healthy")'; }
+until_ok 900 built || fail "the held commit didn't deploy: $(ag /platform/apps/site/deployments | jq -c '[.[] | {number, status, commit_sha, error}]')"
+until_ok 60 answers site.shop.test || fail "site after its build: $(via site.shop.test)"
+ok "the held commit deployed after finish"
 
 echo "$pass checks passed"
