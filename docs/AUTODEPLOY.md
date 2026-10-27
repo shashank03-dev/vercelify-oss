@@ -17,6 +17,11 @@ server is reachable, only make it sooner.
   (*connect a GitHub App* in **New app**, or `sudo vercelify github-app`), or a read-only
   token or deploy key (`sudo vercelify git-source add NAME`). They reach git through the
   environment, never the command line, and are never returned by the API.
+- **Instant deploys** come from the GitHub App's webhook when the server is reachable
+  from outside (`sudo vercelify remote on`). Connect the app after turning that on, so
+  its webhook starts active. Each time the agent starts, it points the webhook at the
+  server's current public address, so a quick tunnel's new address after a reboot
+  keeps pushes instant. Polling covers anything a webhook misses.
 
 ## Behaviour
 

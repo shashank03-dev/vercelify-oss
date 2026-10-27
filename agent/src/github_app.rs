@@ -21,7 +21,7 @@ use base64::Engine as _;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
-use vercelify_core::platform::{GitSource, GithubAppStart};
+use vercelify_core::platform::{GitAuthKind, GitSource, GithubAppStart};
 use vercelify_platform::git_sources::{self, GithubAppCreds};
 use vercelify_platform::secrets::MasterKey;
 use vercelify_platform::Store;
@@ -243,6 +243,45 @@ pub async fn jwt(cfg: &Config, app_id: u64, pem: &str) -> Result<String, String>
         ));
     }
     Ok(format!("{signing}.{}", B64URL.encode(&out.stdout)))
+}
+
+/// Point each GitHub App's webhook at this server's public URL. A quick
+/// tunnel's address changes with every restart; pushes still deploy by
+/// polling, the webhook only makes them instant. Returns how many changed.
+pub async fn sync_webhooks(cfg: &Config, store: &Store, key: &MasterKey) -> Result<usize, String> {
+    let Some(public) = public_bases(cfg).0 else {
+        return Ok(0);
+    };
+    let want = format!("{public}/v1/webhooks/github");
+    let sources = store.with(git_sources::list).map_err(|e| e.to_string())?;
+    let mut changed = 0;
+    for s in sources.iter().filter(|s| s.auth == GitAuthKind::GithubApp) {
+        let Some(creds) = store
+            .with(|c| git_sources::github_app(c, key, &s.id))
+            .map_err(|e| e.to_string())?
+        else {
+            continue;
+        };
+        let jwt = jwt(cfg, creds.app_id, &creds.pem).await?;
+        let (status, body) = github::api(cfg, "GET", "/app/hook/config", Some(&jwt), None).await?;
+        let current = serde_json::from_str::<serde_json::Value>(&body)
+            .ok()
+            .and_then(|v| v["url"].as_str().map(String::from));
+        if status == 200 && current.as_deref() == Some(want.as_str()) {
+            continue;
+        }
+        let body = serde_json::json!({ "url": want, "content_type": "json" });
+        let (status, _) = github::api(cfg, "PATCH", "/app/hook/config", Some(&jwt), Some(&body)).await?;
+        if status != 200 {
+            return Err(format!(
+                "GitHub refused the webhook address for {} (HTTP {status})",
+                creds.slug
+            ));
+        }
+        tracing::info!("GitHub App {}: webhook now {want}", creds.slug);
+        changed += 1;
+    }
+    Ok(changed)
 }
 
 /// An installation token for `repo` (owner/name) from the app on `source`.

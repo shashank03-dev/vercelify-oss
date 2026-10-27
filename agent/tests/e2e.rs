@@ -21,6 +21,37 @@ struct Agent {
 }
 
 impl Agent {
+    /// Stop the daemon and start it again on the same state and port, with
+    /// `set` changed in its environment (a server rebooted, say).
+    fn restart_with(&mut self, set: &[(&str, String)]) {
+        for (k, v) in set {
+            self.extra_env.retain(|(ek, _)| ek != k);
+            self.extra_env.push((k.to_string(), v.clone()));
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+        let env: Vec<(&str, String)> = self.extra_env.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
+        let r = &self.root;
+        self.child = agent_cmd(
+            r,
+            &r.join("sys"),
+            &self.storage,
+            &r.join("power-guard.state"),
+            &self.log,
+            self.port,
+            &env,
+        )
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !listens_on(self.child.id(), self.port) {
+            assert!(Instant::now() < deadline, "agent did not restart");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
     /// Run a CLI subcommand with the same configuration as the daemon.
     fn cli(&self, args: &[&str]) -> std::process::Output {
         let env: Vec<(&str, String)> = self.extra_env.iter().map(|(k, v)| (k.as_str(), v.clone())).collect();
@@ -1914,6 +1945,12 @@ fn fake_github_app(r: &Seen) -> (u16, &'static str, String) {
             r#"{"token": "ghs_installation", "expires_at": "2099-01-01T00:00:00Z"}"#.into(),
         ),
         ("GET", p) if p.starts_with("/repos/me/app/pulls") => (200, j, "[]".into()),
+        ("GET", "/app/hook/config") if jwt_valid(&r.headers) => (
+            200,
+            j,
+            r#"{"url": "https://old-name.trycloudflare.com/v1/webhooks/github", "content_type": "json"}"#.into(),
+        ),
+        ("PATCH", "/app/hook/config") if jwt_valid(&r.headers) => (200, j, r.body.clone()),
         _ => (401, j, r#"{"message":"Bad credentials"}"#.into()),
     }
 }
@@ -1984,7 +2021,7 @@ fn github_app_and_webhooks() {
     APP_PUB.set(public).unwrap();
     let (gh, seen) = fake_server(fake_github_app);
     let control = free_port();
-    let a = start_with(&[
+    let mut a = start_with(&[
         ("VERCELIFY_ENGINE", "platform".into()),
         ("VERCELIFY_ROLE", "main".into()),
         ("VERCELIFY_MESH_COORDINATOR", "1".into()),
@@ -2157,4 +2194,23 @@ fn github_app_and_webhooks() {
     // Without a token: refused.
     let (s, _) = send(&a, "POST", "/v1/platform/github-app", "nope", Some(json!({})));
     assert_eq!(s, 401);
+    // Rebooted behind a quick tunnel with a new address: the app's webhook
+    // follows it.
+    a.restart_with(&[("VERCELIFY_MESH_PUBLIC_URL", "https://new-name.trycloudflare.com".into())]);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let patched = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|r| r.method == "PATCH" && r.path == "/app/hook/config")
+            .map(|r| r.body.clone());
+        if let Some(b) = patched {
+            let v: Value = serde_json::from_str(&b).unwrap();
+            assert_eq!(v["url"], "https://new-name.trycloudflare.com/v1/webhooks/github");
+            break;
+        }
+        assert!(Instant::now() < deadline, "the webhook wasn't moved");
+        std::thread::sleep(Duration::from_millis(100));
+    }
 }

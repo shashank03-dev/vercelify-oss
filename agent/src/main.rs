@@ -281,6 +281,18 @@ async fn serve(cfg: Config) {
         }
     }
     if let Some(p) = &state.platform {
+        // A quick tunnel's address moves with each restart: GitHub's
+        // webhooks follow it (retried while the network comes up).
+        let (gp, cfg) = (p.clone(), state.config.clone());
+        tokio::spawn(async move {
+            for wait in [0, 30, 120, 600] {
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+                match github_app::sync_webhooks(&cfg, &gp.store, &gp.key).await {
+                    Ok(_) => break,
+                    Err(e) => tracing::warn!("updating GitHub App webhooks: {e}"),
+                }
+            }
+        });
         if state.config.watch_interval_secs > 0 {
             tokio::spawn(platform_api::run_fleet(
                 p.clone(),

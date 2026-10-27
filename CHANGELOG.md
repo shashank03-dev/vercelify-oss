@@ -6,6 +6,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-10-27
+
+### Added
+
+- GitHub App webhooks follow the server: on start, the agent points each GitHub
+  App's webhook at its current public address (a Cloudflare quick tunnel gets a new
+  one on every restart), so pushes keep deploying instantly instead of waiting for the
+  minute's poll.
+
 ## [0.2.1] - 2026-10-27
 
 ### Added
