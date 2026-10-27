@@ -196,23 +196,25 @@ function Shell() {
               </div>
             </div>
             <CommandPalette open={palette} onClose={() => setPalette(false)} />
-            <Modal
-              open={adding}
-              onClose={closeWizard}
-              title="Add a machine"
-              description="Any old laptop, PC or Raspberry Pi. It takes one command on the machine and an 8-character code here."
-            >
-              <AddServerWizard
-                servers={config.servers}
-                onClose={closeWizard}
-                onAdded={async (s) => {
-                  // A worker is managed from its main server: stay where we were.
-                  if (isWorker(s) && active && active.agent_url !== s.agent_url) await serversApi.select(active.agent_url).catch(() => {});
-                  await reload();
-                }}
-              />
-            </Modal>
           </LiveProvider>
+          {/* Outside the per-server key: adding a main server selects it, and the
+              wizard must stay on its last step. */}
+          <Modal
+            open={adding}
+            onClose={closeWizard}
+            title="Add a machine"
+            description="Any old laptop, PC or Raspberry Pi. It takes one command on the machine and an 8-character code here."
+          >
+            <AddServerWizard
+              servers={config.servers}
+              onClose={closeWizard}
+              onAdded={async (s) => {
+                // A worker is managed from its main server: stay where we were.
+                if (isWorker(s) && active && active.agent_url !== s.agent_url) await serversApi.select(active.agent_url).catch(() => {});
+                await reload();
+              }}
+            />
+          </Modal>
         </SessionProvider>
       )}
     </NavProvider>

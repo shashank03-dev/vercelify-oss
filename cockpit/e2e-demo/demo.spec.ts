@@ -123,6 +123,20 @@ test("several servers: add, switch, see them side by side, add a worker", async 
   await expect(page.getByTestId("host-status")).toContainText("dell-e7450");
 });
 
+test("add a second main server: the wizard finishes on it", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "dell-e7450");
+  await page.getByTestId("host-status").click();
+  await page.getByTestId("add-server").click();
+  await page.getByTestId("kind-server").click();
+  await page.getByTestId("already-installed").click();
+  await pairFound(page, "optiplex-7050");
+  // switching to the new server must not reset the wizard to its first step
+  await expect(page.getByTestId("wizard-checks")).toBeVisible();
+  await page.getByTestId("wizard-done").click();
+  await expect(page.getByTestId("host-status")).toContainText("optiplex-7050");
+});
+
 test("add a machine: the wizard waits for a fresh install to come online", async ({ page }) => {
   await page.goto("/");
   await pairFound(page, "dell-e7450");
