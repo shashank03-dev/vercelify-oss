@@ -197,6 +197,7 @@ STUB
 }
 
 @test "git-source: a token from stdin (never an argument), a deploy key, list and remove" {
+  export VERCELIFY_TEST=1
   run bash -c 'echo ghp_secret123 | "$1" git-source add work --provider github' _ "$CLI"
   [ "$status" -eq 0 ]
   grep -q 'POST /v1/platform/git-sources .*"token":"ghp_secret123"' "$T/requests.log"
