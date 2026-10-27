@@ -131,17 +131,12 @@ impl Engine {
         if !container.is_empty() {
             docker.stop(&container, 30).await?;
         }
-        if from.is_dir() {
-            if let Err(e) = crate::dbengine::copy_tree(&from, &to).await {
-                // As it was: same container, same data.
-                if !container.is_empty() {
-                    let _ = docker.start(&container).await;
-                }
-                return Err(e);
+        if let Err(e) = copy_or_init_volume(&from, &to).await {
+            // As it was: same container, same data.
+            if !container.is_empty() {
+                let _ = docker.start(&container).await;
             }
-        } else {
-            // Nothing written yet: an empty directory on the new tier.
-            std::fs::create_dir_all(&to)?;
+            return Err(e);
         }
         let host_path = (tier == StorageTier::Hdd).then(|| to.to_string_lossy().into_owned());
         self.store
@@ -161,5 +156,37 @@ impl Engine {
         }
         self.emit(EngineEvent::Changed);
         self.store.with(|c| volumes::get(c, &vol.id))
+    }
+}
+
+async fn copy_or_init_volume(from: &Path, to: &Path) -> Result<()> {
+    match std::fs::metadata(from) {
+        Ok(meta) if meta.is_dir() => crate::dbengine::copy_tree(from, to).await,
+        Ok(_) => Err(Error::Invalid(format!(
+            "volume source {} is not a directory",
+            from.display()
+        ))),
+        // An app that has never mounted the volume has no data to copy.
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(to)?;
+            Ok(())
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn non_directory_volume_source_must_not_be_treated_as_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        let from = temp.path().join("volume-source");
+        let to = temp.path().join("volume-destination");
+        std::fs::write(&from, b"must not discard").unwrap();
+
+        assert!(copy_or_init_volume(&from, &to).await.is_err());
+        assert!(!to.exists());
     }
 }

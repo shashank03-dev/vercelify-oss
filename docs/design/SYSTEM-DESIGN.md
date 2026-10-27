@@ -476,7 +476,9 @@ Templates in `crates/vercelify-platform/templates/databases.toml` (versioned wit
 - Volume tier moves (`POST /v1/platform/volumes/{id}/move`, a job): stop, `cp -a` to the
   other tier (owners and modes kept), record the new place, start. A database restarts on
   the new path; an app volume is mounted by a fresh container, created by a `recover`
-  deployment from the same image. The app is down while the data is copied.
+  deployment from the same image. The app is down while the data is copied. A missing
+  volume source can be initialised empty, but an inaccessible or non-directory source
+  aborts the move and restarts the original container without switching the tier.
 - App volumes are handed to the image's user on every deploy (`chown` of the volume's top
   directory, run in the image itself so `node` or `1000:1000` resolve): our images run as
   non-root and could not write to a new, root-owned volume otherwise.
