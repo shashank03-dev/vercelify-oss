@@ -137,7 +137,14 @@ while an app references it in a variable reference (§10).
 
 Online copy via SQLite's backup API to `platform.db.bak` before every migration, every
 `vercelify update`, and every 5 minutes for restic and the warm standby (§8.4). Restic
-backs up the copy, never the live file.
+backs up a copy, never the live file: `vercelify backup run` takes a fresh one with
+`sqlite3 .backup` into its staging directory when `sqlite3` is installed, else it saves
+the 5-minute copy; `platform.db`, `-wal` and `-shm` are excluded. The master key and the
+mesh directory go with it. `vercelify backup restore --instance` stops the agent and the
+app containers, puts back the master key, the state copy (as `platform.db`, without a
+stale WAL) and the mesh directory (so workers and devices keep their certificates), then
+the volumes, and starts the agent, whose reconciler brings apps and databases back. A
+snapshot holding Coolify's dump (taken before `vercelify migrate`) is refused.
 
 ## 5. Secrets
 
@@ -424,7 +431,9 @@ main server, and the old one stepping down.
 
 ## 9. Proxy and routing
 
-- `vercelify-proxy`: Traefik (pinned, `VERCELIFY_TRAEFIK_VERSION`, contract-tested), host
+- `vercelify-proxy`: Traefik (pinned `proxy::TRAEFIK_IMAGE`; `proxy_image` in agent.toml or
+  `VERCELIFY_PROXY_IMAGE` overrides it, which the routing contract uses to try an older
+  Traefik as an early warning; contract-tested: `host/tests/contract/routing.sh`), host
   network ports 80/443, static config `/etc/vercelify/proxy/traefik.yml`: entry points
   `web`/`websecure`, file provider on `/var/lib/vercelify/proxy/dynamic` (watch), Docker
   provider **off** (we never route by labels, so a container cannot claim a hostname), ACME
@@ -622,9 +631,9 @@ lifetime 30 days, renewed after day 20 (§13.9). Checked with 5 min clock skew.
 
 `vfy2.<base64url JSON>`: the `vfy1.` fields plus `mesh_join` (a single-use device join
 token, `vfyj1.…`, at least a day valid); `agent_url` is the server's mesh address
-(`http://10.77.0.1:7420`), `coolify_url` its Coolify on the mesh while one runs. `sudo
-vercelify pair` prints one on a mesh coordinator (`--tailscale` for the old kind); the app
-joins with `mesh_join`, then talks to `agent_url` over the mesh. `vfy1.` codes keep working.
+(`http://10.77.0.1:7420`). `sudo vercelify pair` prints one on a mesh coordinator; the
+app joins with `mesh_join`, then talks to `agent_url` over the mesh. `vfy1.` codes keep
+working (their old `coolify_*` fields are ignored since M10).
 
 The 8-symbol short code works without typing an address:
 

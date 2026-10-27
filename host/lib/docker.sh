@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Docker Engine install + daemon configuration compatible with Coolify.
+# Docker Engine install + daemon configuration.
 
 # Pick a container address pool that cannot collide with the LAN.
 docker_address_pool() {
@@ -8,9 +8,8 @@ docker_address_pool() {
   if [[ "$gw" == 10.* ]]; then echo "172.30.0.0/16"; else echo "10.0.0.0/8"; fi
 }
 
-# Merge our settings into daemon.json. We set the same keys the Coolify
-# installer checks (log opts + address pool), so it leaves the file alone
-# instead of overwriting it.
+# Merge our settings into daemon.json (log rotation, an address pool that
+# can't collide with the LAN, live-restore).
 # Containers go into vercelify.slice (memory-capped, see hardware.sh) when
 # Docker uses the systemd cgroup driver, i.e. on cgroup v2 hosts.
 docker_cgroup_parent() {
@@ -34,7 +33,7 @@ docker_daemon_config() {
   if [[ -s "$DOCKER_DAEMON_JSON" ]]; then
     current=$(cat "$DOCKER_DAEMON_JSON")
     jq -e . >/dev/null 2>&1 <<<"$current" || die "$DOCKER_DAEMON_JSON is not valid JSON — fix or remove it"
-    # Existing values win so we never fight a user's or Coolify's choices.
+    # Existing values win so we never fight a user's choices.
     merged=$(jq -n --argjson a "$desired" --argjson b "$current" '$a * $b')
     # A cgroupfs driver takes a path, not a systemd slice: leave it out then.
     if jq -e '(."exec-opts" // []) | any(. == "native.cgroupdriver=cgroupfs")' >/dev/null <<<"$current"; then

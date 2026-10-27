@@ -1,85 +1,79 @@
 # Deploy automatically from a branch
 
-GitHub push webhooks can't reach a Coolify that is private to your tailnet or behind
-CGNAT. So the Vercelify agent polls instead: every 60 seconds it asks the Git host for
-the head of each watched branch (`git ls-remote`, a few hundred bytes, no clone) and
-queues a Coolify deployment when the commit changed. It works with GitHub, GitLab,
-Gitea, Bitbucket or any https Git server, and needs no open port or webhook.
+Your server may be private to your network or behind CGNAT, where GitHub's push webhooks
+can't reach it. So the engine polls instead: every 60 seconds it asks the Git host for
+the head of each app's branch (`git ls-remote`, a few hundred bytes, no clone) and queues
+a deployment when the commit changed. It works with GitHub, GitLab, Gitea/Forgejo,
+Bitbucket or any https or ssh Git server, and needs no open port. Webhooks, when the
+server is reachable, only make it sooner.
 
 ## Turn it on
 
-- **New app:** Apps → **New app** → paste the repository URL, pick the branch, leave
-  *Deploy automatically when I push* on. The app builds right away and every push to
-  that branch deploys it again.
-- **Existing app:** open it → **Auto-deploy** tab → **Turn on auto-deploy**. Works for
-  apps created in Coolify too (including GitHub App sources).
-- **CLI:** `sudo vercelify autodeploy add <app-uuid> https://github.com/you/app.git main`.
-
-Private repositories need a read-only token (for GitHub, a fine-grained token with
-*Contents: read*). It is stored on the server in `/var/lib/vercelify/autodeploy.json`
-(mode 0600), passed to git through the environment (never the command line), and never
-returned by the API.
+- **New app:** Apps → **New app** → paste the repository URL, pick the branch. The app
+  builds right away and every push to that branch deploys it again.
+- **Existing app:** its **Deploy on push** card turns it on or off, shows the last check
+  and branch head, and has **Check now**.
+- **Private repositories** need credentials the server stores sealed: a GitHub App
+  (*connect a GitHub App* in **New app**, or `sudo vercelify github-app`), or a read-only
+  token or deploy key (`sudo vercelify git-source add NAME`). They reach git through the
+  environment, never the command line, and are never returned by the API.
 
 ## Behaviour
 
-- The first check only records the current head, so turning it on never redeploys what
-  is already live.
-- A deploy that Coolify refuses is retried on the next check; an app deleted in Coolify
-  turns its watch off.
+- Turning it on never redeploys what is already live: the first check records the head.
 - While the power guard is cooling the machine (`thermal_paused`) or shutting down, new
-  commits wait and deploy once it clears.
-- Pushes that change nothing in the app's watch paths (Coolify's *Watch Paths* setting),
-  or whose newest commit says `[skip deploy]`, `[deploy skip]`, `[skip ci]` or `[ci skip]`,
-  are not built (GitHub repositories; see
+  commits wait and deploy once it clears. On a newer push, a queued older deployment of
+  the same app is dropped (*superseded*).
+- Pushes that change nothing in the app's watch paths (the app's settings, e.g.
+  `apps/web/**`), or whose newest commit says `[skip deploy]`, `[deploy skip]`,
+  `[skip ci]` or `[ci skip]`, are not built (GitHub repositories; see
   [PROJECT-CONFIG.md](PROJECT-CONFIG.md#skipping-builds-that-change-nothing-ignored-build-step)).
 - After each deploy the app's `vercel.json` at that commit is applied: redirects,
   rewrites, headers, cron jobs and the firewall ([PROJECT-CONFIG.md](PROJECT-CONFIG.md)).
-- Each watch shows its last check, branch head, number of automatic deploys, skipped
-  pushes and the last error in the app and in `sudo vercelify autodeploy list`.
 - Change the interval with `autodeploy_interval_secs` in `/etc/vercelify/agent.toml`
-  (minimum 15; 0 = only when you press *Check now*).
+  (minimum 15).
 
-If your Coolify *is* reachable by GitHub (direct mode with a public IP) and you use the
-GitHub App, Coolify's own webhooks also deploy on push; use one or the other per app to
-avoid a second build.
+## Instant deploys (webhooks)
+
+With a public address (a Cloudflare tunnel, or forwarded ports), push events can reach
+the server. `sudo vercelify webhook SOURCE` (or the **Deploy on push** card) makes a
+secret for a git source and prints the URL to add in the repository's webhook settings
+(GitHub, GitLab, Gitea/Forgejo). A webhook only tells the server to look now: the commit
+to deploy still comes from `git ls-remote`, so a forged event can't deploy anything
+else. A GitHub App sets its webhook up by itself.
 
 ## Pull request previews (GitHub)
 
-Turn on **Preview every pull request** in the app's Auto-deploy tab. On every
-check the agent lists the repository's open pull requests (GitHub API; with a
-token each check, without one every 5 minutes to stay inside GitHub's anonymous
-limit) and:
+Turn on previews in the app's **Pull request previews** card. On every check the engine
+lists the repository's open pull requests (GitHub API; give the app credentials if it
+has many apps, as GitHub limits anonymous calls to 60 an hour) and:
 
-- deploys a preview for each new pull request, and again when its head moves
-  (`POST /api/v1/deploy?uuid=…&pr=N`), at most 3 per app at once
-  (`max_previews` in `agent.toml`; more wait for a slot),
+- deploys a preview for each pull request, and again when its head moves, at
+  `pr-<n>-<app>.<domain>`, at most 3 per app at once (the card sets the limit; the oldest
+  stops when a new one starts),
+- uses the variables marked for previews (for example a separate database URL),
 - removes the preview when the pull request closes or merges,
-- never builds pull requests from forks: that is someone else's code running on
-  your machine. Deploy one by hand in Coolify if you trust it.
-
-No webhook, no open port: it works behind CGNAT like branch auto-deploy.
+- never builds pull requests from forks: that is someone else's code running on your
+  machine.
 
 ## GitHub statuses and comments
 
-**Report to GitHub** (needs a token with *Commit statuses: write* and *Pull
-requests: write*) adds:
+With a token that may write them (a GitHub App always can; a token needs *Commit
+statuses: write* and *Pull requests: write*), the engine adds:
 
-- a `vercelify` commit status on every automatic deploy: pending, then success
+- a `vercelify/<app>` commit status on every automatic deploy: pending, then success
   with the app's URL, or failure,
-- a `vercelify/preview` status and one comment per pull request with the preview
+- a `vercelify/<app> (preview)` status and one comment per pull request with the preview
   URL, updated (not repeated) on new pushes.
 
-## Automatic rollback
+## When a deploy goes wrong
 
-With **Roll back automatically** (on by default for new watches) the agent
-follows each deployment it started. If Coolify reports the build failed, the
-previous version simply keeps running and you get an alert. If the new version
-finishes but is *unhealthy*, *exited* or *restarting* within three minutes, the
-agent rolls back to the commit that was live before (Coolify's rollback endpoint,
-which reuses the kept image; on older Coolify versions it pins the commit and
-deploys), reports it on GitHub and raises an alert. The next push deploys
-normally again.
+- **The build fails, or the new version never answers its health check:** nothing
+  switches; the previous version keeps serving and you get an alert with the log.
+- **The new version goes live, then crashes** (exits, runs out of memory, or restarts
+  twice) within three minutes: the engine rolls back to the deployment that was live
+  before, by itself, and says so in the log, on GitHub and in an alert. The next push
+  deploys normally again.
 
-The installer keeps the last 5 images of each app (Coolify's
-`docker_images_to_keep`), so rollbacks are usually instant; the Deployments tab
-marks each rollback target *instant* or *rebuild*.
+The engine keeps the newest 5 images of each app (and every image a server still
+runs), so rollbacks start at once without rebuilding.

@@ -121,25 +121,34 @@ os() { printf 'ID=%s\nVERSION_ID="%s"\nPRETTY_NAME="%s"\nID_LIKE="%s"\n' "$1" "$
 @test "argument parsing normalises the domain" {
   parse_args --domain 'HTTPS://*.Example.com/' --hostname laptop -y
   [ "$DOMAIN" = example.com ]
-  [ "$TS_HOSTNAME" = laptop ]
+  [ "$MACHINE_NAME" = laptop ] && [ "$RENAME" = 1 ]
   [ "$ASSUME_YES" = 1 ]
   valid_domain example.com
   valid_domain apps.my-site.co.uk
-  ! valid_domain 'bad domain'
-  ! valid_domain localhost
+  run valid_domain 'bad domain'; [ "$status" -ne 0 ]
+  run valid_domain localhost; [ "$status" -ne 0 ]
 }
 
-@test "wildcard per domain mode" {
-  DOMAIN=example.com CF_API_TOKEN=x; [ "$(coolify_wildcard)" = http://example.com ]
-  DOMAIN=example.com CF_API_TOKEN=''; [ "$(coolify_wildcard)" = https://example.com ]
-  ts_ipv4() { echo 100.101.102.103; }
-  DOMAIN='' CF_API_TOKEN=''; [ "$(coolify_wildcard)" = http://100.101.102.103.sslip.io ]
+@test "a worker joins with the invite the main server printed" {
+  parse_args --worker --join vfyj1.abc --hostname pi5 --ai
+  [ "$ROLE" = worker ] && [ "$JOIN_TOKEN" = vfyj1.abc ] && [ "$MACHINE_NAME" = pi5 ] && [ "$WITH_AI" = 1 ]
 }
 
-@test "generated admin passwords are strong" {
-  p=$(generate_password)
-  [ "${#p}" -ge 20 ]
-  [[ "$p" =~ [a-z] && "$p" =~ [A-Z] && "$p" =~ [0-9] && "$p" =~ [^a-zA-Z0-9] ]]
+@test "options of the Coolify and Tailscale installers are accepted and ignored" {
+  run parse_args --tailscale-authkey tskey-x --coolify-pubkey 'ssh-ed25519 AAA' --admin-email a@b.c -y
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"--tailscale-authkey is not needed any more"* ]]
+  [[ "$output" == *"--admin-email is not needed any more"* ]]
+}
+
+@test "app wildcard per domain mode" {
+  DOMAIN=example.com CF_API_TOKEN=x; [ "$(app_wildcard)" = http://example.com ]
+  DOMAIN=example.com CF_API_TOKEN=''; [ "$(app_wildcard)" = https://example.com ]
+  # private: the mesh address, through sslip.io
+  mesh_ipv4() { echo 10.77.0.1; }
+  DOMAIN='' CF_API_TOKEN=''; [ "$(app_wildcard)" = http://10.77.0.1.sslip.io ]
+  mesh_ipv4() { return 1; }
+  [ "$(app_wildcard)" = "http://$MESH_MAIN_IP.sslip.io" ]
 }
 
 @test "--help works without root" {
@@ -204,34 +213,22 @@ stub_destructive_tools() {
   grep -q "^mkfs.ext4 -F -q -L vstorage -m 1 /dev/sda" "$T/destructive.log"
 }
 
-@test "admin e-mail must have a domain that exists in DNS (Coolify rejects others)" {
-  mkdir -p "$T/bin"
-  printf '#!/bin/sh\n[ "$2" = "example.com" ] || [ "$2" = "gmail.com" ]\n' >"$T/bin/getent"; chmod +x "$T/bin/getent"
-  run strict coolify_safe_email me@gmail.com
-  [ "$output" = me@gmail.com ]
-  run strict coolify_safe_email admin@laptop.local
-  [[ "$output" == *"using admin@example.com"* ]]
-  [ "${lines[-1]}" = admin@example.com ]
-  run strict coolify_safe_email not-an-email
-  [ "${lines[-1]}" = admin@example.com ]
-}
-
 @test "updates keep the domain chosen earlier (no --domain on re-run)" {
   export VERCELIFY_ETC="$T/etc" SYSTEMD_DIR="$T/systemd"
   mkdir -p "$VERCELIFY_ETC" "$SYSTEMD_DIR"
-  ts_ipv4() { echo 100.101.102.103; }
+  mesh_ipv4() { echo 10.77.0.1; }
 
   printf 'role=main\nversion=0.1.0\ndomain=example.com\ndomain_mode=cloudflare\n' >"$VERCELIFY_ETC/install.env"
   DOMAIN='' CF_API_TOKEN='' DOMAIN_MODE=''
   load_previous_install
   [ "$DOMAIN" = example.com ]
   [ "$(domain_mode)" = cloudflare ]
-  [ "$(coolify_wildcard)" = http://example.com ]
+  [ "$(app_wildcard)" = http://example.com ]
 
   printf 'role=main\ndomain=example.org\ndomain_mode=direct\n' >"$VERCELIFY_ETC/install.env"
   DOMAIN='' DOMAIN_MODE=''
   load_previous_install
-  [ "$(coolify_wildcard)" = https://example.org ]
+  [ "$(app_wildcard)" = https://example.org ]
 
   # 0.1 installs wrote no domain_mode: a tunnel unit means Cloudflare
   printf 'role=main\ndomain=example.net\n' >"$VERCELIFY_ETC/install.env"
@@ -249,7 +246,7 @@ stub_destructive_tools() {
   printf 'role=main\ndomain=\ndomain_mode=\n' >"$VERCELIFY_ETC/install.env"
   DOMAIN='' DOMAIN_MODE=''
   load_previous_install
-  [ -z "$DOMAIN" ] && [ "$(coolify_wildcard)" = http://100.101.102.103.sslip.io ]
+  [ -z "$DOMAIN" ] && [ "$(app_wildcard)" = http://10.77.0.1.sslip.io ]
 }
 
 @test "--ai with and without a model" {
@@ -257,17 +254,42 @@ stub_destructive_tools() {
   [ "$WITH_AI" = 1 ] && [ -z "$AI_MODEL" ]
   WITH_AI=0
   parse_args --ai qwen2.5:3b --hostname box
-  [ "$WITH_AI" = 1 ] && [ "$AI_MODEL" = qwen2.5:3b ] && [ "$TS_HOSTNAME" = box ]
+  [ "$WITH_AI" = 1 ] && [ "$AI_MODEL" = qwen2.5:3b ] && [ "$MACHINE_NAME" = box ]
   run default_ai_model
   [[ "$output" == llama3.2:3b || "$output" == gemma3:1b ]]
 }
 
+@test "network: the main server coordinates, a worker joins with its invite" {
+  export VERCELIFY_ETC="$T/etc" MESH_DIR="$T/mesh"
+  mkdir -p "$VERCELIFY_ETC"
+  mesh_init() { echo "mesh_init"; }
+  mesh_join() { echo "mesh_join $*"; }
+  ROLE=main JOIN_TOKEN=''
+  run setup_network
+  [[ "$output" == *"mesh_init"* ]]
+  ROLE=worker JOIN_TOKEN=vfyj1.abc
+  run setup_network
+  [[ "$output" == *"mesh_join vfyj1.abc --platform"* ]]
+  # a worker without an invite says what to do
+  JOIN_TOKEN=''
+  run setup_network
+  [[ "$output" == *"sudo vercelify mesh invite"* ]]
+  grep -q '^engine = "platform"' "$VERCELIFY_ETC/agent.toml"
+  # already on the network: nothing joins twice
+  mkdir -p "$MESH_DIR" && echo '{"ipv4":"10.77.0.4"}' >"$MESH_DIR/state.json"
+  systemctl() { return 0; }
+  ROLE=worker JOIN_TOKEN=vfyj1.abc
+  run setup_network
+  [[ "$output" == *"on the network as 10.77.0.4"* && "$output" != *mesh_join* ]]
+}
 
-@test "Coolify is installed at the tested version unless overridden" {
-  [ "$(coolify_target_version)" = "$COOLIFY_TESTED_VERSION" ]
-  [ "$(VERCELIFY_COOLIFY_VERSION=latest coolify_target_version)" = "" ]
-  [ "$(VERCELIFY_COOLIFY_VERSION=v4.5.0 coolify_target_version)" = 4.5.0 ]
-  [ "$(VERCELIFY_COOLIFY_VERSION=4.0.0-beta.420 coolify_target_version)" = 4.0.0-beta.420 ]
-  run bash -c 'VERCELIFY_SOURCE_ONLY=1 . "$1"; VERCELIFY_COOLIFY_VERSION="1; rm -rf /" coolify_target_version' _ "$BATS_TEST_DIRNAME/../setup-host.sh"
-  [ "$status" -ne 0 ]
+@test "a server Coolify still runs keeps it until vercelify migrate" {
+  export VERCELIFY_ETC="$T/etc" COOLIFY_DATA_DIR="$T/coolify"
+  mkdir -p "$VERCELIFY_ETC"
+  ROLE=main
+  run not_migrated; [ "$status" -ne 0 ]
+  mkdir -p "$T/coolify/source" && touch "$T/coolify/source/.env"
+  run not_migrated; [ "$status" -eq 0 ]
+  ROLE=worker
+  run not_migrated; [ "$status" -ne 0 ]
 }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# `vercelify llm` and `vercelify autodeploy` against a mock agent API.
+# `vercelify` commands (llm, sleep, doctor, pair…) against a mock agent API.
 
 setup() {
   T=$(mktemp -d)
@@ -73,46 +73,15 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   "$CLI" llm >/dev/null
   grep -q 'auth=Bearer test-agent-token' "$T/requests.log"
   ! grep -q -- 'test-agent-token' <(ps -eo args) 2>/dev/null || true
-  grep -q -- '-K -' "$CLI"
+  grep -q -- '-K -' "$BATS_TEST_DIRNAME/../lib/agent.sh"
 }
 
-@test "autodeploy: add, list, check, remove" {
-  run "$CLI" autodeploy
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"no branches watched"* ]]
-
-  run "$CLI" autodeploy add app1 https://github.com/you/blog.git dev --token ghp_x
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"pushes to dev of https://github.com/you/blog.git now deploy app1"* ]]
-  grep -q 'POST /v1/autodeploy .*"token":"ghp_x"' "$T/requests.log"
-  grep -q 'POST /v1/autodeploy/app1/check' "$T/requests.log"
-
-  run "$CLI" autodeploy add app2 https://github.com/you/site.git
-  grep -q '"app_uuid":"app2","repo":"https://github.com/you/site.git","branch":"main"}' "$T/requests.log"
-
-  run "$CLI" autodeploy list
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"app1"*"dev"*"on"* ]]
-  [[ "$output" == *"app2"*"main"* ]]
-
-  run "$CLI" autodeploy check app1
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"head 1111111111"* ]]
-
-  run "$CLI" autodeploy rm app1
-  [ "$status" -eq 0 ]
-  run "$CLI" autodeploy rm app1
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"no auto-deploy for this application"* ]]
-}
-
-@test "autodeploy: bad input and missing arguments" {
-  run "$CLI" autodeploy add app1 https://github.com/you/blog.git --upload-pack
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"not a valid branch name"* ]]
-  run "$CLI" autodeploy add app1
-  [ "$status" -ne 0 ]
-  [[ "$output" == *"usage"* ]]
+@test "Coolify-era commands say what took their place" {
+  for c in autodeploy add-worker coolify routes; do
+    run "$CLI" "$c"
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"Coolify"*"mesh invite"* ]]
+  done
 }
 
 @test "without the token file the CLI asks for sudo" {
@@ -124,7 +93,7 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
 
 @test "a dead agent gives a pointer to doctor" {
   export AGENT_LOCAL_URL=http://127.0.0.1:9
-  run "$CLI" autodeploy
+  run "$CLI" sleep
   [ "$status" -ne 0 ]
   [[ "$output" == *"vercelify doctor"* ]]
 }
@@ -148,11 +117,14 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   run "$CLI" sleep
   [ "$status" -eq 0 ]
   [[ "$output" == *"no app sleeps"* ]]
-  run "$CLI" sleep on app1 15 --previews
+  run "$CLI" sleep on blog 15 --previews
   [ "$status" -eq 0 ]
   grep -q 'PUT /v1/sleep/app1 .*"idle_minutes":15,"previews":true' "$T/requests.log"
   run "$CLI" sleep list
-  [[ "$output" == *"app1  after 15 min idle (and previews)  blog.example.com asleep"* ]]
+  [[ "$output" == *"blog  after 15 min idle (and previews)  blog.example.com asleep"* ]]
+  run "$CLI" sleep on nope 15
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no app named nope"* ]]
   run "$CLI" sleep on app1 2
   [ "$status" -ne 0 ]
   [[ "$output" == *"5 minutes to 24 hours"* ]]
@@ -202,7 +174,7 @@ STUB
 }
 
 @test "uninstall wakes sleeping apps and removes Vercelify's own containers" {
-  "$CLI" sleep on app1 15 >/dev/null
+  "$CLI" sleep on blog 15 >/dev/null
   mkdir -p "$T/bin" "$T/systemd"
   # only Ollama is installed
   printf '#!/bin/sh\necho "docker $*" >>"%s/docker.log"\n[ "$1 $2" = "inspect vercelify-registry" ] && exit 1\nexit 0\n' "$T" >"$T/bin/docker"
@@ -217,4 +189,37 @@ STUB
   ! grep -q 'docker rm -f vercelify-registry' "$T/docker.log"
   [[ "$output" == *"removed the vercelify-ollama container"* ]]
   [[ "$output" != *"vercelify-registry"* ]]
+}
+
+@test "git-source: a token from stdin (never an argument), a deploy key, list and remove" {
+  run bash -c 'echo ghp_secret123 | "$1" git-source add work --provider github' _ "$CLI"
+  [ "$status" -eq 0 ]
+  grep -q 'POST /v1/platform/git-sources .*"token":"ghp_secret123"' "$T/requests.log"
+  # the token is in no command's arguments: agent_api sends the body through a descriptor
+  grep -q -- '--data-binary "@/dev/fd/3"' "$BATS_TEST_DIRNAME/../lib/agent.sh"
+  run "$CLI" git-source add ci --provider gitea --deploy-key </dev/null
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"ssh-ed25519 AAAAdeploykey"* ]]
+  run "$CLI" git-source
+  [[ "$output" == *"work"*"github"*"token"* && "$output" == *"ci"*"gitea"*"deploy_key"* ]]
+  run "$CLI" git-source rm work
+  [ "$status" -eq 0 ]
+  grep -q 'DELETE /v1/platform/git-sources/git_1' "$T/requests.log"
+  run "$CLI" git-source add empty </dev/null
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"no token given"* ]]
+  run "$CLI" git-source add x --provider bitbucket </dev/null
+  [[ "$output" == *"unknown provider"* ]]
+}
+
+@test "pair --tailscale reaches the agent; anything else is refused" {
+  printf '#!/bin/sh\necho "$*" >>"$T_CALLS"\nprintf "ABCD-EFGH\\nvfy1.ts\\n"\n' >"$T/agent"
+  chmod +x "$T/agent"
+  export T_CALLS="$T/calls"
+  AGENT_BIN="$T/agent" VERCELIFY_TEST=1 run "$CLI" pair --tailscale
+  [ "$status" -eq 0 ]
+  grep -q 'pair --tailscale --short --with-code' "$T/calls"
+  AGENT_BIN="$T/agent" VERCELIFY_TEST=1 run "$CLI" pair --bogus
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"usage: vercelify pair [--tailscale]"* ]]
 }

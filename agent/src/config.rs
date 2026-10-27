@@ -111,6 +111,8 @@ pub struct Config {
     pub proxy_dir: PathBuf,
     /// Our proxy's container (its image tells the Traefik version).
     pub proxy_container: String,
+    /// The proxy's image (default: the tested, pinned Traefik).
+    pub proxy_image: String,
     /// Where the proxy listens on this machine (cron jobs call apps through it).
     pub proxy_http_port: u16,
     pub proxy_https_port: u16,
@@ -232,6 +234,7 @@ impl Default for Config {
             traefik_metrics_url: "http://127.0.0.1:8082/metrics".into(),
             proxy_dir: "/var/lib/vercelify/proxy".into(),
             proxy_container: vercelify_platform::proxy::CONTAINER.into(),
+            proxy_image: vercelify_platform::proxy::TRAEFIK_IMAGE.into(),
             proxy_http_port: 80,
             proxy_https_port: 443,
             rewrite_private_targets: false,
@@ -455,6 +458,9 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_PROXY_CONTAINER") {
             self.proxy_container = v;
+        }
+        if let Some(v) = var("VERCELIFY_PROXY_IMAGE") {
+            self.proxy_image = v;
         }
         if let Some(v) = var("VERCELIFY_PROXY_HTTP_PORT").and_then(|v| v.parse().ok()) {
             self.proxy_http_port = v;

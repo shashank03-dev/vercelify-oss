@@ -12,6 +12,7 @@
 # missing, a commented-out example left alone). VALUE is TOML (quote strings).
 toml_set() {
   local key=$1 value=$2 file=$3 tmp
+  [[ -e "$file" ]] || : >"$file"
   tmp=$(mktemp)
   if grep -Eq "^[[:space:]]*${key}[[:space:]]*=" "$file" 2>/dev/null; then
     awk -v k="$key" -v v="$value" '
@@ -26,7 +27,7 @@ toml_set() {
 }
 
 # toml_list_add KEY ITEM FILE — add "ITEM" to a top-level string list
-# (`listen = ["tailscale", "127.0.0.1"]`) unless it is there.
+# (`listen = ["127.0.0.1", "mesh"]`) unless it is there.
 toml_list_add() {
   local key=$1 item=$2 file=$3 cur
   cur=$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$file" 2>/dev/null | head -1 | sed -E 's/^[^=]*=[[:space:]]*//')
@@ -84,8 +85,7 @@ mesh_tunnel_route() {
   . "$env"
   [[ -n "${CF_DOMAIN:-}" ]] || return 0
   toml_set mesh_public_url "\"https://mesh.$CF_DOMAIN\"" "$cfg"
-  rm -f "${VERCELIFY_STATE:-/var/lib/vercelify}/routes.json"
-  routes_sync || warn "the tunnel routes weren't updated; next sync retries"
+  routes_sync || warn "the tunnel routes weren't updated: run this again (sudo vercelify domain $CF_DOMAIN --cloudflare-token …)"
   run_cmd systemctl restart vercelify-agent
   ok "outside the LAN: joins and the relay go through https://mesh.$CF_DOMAIN"
 }

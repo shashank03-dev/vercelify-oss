@@ -6,7 +6,7 @@ server: redirects, rewrites (including proxying to another site), headers, `clea
 blocked IPs, trusted IPs, deny rules and rate limits. A project moving from Vercel keeps
 its configuration as it is.
 
-Everything runs in the proxy that already serves your apps (Coolify's Traefik), so it
+Everything runs in the proxy that already serves your apps (the engine's Traefik), so it
 costs no memory and nothing extra runs per request. Rules apply a second or two after a
 change, without restarting anything.
 
@@ -14,8 +14,8 @@ change, without restarting anything.
 
 | Source | When |
 | --- | --- |
-| The repository, at the deployed commit | Apps with [auto-deploy](AUTODEPLOY.md) on GitHub: after each production deploy finishes, and for each pull request preview. The file is read from the app's base directory (Coolify's "Base Directory", Vercel's "Root Directory"). |
-| The repository, now | **Read from repository** in the app's **vercel.json** tab, or `vfy config sync APP` (GitHub; branch from auto-deploy or Coolify). |
+| The repository, at the deployed commit | Apps with [auto-deploy](AUTODEPLOY.md) on GitHub: after each production deploy finishes, and for each pull request preview. The file is read from the app's build context (Vercel's "Root Directory"). |
+| The repository, now | **Read from repository** in the app's **vercel.json** tab, or `vfy config sync APP` (GitHub; the app's branch). |
 | An upload | **Upload…** in the same tab, or `vfy config push APP [DIR]` from your checkout. Works for any Git host. |
 
 An upload wins until you remove it (**Remove rules**, `vfy config rm APP`); after that
@@ -35,18 +35,19 @@ vfy config check apps/web   # another folder
 | Key | Behaviour here | Difference from Vercel |
 | --- | --- | --- |
 | `redirects` | `source`, `destination` (path or URL), `permanent` (default true), `statusCode`, `has`, `missing`, `caseSensitive`. The visitor's query string is kept, merged with the destination's. | Permanent redirects answer 301 for GET/HEAD (308 otherwise), temporary ones 302 (307). Browsers treat them the same. |
-| `rewrites` to a path without parameters (e.g. `/(.*)` → `/index.html`) | Served when the app has nothing at the requested path (it answers 404), exactly like Vercel applies rewrites after its file system. Single-page apps work as on Vercel. | On Traefik older than 3.5 the fallback page is served with status 404 instead of 200 (Coolify installs 3.7). |
+| `rewrites` to a path without parameters (e.g. `/(.*)` → `/index.html`) | Served when the app has nothing at the requested path (it answers 404), exactly like Vercel applies rewrites after its file system. Single-page apps work as on Vercel. | On Traefik older than 3.5 the fallback page is served with status 404 instead of 200 (Vercelify runs 3.7). |
 | `rewrites` with parameters (e.g. `/blog/:slug` → `/posts/:slug`) | The path is rewritten before the app sees it. | Applied even if a file exists at the original path; a query in the destination is dropped (a warning says so). |
-| `rewrites` to `https://…` | Proxied to that site with the path rewritten; the other site gets its own `Host`. | Addresses on this machine or a private network (`127.0.0.1`, `10.x`, `localhost`, Docker names like `coolify`, `*.internal`) are refused with a note: the proxy can reach them, and the rewrite would put them on your public domain. `rewrite_private_targets = true` in `agent.toml` allows it. |
+| `rewrites` to `https://…` | Proxied to that site with the path rewritten; the other site gets its own `Host`. | Addresses on this machine or a private network (`127.0.0.1`, `10.x`, `localhost`, Docker names like `vercelify-ollama`, `*.internal`) are refused with a note: the proxy can reach them, and the rewrite would put them on your public domain. `rewrite_private_targets = true` in `agent.toml` allows it. |
 | `headers` | Response headers for matching paths, also on redirects and fallback pages. | See [several rules for one path](#several-rules-for-one-path). |
 | `cleanUrls` | `/about.html` → `/about`, `/blog/index.html` → `/blog`, `/index.html` → `/`. | Your server must answer the clean address (most static servers do). |
 | `trailingSlash` | `true` adds a slash to paths without a file extension, `false` removes it. | Same. |
 | `crons` | `path` + five-field `schedule` in UTC. See [cron jobs](#cron-jobs). | No per-plan limits. |
 | `has` / `missing` | `header`, `cookie`, `query` and `host`, with an optional regex `value`. | Values captured in `has` can't be used in the destination. |
 
-Keys that make no sense for a container (`functions`, `regions`, `buildCommand`,
-`outputDirectory`, `images`…) are listed as notes in the app and in `vfy config check`
-with what to do instead (usually: set it in Coolify). Nothing is silently ignored.
+`buildCommand`, `installCommand`, `outputDirectory` and `framework` are read by the build
+([PLATFORM.md](PLATFORM.md#3-apps-previews-and-rollbacks)). Keys that make no sense for a
+container (`functions`, `regions`, `images`…) are listed as notes in the app and in
+`vfy config check` with what to do instead. Nothing is silently ignored.
 
 ### Sources
 
@@ -149,10 +150,9 @@ day matching either counts.
 
 Builds are the heaviest thing a small server does. Auto-deploy skips a push when:
 
-- no changed file is in the app's **watch paths** (the app's *Watch Paths* setting in
-  Coolify, e.g. `apps/web/**` and `packages/**`; `!pattern` excludes). The same rules Coolify
-  uses for its webhooks: `*` stays in one folder, `**` crosses folders, the last matching
-  pattern decides;
+- no changed file is in the app's **watch paths** (its build settings, e.g. `apps/web/**`
+  and `packages/**`; `!pattern` excludes): `*` stays in one folder, `**` crosses
+  folders, the last matching pattern decides;
 - or the newest commit's message contains `[skip deploy]`, `[deploy skip]`, `[skip ci]`
   or `[ci skip]`.
 
@@ -172,20 +172,21 @@ visitor ─▶ Traefik
             ├─ vfy-<app>-…-rl*      priority 20000   rate limits for some paths
             ├─ vfy-<app>-…-h*       priority 10000   headers for some paths
             ├─ vfy-<app>-…-base     priority  5000   everything else
-            ├─ https-0-<app>        Coolify's own route (priority ≈ 50)
+            ├─ vfy-<app>-<n>[-secure] the engine's base route (priority 100)
             └─ vercelify-wake       priority     1   sleeping apps
 ```
 
-The agent reads the labels Coolify puts on the app's container (its routers, services
-and middlewares) and writes `/data/coolify/proxy/dynamic/vercelify-routes-<app>.yaml`
-with copies of Coolify's routers at higher priorities. Each copy keeps Coolify's own
-middlewares (gzip, basic auth, www redirects), and routers that only redirect http to
-https are left to Coolify. One file per app or preview, so a problem in one never
-affects another.
+The agent reads each app's base routes from the engine (its routers, service and
+middlewares) and writes `<state>/proxy/dynamic/vercelify-routes-<app id>.yaml` with
+copies of those routers at higher priorities. Each copy keeps the base route's own
+middlewares (basic auth, www redirects), and routers that only redirect http to https
+are left as they are. One file per app or preview, so a problem in one never affects
+another. Apps on workers are served by the main server's proxy, so their rules apply
+there too.
 
-When the app's container is stopped (asleep, or between deploys) its service disappears,
-Traefik skips these routes, and requests fall through to Coolify's route or the wake
-listener as before. The agent checks once a minute and right after every change. If it
+When the app is stopped (asleep, or between deploys) its base route and service
+disappear, Traefik skips these routes, and requests fall through to the wake listener
+or a clean 404. The agent checks once a minute and right after every change. If it
 can't read Docker for a moment, the routes stay as they are. Apps served under a
 sub-path (`https://example.com/app`) aren't supported and get a note.
 
@@ -193,17 +194,17 @@ sub-path (`https://example.com/app`) aren't supported and get a note.
 
 | What you see | What to do |
 | --- | --- |
-| "no container for this app on this server yet" | Deploy the app once. Apps on a worker are routed by that worker's proxy; set their rules on the worker's agent (`vfy -s <worker> config push …`). |
-| "Coolify's proxy runs traefik:v2…" | Upgrade the proxy in Coolify (Servers → Proxy). The rules need Traefik 3. |
+| "this app isn't deployed yet" | Deploy the app once; its rules apply as soon as it has a route. |
+| "the proxy isn't running" | `docker ps` should list `vercelify-proxy`; the agent starts it again within a minute, `sudo vercelify doctor` says why it can't. |
 | A rule shows as a note | The note says why it was skipped or how it differs. `vfy config check` shows the same before you push. |
-| Rules don't apply | `docker logs coolify-proxy` shows configuration errors; `cat /data/coolify/proxy/dynamic/vercelify-routes-*.yaml` shows what was generated. |
+| Rules don't apply | `docker logs vercelify-proxy` shows configuration errors; `sudo cat /var/lib/vercelify/proxy/dynamic/vercelify-routes-*.yaml` shows what was generated. |
 
 ## Tests
 
 - Unit tests for the path-to-regexp compiler, every rule kind, the generated Traefik
-  configuration, cron schedules, Coolify's watch-path globs and the GitHub responses
+  configuration, cron schedules, watch-path globs and the GitHub responses
   (`cargo test -p vercelify-agent`).
-- `host/tests/contract/routing.sh` runs the real agent against a real Traefik (3.7, and
-  3.4 in CI) with apps labelled exactly as Coolify 4.4.6 labels them. It checks 69
+- `host/tests/contract/routing.sh` runs the real agent with the engine and its own
+  proxy (Traefik 3.7, and 3.4 in CI) and two apps deployed as image apps. It checks 69
   behaviours end to end, including spoofed tunnel headers from another address, a cron
   run with `CRON_SECRET`, a stopped app and removal. See [DEVELOPMENT.md](DEVELOPMENT.md).

@@ -1,15 +1,20 @@
 #!/usr/bin/env bash
 # Backups with restic: encrypted, deduplicated, to the storage disk, another
-# server in your pool (over Tailscale) and/or any S3-compatible bucket.
+# server in your pool (over the mesh) and/or any S3-compatible bucket.
 #
-# What is saved: Coolify's database and .env (its APP_KEY decrypts every
-# stored secret), SSH keys, /etc/vercelify, agent state, consistent dumps of
-# every database container, and the data of app volumes on both tiers.
+# What is saved: the engine's state (a consistent copy of platform.db and the
+# master key that unseals every stored secret), /etc/vercelify, consistent
+# dumps of every database container, and the data of app volumes on both
+# tiers. The live platform.db is never read: SQLite may be mid-write. A server
+# still on Coolify (not migrated) also gets Coolify's database and .env.
 
 : "${VERCELIFY_STATE:=/var/lib/vercelify}"
 : "${BACKUP_ENV_FILE:=$VERCELIFY_ETC/backup.env}"
 : "${BACKUP_STAGE:=$VERCELIFY_STATE/backup-stage}"
 : "${COOLIFY_DATA:=/data/coolify}"
+: "${COOLIFY_DB_CONTAINER:=coolify-db}"
+: "${PLATFORM_DB:=$VERCELIFY_STATE/platform.db}"
+: "${SQLITE3:=sqlite3}"
 : "${DOCKER_VOLUMES_DIR:=/var/lib/docker/volumes}"
 : "${RESTIC:=restic}"
 BACKUP_LOG="$VERCELIFY_STATE/backup.log"
@@ -121,11 +126,22 @@ write_backup_status() { # OK(true|false) ERROR SNAPSHOT
 
 # Consistent dumps of every database container into the staging directory.
 # A dump that fails is reported, but never stops the rest from being saved
-# (Coolify's secrets matter more than any one app's database). Prints the
+# (the engine's state matters more than any one app's database). Prints the
 # names that failed.
 dump_databases() {
   local stage=$1 id name image n=0 failed=()
   mkdir -p "$stage/databases"
+  # The engine's own database, fresh: sqlite3's online backup. Without
+  # sqlite3, the copy the agent keeps (platform.db.bak, every 5 min) is saved.
+  if [[ -f "$PLATFORM_DB" ]] && have "$SQLITE3"; then
+    if "$SQLITE3" "$PLATFORM_DB" ".backup '$stage/platform.db'" 2>/dev/null; then
+      n=$((n + 1))
+    else
+      warn "a fresh copy of the engine's database failed; its 5-minute copy is saved"
+      rm -f "$stage/platform.db"
+    fi
+  fi
+  # A server not migrated yet: Coolify's own database.
   if docker inspect "$COOLIFY_DB_CONTAINER" >/dev/null 2>&1; then
     if docker exec "$COOLIFY_DB_CONTAINER" pg_dump -U coolify -Fc coolify >"$stage/databases/coolify.dump"; then
       n=$((n + 1))
@@ -148,7 +164,7 @@ dump_databases() {
         docker exec "$id" sh -c 'exec mongodump --archive ${MONGO_INITDB_ROOT_USERNAME:+-u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin}' >"$stage/databases/$name.archive" || rc=$? ;;
       *redis*|*valkey*|*keydb*|*dragonfly*)
         # Flush to disk; the files are saved with the volumes below.
-        docker exec "$id" sh -c 'redis-cli ${REDIS_PASSWORD:+-a "$REDIS_PASSWORD"} SAVE' >/dev/null 2>&1 || true
+        docker exec "$id" sh -c 'REDISCLI_AUTH="${VFY_PASSWORD:-$REDIS_PASSWORD}" "$(command -v valkey-cli || command -v keydb-cli || echo redis-cli)" SAVE' >/dev/null 2>&1 || true
         continue ;;
       *) continue ;;
     esac
@@ -165,7 +181,7 @@ dump_databases() {
 
 backup_paths() {
   local p
-  for p in "$COOLIFY_DATA/source/.env" "$COOLIFY_DATA/ssh" "$VERCELIFY_ETC" "$VERCELIFY_STATE" \
+  for p in "$COOLIFY_DATA/source/.env" "$COOLIFY_DATA/ssh" "$VERCELIFY_ETC" "$VERCELIFY_STATE" "$(master_key_file)" \
            "$STORAGE_MOUNT/volumes" "$DOCKER_VOLUMES_DIR" "$BACKUP_STAGE"; do
     [[ -e "$p" ]] && printf '%s\n' "$p"
   done
@@ -185,7 +201,8 @@ backup_run() {
     info "saving to $r"
     if out=$(RESTIC_REPOSITORY=$r "$RESTIC" backup --tag vercelify --host "$(hostname -s)" \
         --exclude-caches --exclude "$DOCKER_VOLUMES_DIR/ollama-models" --exclude "$DOCKER_VOLUMES_DIR/*/_data/lost+found" \
-        --exclude "$VERCELIFY_STATE/backup.log" "${paths[@]}" 2>&1); then
+        --exclude "$VERCELIFY_STATE/backup.log" --exclude "$PLATFORM_DB" --exclude "$PLATFORM_DB-wal" \
+        --exclude "$PLATFORM_DB-shm" --exclude "${ROLLBACK_DIR:-$VERCELIFY_STATE/rollback}" "${paths[@]}" 2>&1); then
       snap=$(sed -n 's/^snapshot \([0-9a-f]*\) saved.*/\1/p' <<<"$out" | tail -1)
       ok "snapshot ${snap:-saved} in $r"
       RESTIC_REPOSITORY=$r "$RESTIC" forget --tag vercelify --host "$(hostname -s)" --prune \
@@ -239,37 +256,53 @@ backup_restore() {
     info "databases are in $target$BACKUP_STAGE/databases; to put this server back as it was: sudo vercelify backup restore $snap --instance"
     return 0
   }
-  [[ $ROLE == main ]] || die "--instance restores a main server (Coolify); on a worker copy what you need from $target"
-  confirm "Replace this server's Coolify database, keys and app data with the backup?" n || die "cancelled (files stay in $target)"
-  local t=$target
-  run_cmd docker stop coolify >/dev/null 2>&1 || true
-  if [[ -f "$t$COOLIFY_DATA/source/.env" ]]; then
-    # APP_KEY must match the database or every stored secret is unreadable.
-    run_cmd cp -a "$t$COOLIFY_DATA/source/.env" "$COOLIFY_DATA/source/.env"
-  fi
-  [[ -d "$t$COOLIFY_DATA/ssh" ]] && run_cmd rsync -a "$t$COOLIFY_DATA/ssh/" "$COOLIFY_DATA/ssh/"
+  [[ $ROLE == main ]] || die "--instance restores a main server; on a worker copy what you need from $target"
+  local t=$target db=''
   if [[ -f "$t$BACKUP_STAGE/databases/coolify.dump" ]]; then
-    docker exec -i "$COOLIFY_DB_CONTAINER" pg_restore -U coolify -d coolify --clean --if-exists --no-owner \
-      <"$t$BACKUP_STAGE/databases/coolify.dump" || warn "pg_restore reported problems (often harmless notices)"
+    die "this snapshot is from before the move to Vercelify's engine (Coolify). Its files are in $t; restore it on a server running Coolify, then: sudo vercelify migrate"
   fi
+  if [[ -f "$t$BACKUP_STAGE/platform.db" ]]; then
+    db="$t$BACKUP_STAGE/platform.db"
+  elif [[ -f "$t$PLATFORM_DB.bak" ]]; then
+    db="$t$PLATFORM_DB.bak"
+  fi
+  [[ -n "$db" ]] || die "no engine state in this snapshot; the files are in $t"
+  [[ -f "$t$(master_key_file)" ]] || die "the snapshot has no master key: its secrets could not be unsealed. Files are in $t"
+  confirm "Replace this server's apps, settings, secrets and app data with the backup?" n || die "cancelled (files stay in $t)"
+  # The engine stops first: it would put back what it last knew.
+  run_cmd systemctl stop vercelify-agent
   # Volume files are rewritten under no running container: a database must
-  # not see its files change under it. Coolify's own database was just
-  # restored from its dump; its volume's file copy (taken while it ran) is
-  # left out, or it would undo that.
-  local running=() keep=() v
-  mapfile -t running < <(docker ps --format '{{.Names}}' | grep -vx -e "$COOLIFY_DB_CONTAINER" -e coolify || true)
-  mapfile -t keep < <(docker inspect -f '{{range .Mounts}}{{if eq .Type "volume"}}{{.Name}}{{"\n"}}{{end}}{{end}}' "$COOLIFY_DB_CONTAINER" 2>/dev/null | sed '/^$/d')
+  # not see its files change under it.
+  local running=()
+  mapfile -t running < <(docker ps --format '{{.Names}}' | grep -vx -e vercelify-proxy -e vfy-registry || true)
   (( ${#running[@]} )) && { run_cmd docker stop "${running[@]}" >/dev/null || warn "some containers did not stop"; }
-  [[ -d "$t$STORAGE_MOUNT/volumes" ]] && run_cmd rsync -aHAX --numeric-ids "$t$STORAGE_MOUNT/volumes/" "$STORAGE_MOUNT/volumes/"
-  if [[ -d "$t$DOCKER_VOLUMES_DIR" ]]; then
-    local excludes=()
-    for v in "${keep[@]}"; do excludes+=(--exclude "/$v/"); done
-    run_cmd rsync -aHAX --numeric-ids "${excludes[@]}" "$t$DOCKER_VOLUMES_DIR/" "$DOCKER_VOLUMES_DIR/"
+  run_cmd install -m 0600 "$t$(master_key_file)" "$(master_key_file)"
+  run_cmd rm -f "$PLATFORM_DB-wal" "$PLATFORM_DB-shm"
+  run_cmd install -m 0600 "$db" "$PLATFORM_DB"
+  # The network's identity too (the coordinator's keys, this node's): workers
+  # and devices keep their certificates and find the server again.
+  local mesh=${MESH_DIR:-$VERCELIFY_STATE/mesh} restored_mesh=0
+  if [[ -d "$t$mesh" ]]; then
+    run_cmd systemctl stop vercelify-mesh 2>/dev/null || true
+    run_cmd mkdir -p "$mesh"
+    run_cmd rsync -a --delete "$t$mesh/" "$mesh/"
+    restored_mesh=1
   fi
-  (( ${#running[@]} )) && { run_cmd docker start "${running[@]}" >/dev/null || warn "some containers did not start again — start them in Coolify"; }
-  run_cmd docker start coolify >/dev/null
-  coolify_wait_healthy 600 || warn "Coolify is slow to come back — check: docker logs coolify"
-  ok "instance restored. Start (or redeploy) your apps and databases in Coolify; database dumps are in $t$BACKUP_STAGE/databases"
+  [[ -d "$t$STORAGE_MOUNT/volumes" ]] && run_cmd rsync -aHAX --numeric-ids "$t$STORAGE_MOUNT/volumes/" "$STORAGE_MOUNT/volumes/"
+  [[ -d "$t$DOCKER_VOLUMES_DIR" ]] && run_cmd rsync -aHAX --numeric-ids "$t$DOCKER_VOLUMES_DIR/" "$DOCKER_VOLUMES_DIR/"
+  (( ${#running[@]} )) && { run_cmd docker start "${running[@]}" >/dev/null || true; }
+  # The engine reconciles from the restored state: apps and databases start
+  # (or redeploy) as they were when the backup was taken.
+  run_cmd systemctl start vercelify-agent
+  (( restored_mesh )) && { run_cmd systemctl restart vercelify-mesh 2>/dev/null || true; }
+  ok "instance restored — the engine is bringing apps and databases back as they were. Database dumps are in $t$BACKUP_STAGE/databases"
+}
+
+# The engine's master key (agent.toml `master_key_file`, else beside platform.db).
+master_key_file() {
+  local f
+  f=$(sed -n -E 's/^[[:space:]]*master_key_file[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "${AGENT_CONFIG:-$VERCELIFY_ETC/agent.toml}" 2>/dev/null | head -1)
+  printf '%s\n' "${f:-$VERCELIFY_STATE/master.key}"
 }
 
 backup_cli() {

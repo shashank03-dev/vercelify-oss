@@ -22,17 +22,10 @@ pub const JOIN_PREFIX: &str = "vfyj1";
 /// Zone of mesh names: `<node>.vfy`, `*.<node>.vfy`.
 pub const DNS_ZONE: &str = "vfy";
 
-/// What a device (a Mac) may reach on a server (design §3.5 of the plan):
-/// the agent, Traefik, Ollama, the display stream, and Coolify's dashboard
-/// while servers still run it (until M10). Database public ports are added
+/// What a device (a Mac) may reach on a server (design §13.8): the agent,
+/// the proxy, Ollama and the display stream. Database public ports are added
 /// per server.
-pub const DEVICE_PORTS: &[&str] = &[
-    "7420/tcp",
-    "80/tcp",
-    "443/tcp",
-    "11434/tcp",
-    "5600-5610/udp",
-];
+pub const DEVICE_PORTS: &[&str] = &["7420/tcp", "80/tcp", "443/tcp", "11434/tcp", "5600-5610/udp"];
 
 /// Pasted on a new machine: `sudo vercelify mesh join vfyj1.…`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -13,16 +13,23 @@ setup() {
 
 teardown() { rm -rf "$T"; }
 
-@test "the engine is read from agent.toml" {
-  ! platform_engine
+@test "the engine is read from agent.toml; without it, Coolify's presence decides" {
+  export COOLIFY_DATA_DIR="$T/coolify"
+  # a new server: the platform
+  run platform_engine; [ "$status" -eq 0 ]
+  # a server still on Coolify (not migrated)
+  mkdir -p "$T/coolify/source" && touch "$T/coolify/source/.env"
+  run platform_engine; [ "$status" -ne 0 ]
   printf 'port = 7420\n# engine = "platform"\n' >"$VERCELIFY_ETC/agent.toml"
-  ! platform_engine
+  run platform_engine; [ "$status" -ne 0 ]
   printf 'port = 7420\nengine = "platform"\n' >"$VERCELIFY_ETC/agent.toml"
-  platform_engine
+  run platform_engine; [ "$status" -eq 0 ]
   printf '  engine="platform"\n' >"$VERCELIFY_ETC/agent.toml"
-  platform_engine
+  run platform_engine; [ "$status" -eq 0 ]
+  # the key wins over what is on disk
+  rm -rf "$T/coolify"
   printf 'engine = "coolify"\n' >"$VERCELIFY_ETC/agent.toml"
-  ! platform_engine
+  run platform_engine; [ "$status" -ne 0 ]
 }
 
 @test "domain settings for each mode" {

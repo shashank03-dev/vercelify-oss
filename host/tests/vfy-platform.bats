@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# `vfy` against a server on Vercelify's own engine (paired without Coolify):
+# `vfy` against a server on Vercelify's own engine:
 # apps, deploys with a streamed build log, logs, rollbacks, variables,
 # restart, the service catalogue and `why`.
 
@@ -10,7 +10,7 @@ setup() {
   for _ in $(seq 50); do [ -s "$T/port" ] && break; sleep 0.1; done
   URL="http://127.0.0.1:$(cat "$T/port")"
   cat >"$T/settings.json" <<JSON
-{"servers": [{"agent_url": "$URL", "agent_token": "agent-secret", "coolify_url": "", "coolify_token": null, "hostname": "optiplex", "role": "main"}],
+{"servers": [{"agent_url": "$URL", "agent_token": "agent-secret", "hostname": "optiplex", "role": "main"}],
  "active": "$URL"}
 JSON
   export VFY_SETTINGS="$T/settings.json" NO_COLOR=1
@@ -20,7 +20,7 @@ JSON
 
 teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
 
-@test "apps: state from the engine, no Coolify involved" {
+@test "apps: state from the engine" {
   run "$VFY" apps
   [ "$status" -eq 0 ]
   [[ "$output" == *"✓ blog"*"live"*"https://blog.example.com"* ]]
@@ -138,7 +138,7 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   SOCKS_PID=$!
   for _ in $(seq 50); do [ -s "$T/socks.port" ] && break; sleep 0.1; done
   cat >"$T/mesh.json" <<JSON
-{"servers": [{"agent_url": "http://10.77.0.1:7420", "agent_token": "agent-secret", "coolify_url": "", "coolify_token": null, "hostname": "optiplex", "role": "main"}],
+{"servers": [{"agent_url": "http://10.77.0.1:7420", "agent_token": "agent-secret", "hostname": "optiplex", "role": "main"}],
  "active": "http://10.77.0.1:7420"}
 JSON
   # App mode (the daemon's status says userspace) → through the proxy.

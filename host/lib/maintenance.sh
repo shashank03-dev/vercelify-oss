@@ -44,6 +44,14 @@ reboot_reason() {
 }
 
 # Why not now, or nothing when it is safe to reboot.
+# Is the engine building or rolling out an app? (An agent that doesn't
+# answer blocks nothing: the reboot is what may bring it back.)
+deployment_running() {
+  [[ -r "$VERCELIFY_ETC/agent.token" ]] || return 1
+  (API_TIMEOUT=10 agent_api GET /v1/platform/apps) 2>/dev/null |
+    jq -e 'any(.[]; .last_status == "queued" or .last_status == "building" or .last_status == "deploying")' >/dev/null 2>&1
+}
+
 reboot_blocker() {
   local up
   up=$(cut -d. -f1 "$PROC_UPTIME" 2>/dev/null || echo 0)
@@ -52,7 +60,7 @@ reboot_blocker() {
     echo "the power guard reports: $(sed -E 's/.*"reason":"([^"]*)".*/\1/' "$POWER_GUARD_STATE")"
     return
   fi
-  if docker ps --format '{{.Image}}' 2>/dev/null | grep -q 'coolify-helper'; then
+  if deployment_running || docker ps --format '{{.Image}}' 2>/dev/null | grep -q 'coolify-helper'; then
     echo "a deployment is building"
     return
   fi

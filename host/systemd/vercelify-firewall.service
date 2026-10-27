@@ -1,6 +1,6 @@
 [Unit]
-Description=Vercelify firewall (control plane reachable only via Tailscale)
-After=docker.service tailscaled.service
+Description=Vercelify firewall (control plane reachable only over the mesh)
+After=docker.service vercelify-mesh.service
 PartOf=docker.service
 
 [Service]

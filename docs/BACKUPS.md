@@ -9,10 +9,9 @@ off-site copy with one command.
 
 | Item | Why it matters |
 | --- | --- |
-| `/data/coolify/source/.env` | Its `APP_KEY` decrypts every secret Coolify stores. Without it a restored database is unreadable. |
-| Coolify's database (`pg_dump -Fc`) | Projects, apps, environment variables, domains, servers. |
-| `/data/coolify/ssh` | The keys Coolify uses to reach every server in the pool. |
-| `/etc/vercelify`, `/var/lib/vercelify` | Agent tokens, auto-deploy watches, alerts, the Cloudflare token. |
+| The engine's state (`platform.db`) | Projects, apps, deployments, environment variables, domains, databases, servers. Copied with SQLite's online backup (or its 5-minute copy, `platform.db.bak`): the live file is never read while it is written. |
+| The master key (`/var/lib/vercelify/master.key`) | Unseals every stored secret (variables, database passwords, Git tokens). Without it a restored state can't be read. |
+| `/etc/vercelify`, `/var/lib/vercelify` | Agent tokens, the network's keys, alerts, the Cloudflare token. |
 | A dump of every database container | Postgres (`pg_dumpall`), MySQL/MariaDB (`--single-transaction`), MongoDB (`mongodump`); Redis-like stores are flushed (`SAVE`) before their files are copied. Dumps are consistent even while apps write. |
 | App volumes on both tiers | `/mnt/storage/volumes` and Docker's named volumes (AI models excluded). |
 
@@ -54,11 +53,22 @@ A whole server, onto a fresh machine after a disk failure:
 2. Connect to the same repository with the password you kept:
    `sudo VERCELIFY_BACKUP_PASSWORD='<password>' vercelify backup setup --to <the same repository>`
    (an off-site one: the local disk is gone).
-3. `sudo vercelify backup restore latest --instance` — restores Coolify's `.env`
-   (APP_KEY), SSH keys and database, then the app volumes, and restarts Coolify.
-4. Start or redeploy apps in Coolify; database dumps are under
-   `<restore dir>/var/lib/vercelify/backup-stage/databases` if you want to load
-   one by hand.
+3. `sudo vercelify backup restore latest --instance` — stops the agent and the apps,
+   puts back the master key, the engine's state and the network's keys, then the app
+   volumes, and starts everything again. The engine brings every app and database back
+   as it was when the backup ran; database dumps are under
+   `<restore dir>/var/lib/vercelify/backup-stage/databases` if you want to load one by
+   hand.
+4. Workers and your devices keep their place on the network. They find the new machine
+   by itself through a Cloudflare tunnel, or when it gets the old one's LAN address;
+   otherwise re-pair them (`sudo vercelify pair`, `sudo vercelify mesh invite`).
+
+With a worker to spare, a [warm standby](PLATFORM.md#6-more-servers-workers-and-a-standby)
+takes over in minutes instead (`sudo vercelify promote`).
+
+A snapshot taken while the server still ran Coolify is restored onto a server running
+Coolify, then moved with `sudo vercelify migrate`; `--instance` refuses to put it over
+the engine.
 
 Practice it once on a spare machine: a backup you have never restored is a hope,
 not a plan.

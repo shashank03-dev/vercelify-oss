@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Public domains without opening router ports: a Cloudflare Tunnel that
-# sends *.DOMAIN (and DOMAIN) to Traefik on localhost:80, plus the DNS
+# sends *.DOMAIN (and DOMAIN) to Vercelify's proxy on localhost:80, plus the DNS
 # records for it. Needs an API token with:
 #   Account › Cloudflare Tunnel › Edit
 #   Zone › DNS › Edit      and   Zone › Zone › Read   (for the domain's zone)
@@ -59,14 +59,13 @@ mesh_coordinates() {
   grep -Eq '^[[:space:]]*mesh_coordinator[[:space:]]*=[[:space:]]*true' "${VERCELIFY_ETC:-/etc/vercelify}/agent.toml" 2>/dev/null
 }
 
-# Route *.DOMAIN and DOMAIN to Traefik. ROUTES (JSON array of
-# {hostname, service}) come first: apps running on other servers in the pool;
-# then mesh.DOMAIN to the mesh's control listener on a coordinator.
+# Route *.DOMAIN and DOMAIN to Vercelify's proxy, and mesh.DOMAIN to the
+# mesh's control listener on a coordinator. Apps on other servers are reached
+# by the proxy itself over the mesh, so the tunnel never needs per-app routes.
 cf_configure_ingress() {
-  local account=$1 tunnel=$2 domain=$3 routes=${4:-[]} mesh=false body
+  local account=$1 tunnel=$2 domain=$3 mesh=false body
   mesh_coordinates && mesh=true
-  body=$(jq -nc --arg d "$domain" --argjson r "$routes" --argjson m "$mesh" '{config: {ingress: (
-    [$r[] | {hostname, service, originRequest: {}}] +
+  body=$(jq -nc --arg d "$domain" --argjson m "$mesh" '{config: {ingress: (
     (if $m then [{hostname: ("mesh." + $d), service: "http://localhost:7443", originRequest: {}}] else [] end) + [
     {hostname: ("*." + $d), service: "http://localhost:80", originRequest: {}},
     {hostname: $d, service: "http://localhost:80", originRequest: {}},
@@ -75,47 +74,16 @@ cf_configure_ingress() {
   cf PUT "/accounts/$account/cfd_tunnel/$tunnel/configurations" "$body" >/dev/null
 }
 
-# Lines "FQDNS|SERVER_IP" (Coolify apps on other servers) -> JSON routes for
-# hostnames under DOMAIN, each to that server's Traefik over Tailscale.
-routes_from_rows() {
-  local domain=$1
-  jq -Rn --arg d "$domain" '
-    [inputs | select(length > 0) | split("|") | select(length == 2)
-     | .[1] as $ip | .[0] | split(",")[] | gsub("^\\s+|\\s+$"; "")
-     | select(length > 0)
-     | sub("^https?://"; "") | split("/")[0] | split(":")[0] | ascii_downcase
-     | select(. == $d or endswith("." + $d))
-     | select(test("^[a-z0-9.-]+$")) | select($ip | test("^[0-9a-fA-F.:]+$"))
-     | {hostname: ., service: ("http://" + $ip + ":80")}]
-    | unique_by(.hostname)'
-}
-
-# Apps (and their previews) that run on a server other than this one.
-worker_app_rows() {
-  coolify_psql "select coalesce(a.fqdn,''), s.ip from applications a
-    join standalone_dockers d on d.id = a.destination_id
-    join servers s on s.id = d.server_id where s.id <> 0" 2>/dev/null || true
-  coolify_psql "select coalesce(p.fqdn,''), s.ip from application_previews p
-    join applications a on a.id = p.application_id
-    join standalone_dockers d on d.id = a.destination_id
-    join servers s on s.id = d.server_id where s.id <> 0" 2>/dev/null || true
-}
-
-# Keep the tunnel's routes in line with where apps run (timer, every 5 min).
+# Reapply the tunnel's routes from the stored token (after this server
+# starts or stops coordinating the mesh).
 routes_sync() {
-  local env="$VERCELIFY_ETC/cloudflare.env" routes state="${VERCELIFY_STATE:-/var/lib/vercelify}/routes.json"
-  [[ -r "$env" ]] || { info "no Cloudflare tunnel with a stored token — nothing to sync"; return 0; }
+  local env="$VERCELIFY_ETC/cloudflare.env"
+  [[ -r "$env" ]] || { info "no Cloudflare tunnel with a stored token — nothing to update"; return 0; }
   # shellcheck disable=SC1090
   . "$env"
   CF_TOKEN=$CF_API_TOKEN
-  routes=$(worker_app_rows | routes_from_rows "$CF_DOMAIN")
-  if [[ -r "$state" ]] && [[ "$(jq -cS . "$state" 2>/dev/null)" == "$(jq -cS . <<<"$routes")" ]]; then
-    return 0
-  fi
-  cf_configure_ingress "$CF_ACCOUNT" "$CF_TUNNEL" "$CF_DOMAIN" "$routes" || return 1
-  mkdir -p "$(dirname "$state")"
-  printf '%s\n' "$routes" >"$state"
-  ok "tunnel routes: $(jq 'length' <<<"$routes") app hostname(s) on other servers, everything else to this server"
+  cf_configure_ingress "$CF_ACCOUNT" "$CF_TUNNEL" "$CF_DOMAIN" || return 1
+  ok "tunnel routes: *.$CF_DOMAIN and $CF_DOMAIN → this server's proxy"
 }
 
 # Create/update a proxied CNAME NAME -> TARGET. Only A/AAAA/CNAME records
@@ -197,39 +165,21 @@ setup_cloudflare_domain() {
   tunnel=$(cf_ensure_tunnel "$account" "$tunnel_name") || die "could not create the tunnel"
   ok "tunnel $tunnel_name ($tunnel)"
   cf_configure_ingress "$account" "$tunnel" "$domain" || die "could not configure tunnel routes"
-  # That reset any routes to pooled servers: let the next sync put them back.
-  rm -f "${VERCELIFY_STATE:-/var/lib/vercelify}/routes.json"
-  ok "routes: *.$domain and $domain → Traefik (localhost:80)"
+  ok "routes: *.$domain and $domain → the proxy (localhost:80)"
   cf_upsert_cname "$zone" "*.$domain" "$tunnel.cfargotunnel.com" "$force" || die "DNS update failed"
   cf_upsert_cname "$zone" "$domain" "$tunnel.cfargotunnel.com" "$force" || warn "apex record not changed"
   token=$(cf_tunnel_token "$account" "$tunnel") || die "could not fetch the tunnel token"
   [[ -n "$token" && "$token" != null ]] || die "empty tunnel token"
   install_cloudflared
   cloudflared_service "$token"
-  # Kept (0600) so routes can follow apps that run on other servers.
+  # Kept (0600) so the routes can be reapplied (mesh coordinator changes).
   printf 'CF_API_TOKEN=%s\nCF_ACCOUNT=%s\nCF_TUNNEL=%s\nCF_DOMAIN=%s\n' "$CF_TOKEN" "$account" "$tunnel" "$domain" |
     write_file "$VERCELIFY_ETC/cloudflare.env" 0600 || true
-  write_file "$SYSTEMD_DIR/vercelify-routes.service" 0644 <<'UNIT' || true
-[Unit]
-Description=Vercelify: route apps on pooled servers through the tunnel
-After=docker.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/vercelify routes sync
-UNIT
-  write_file "$SYSTEMD_DIR/vercelify-routes.timer" 0644 <<'UNIT' || true
-[Unit]
-Description=Keep tunnel routes in line with where apps run
-
-[Timer]
-OnBootSec=2min
-OnUnitActiveSec=5min
-
-[Install]
-WantedBy=timers.target
-UNIT
-  run_cmd systemctl daemon-reload
-  run_cmd systemctl enable --now vercelify-routes.timer >/dev/null 2>&1 || true
-  ok "cloudflared running — https://anything.$domain now reaches this machine (and apps on pooled servers)"
+  # The Coolify-era timer that followed apps on pooled servers.
+  if [[ -e "$SYSTEMD_DIR/vercelify-routes.timer" ]]; then
+    run_cmd systemctl disable --now vercelify-routes.timer >/dev/null 2>&1 || true
+    run_cmd rm -f "$SYSTEMD_DIR/vercelify-routes.timer" "$SYSTEMD_DIR/vercelify-routes.service"
+    run_cmd systemctl daemon-reload
+  fi
+  ok "cloudflared running — https://anything.$domain now reaches this server's apps (and those on other servers)"
 }

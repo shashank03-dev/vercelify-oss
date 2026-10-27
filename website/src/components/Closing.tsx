@@ -67,11 +67,11 @@ const FAQ = [
   ],
   [
     "Do I need a domain?",
-    "No. Without one, your apps are private to your own devices on Tailscale. Add a domain whenever you want them public.",
+    "No. Without one, your apps are private to your own devices on Vercelify's network. Add a domain whenever you want them public.",
   ],
   [
     "Is it safe to run at home?",
-    "The control panel is only reachable on your private Tailscale network. No router ports are opened, and apps go public only through a Cloudflare Tunnel you set up.",
+    "The control panel is only reachable on Vercelify's private WireGuard network. No router ports are opened, and apps go public only through a Cloudflare Tunnel you set up.",
   ],
   [
     "What if the power goes out?",
@@ -79,7 +79,7 @@ const FAQ = [
   ],
   [
     "I don't have a Mac.",
-    "Everything also works from the Coolify dashboard in any browser. Install Tailscale on your computer or phone and open the dashboard link the installer prints.",
+    "The vfy command line runs on Linux as well as macOS, and every app has its own address on your network. The desktop app is macOS-only for now.",
   ],
   [
     "Which hardware works?",
@@ -235,7 +235,7 @@ export function Footer() {
         </div>
         <div className="mt-12 flex flex-wrap justify-between gap-3 font-mono text-[11px] text-fg-dim sm:mt-16">
           <span>© 2026 Vercelify contributors</span>
-          <span>Built on Coolify, Tailscale and Cloudflare · Not affiliated with Vercel Inc.</span>
+          <span>Built on Docker, Traefik and WireGuard · Not affiliated with Vercel Inc.</span>
         </div>
       </footer>
     </Section>

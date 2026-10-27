@@ -4,14 +4,14 @@ const STEPS = [
   {
     n: "01",
     title: "Run one line on the laptop",
-    body: "The installer sets up Docker, Coolify, Tailscale, the firewall and power management, then prints a pairing code.",
+    body: "The installer sets up Docker, Vercelify's engine and private network, the firewall and power management, then prints a pairing code.",
     cmd: INSTALL_HOST,
     display: "curl -fsSL …/install.sh | sudo bash",
   },
   {
     n: "02",
     title: "Install the Mac app",
-    body: "One more line installs Tailscale and the Vercelify app. Sign in to the same Tailscale account on both machines.",
+    body: "One more line installs the Vercelify app and its network daemon. No account to create, nothing to sign in to.",
     cmd: INSTALL_MAC,
     display: "curl -fsSL …/install-mac.sh | bash",
   },
@@ -76,8 +76,8 @@ function Terminal() {
         <span className="ml-3 font-mono text-[11px] text-fg-dim">thinkpad-t470 — install.sh</span>
       </div>
       <pre className="overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] text-fg-muted sm:px-5 sm:py-5 sm:text-[12.5px]">
-        <span className="text-ok">✔</span> Docker 28 and Coolify 4 installed{"\n"}
-        <span className="text-ok">✔</span> Tailscale connected as thinkpad-t470{"\n"}
+        <span className="text-ok">✔</span> Docker 28 and the Vercelify agent installed{"\n"}
+        <span className="text-ok">✔</span> this server coordinates the mesh as 10.77.0.1{"\n"}
         <span className="text-ok">✔</span> Firewall, lid-close and battery guard on{"\n"}
         {"\n"}
         <span className="font-semibold text-fg">✔ Vercelify is ready</span>

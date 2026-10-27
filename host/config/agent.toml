@@ -40,10 +40,11 @@ services = ["docker", "vercelify-mesh", "cloudflared", "sunshine", "vercelify-po
 #   rewrite_private_targets = false
 #   proxy_http_port = 80          (cron jobs call apps through the proxy here)
 #   proxy_https_port = 443
+#   proxy_image = "traefik:v3.7"  (the tested Traefik; newer at your own risk)
 
 # Vercelify's engine builds and runs apps on a main server
-# (docs/design/SYSTEM-DESIGN.md). A server installed with Coolify keeps
-# "coolify" until `sudo vercelify migrate`. The master key seals stored
+# (docs/design/SYSTEM-DESIGN.md). Without this key, a server where Coolify
+# is installed stays on it until `sudo vercelify migrate`. The master key seals stored
 # secrets; it is part of every backup.
 engine = "platform"
 #   platform_db = "/var/lib/vercelify/platform.db"

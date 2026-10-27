@@ -9,13 +9,13 @@ import { LaserLanding, useShader } from "./LaserLanding";
 import { Reveal, Section, cx } from "./ui";
 
 const STACK = [
-  "Coolify",
-  "Tailscale",
-  "Cloudflare Tunnel",
-  "Traefik",
   "Docker",
+  "BuildKit",
+  "Traefik",
+  "WireGuard",
+  "Cloudflare Tunnel",
   "Let's Encrypt",
-  "Nixpacks",
+  "SQLite",
   "Rust",
   "Tauri",
 ];
@@ -23,7 +23,7 @@ const STACK = [
 const FACTS = [
   ["$0", "a month, forever"],
   ["8 GB", "of RAM runs several apps"],
-  ["3 MB", "host agent, written in Rust"],
+  ["8 MB", "server agent and engine, in Rust"],
   ["~30 min", "from blank laptop to live URL"],
 ] as const;
 

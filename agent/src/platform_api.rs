@@ -389,11 +389,21 @@ async fn app_get(State(s): State<AppState>, Path(app): Path<String>) -> ApiResul
 }
 
 async fn app_patch(State(s): State<AppState>, Path(app): Path<String>, Json(req): Json<AppPatch>) -> ApiResult<App> {
+    let stop_or_start = req.desired.is_some();
     let a = tx(&s, move |c, _| {
         let id = apps::find(c, &app)?.id;
         apps::patch(c, &id, &req)
     })
     .await?;
+    // Stopping or starting an app happens now, not at the next reconcile.
+    if stop_or_start {
+        let p = platform(&s)?;
+        tokio::spawn(async move {
+            if let Err(e) = p.reconciler.once().await {
+                tracing::warn!("reconcile after a stop or start: {e}");
+            }
+        });
+    }
     changed(&s, "apps");
     Ok(Json(a))
 }
@@ -1199,7 +1209,7 @@ async fn domain_get(State(s): State<AppState>) -> ApiResult<PlatformDomain> {
 }
 
 /// The wildcard for new apps' and previews' names. Existing apps keep their
-/// domains (change them per app), as with Coolify.
+/// domains (change them per app).
 async fn domain_set(State(s): State<AppState>, Json(req): Json<PlatformDomain>) -> ApiResult<PlatformDomain> {
     let wildcard = match req.wildcard.as_deref().map(str::trim).filter(|w| !w.is_empty()) {
         Some(w) => Some(vercelify_platform::validate::host(w.trim_start_matches("*."))?),

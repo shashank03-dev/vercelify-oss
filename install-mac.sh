@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# Vercelify for macOS: installs the Vercelify app, its network daemon
-# (vercelify-mesh) and Tailscale, then opens the app.
+# Vercelify for macOS: installs the Vercelify app and its network daemon
+# (vercelify-mesh), then opens the app.
 #
 #   curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash
 #
 # Options
 #   --with-display   also install ffmpeg + Moonlight (laptop screen as a monitor, remote desktop)
 #   --from-source    build the app here instead of downloading a release (needs Xcode CLT, Node 20+, Rust)
-#   --no-tailscale   skip the Tailscale check
-#   --no-mesh        skip vercelify-mesh, Vercelify's own network (servers on the mesh need it)
+#   --no-mesh        skip vercelify-mesh, Vercelify's network (needed to reach servers off your LAN)
 #   --mesh-system    run vercelify-mesh as root with a real interface (*.vfy for every app;
 #                    asks for your password) instead of in the app's user session
 #   --dest DIR       install the app into DIR (default: /Applications, else ~/Applications)
@@ -25,7 +24,6 @@ APP_NAME=Vercelify
 
 WITH_DISPLAY=0
 FROM_SOURCE=0
-WITH_TAILSCALE=1
 WITH_MESH=1
 MESH_SYSTEM=0
 MESH_LABEL=dev.vercelify.mesh
@@ -71,7 +69,8 @@ parse_args() {
     case "$1" in
       --with-display) WITH_DISPLAY=1 ;;
       --from-source) FROM_SOURCE=1 ;;
-      --no-tailscale) WITH_TAILSCALE=0 ;;
+      # Older instructions passed it: nothing to skip now.
+      --no-tailscale) ;;
       --no-mesh) WITH_MESH=0 ;;
       --mesh-system) MESH_SYSTEM=1 ;;
       --dest) DEST=${2:?--dest needs a directory}; shift ;;
@@ -109,21 +108,6 @@ mesh_asset() {
 
 # Release tag in the same JSON, e.g. v0.2.0.
 release_tag() { grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" | head -1 | sed 's/.*"\([^"]*\)"$/\1/'; }
-
-install_tailscale() {
-  step "Tailscale (private network to your servers)"
-  if [[ -d /Applications/Tailscale.app ]] || have tailscale; then
-    ok "Tailscale is installed — make sure you are signed in with the same account as your servers"
-    return 0
-  fi
-  if have brew; then
-    info "installing Tailscale with Homebrew…"
-    brew install --cask tailscale >/dev/null && { ok "Tailscale installed — open it from the menu bar and sign in"; open -a Tailscale 2>/dev/null || true; return 0; }
-    warn "Homebrew could not install Tailscale"
-  fi
-  warn "install Tailscale from the Mac App Store or tailscale.com/download, then sign in"
-  open "https://tailscale.com/download/mac" 2>/dev/null || true
-}
 
 quit_running_app() {
   if pgrep -xq "$APP_NAME" 2>/dev/null; then
@@ -270,7 +254,7 @@ obtain_mesh_binary() {
 }
 
 install_mesh() {
-  step "Vercelify network (vercelify-mesh: your servers without Tailscale)"
+  step "Vercelify network (vercelify-mesh: your servers, privately, from anywhere)"
   local home bin plist sudo='' domain
   home=$(mesh_home)
   if (( MESH_SYSTEM )); then
@@ -287,7 +271,7 @@ install_mesh() {
   tmp=$(mktemp)
   if ! obtain_mesh_binary "$tmp"; then
     rm -f "$tmp"
-    warn "no vercelify-mesh build for this Mac yet (servers on Tailscale still work)"
+    warn "no vercelify-mesh build for this Mac yet: the app reaches servers on your LAN only (re-run with --from-source to build it)"
     return 0
   fi
   $sudo install -m 0755 "$tmp" "$bin"
@@ -317,7 +301,6 @@ main() {
   parse_args "$@"
   [[ "$(uname -s)" == Darwin ]] || die "this installer is for macOS — on Linux servers use install.sh"
   printf '\n%s%s Vercelify for Mac%s — your own Vercel on your old laptops\n' "$B" "$C" "$N" >&2
-  (( WITH_TAILSCALE )) && install_tailscale
 
   local dest
   dest=$(app_dest)

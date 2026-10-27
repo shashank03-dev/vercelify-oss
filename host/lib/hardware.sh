@@ -220,7 +220,7 @@ EOF
 }
 
 # All containers live in vercelify.slice, capped below total RAM, so sshd,
-# tailscaled and the agent always have memory left when an app leaks.
+# vercelify-mesh and the agent always have memory left when an app leaks.
 container_slice() {
   local mem reserve max high
   mem=$(mem_total_mb)

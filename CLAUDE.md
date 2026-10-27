@@ -14,31 +14,30 @@ running several deployments on a weak machine more reliable.
 
 | Path | What it is |
 | --- | --- |
-| `crates/vercelify-core` | Shared Rust library: system collection (disks, power, thermal, Tailscale), models, pairing codes, volume/stream helpers. Models export TS types via `ts-rs`. |
-| `crates/vercelify-platform` | Vercelify's own PaaS engine (replacing Coolify): SQLite state + migrations, sealed secrets, builds, deployments, reconciler. A library the agent mounts. |
-| `crates/vercelify-mesh` | Vercelify's own private network (replacing Tailscale): addressing, keys, coordinator certificates and peer maps, and the `vercelify-mesh` daemon. |
+| `crates/vercelify-core` | Shared Rust library: system collection (disks, power, thermal, the mesh), models, pairing codes, volume/stream helpers. Models export TS types via `ts-rs`. |
+| `crates/vercelify-platform` | Vercelify's PaaS engine: SQLite state + migrations, sealed secrets, builds, deployments, previews, databases, proxy routes, reconciler, multi-node, the Coolify import. A library the agent mounts. |
+| `crates/vercelify-mesh` | Vercelify's private network: addressing, keys, coordinator certificates and peer maps, NAT traversal and relay, and the `vercelify-mesh` daemon. |
 | `agent/` | `vercelify-agent`, the small Rust daemon on the host (`:7420`, bearer token). Reports system state, manages containers/services/volumes and the display receiver. |
 | `cockpit/` | Tauri v2 desktop app (React 19, TypeScript, Tailwind v4, Framer Motion). `src/` = UI, `src-tauri/` = Rust command layer. |
 | `cockpit/src/types/generated` | **Generated** by `cargo test` from Rust models. Never edit by hand. |
 | `host/` | One-line installer (`setup-host.sh`), `vercelify` admin CLI, firewall, power-guard, systemd units, bats tests. |
 | `install.sh` | `curl … \| sudo bash` entry point that fetches `host/`. |
 | `cli/vfy` | Mac/Linux command-line tool (`vfy apps/deploy/logs/env pull…`) using the app's paired servers. Bash 3.2 compatible. |
-| `install-mac.sh` | `curl … \| bash` for the Mac: Tailscale + the cockpit app (release `.dmg` or a source build). Must stay bash 3.2 compatible. |
+| `install-mac.sh` | `curl … \| bash` for the Mac: the cockpit app (release `.dmg` or a source build) and `vercelify-mesh`. Must stay bash 3.2 compatible. |
 | `website/` | Open-source launch site (Vite, React 19, Tailwind v4, same tokens and fonts as the cockpit). `npm run dev` serves it on `:5180`. |
-| `docs/` | Architecture, Coolify notes, development, display streaming, troubleshooting, Vercel parity, `vercel.json` support (PROJECT-CONFIG). |
+| `docs/` | Architecture, the platform (PLATFORM) and network (MESH) guides, development, display streaming, troubleshooting, Vercel parity, `vercel.json` support (PROJECT-CONFIG), the design (`design/SYSTEM-DESIGN.md`). |
 
-The stack today is **Coolify v4** as the PaaS engine (builds, Traefik, Let's Encrypt,
-previews, DBs), plus **Tailscale** for private access with no open ports, plus an
-optional **Cloudflare Tunnel** for public HTTPS behind CGNAT. The cockpit talks
-to the agent and to Coolify's API over Tailscale.
+The stack is Vercelify's own engine (`vercelify-platform`, in the agent: builds with
+BuildKit, deployments, previews, databases, a pinned Traefik with Let's Encrypt) and
+its own WireGuard network (`vercelify-mesh`) for private access with no open ports,
+plus an optional **Cloudflare Tunnel** for public HTTPS behind CGNAT. The cockpit
+talks to the agent over the mesh.
 
-**Both are being replaced** by our own engine (`vercelify-platform`, selected per
-server with `engine = "platform"` in `agent.toml`) and our own WireGuard mesh
-(`vercelify-mesh`). The plan and milestones are in `docs/PLAN-NATIVE-PLATFORM.md`;
-the binding engineering design is `docs/design/SYSTEM-DESIGN.md`. Change the
-design doc in the same commit as code that departs from it. Until milestone M10,
-Coolify and Tailscale stay the default and must keep working; new features go
-into the platform engine, not into Coolify integration.
+The binding engineering design is `docs/design/SYSTEM-DESIGN.md` (the history is in
+`docs/PLAN-NATIVE-PLATFORM.md`). Change the design doc in the same commit as code that
+departs from it. Servers installed before the engine still run Coolify and Tailscale
+until `sudo vercelify migrate` (`agent.toml` without `engine` and Coolify's `.env`
+present); keep that path and the migration working, but build nothing new on Coolify.
 
 ## Commands
 
@@ -51,8 +50,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 bats host/tests
 shellcheck -x -S warning install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/contract/*.sh
-sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/coolify.sh   # real Coolify (Docker)
-sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/routing.sh   # vercel.json rules on a real Traefik
+sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/routing.sh   # vercel.json rules on the engine's real proxy
 sudo host/tests/contract/mesh.sh                 # four mesh nodes in network namespaces (debug agent + vercelify-mesh)
 sudo host/tests/contract/mesh-nat.sh             # NAT traversal: hole punching and the relay behind real Linux NAT
 sudo host/tests/contract/multinode.sh            # a worker with its own Docker: placement, mesh registry, replicas, logs/terminal
@@ -63,12 +61,12 @@ cd cockpit
 npm ci && npm run typecheck && npm test && npx vite build
 npm run e2e:demo                                 # Playwright UI flows against the demo backend
 npm run tauri dev                                # desktop app
-VERCELIFY_AGENT_URL=… VERCELIFY_COOLIFY_URL=… npm run dev   # browser mode via Vite proxies
+VERCELIFY_AGENT_URL=… npm run dev                # browser mode via the Vite proxy
 ```
 
 The Tauri crate needs `cockpit/dist` to exist for `generate_context!`. CI creates a
-placeholder. Coolify is pinned (`COOLIFY_TESTED_VERSION` in `host/lib/coolify.sh`):
-when you bump it, run the contract test against the new version first. See
+placeholder. Traefik is pinned (`proxy::TRAEFIK_IMAGE` in `crates/vercelify-platform`):
+when you bump it, run the routing contract test against the new version first. See
 `docs/DEVELOPMENT.md` for the arm64 (QEMU), live, desktop and installer e2e
 suites.
 

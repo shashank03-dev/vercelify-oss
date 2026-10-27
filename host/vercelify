@@ -4,8 +4,9 @@ set -Eeuo pipefail
 
 SELF=$(readlink -f "${BASH_SOURCE[0]}")
 HOST_DIR=$(dirname "$SELF")
+# shellcheck disable=SC2034 # read by the libraries (systemd units, binaries)
 VERCELIFY_SRC=$(dirname "$HOST_DIR")
-for lib in common system hardware storage docker tailscale coolify platform mesh cloudflare agent backup registry maintenance standby migrate; do
+for lib in common system hardware storage docker platform mesh cloudflare agent backup registry maintenance standby migrate; do
   # shellcheck source=/dev/null
   . "$HOST_DIR/lib/$lib.sh"
 done
@@ -19,32 +20,25 @@ Usage: sudo vercelify <command> [args]
 
   status                 One-screen overview of every component
   doctor                 Check everything and explain how to fix problems
-  pair [--refresh]       Show a one-time 8-character code for the Mac app (and the full
-                         pairing code); --refresh also creates a new Coolify API token
+  pair [--tailscale]     Show a one-time 8-character code for the Mac app (and the full
+                         pairing code); --tailscale on a server not migrated yet
   domain [DOMAIN] [--cloudflare-token TOKEN] [--force-dns]
                          Set or change the public domain (no args: back to private sslip.io)
-  add-worker USER@HOST   Turn another machine (e.g. a Raspberry Pi on your tailnet) into a
-                         Coolify build/deploy server
   llm [status|install [ssd|hdd]|pull MODEL|rm MODEL|chat MODEL PROMPT|start|stop|restart]
                          Local AI models (Ollama) on this machine
-  autodeploy [list|add APP_UUID REPO [BRANCH] [--token T]|rm APP_UUID|check APP_UUID]
-                         Deploy a Coolify app whenever its branch gets a new commit
-  coolify [check|upgrade [VERSION|latest]]
-                         Check Coolify's version and schema against Vercelify, or upgrade
-                         Coolify on purpose (its own auto-update is off; default: the
-                         version this release was tested with)
   backup [status|setup [--to REPO]…|run|list|restore [SNAP] [--instance]]
                          Encrypted nightly backups (restic) to the HDD, another server
                          (sftp:root@pi:/path) or S3; restore files or the whole server
-  routes sync            Route public hostnames of apps on pooled servers through the
-                         Cloudflare tunnel (also runs every 5 minutes by itself)
-  registry [install|trust HOST:PORT|multiarch]
-                         Private image registry on the tailnet: build on the strongest
-                         machine, let small ones (a Pi) just pull
+  restore-state [FILE]   Put back the engine's last good state database (its 5-minute
+                         copy, or FILE) after the doctor reports it damaged
+  registry multiarch     Let this machine build images for the other CPU type (a Pi)
   mesh [status|init|invite [--device] [--role R]|join TOKEN [--name N]|nodes|revoke NAME|rotate]
                          Vercelify's own private network (WireGuard, vfy0): make this main
                          server its coordinator, invite and join machines, revoke them
   github-app [--org ORG] Create a GitHub App for private repositories and instant deploys
+  git-source [list|add NAME [--provider P] [--deploy-key]|rm NAME]
+                         Credentials for private repositories: an access token (read from
+                         stdin, never the command line) or a read-only deploy key
   webhook SOURCE         A webhook secret for a git source (GitHub, GitLab, Gitea)
   standby [NAME|off]     A worker that keeps a sealed copy of this main server (every 5 min)
   promote [--force]      On the standby: become the main server when the old one is gone
@@ -54,19 +48,20 @@ Usage: sudo vercelify <command> [args]
                          (no flag: show what would happen, change nothing)
   tokens [list|revoke ID]
                          Devices paired with this server; revoke a lost one
-  sleep [list|on APP_UUID [MINUTES] [--previews]|off APP_UUID]
+  sleep [list|on APP [MINUTES] [--previews]|off APP]
                          Stop an app after idle minutes to free memory; the next visit
                          wakes it (a "waking up" page for a second or two)
   maintenance [status|on [HH:MM]|off|run]
                          Reboot for security updates in a nightly window, only when one
                          is needed and no deploy, backup or update is running
-  logs [agent|guard|coolify|tunnel|setup|backup]
+  logs [agent|mesh|guard|tunnel|setup|backup]
                          Follow logs of a component
   update [--edge|--stable|--ref TAG]
                          Install the latest release (keeps your data); rolls back by
                          itself if the new agent doesn't come up
   rollback               Go back to the version installed before the last update
-  uninstall              Remove Vercelify's agent, guard, firewall and CLI (keeps Coolify + data)
+  uninstall              Remove Vercelify's agent, network, guard, firewall and CLI (apps'
+                         containers and all data stay)
   version
 EOF
 }
@@ -75,25 +70,6 @@ need_root() { [[ $EUID -eq 0 || "${VERCELIFY_TEST:-0}" == 1 ]] || die "run with 
 # Talking to the agent needs its token, which only root can read.
 need_token() { [[ -r "$VERCELIFY_ETC/agent.token" ]] || die "run with sudo: sudo vercelify $*"; }
 
-: "${AGENT_LOCAL_URL:=http://127.0.0.1:7420}"
-
-# agent_api METHOD PATH [JSON] — prints the response body; dies with the
-# agent's error message on failure. The token goes to curl on stdin, not argv.
-agent_api() {
-  local method=$1 path=$2 body=${3:-} out code msg
-  local args=(-sS -X "$method" -K - -w '\n%{http_code}' --max-time "${API_TIMEOUT:-60}")
-  [[ -n "$body" ]] && args+=(-H 'Content-Type: application/json' --data "$body")
-  out=$(printf 'header = "Authorization: Bearer %s"\n' "$(<"$VERCELIFY_ETC/agent.token")" |
-    curl "${args[@]}" "$AGENT_LOCAL_URL$path") ||
-    die "the agent is not answering on $AGENT_LOCAL_URL — see: sudo vercelify doctor"
-  code=${out##*$'\n'}
-  out=${out%$'\n'*}
-  if [[ "$code" != 2* ]]; then
-    msg=$(jq -r '.error // .message // empty' <<<"$out" 2>/dev/null || true)
-    die "${msg:-HTTP $code from the agent}"
-  fi
-  printf '%s' "$out"
-}
 
 human_bytes() { numfmt --to=iec --suffix=B "${1:-0}" 2>/dev/null || echo "${1:-0}B"; }
 
@@ -111,17 +87,18 @@ line() { # line LABEL STATE DETAIL
 
 cmd_status() {
   printf '\n%sVercelify%s on %s (%s)\n\n' "$C_BOLD" "$C_RESET" "$(hostname)" "$ROLE"
-  local ts ip dns
-  ts=$(ts_state); ip=$(ts_ipv4 || true); dns=$(ts_dns_name || true)
-  line Tailscale "$ts" "${dns:-} ${ip:+($ip)}"
+  local ip
+  ip=$(jq -r '.ipv4 // empty' "${MESH_DIR}/state.json" 2>/dev/null || true)
+  line Network "$([[ -n "$ip" ]] && svc_state vercelify-mesh || echo "not set up")" "${ip:+vfy0 $ip}"
   line Docker "$(svc_state docker)" "$(docker ps -q 2>/dev/null | wc -l) running containers"
   if [[ $ROLE == main ]]; then
-    local h
-    h=$(curl -fsS -m 3 "$COOLIFY_URL_LOCAL/api/health" 2>/dev/null || echo down)
-    line Coolify "$([[ $h == OK ]] && echo ok || echo down)" "http://${dns:-${ip:-localhost}}:8000"
-    local proxy
-    proxy=$(docker inspect -f '{{.State.Health.Status}}' coolify-proxy 2>/dev/null || echo missing)
-    line "Proxy (Traefik)" "$([[ $proxy == healthy ]] && echo ok || echo "$proxy")" "ports 80/443"
+    if platform_engine; then
+      local proxy
+      proxy=$(docker inspect -f '{{.State.Status}}' vercelify-proxy 2>/dev/null || echo missing)
+      line "Proxy (Traefik)" "$proxy" "ports 80/443"
+    else
+      line Coolify warn "runs this server's apps — move them: sudo vercelify migrate"
+    fi
     [[ -f "$SYSTEMD_DIR/cloudflared.service" ]] && line "Cloudflare tunnel" "$(svc_state cloudflared)" "${domain:+*.$domain}"
   fi
   line Agent "$(svc_state vercelify-agent)" ":7420"
@@ -179,36 +156,36 @@ cmd_doctor() {
   fi
   warn "the agent is not answering — basic local checks only"
   check "Docker daemon running" "sudo systemctl restart docker; journalctl -u docker -n 50" docker info
-  check "Tailscale connected" "sudo tailscale up --hostname=$(hostname -s)" bash -c '[[ "$(tailscale status --json | jq -r .BackendState)" == Running ]]'
+  check "On Vercelify's network" "journalctl -u vercelify-mesh -n 50 (not set up: sudo vercelify mesh init on the main server)" bash -c "ip -4 addr show vfy0 | grep -q 'inet '"
   check "Agent answering" "sudo systemctl restart vercelify-agent; journalctl -u vercelify-agent -n 50" curl -fsS -m 3 "$AGENT_LOCAL_URL/v1/health"
   check "Agent token present" "sudo vercelify-agent --config $VERCELIFY_ETC/agent.toml token --write" test -s "$VERCELIFY_ETC/agent.token"
-  if [[ $ROLE == main ]]; then
-    check "Coolify healthy" "docker logs coolify --tail 50 (IPv6 disabled? Coolify's nginx needs it)" bash -c "[[ \"\$(curl -fsS -m 5 $COOLIFY_URL_LOCAL/api/health)\" == OK ]]"
-  fi
-  check "System disk < 90% full" "docker system prune -af --volumes=false; Coolify → Servers → Docker cleanup" bash -c '(( $(df --output=pcent / | tail -1 | tr -dc 0-9) < 90 ))'
+  check "System disk < 90% full" "docker system prune -af (keeps volumes)" bash -c '(( $(df --output=pcent / | tail -1 | tr -dc 0-9) < 90 ))'
   echo
   if (( DOCTOR_FAILS == 0 )); then ok "basic checks passed (start the agent for the full report)"; else err "$DOCTOR_FAILS problem(s) found"; return 1; fi
 }
 
 cmd_pair() {
   need_root pair
-  if [[ "${1:-}" == --refresh && $ROLE == main ]]; then
-    rm -f "$VERCELIFY_ETC/coolify.token"
-    coolify_api_token
-  fi
-  local code short both
+  local code short both extra=()
+  # --tailscale: a server not migrated yet, paired over Tailscale.
+  case "${1:-}" in
+    "") ;;
+    --tailscale) extra=(--tailscale) ;;
+    *) die "usage: vercelify pair [--tailscale]" ;;
+  esac
   # One call, one device token for both codes (agents before 0.2.1: two calls).
-  if both=$("$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" pair --short --with-code 2>/dev/null) &&
+  if both=$("$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" pair "${extra[@]}" --short --with-code 2>/dev/null) &&
      [[ $(wc -l <<<"$both") -eq 2 ]]; then
     short=$(sed -n 1p <<<"$both")
     code=$(sed -n 2p <<<"$both")
   else
-    code=$("$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" pair)
-    short=$("$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" pair --short 2>/dev/null || true)
+    code=$("$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" pair "${extra[@]}")
+    short=$("$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" pair "${extra[@]}" --short 2>/dev/null || true)
   fi
   if [[ -n "$short" ]]; then
     printf '\n  In the Vercelify app on your Mac, pick %s%s%s and type:\n\n      %s%s%s\n\n  (one use, valid for 15 minutes)\n' \
       "$C_BOLD" "$(hostname -s)" "$C_RESET" "$C_BOLD" "$short" "$C_RESET" >&2
+    printf '  (the app finds it on the same Wi-Fi; elsewhere, paste the full code)\n' >&2
   fi
   printf '\n  Or paste the full pairing code:\n\n  %s\n\n' "$code" >&2
   if have qrencode && [[ -t 1 ]]; then qrencode -t ansiutf8 -m 1 "$code"; fi
@@ -289,54 +266,9 @@ cmd_llm() {
   esac
 }
 
-cmd_autodeploy() {
-  need_token autodeploy
-  local sub=${1:-list}
-  (( $# )) && shift
-  case "$sub" in
-    list|ls)
-      local st
-      st=$(agent_api GET /v1/autodeploy)
-      if [[ "$(jq '.watches | length' <<<"$st")" == 0 ]]; then
-        info "no branches watched — add one in the Mac app or: sudo vercelify autodeploy add APP_UUID REPO [BRANCH]"
-        return 0
-      fi
-      printf '  %-16s %-18s %-14s %-8s %-7s %s\n' APP NAME BRANCH STATE DEPLOYS "LAST CHECK / ERROR"
-      jq -r '.watches[] | [.app_uuid, .name, .branch, (if .enabled then "on" else "paused" end), .deploys, (.last_error // .last_checked_at // "never")] | map(tostring) | join("\u001f")' <<<"$st" |
-        while IFS=$'\x1f' read -r uuid name branch state deploys last; do
-          printf '  %-16s %-18s %-14s %-8s %-7s %s\n' "$uuid" "${name:0:18}" "$branch" "$state" "$deploys" "$last"
-        done
-      ;;
-    add)
-      local uuid='' repo='' branch=main token='' have_token=0 pos=()
-      while (( $# )); do
-        case "$1" in
-          --token) token=${2:?}; have_token=1; shift ;;
-          *) pos+=("$1") ;;
-        esac
-        shift
-      done
-      uuid=${pos[0]:-}; repo=${pos[1]:-}; branch=${pos[2]:-main}
-      [[ -n "$uuid" && -n "$repo" ]] || die "usage: vercelify autodeploy add APP_UUID REPO [BRANCH] [--token TOKEN]"
-      local body
-      body=$(jq -nc --arg a "$uuid" --arg r "$repo" --arg b "$branch" --arg t "$token" --argjson ht "$have_token" \
-        '{app_uuid: $a, repo: $r, branch: $b} + (if $ht == 1 then {token: $t} else {} end)')
-      agent_api POST /v1/autodeploy "$body" >/dev/null
-      agent_api POST "/v1/autodeploy/$uuid/check" '{}' >/dev/null || true
-      ok "pushes to $branch of $repo now deploy $uuid"
-      ;;
-    rm|remove)
-      local uuid=${1:?usage: vercelify autodeploy rm APP_UUID}
-      agent_api DELETE "/v1/autodeploy/$uuid" >/dev/null
-      ok "auto-deploy removed for $uuid"
-      ;;
-    check)
-      local uuid=${1:?usage: vercelify autodeploy check APP_UUID} w
-      w=$(agent_api POST "/v1/autodeploy/$uuid/check" '{}')
-      jq -r '"  head \(.last_commit // "?") · \(.deploys) automatic deploys" + (if .last_error then "\n  error: \(.last_error)" else "" end)' <<<"$w"
-      ;;
-    *) die "unknown autodeploy command '$sub' (see: vercelify help)" ;;
-  esac
+# An app's id from its name (or id), as the engine knows it.
+app_id() {
+  agent_api GET "/v1/platform/apps/$1" | jq -r .id
 }
 
 cmd_sleep() {
@@ -345,18 +277,20 @@ cmd_sleep() {
   (( $# )) && shift
   case "$sub" in
     list|ls|status)
-      local st
+      local st apps
       st=$(agent_api GET /v1/sleep)
+      apps=$( (agent_api GET /v1/platform/apps) 2>/dev/null || echo '[]')
       [[ "$(jq -r '.error // empty' <<<"$st")" ]] && warn "$(jq -r .error <<<"$st")"
       if [[ "$(jq '.settings | length' <<<"$st")" == 0 ]]; then
-        info "no app sleeps when idle — turn it on: sudo vercelify sleep on APP_UUID [MINUTES]"
+        info "no app sleeps when idle — turn it on: sudo vercelify sleep on APP [MINUTES]"
         return 0
       fi
-      jq -r '.settings[] as $s | ([.targets[] | select(.app_uuid == $s.app_uuid)] | map("\(.hosts[0] // .key) \(.state)") | join(", ")) as $t
-        | "  \($s.app_uuid)  after \($s.idle_minutes) min idle\(if $s.previews then " (and previews)" else "" end)  \($t)"' <<<"$st"
+      jq -r --argjson apps "$apps" '.settings[] as $s | ([.targets[] | select(.app_uuid == $s.app_uuid)] | map("\(.hosts[0] // .key) \(.state)") | join(", ")) as $t
+        | ([$apps[] | select(.id == $s.app_uuid) | .name][0] // $s.app_uuid) as $name
+        | "  \($name)  after \($s.idle_minutes) min idle\(if $s.previews then " (and previews)" else "" end)  \($t)"' <<<"$st"
       ;;
     on)
-      local uuid=${1:?usage: vercelify sleep on APP_UUID [MINUTES] [--previews]} minutes=30 previews=false
+      local app=${1:?usage: vercelify sleep on APP [MINUTES] [--previews]} uuid minutes=30 previews=false
       shift
       while (( $# )); do
         case "$1" in
@@ -365,13 +299,14 @@ cmd_sleep() {
         esac
         shift
       done
+      uuid=$(app_id "$app")
       agent_api PUT "/v1/sleep/$uuid" "$(jq -nc --argjson m "$minutes" --argjson p "$previews" '{enabled: true, idle_minutes: $m, previews: $p}')" >/dev/null
-      ok "$uuid sleeps after $minutes idle minutes and wakes on the next visit"
+      ok "$app sleeps after $minutes idle minutes and wakes on the next visit"
       ;;
     off)
-      local uuid=${1:?usage: vercelify sleep off APP_UUID}
-      agent_api PUT "/v1/sleep/$uuid" '{"enabled":false}' >/dev/null
-      ok "$uuid stays awake"
+      local app=${1:?usage: vercelify sleep off APP}
+      agent_api PUT "/v1/sleep/$(app_id "$app")" '{"enabled":false}' >/dev/null
+      ok "$app stays awake"
       ;;
     *) die "unknown sleep command '$sub' (see: vercelify help)" ;;
   esac
@@ -390,23 +325,24 @@ cmd_domain() {
     esac
     shift
   done
-  local wildcard
+  platform_engine || die "Coolify still sets this server's domains — move it to Vercelify's engine first: sudo vercelify migrate"
+  local wildcard ip
   if [[ -z "$new" ]]; then
-    wildcard="http://$(ts_ipv4).sslip.io"
+    ip=$(jq -r '.ipv4 // empty' "${MESH_DIR}/state.json" 2>/dev/null || true)
+    [[ -n "$ip" ]] || die "private addresses use this server's address on Vercelify's network: sudo vercelify mesh init first"
+    wildcard="http://$ip.sslip.io"
   elif [[ -n "$token" ]]; then
     setup_cloudflare_domain "$new" "$token" "vercelify-$(hostname -s)" "$force"
+    # A coordinator: devices outside the LAN join and relay through the tunnel.
+    mesh_coordinates && mesh_tunnel_route
     wildcard="http://$new"
   else
     wildcard="https://$new"
     info "point A records for $new and *.$new to your public IP and forward TCP 80/443 to this machine"
   fi
-  if platform_engine; then
-    local edge=false
-    [[ -n "$token" && -n "$new" ]] && edge=true
-    platform_set_domain "$wildcard" "$edge"
-  else
-    configure_coolify "$wildcard"
-  fi
+  local edge=false
+  [[ -n "$token" && -n "$new" ]] && edge=true
+  platform_set_domain "$wildcard" "$edge"
   local mode=''
   if [[ -n "$new" ]]; then [[ -n "$token" ]] && mode=cloudflare || mode=direct; fi
   sed -i '/^domain=/d; /^domain_mode=/d' "$VERCELIFY_ETC/install.env" 2>/dev/null || true
@@ -415,63 +351,11 @@ cmd_domain() {
   info "existing apps keep their URLs — change them in each app's Domains field"
 }
 
-cmd_add_worker() {
-  need_root add-worker
-  [[ $ROLE == main ]] || die "run this on the main host"
-  local target=${1:?usage: vercelify add-worker USER@HOST}
-  local host=${target#*@} pubkey key_uuid token ip
-  pubkey=$(coolify_public_key) || die "could not find Coolify's SSH key"
-  step "Preparing worker $target"
-  info "you may be asked for $target's password (and sudo password) once"
-  # Ship this exact version of the installer instead of downloading one.
-  tar -C "$VERCELIFY_SRC" -cz --exclude target --exclude node_modules --exclude .git host install.sh Cargo.toml Cargo.lock crates agent 2>/dev/null |
-    ssh -o StrictHostKeyChecking=accept-new "$target" \
-      "rm -rf /tmp/vercelify-src && mkdir -p /tmp/vercelify-src && tar -xz -C /tmp/vercelify-src" ||
-    die "could not copy the installer to $target"
-  ssh -t -o StrictHostKeyChecking=accept-new "$target" \
-    "sudo bash /tmp/vercelify-src/host/setup-host.sh --worker --hostname '${host%%.*}' --coolify-pubkey '$pubkey' -y" ||
-    die "worker setup failed on $target"
-
-  step "Registering $host in Coolify"
-  ip=$(tailscale ip -4 "$host" 2>/dev/null | head -1 || true)
-  ip=${ip:-$host}
-  token=$(cat "$VERCELIFY_ETC/coolify.token" 2>/dev/null || true)
-  key_uuid=$(coolify_private_key_uuid)
-  if [[ -z "$token" || -z "$key_uuid" ]]; then
-    warn "add it manually: Coolify → Servers → + Add → IP $ip, user root, key 'localhost's key'"
-    return 0
-  fi
-  local body resp
-  body=$(jq -nc --arg n "${host%%.*}" --arg ip "$ip" --arg k "$key_uuid" \
-    '{name: $n, description: "Vercelify worker (Tailscale)", ip: $ip, port: 22, user: "root", private_key_uuid: $k, instant_validate: true}')
-  resp=$(curl -fsS -m 30 -X POST -H "Authorization: Bearer $token" -H "Content-Type: application/json" \
-    --data "$body" "$COOLIFY_URL_LOCAL/api/v1/servers" 2>&1) || { warn "Coolify API: $resp"; return 0; }
-  ok "worker registered (uuid $(jq -r .uuid <<<"$resp")) — Coolify is validating it now"
-  info "pick it as the server when creating a resource, or as a build server in Server settings"
-}
-
-cmd_coolify() {
-  need_root coolify
-  [[ $ROLE == main ]] || die "run this on the main host"
-  case "${1:-check}" in
-    check|status)
-      local current
-      current=$(coolify_current_version || echo unknown)
-      info "Coolify $current (this Vercelify release is tested with $COOLIFY_TESTED_VERSION)"
-      [[ "$current" == "$COOLIFY_TESTED_VERSION" || "$current" == unknown ]] ||
-        info "to move to the tested version: sudo vercelify coolify upgrade"
-      coolify_schema_check
-      ;;
-    upgrade) coolify_upgrade "${2:-}"; coolify_schema_check || die "upgraded, but Vercelify needs an update for this Coolify version" ;;
-    *) die "usage: vercelify coolify [check|upgrade [VERSION|latest]]" ;;
-  esac
-}
-
 cmd_logs() {
   case "${1:-agent}" in
     agent) journalctl -u vercelify-agent -f -n 100 ;;
+    mesh|network) journalctl -u vercelify-mesh -f -n 100 ;;
     guard|power) journalctl -u vercelify-power-guard -f -n 100 ;;
-    coolify) docker logs -f --tail 100 coolify ;;
     tunnel|cloudflared) journalctl -u cloudflared -f -n 100 ;;
     setup) less +G "$VERCELIFY_LOG" ;;
     backup) tail -n 100 -f "$BACKUP_LOG" ;;
@@ -480,7 +364,7 @@ cmd_logs() {
 }
 
 ROLLBACK_DIR=${ROLLBACK_DIR:-$VERCELIFY_LIB/rollback}
-UNITS="vercelify-agent vercelify-power-guard vercelify-firewall"
+UNITS="vercelify-agent vercelify-mesh vercelify-power-guard vercelify-firewall"
 
 # Keep what an update replaces, so a failed update can be undone.
 snapshot_for_rollback() {
@@ -488,6 +372,9 @@ snapshot_for_rollback() {
   rm -rf "$tmp"
   mkdir -p "$tmp/units"
   [[ -x "$AGENT_BIN" ]] && cp -a "$AGENT_BIN" "$tmp/vercelify-agent"
+  [[ -x "$MESH_BIN" ]] && cp -a "$MESH_BIN" "$tmp/vercelify-mesh"
+  # The engine's last consistent copy: a newer agent may move its schema on.
+  [[ -f "$PLATFORM_DB.bak" ]] && cp -a "$PLATFORM_DB.bak" "$tmp/platform.db"
   [[ -d "$VERCELIFY_LIB/host" ]] && cp -a "$VERCELIFY_LIB/host" "$tmp/host"
   [[ -f "$VERCELIFY_ETC/install.env" ]] && cp -a "$VERCELIFY_ETC/install.env" "$tmp/install.env"
   for u in $UNITS; do [[ -f "$SYSTEMD_DIR/$u.service" ]] && cp -a "$SYSTEMD_DIR/$u.service" "$tmp/units/"; done
@@ -498,6 +385,15 @@ snapshot_for_rollback() {
 restore_rollback() {
   [[ -d "$ROLLBACK_DIR" ]] || die "nothing to roll back to ($ROLLBACK_DIR is missing)"
   [[ -f "$ROLLBACK_DIR/vercelify-agent" ]] && install -m 0755 "$ROLLBACK_DIR/vercelify-agent" "$AGENT_BIN"
+  [[ -f "$ROLLBACK_DIR/vercelify-mesh" ]] && install -m 0755 "$ROLLBACK_DIR/vercelify-mesh" "$MESH_BIN"
+  # The old agent can't open a database a newer one migrated: back to the copy
+  # taken before the update (changes made since then are lost, and said so).
+  if [[ -f "$ROLLBACK_DIR/platform.db" && -f "$PLATFORM_DB" ]] &&
+     (( $(sqlite_user_version "$PLATFORM_DB") > $(sqlite_user_version "$ROLLBACK_DIR/platform.db") )); then
+    systemctl stop vercelify-agent 2>/dev/null || true
+    restore_state_file "$ROLLBACK_DIR/platform.db"
+    warn "the engine's state is back to before the update: changes made since then are gone"
+  fi
   if [[ -d "$ROLLBACK_DIR/host" ]]; then
     mkdir -p "$VERCELIFY_LIB/host"
     rsync -a --checksum --delete "$ROLLBACK_DIR/host/" "$VERCELIFY_LIB/host/"
@@ -517,6 +413,50 @@ agent_healthy() {
     (( i < ${1:-60} )) && sleep 1
   done
   return 1
+}
+
+: "${PLATFORM_DB:=/var/lib/vercelify/platform.db}"
+
+# The schema version SQLite keeps in a database file's header (user_version,
+# 4 bytes big-endian at offset 60).
+sqlite_user_version() {
+  local b
+  b=$(od -An -j60 -N4 -tu1 "$1" 2>/dev/null) || { echo 0; return; }
+  # shellcheck disable=SC2086
+  set -- $b
+  echo $(( (${1:-0} << 24) | (${2:-0} << 16) | (${3:-0} << 8) | ${4:-0} ))
+}
+
+# restore_state_file FILE — put FILE in place of the engine's database (the
+# agent stopped); the one it replaces is kept next to it.
+restore_state_file() {
+  local src=$1 kept
+  kept="$PLATFORM_DB.replaced-$(date +%Y%m%d-%H%M%S)"
+  if [[ -f "$PLATFORM_DB" ]]; then
+    mv "$PLATFORM_DB" "$kept"
+    rm -f "$PLATFORM_DB-wal" "$PLATFORM_DB-shm"
+    info "the database it replaces is kept as $kept"
+  fi
+  install -m 0600 "$src" "$PLATFORM_DB"
+}
+
+# restore-state [FILE] — the engine's state database back from its last
+# consistent copy (written every 5 minutes, and before every schema change).
+cmd_restore_state() {
+  need_root restore-state
+  local src=${1:-$PLATFORM_DB.bak}
+  [[ -s "$src" ]] || die "no copy at $src — restore one from a backup: sudo vercelify backup restore (its files include ${PLATFORM_DB}.bak)"
+  [[ "$(head -c 15 "$src")" == "SQLite format 3" ]] || die "$src is not an SQLite database"
+  confirm "Replace the engine's state with $src ($(date -r "$src" '+%Y-%m-%d %H:%M'))? Changes made after it are lost" n || die "cancelled"
+  local copy
+  copy=$(mktemp)
+  cp -a "$src" "$copy"
+  run_cmd systemctl stop vercelify-agent
+  restore_state_file "$copy"
+  rm -f "$copy"
+  run_cmd systemctl start vercelify-agent
+  agent_healthy 60 || die "the agent did not come back — see: journalctl -u vercelify-agent -n 50"
+  ok "the engine runs from $src; apps that changed since are put back as it says by the reconciler"
 }
 
 cmd_update() {
@@ -554,17 +494,17 @@ cmd_rollback() {
   need_root rollback
   restore_rollback
   agent_healthy 30 || die "the agent did not come back — see: journalctl -u vercelify-agent -n 50"
-  ok "rolled back to the version installed before the last update (Docker, Coolify and your data are unchanged)"
+  ok "rolled back to the version installed before the last update (Docker, apps and their data are unchanged)"
 }
 
 cmd_uninstall() {
   need_root uninstall
-  confirm "Remove the Vercelify agent, power guard, firewall and CLI? (Coolify, apps and data stay)" n || exit 0
+  confirm "Remove the Vercelify agent, its network, power guard, firewall and CLI? (apps' containers and all data stay)" n || exit 0
   local u c
   # Sleeping apps: wake them and drop the proxy's wake route while the agent
   # can still do it, or they stay down behind a route to nothing.
   for u in $( (agent_api GET /v1/sleep | jq -r '.settings[]?.app_uuid') 2>/dev/null); do
-    (agent_api PUT "/v1/sleep/$u" '{"enabled":false}' >/dev/null) 2>/dev/null || warn "could not wake $u — start it in Coolify"
+    (agent_api PUT "/v1/sleep/$u" '{"enabled":false}' >/dev/null) 2>/dev/null || warn "could not wake $u — start its container yourself (docker ps -a)"
   done
   # Vercelify's own containers (data stays): without the firewall, Ollama's
   # API would answer anyone on the network.
@@ -583,8 +523,7 @@ cmd_uninstall() {
   systemctl daemon-reload
   rm -f "$AGENT_BIN" "${MESH_BIN:-/usr/local/bin/vercelify-mesh}" "${CLI_LINK:-/usr/local/bin/vercelify}"
   rm -rf "$VERCELIFY_LIB"
-  ok "removed. Config kept in $VERCELIFY_ETC (delete it yourself if you like)."
-  info "Coolify itself: see https://coolify.io/docs/get-started/uninstallation"
+  ok "removed. Config kept in $VERCELIFY_ETC, the engine's state in /var/lib/vercelify (delete them yourself if you like)."
 }
 
 main() {
@@ -595,19 +534,19 @@ main() {
     doctor) cmd_doctor ;;
     pair) cmd_pair "$@" ;;
     domain) cmd_domain "$@" ;;
-    add-worker) cmd_add_worker "$@" ;;
     llm|ai) cmd_llm "$@" ;;
-    autodeploy|auto-deploy) cmd_autodeploy "$@" ;;
     logs) cmd_logs "$@" ;;
-    coolify) cmd_coolify "$@" ;;
     backup|backups) need_root backup; backup_cli "$@" ;;
+    restore-state) cmd_restore_state "$@" ;;
     registry) need_root registry; registry_cli "$@" ;;
-    routes) need_root routes; [[ $ROLE == main ]] || die "run this on the main host"; routes_sync ;;
+    add-worker|autodeploy|auto-deploy|coolify|routes)
+      die "'$cmd' was part of running Vercelify on Coolify. On Vercelify's engine: workers join with sudo vercelify mesh invite, apps deploy on push by themselves, and the tunnel routes every app" ;;
     maintenance) need_root maintenance; maintenance_cli "$@" ;;
     sleep) cmd_sleep "$@" ;;
     mesh) mesh_cli "$@" ;;
     standby) need_root standby; standby_cli "$@" ;;
     github-app) need_root github-app; platform_github_app "$@" ;;
+    git-source) need_root git-source; platform_git_source "$@" ;;
     webhook) need_root webhook; platform_webhook "$@" ;;
     promote) cmd_promote "$@" ;;
     demote) cmd_demote "$@" ;;

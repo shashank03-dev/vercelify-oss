@@ -3,6 +3,27 @@
 
 : "${VERCELIFY_REPO:=shashank03-dev/vercelify-oss}"
 : "${AGENT_BIN:=/usr/local/bin/vercelify-agent}"
+: "${AGENT_LOCAL_URL:=http://127.0.0.1:7420}"
+
+# agent_api METHOD PATH [JSON] — prints the response body; dies with the
+# agent's error message on failure. The token goes to curl on stdin, not argv.
+agent_api() {
+  local method=$1 path=$2 body=${3:-} out code msg
+  local args=(-sS -X "$method" -K - -w '\n%{http_code}' --max-time "${API_TIMEOUT:-60}")
+  # The body through a file descriptor: it may hold a secret, and the
+  # command line is visible to every user (ps).
+  [[ -n "$body" ]] && args+=(-H 'Content-Type: application/json' --data-binary "@/dev/fd/3")
+  out=$(printf 'header = "Authorization: Bearer %s"\n' "$(<"$VERCELIFY_ETC/agent.token")" |
+    curl "${args[@]}" "$AGENT_LOCAL_URL$path" 3< <(printf '%s' "$body")) ||
+    die "the agent is not answering on $AGENT_LOCAL_URL — see: sudo vercelify doctor"
+  code=${out##*$'\n'}
+  out=${out%$'\n'*}
+  if [[ "$code" != 2* ]]; then
+    msg=$(jq -r '.error // .message // empty' <<<"$out" 2>/dev/null || true)
+    die "${msg:-HTTP $code from the agent}"
+  fi
+  printf '%s' "$out"
+}
 
 # obtain_binary NAME OVERRIDE_VAR "CARGO ARGS" — locate or obtain a release
 # binary (vercelify-agent, vercelify-mesh) for this architecture; prints its path.
@@ -92,9 +113,6 @@ install_agent() {
   if [[ ! -s "$VERCELIFY_ETC/agent.token" ]]; then
     random_hex 32 | write_file "$VERCELIFY_ETC/agent.token" 0600 || true
   fi
-  # The agent may authorise a main host's Coolify key here (server pools);
-  # systemd only lets it write to this directory if it exists.
-  run_cmd install -d -m 0700 /root/.ssh
   run_cmd install -d -m 0700 /var/lib/vercelify
   write_file "$SYSTEMD_DIR/vercelify-agent.service" 0644 <"$VERCELIFY_SRC/host/systemd/vercelify-agent.service" || true
   run_cmd systemctl daemon-reload
@@ -139,12 +157,12 @@ install_firewall() {
   run_cmd systemctl daemon-reload
   run_cmd systemctl enable vercelify-firewall >/dev/null 2>&1
   run_cmd systemctl restart vercelify-firewall
-  ok "dashboard and AI API reachable only over Tailscale (apps on 80/443 stay public)"
+  ok "the agent's and AI API's ports reachable only over Vercelify's network (apps on 80/443 stay public)"
 }
 
 install_cli() {
   run_cmd mkdir -p "$VERCELIFY_LIB"
-  # Keep a copy of the scripts so `vercelify update/add-worker/domain` work offline.
+  # Keep a copy of the scripts so `vercelify update/domain` work offline.
   run_cmd rsync -a --delete --exclude target --exclude node_modules --exclude .git \
     "$VERCELIFY_SRC/host/" "$VERCELIFY_LIB/host/"
   run_cmd install -m 0644 "$VERCELIFY_SRC/install.sh" "$VERCELIFY_LIB/install.sh" 2>/dev/null || true

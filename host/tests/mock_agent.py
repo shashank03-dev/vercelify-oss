@@ -9,7 +9,8 @@ import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 TOKEN = "test-agent-token"
-state = {"installed": False, "models": [], "tasks": [], "watches": [], "sleep": []}
+state = {"installed": False, "models": [], "tasks": [], "sleep": [], "sources": []}
+APPS = [{"id": "app1", "name": "blog"}, {"id": "app2", "name": "shop"}]
 
 
 def task_tick():
@@ -96,28 +97,30 @@ class H(BaseHTTPRequestHandler):
             return self.reply(200, {"message": {"role": "assistant", "content": "Hello from " + body["model"]}, "done": True})
         if p in ("/v1/llm/start", "/v1/llm/stop", "/v1/llm/restart"):
             return self.reply(200, llm_status())
-        if method == "GET" and p == "/v1/autodeploy":
-            return self.reply(200, {"interval_secs": 60, "coolify_configured": True, "watches": state["watches"]})
-        if method == "POST" and p == "/v1/autodeploy":
-            if body.get("branch", "").startswith("-"):
-                return self.reply(400, {"error": f"`{body['branch']}` is not a valid branch name"})
-            w = {"app_uuid": body["app_uuid"], "name": body.get("name") or body["app_uuid"], "repo": body["repo"], "branch": body["branch"],
-                 "enabled": True, "has_token": bool(body.get("token")), "last_commit": None, "last_checked_at": None, "last_error": None, "deploys": 0}
-            state["watches"] = [x for x in state["watches"] if x["app_uuid"] != w["app_uuid"]] + [w]
-            return self.reply(200, w)
-        if method == "POST" and p.startswith("/v1/autodeploy/") and p.endswith("/check"):
-            uuid = p.split("/")[3]
-            for w in state["watches"]:
-                if w["app_uuid"] == uuid:
-                    w["last_commit"], w["last_checked_at"] = "1" * 40, "2026-10-19T10:00:00Z"
-                    return self.reply(200, w)
-            return self.reply(404, {"error": "no auto-deploy for this application"})
-        if method == "DELETE" and p.startswith("/v1/autodeploy/"):
-            uuid = p.split("/")[3]
-            if not any(w["app_uuid"] == uuid for w in state["watches"]):
-                return self.reply(404, {"error": "no auto-deploy for this application"})
-            state["watches"] = [w for w in state["watches"] if w["app_uuid"] != uuid]
-            return self.reply(200, {"ok": True})
+        if method == "PUT" and p == "/v1/platform/settings/domain":
+            return self.reply(200, body)
+        if method == "GET" and p == "/v1/platform/git-sources":
+            return self.reply(200, state["sources"])
+        if method == "POST" and p == "/v1/platform/git-sources":
+            if body.get("auth") == "token" and not body.get("token"):
+                return self.reply(400, {"error": "a token is needed"})
+            g = {"id": f"git_{len(state['sources']) + 1}", "name": body["name"], "provider": body["provider"], "auth": body["auth"],
+                 "public_key": "ssh-ed25519 AAAAdeploykey vercelify" if body["auth"] == "deploy_key" else "",
+                 "created_at": "2026-10-27T00:00:00Z", "webhook": False}
+            state["sources"].append(g)
+            return self.reply(200, g)
+        if method == "DELETE" and p.startswith("/v1/platform/git-sources/"):
+            sid = p.split("/")[4]
+            state["sources"] = [g for g in state["sources"] if g["id"] != sid]
+            return self.reply(200, {"deleted": True})
+        if method == "GET" and p == "/v1/platform/apps":
+            return self.reply(200, APPS)
+        if method == "GET" and p.startswith("/v1/platform/apps/"):
+            want = p.split("/")[4]
+            for a in APPS:
+                if want in (a["id"], a["name"]):
+                    return self.reply(200, a)
+            return self.reply(404, {"error": f"no app named {want}"})
         if method == "GET" and p == "/v1/sleep":
             targets = [{"key": s["app_uuid"], "app_uuid": s["app_uuid"], "pull_request_id": 0, "hosts": ["blog.example.com"],
                         "state": "asleep", "last_request_at": None, "asleep_since": None} for s in state["sleep"]]

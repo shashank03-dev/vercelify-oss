@@ -85,7 +85,7 @@ fstab_storage_line() { # UUID FSTYPE
 
 # Prepare the directory layout on the storage tier.
 storage_layout() {
-  run_cmd mkdir -p "$STORAGE_MOUNT/volumes" "$STORAGE_MOUNT/backups/coolify"
+  run_cmd mkdir -p "$STORAGE_MOUNT/volumes" "$STORAGE_MOUNT/backups"
   run_cmd chmod 0755 "$STORAGE_MOUNT" "$STORAGE_MOUNT/volumes"
 }
 
@@ -262,16 +262,4 @@ setup_storage() {
   fi
   storage_layout
   ok "mounted $target at $STORAGE_MOUNT ($(df -h --output=size "$STORAGE_MOUNT" 2>/dev/null | tail -1 | tr -d ' ') total)"
-}
-
-# Keep Coolify's database backups on the HDD as well.
-bind_coolify_backups() {
-  mountpoint -q "$STORAGE_MOUNT" 2>/dev/null || [[ "$VERCELIFY_DRY_RUN" == 1 ]] || return 0
-  run_cmd mkdir -p /data/coolify/backups "$STORAGE_MOUNT/backups/coolify"
-  if fstab_set /data/coolify/backups \
-    "$STORAGE_MOUNT/backups/coolify /data/coolify/backups none bind,nofail,x-systemd.requires-mounts-for=$STORAGE_MOUNT 0 0"; then
-    run_cmd systemctl daemon-reload
-  fi
-  mountpoint -q /data/coolify/backups 2>/dev/null || run_cmd mount /data/coolify/backups || warn "could not bind-mount Coolify backups"
-  ok "Coolify backups → $STORAGE_MOUNT/backups/coolify"
 }

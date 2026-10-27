@@ -159,7 +159,7 @@ export function MeshNetwork() {
       testId="mesh-network"
       icon={<Network />}
       title="Vercelify network"
-      description="Your servers and devices on Vercelify's own WireGuard network — no Tailscale needed."
+      description="Your servers and devices on Vercelify's own encrypted WireGuard network."
       actions={
         c && (
           <Button size="sm" icon={<UserPlus />} onClick={() => setInviting(true)} data-testid="mesh-invite-open">

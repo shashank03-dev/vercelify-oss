@@ -51,8 +51,8 @@ sudo vercelify maintenance off
 
 ## Sleeping apps free memory
 
-On a 4 GB Pi, apps nobody visits can sleep: `sudo vercelify sleep on APP_UUID 30`
-(or the app's Domains tab in the Mac app). After 30 minutes without a request
+On a 4 GB Pi, apps nobody visits can sleep: `sudo vercelify sleep on APP 30` on the
+main server (or the app's **Sleep when idle** card in the Mac app). After 30 minutes without a request
 the app stops; the next visitor sees "waking up" for a second or two while it
 starts again.
 
@@ -61,11 +61,11 @@ starts again.
 On every machine:
 
 - All containers run in `vercelify.slice`, capped at *RAM − the OS reserve*. An
-  app that leaks memory is stopped inside the slice; sshd, Tailscale and the
+  app that leaks memory is stopped inside the slice; sshd, the network and the
   agent keep working, so you can still reach the machine.
 - The agent sets OOM priorities every minute: build containers die first, then
-  pull-request previews, then the AI model server, then apps; Coolify's core
-  and databases last.
+  pull-request previews, then the AI model server, then apps; the proxy, the
+  registry and databases last.
 - Memory pressure (PSI) and out-of-memory kills show up in **Health → Hardware**
   and in the doctor, and raise alerts.
 
@@ -76,31 +76,28 @@ The power guard responds in steps instead of freezing everything:
 1. **Pause** at `THERMAL_PAUSE_C`: builds and the AI server are paused, apps get
    half the CPUs (`docker update --cpus`) and keep serving.
 2. **Freeze** at `THERMAL_FREEZE_C` (default: shutdown − 3 °C): apps are paused
-   too. Databases and Coolify are never frozen; other services wait on their
-   locks.
+   too. Databases, the proxy and the registry are never frozen; other services
+   wait on them.
 3. **Resume** at `THERMAL_RESUME_C`: everything is unpaused and CPU limits go
    back to what they were.
 4. **Shut down** cleanly after three readings at `THERMAL_SHUTDOWN_C`.
 
 ## Building for a Pi
 
-A 4 GB Pi cannot build a Next.js app next to everything else. Build on the
-strongest machine and let the Pi pull:
+A 4 GB Pi cannot build a Next.js app next to everything else, and it doesn't have
+to: the main server builds every image and keeps it in its own registry, which the
+Pi pulls from over the network. For an app placed on a Pi the main server builds a
+`linux/arm64` image too; on an x86 main server that needs emulation, once:
 
 ```bash
-# on the main server
-sudo vercelify registry install          # registry on the tailnet (data on the HDD)
-sudo vercelify registry multiarch        # x86 machines can build arm64 images (QEMU)
-# on each worker
-sudo vercelify registry trust laptop:5000
+sudo vercelify registry multiarch        # on the main server: build arm64 images (QEMU)
 ```
 
-Then in Coolify: **Servers → your strongest machine → Use it as a build
-server**, and for each app **General → Docker Registry** `laptop:5000/<app>`.
+Emulated builds are slower. If a build is too slow, pin the app to an x86 server in
+its **Where it runs** card.
 
 ## Public apps on a worker
 
-With a Cloudflare domain, apps that run on a worker are routed through the main
-server's tunnel to that worker's Traefik over Tailscale. `vercelify routes sync`
-does it, and a timer runs it every five minutes, so moving an app to the Pi
-needs no Cloudflare dashboard work.
+Visitors always arrive at the main server (its tunnel or its ports); its proxy sends
+requests for an app on a worker to that worker over the network. Moving an app to the
+Pi needs no DNS or Cloudflare changes.

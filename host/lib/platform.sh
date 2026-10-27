@@ -2,9 +2,17 @@
 # Vercelify's own platform engine (instead of Coolify): helpers for the CLI.
 # The engine lives in the agent; the CLI talks to it through agent_api.
 
-# platform_engine — true when agent.toml selects the platform engine.
+# platform_engine — true when this server runs Vercelify's engine, decided
+# as the agent does: agent.toml's `engine`, else Coolify's .env on disk means
+# a server installed with Coolify that isn't migrated yet.
 platform_engine() {
-  grep -Eq '^[[:space:]]*engine[[:space:]]*=[[:space:]]*"platform"' "${AGENT_CONFIG:-$VERCELIFY_ETC/agent.toml}" 2>/dev/null
+  local cfg=${AGENT_CONFIG:-$VERCELIFY_ETC/agent.toml} engine
+  engine=$(sed -n -E 's/^[[:space:]]*engine[[:space:]]*=[[:space:]]*"([a-z]+)".*/\1/p' "$cfg" 2>/dev/null | head -1)
+  if [[ -n "$engine" ]]; then
+    [[ "$engine" == platform ]]
+    return
+  fi
+  [[ ! -f "${COOLIFY_DATA_DIR:-/data/coolify}/source/.env" ]]
 }
 
 # platform_domain_json WILDCARD_URL EDGE_TLS — the body of
@@ -41,6 +49,61 @@ platform_github_app() {
   printf '\n  Open this in a browser (within 30 minutes), confirm on GitHub, and it comes back here:\n\n    %s\n\n' \
     "$(jq -r .start_url <<<"$out")" >&2
   info "then install the app on your repositories (GitHub shows the link) and pick it as their git source"
+}
+
+# git-source [list | add NAME [--provider P] [--deploy-key] | rm NAME] —
+# credentials for private repositories. A token is read from stdin (or asked
+# for), never from the command line; a deploy key's public half is printed.
+platform_git_source() {
+  local sub=${1:-list} name provider=github auth=token token='' out id
+  (( $# )) && shift
+  platform_engine || die "git sources are part of the platform engine: sudo vercelify migrate"
+  case "$sub" in
+    list|ls)
+      agent_api GET /v1/platform/git-sources | jq -r '.[] | [.name, .provider, .auth, (if .webhook then "webhook" else "" end), .id] | @tsv' |
+        while IFS=$'\t' read -r name provider auth hook id; do
+          printf '  %-20s %-7s %-10s %-8s %s\n' "$name" "$provider" "$auth" "$hook" "$id"
+        done
+      ;;
+    add)
+      name=${1:-}
+      [[ -n "$name" ]] || die "usage: vercelify git-source add NAME [--provider github|gitlab|gitea|generic] [--deploy-key]"
+      shift
+      while (( $# )); do
+        case "$1" in
+          --provider) provider=${2:?--provider needs github, gitlab, gitea or generic}; shift ;;
+          --deploy-key) auth=deploy_key ;;
+          *) die "usage: vercelify git-source add NAME [--provider github|gitlab|gitea|generic] [--deploy-key]" ;;
+        esac
+        shift
+      done
+      [[ "$provider" =~ ^(github|gitlab|gitea|generic)$ ]] || die "unknown provider '$provider' (github, gitlab, gitea or generic)"
+      if [[ "$auth" == token ]]; then
+        if [[ -t 0 ]]; then
+          read -r -s -p "Access token for $name (read-only access to the repositories): " token
+          echo >&2
+        else
+          IFS= read -r token || true
+        fi
+        [[ -n "$token" ]] || die "no token given (paste it, or pipe it in: … | sudo vercelify git-source add $name)"
+      fi
+      # (jq gets the token through its environment, not its arguments.)
+      out=$(agent_api POST /v1/platform/git-sources "$(VFY_TOKEN=$token jq -nc --arg n "$name" --arg p "$provider" --arg a "$auth" \
+        '{name: $n, provider: $p, auth: $a} + (if env.VFY_TOKEN == "" then {} else {token: env.VFY_TOKEN} end)')")
+      ok "git source $name added — pick it as an app's credentials (New app, or the app's Git card)"
+      if [[ "$auth" == deploy_key ]]; then
+        printf '\n  Add this read-only deploy key to the repository:\n\n    %s\n\n' "$(jq -r .public_key <<<"$out")" >&2
+      fi
+      ;;
+    rm|remove)
+      name=${1:?usage: vercelify git-source rm NAME}
+      id=$(agent_api GET /v1/platform/git-sources | jq -r --arg n "$name" '[.[] | select(.name == $n or .id == $n)][0].id // empty')
+      [[ -n "$id" ]] || die "no git source named $name (see: sudo vercelify git-source)"
+      agent_api DELETE "/v1/platform/git-sources/$id" >/dev/null
+      ok "git source $name removed"
+      ;;
+    *) die "usage: vercelify git-source [list | add NAME [--provider P] [--deploy-key] | rm NAME]" ;;
+  esac
 }
 
 # webhook SOURCE — a webhook secret for a git source, and where to send events.

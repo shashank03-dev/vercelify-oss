@@ -19,14 +19,17 @@ Before building a feature, check that it:
    weak machine more reliable.
 2. Works on low-end hardware (8 GB RAM, HDD, possibly on battery).
 3. Adds **no** recurring cost and **no** required cloud service.
-4. Extends Coolify where possible instead of re-implementing it.
+4. Builds on Docker, BuildKit, Traefik and WireGuard instead of adding another
+   dependency, and fits the engine's design (`docs/design/SYSTEM-DESIGN.md`).
 
 ## Repository layout
 
 | Path | What it is |
 | --- | --- |
 | `crates/vercelify-core` | Shared Rust library (system probes, models exported to TypeScript). |
-| `agent/` | `vercelify-agent`, the small Rust daemon on the host. |
+| `crates/vercelify-platform` | The engine: state, builds, deployments, databases, proxy routes. |
+| `crates/vercelify-mesh` | The private network and the `vercelify-mesh` daemon. |
+| `agent/` | `vercelify-agent`, the small Rust daemon on the host (it mounts the engine). |
 | `cockpit/` | Tauri v2 desktop app: `src/` (React UI) and `src-tauri/` (Rust). |
 | `host/` | Server installer, `vercelify` admin CLI, firewall, power-guard, systemd units, bats tests. |
 | `cli/vfy` | Mac/Linux command-line tool. |

@@ -2,14 +2,11 @@ name: Integration
 
 # Slower checks against real software, run when the code they cover changes,
 # every Monday (to catch upstream changes early) and on demand:
-#   - the Coolify contract: schema, API routes, the agent's SQL, the proxy
-#     edit and a full sleep/wake cycle against the Coolify version the
-#     installer pins (COOLIFY_TESTED_VERSION), and against Coolify's newest
-#     release as an early warning; then `vercelify migrate` takes a shop
-#     (database, apps, a service, their data) over from that Coolify
-#   - project rules (vercel.json) against a real Traefik: redirects,
-#     rewrites, headers, firewall and cron jobs through the agent, on apps
-#     labelled the way Coolify labels them
+#   - the migration: `vercelify migrate` takes a shop (database, apps, a
+#     service, their data) over from a real Coolify — the version servers were
+#     installed with, and Coolify's newest release as an early warning
+#   - project rules (vercel.json) on the engine's own proxy: redirects,
+#     rewrites, headers, firewall and cron jobs through the agent
 #   - the mesh: four nodes in network namespaces with the real agent and
 #     vercelify-mesh (joining, paths, DNS, firewall, rotation, revocation),
 #     then three behind real NAT routers (hole punching, the relay)
@@ -17,17 +14,16 @@ name: Integration
 #     app placed on it through the mesh registry, replicas on both servers,
 #     logs, restart, a terminal, automatic rollback and revocation; then the
 #     warm standby promoted after the main server dies
-#   - the real installer in a systemd container (Docker, Tailscale, Coolify,
-#     agent, guard, firewall), twice, to prove it is idempotent
+#   - the real installer in a systemd container (Docker, the agent with the
+#     engine and its proxy, the mesh, guard, firewall, an app deployed),
+#     twice, to prove it is idempotent
 on:
   pull_request:
     paths:
-      - host/lib/coolify.sh
       - host/setup-host.sh
       - host/lib/**
       - host/tests/contract/**
       - host/tests/integration/**
-      - agent/src/coolify.rs
       - agent/src/migrate.rs
       - agent/src/migrate_export.php
       - crates/vercelify-platform/src/import.rs
@@ -62,8 +58,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  coolify-contract:
-    name: Coolify contract (${{ matrix.version }})
+  migration:
+    name: Migration from Coolify (${{ matrix.version }})
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     strategy:
@@ -82,21 +78,18 @@ jobs:
           if [ "${{ matrix.version }}" = newest ]; then
             echo "COOLIFY_VERSION=$(curl -fsSL https://cdn.coollabs.io/coolify/versions.json | jq -r .coolify.v4.version)" >>"$GITHUB_ENV"
           fi
-      - name: Contract
-        run: sudo -E env "PATH=$PATH" AGENT_BIN="$PWD/target/debug/vercelify-agent" host/tests/contract/coolify.sh
-      - name: Migration (vercelify migrate)
+      - name: vercelify migrate
         run: sudo -E env "PATH=$PATH" AGENT_BIN="$PWD/target/debug/vercelify-agent" host/tests/contract/migrate.sh
 
   routing-contract:
-    name: Project rules on Traefik (${{ matrix.traefik }})
+    name: Project rules on the proxy (${{ matrix.traefik }})
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
-        # Coolify's default proxy, and an older one still found on servers
-        # (no status rewrite for fallbacks). Old Traefik speaks an API newer
-        # Docker versions refuse: an early warning, not a gate.
+        # The engine's pinned proxy, and an older one (no status rewrite for
+        # fallbacks): an early warning, not a gate.
         traefik: ["traefik:v3.7", "traefik:v3.4"]
     continue-on-error: ${{ matrix.traefik != 'traefik:v3.7' }}
     steps:
@@ -138,7 +131,7 @@ jobs:
         run: sudo -E env "PATH=$PATH" host/tests/contract/promote.sh
 
   installer:
-    name: Installer on Debian 12 (systemd, real Coolify)
+    name: Installer on Debian 12 (systemd)
     if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'installer')
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -149,4 +142,7 @@ jobs:
           targets: x86_64-unknown-linux-musl
       - run: pip install cargo-zigbuild
       - run: cargo zigbuild --release -p vercelify-agent --target x86_64-unknown-linux-musl
-      - run: sudo AGENT_BINARY="$PWD/target/x86_64-unknown-linux-musl/release/vercelify-agent" REGISTRY_MIRROR=https://mirror.gcr.io host/tests/integration/run.sh
+      - run: cargo zigbuild --release -p vercelify-mesh --features daemon --target x86_64-unknown-linux-musl
+      - run: |
+          rel="$PWD/target/x86_64-unknown-linux-musl/release"
+          sudo AGENT_BINARY="$rel/vercelify-agent" MESH_BINARY="$rel/vercelify-mesh" REGISTRY_MIRROR=https://mirror.gcr.io host/tests/integration/run.sh

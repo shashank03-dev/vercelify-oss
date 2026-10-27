@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Vercelify host setup — turns a Debian/Ubuntu machine into a self-hosted
-# Vercel: Coolify + Docker + Tailscale + storage tiers + the cockpit agent.
+# Vercel: Docker + Vercelify's engine and private network (the agent and
+# vercelify-mesh) + storage tiers.
 #
 # Re-runnable at any time: every step checks what is already done.
 # Run `setup-host.sh --help` for options.
@@ -19,10 +20,10 @@ VERSION=${VERSION:-dev}
 . "$VERCELIFY_SRC/host/lib/storage.sh"
 # shellcheck source=lib/docker.sh
 . "$VERCELIFY_SRC/host/lib/docker.sh"
-# shellcheck source=lib/tailscale.sh
-. "$VERCELIFY_SRC/host/lib/tailscale.sh"
-# shellcheck source=lib/coolify.sh
-. "$VERCELIFY_SRC/host/lib/coolify.sh"
+# shellcheck source=lib/platform.sh
+. "$VERCELIFY_SRC/host/lib/platform.sh"
+# shellcheck source=lib/mesh.sh
+. "$VERCELIFY_SRC/host/lib/mesh.sh"
 # shellcheck source=lib/cloudflare.sh
 . "$VERCELIFY_SRC/host/lib/cloudflare.sh"
 # shellcheck source=lib/agent.sh
@@ -41,13 +42,14 @@ Usage: sudo $0 [options]
 Most people need no options: the installer asks a few questions.
 
 Role
-  --worker                 Worker node (e.g. Raspberry Pi): Docker + Tailscale +
-                           agent only; deployments are managed by the main host
-  --coolify-pubkey KEY     (worker) Coolify's SSH public key to authorise for root
+  --worker                 Worker (e.g. a Raspberry Pi): runs apps the main server
+                           places on it
+  --join TOKEN             (worker) Join the main server's network with this invite
+                           (the Mac app puts it in the command; or on the main
+                           server: sudo vercelify mesh invite)
 
 Network & domain
-  --hostname NAME          Machine name on your tailnet (default: $(hostname -s 2>/dev/null || echo host))
-  --tailscale-authkey KEY  Join Tailscale without opening a login link
+  --hostname NAME          This machine's name (default: $(hostname -s 2>/dev/null || echo host))
   --domain DOMAIN          Your domain: apps get *.DOMAIN (e.g. blog.DOMAIN)
   --cloudflare-token TOK   Cloudflare API token: creates a tunnel + DNS for you
                            (no port forwarding, works behind CGNAT)
@@ -58,15 +60,10 @@ Storage
                            (default: auto-detect; 'none' = single-disk mode)
   --format-storage         Allow formatting that disk as ext4 (ERASES IT)
 
-Coolify
-  --admin-email EMAIL      Dashboard login (default: admin@example.com; the domain
-                           must exist in DNS — Coolify checks it)
-  --admin-password PASS    Dashboard password (default: generated, shown at the end)
-
 Features
   --ai [MODEL]             Also install Ollama for local AI models, and download
                            MODEL (default: llama3.2:3b, or gemma3:1b under 8 GB)
-  --no-firewall            Don't restrict the dashboard and AI API to Tailscale
+  --no-firewall            Don't keep the agent's and AI API's ports private
   --no-power-guard         Don't install the battery/thermal guard
   --no-display             Don't install mpv (secondary-monitor receiver)
   --no-backup              Don't turn on nightly backups (main server)
@@ -79,14 +76,16 @@ General
 Examples
   sudo $0
   sudo $0 --domain example.com --cloudflare-token cf_XXXX -y
-  sudo $0 --worker --hostname pi5
+  sudo $0 --worker --hostname pi5 --join vfyj1.…
 EOF
 }
 
 # --- options -----------------------------------------------------------------
 ROLE=main
-TS_HOSTNAME=$(hostname -s 2>/dev/null || echo vercelify)
-TS_AUTHKEY=${TS_AUTHKEY:-}
+MACHINE_NAME=$(hostname -s 2>/dev/null || echo vercelify)
+MACHINE_NAME=${MACHINE_NAME,,}
+RENAME=0
+JOIN_TOKEN=''
 DOMAIN=''
 # cloudflare | direct — remembered in install.env so updates keep the domain
 DOMAIN_MODE=''
@@ -94,9 +93,6 @@ CF_API_TOKEN=${CF_API_TOKEN:-}
 FORCE_DNS=0
 STORAGE_DEVICE=auto
 FORMAT_STORAGE=0
-ADMIN_EMAIL=''
-ADMIN_PASSWORD=''
-COOLIFY_PUBKEY=''
 WITH_FIREWALL=1
 WITH_POWER_GUARD=1
 WITH_DISPLAY=1
@@ -109,16 +105,16 @@ parse_args() {
   while (( $# )); do
     case "$1" in
       --worker) ROLE=worker ;;
-      --coolify-pubkey) COOLIFY_PUBKEY=${2:?}; shift ;;
-      --hostname) TS_HOSTNAME=${2:?}; shift ;;
-      --tailscale-authkey) TS_AUTHKEY=${2:?}; shift ;;
+      --join) JOIN_TOKEN=${2:?}; shift ;;
+      --hostname) MACHINE_NAME=${2:?}; RENAME=1; shift ;;
       --domain) DOMAIN=${2:?}; shift ;;
       --cloudflare-token) CF_API_TOKEN=${2:?}; shift ;;
       --force-dns) FORCE_DNS=1 ;;
       --storage-device) STORAGE_DEVICE=${2:?}; shift ;;
       --format-storage) FORMAT_STORAGE=1 ;;
-      --admin-email) ADMIN_EMAIL=${2:?}; shift ;;
-      --admin-password) ADMIN_PASSWORD=${2:?}; shift ;;
+      # Options of installers before Vercelify's own engine: nothing to do now.
+      --tailscale-authkey|--coolify-pubkey|--admin-email|--admin-password)
+        warn "$1 is not needed any more (Vercelify runs without Coolify and Tailscale) — ignored"; shift ;;
       --no-firewall) WITH_FIREWALL=0 ;;
       --no-power-guard) WITH_POWER_GUARD=0 ;;
       --no-display) WITH_DISPLAY=0 ;;
@@ -167,36 +163,29 @@ preflight() {
   mem_mb=$(awk '/MemTotal/ {print int($2/1024)}' /proc/meminfo)
   disk_gb=$(( $(df --output=avail -k / | tail -1) / 1024 / 1024 ))
   if (( mem_mb < 1800 )); then die "at least 2 GB RAM is required (found ${mem_mb} MB)"; fi
-  (( mem_mb < 3800 )) && [[ $ROLE == main ]] && warn "${mem_mb} MB RAM: Coolify works but builds will be slow; 4 GB+ recommended"
+  (( mem_mb < 3800 )) && [[ $ROLE == main ]] && warn "${mem_mb} MB RAM: apps run, but builds will be slow; 4 GB+ recommended"
   ok "${mem_mb} MB RAM, ${disk_gb} GB free on /"
   (( disk_gb < 20 )) && [[ $ROLE == main ]] && warn "less than 20 GB free on / — Docker images and builds need room"
 
   curl -fsS -m 10 -o /dev/null https://get.docker.com || die "no internet access (https://get.docker.com unreachable)"
   ok "internet access"
-
-  if [[ -r /proc/sys/net/ipv6/conf/all/disable_ipv6 && "$(cat /proc/sys/net/ipv6/conf/all/disable_ipv6)" == 1 ]] ||
-     [[ ! -e /proc/net/if_inet6 ]]; then
-    warn "IPv6 is disabled in the kernel — Coolify's web server needs it; enable IPv6 (remove ipv6.disable=1) if the dashboard never becomes healthy"
-  fi
-  valid_hostname "$TS_HOSTNAME" || die "invalid --hostname '$TS_HOSTNAME' (lowercase letters, digits, '-')"
+  valid_hostname "$MACHINE_NAME" || die "invalid --hostname '$MACHINE_NAME' (lowercase letters, digits, '-')"
+  [[ -z "$JOIN_TOKEN" || "$JOIN_TOKEN" == vfyj1.* ]] || die "--join needs an invite (vfyj1.…) from: sudo vercelify mesh invite"
 }
 
 wizard() {
   has_tty || return 0
   [[ "$ASSUME_YES" == 1 ]] && return 0
   printf '\n%s%s Vercelify %s — self-hosted Vercel on this machine%s\n' "$C_BOLD" "$C_CYAN" "$VERSION" "$C_RESET" >&2
-  printf '%s   Role: %s · Host: %s · Answer a few questions (Enter = default).%s\n' "$C_DIM" "$ROLE" "$TS_HOSTNAME" "$C_RESET" >&2
+  printf '%s   Role: %s · Host: %s · Answer a few questions (Enter = default).%s\n' "$C_DIM" "$ROLE" "$MACHINE_NAME" "$C_RESET" >&2
   if (( ! WITH_AI )); then
     printf '\n  Vercelify can also run open AI models (Llama, Qwen, Gemma…) on this machine,\n  for your Mac and your apps. About 4 GB to download (~12 GB on disk); you can add it later.\n' >&2
     if confirm "Set up local AI models too?" n; then WITH_AI=1; fi
   fi
   [[ $ROLE == worker ]] && return 0
 
-  if [[ -z "$ADMIN_EMAIL" ]] && ! coolify_installed 2>/dev/null; then
-    ask ADMIN_EMAIL "E-mail for your Coolify login (any real address):" "admin@example.com"
-  fi
   if [[ -z "$DOMAIN" ]]; then
-    printf '\n  Apps need addresses. Without a domain they are private to your tailnet\n  (http://<app>.<tailscale-ip>.sslip.io). With one they get https://<app>.<domain>.\n' >&2
+    printf '\n  Apps need addresses. Without a domain they are private to your Vercelify network\n  (http://<app>.%s.sslip.io). With one they get https://<app>.<domain>.\n' "$MESH_MAIN_IP" >&2
     ask DOMAIN "Your domain (blank = private only, add one later with 'vercelify domain'):" ""
     DOMAIN=${DOMAIN,,}
   fi
@@ -209,13 +198,15 @@ wizard() {
 plan() {
   step "Plan"
   info "role:       $ROLE"
-  info "hostname:   $TS_HOSTNAME (Tailscale MagicDNS)"
+  info "name:       $MACHINE_NAME"
   info "storage:    $STORAGE_DEVICE → $STORAGE_MOUNT"
   (( WITH_AI )) && info "AI models:  Ollama${AI_MODEL:+ + $AI_MODEL}"
   if [[ $ROLE == main ]]; then
     if [[ "$(domain_mode)" == cloudflare ]]; then info "domain:     *.$DOMAIN via Cloudflare Tunnel (HTTPS at Cloudflare)"
     elif [[ -n "$DOMAIN" ]]; then info "domain:     *.$DOMAIN via your public IP (Let's Encrypt; forward ports 80+443)"
-    else info "domain:     none — apps private to your tailnet via sslip.io"; fi
+    else info "domain:     none — apps private to your Vercelify network via sslip.io"; fi
+  elif [[ -n "$JOIN_TOKEN" ]]; then
+    info "network:    joins its main server's (invite ${JOIN_TOKEN:0:12}…)"
   fi
   [[ "$VERCELIFY_DRY_RUN" == 1 ]] && warn "dry run: nothing will be changed"
   return 0
@@ -242,38 +233,72 @@ domain_mode() {
   else echo direct; fi
 }
 
-coolify_wildcard() {
+# The main server's address on its own network (`vercelify mesh init`).
+MESH_MAIN_IP=10.77.0.1
+
+# Where new apps get their addresses: <app>.<this>.
+app_wildcard() {
   if [[ "$(domain_mode)" == cloudflare ]]; then
-    echo "http://$DOMAIN"         # TLS terminates at Cloudflare; Traefik serves HTTP to the tunnel
+    echo "http://$DOMAIN"         # TLS terminates at Cloudflare; the proxy serves HTTP to the tunnel
   elif [[ -n "$DOMAIN" ]]; then
-    echo "https://$DOMAIN"        # Traefik gets a Let's Encrypt certificate per app
+    echo "https://$DOMAIN"        # the proxy gets a Let's Encrypt certificate per app
   else
-    local ip
-    ip=$(ts_ipv4)
-    [[ -n "$ip" ]] && echo "http://$ip.sslip.io" || echo ""
+    echo "http://$(mesh_ipv4 || echo "$MESH_MAIN_IP").sslip.io"
   fi
 }
 
-authorize_coolify_key() {
-  [[ -n "$COOLIFY_PUBKEY" ]] || return 0
-  [[ "$COOLIFY_PUBKEY" =~ ^(ssh-ed25519|ssh-rsa|ecdsa-sha2-[a-z0-9-]+)\ [A-Za-z0-9+/=]+ ]] || die "--coolify-pubkey does not look like an SSH public key"
-  run_cmd install -d -m 0700 /root/.ssh
-  touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys
-  if ! grep -qF "${COOLIFY_PUBKEY%% coolify*}" /root/.ssh/authorized_keys 2>/dev/null; then
-    [[ "$VERCELIFY_DRY_RUN" == 1 ]] || printf '%s\n' "$COOLIFY_PUBKEY" >>/root/.ssh/authorized_keys
+# This machine's address on Vercelify's network, if it is on one.
+mesh_ipv4() { jq -r '.ipv4 // empty' "$MESH_DIR/state.json" 2>/dev/null | grep . ; }
+
+# The name everything shows (the agent, the network, the Mac app) is the
+# machine's own: --hostname renames it.
+set_machine_name() {
+  (( RENAME )) || return 0
+  [[ "$(hostname -s 2>/dev/null)" == "$MACHINE_NAME" ]] && return 0
+  [[ "$VERCELIFY_DRY_RUN" == 1 ]] && { info "[dry-run] would rename this machine to $MACHINE_NAME"; return 0; }
+  run_cmd hostnamectl set-hostname "$MACHINE_NAME" || { warn "could not rename this machine to $MACHINE_NAME"; return 0; }
+  if grep -q '^127\.0\.1\.1[[:space:]]' /etc/hosts 2>/dev/null; then
+    sed -i "s/^127\.0\.1\.1[[:space:]].*/127.0.1.1\t$MACHINE_NAME/" /etc/hosts
+  else
+    printf '127.0.1.1\t%s\n' "$MACHINE_NAME" >>/etc/hosts
   fi
-  ok "authorised the main host's Coolify key for root"
+  ok "this machine is now called $MACHINE_NAME"
 }
 
-generate_password() { printf 'Vf-%s-%s!9' "$(random_hex 6)" "$(random_hex 6 | tr 'a-f' 'A-F')"; }
+# Vercelify's own network (design §13): the main server coordinates it; a
+# worker joins with the invite its install command carries.
+setup_network() {
+  step "Private network (vercelify-mesh)"
+  if [[ "$VERCELIFY_DRY_RUN" == 1 ]]; then
+    if [[ -n "$JOIN_TOKEN" ]]; then info "[dry-run] would join the main server's network"
+    else info "[dry-run] would set up this server's network"; fi
+    return 0
+  fi
+  if [[ -n "$(mesh_ipv4)" ]]; then
+    systemctl is-active --quiet vercelify-mesh 2>/dev/null || mesh_install_unit
+    ok "on the network as $(mesh_ipv4)"
+    return 0
+  fi
+  if [[ $ROLE == main ]]; then
+    ( mesh_init ) || warn "the network isn't set up yet — later: sudo vercelify mesh init"
+  elif [[ -n "$JOIN_TOKEN" ]]; then
+    ( mesh_join "$JOIN_TOKEN" --platform ) || warn "joining failed — on the main server: sudo vercelify mesh invite, then here: sudo vercelify mesh join <token> --platform"
+  else
+    toml_set engine '"platform"' "$VERCELIFY_ETC/agent.toml"
+    warn "not on a network yet — on the main server run: sudo vercelify mesh invite, then here what it prints"
+  fi
+}
+
+# A server whose apps Coolify still runs: the update leaves Coolify (and
+# Tailscale) as they are until `vercelify migrate`.
+not_migrated() { [[ $ROLE == main ]] && ! platform_engine; }
 
 MAC_INSTALL="curl -fsSL https://raw.githubusercontent.com/$VERCELIFY_REPO/main/install-mac.sh | bash"
 
 summary() {
-  local dns ip pair='' short='' dashboard summary_file="$VERCELIFY_ETC/summary.txt"
-  ip=$(ts_ipv4 || true)
-  dns=$(ts_dns_name || true)
-  dashboard="http://${dns:-${ip:-<tailscale-ip>}}:8000"
+  local ip pair='' short='' summary_file="$VERCELIFY_ETC/summary.txt" wildcard=''
+  ip=$(mesh_ipv4 || true)
+  [[ $ROLE == main ]] && ! not_migrated && wildcard=$(app_wildcard)
   if [[ "$VERCELIFY_DRY_RUN" != 1 ]] && [[ -x "$AGENT_BIN" ]]; then
     # One device token for both codes; the short one lasts long enough to
     # install the Mac app first.
@@ -284,37 +309,38 @@ summary() {
       pair=$(sed -n 2p <<<"$both")
     else
       pair=$("$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" pair 2>/dev/null || true)
-      short=$("$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" pair --short --ttl 3600 2>/dev/null || true)
     fi
   fi
 
   {
     printf '\n%s%s✔ Vercelify is ready%s  (%s, %s)\n\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$ROLE" "$VERSION"
-    if [[ $ROLE == main ]]; then
-      printf '  %sCoolify dashboard%s  %s\n' "$C_BOLD" "$C_RESET" "$dashboard"
-      [[ -n "$ADMIN_EMAIL" ]] && printf '  %sLogin%s              %s / %s\n' "$C_BOLD" "$C_RESET" "$ADMIN_EMAIL" "${ADMIN_PASSWORD:-<the password you chose>}"
-      local apps
-      apps=$(coolify_wildcard | sed 's#://#://<app>.#')
-      printf '  %sApps%s               %s\n' "$C_BOLD" "$C_RESET" "${apps:-connect Tailscale, then: sudo vercelify domain}"
+    if [[ -n "$wildcard" ]]; then
+      printf '  %sApps%s               %s\n' "$C_BOLD" "$C_RESET" "${wildcard/:\/\//:\/\/<app>.}"
     fi
-    printf '  %sTailscale%s          %s (%s)\n' "$C_BOLD" "$C_RESET" "${dns:-not connected}" "${ip:--}"
+    printf '  %sNetwork%s            %s\n' "$C_BOLD" "$C_RESET" "${ip:+$(hostname -s) at $ip (vfy0)}${ip:-not on a Vercelify network yet}"
     printf '  %sStorage%s            %s\n' "$C_BOLD" "$C_RESET" "$(findmnt -no SOURCE,SIZE "$STORAGE_MOUNT" 2>/dev/null || echo "single disk ($STORAGE_MOUNT on /)")"
-    (( WITH_AI )) && printf '  %sAI models%s          http://%s:11434 (Ollama, OpenAI-compatible at /v1)\n' "$C_BOLD" "$C_RESET" "${dns:-${ip:-<tailscale-ip>}}"
-    if [[ -n "$pair" ]]; then
+    (( WITH_AI )) && printf '  %sAI models%s          http://%s:11434 (Ollama, OpenAI-compatible at /v1)\n' "$C_BOLD" "$C_RESET" "${ip:-<this server>}"
+    if not_migrated; then
+      printf '\n  %sCoolify still runs this server'"'"'s apps.%s Move them to Vercelify'"'"'s engine (it shows\n  every step first and keeps Coolify until you remove it):  sudo vercelify migrate\n' "$C_BOLD" "$C_RESET"
+    fi
+    if [[ -n "$pair" && $ROLE == main ]]; then
       printf '\n  %sConnect your Mac%s\n' "$C_BOLD" "$C_RESET"
-      printf '    1. Install the app (and Tailscale):\n         %s\n' "$MAC_INSTALL"
+      printf '    1. Install the app:\n         %s\n' "$MAC_INSTALL"
       if [[ -n "$short" ]]; then
-        printf '    2. Open Vercelify, pick %s%s%s and type the code   %s%s%s   (valid 1 hour)\n' \
-          "$C_BOLD" "${dns%%.*}" "$C_RESET" "$C_BOLD" "$short" "$C_RESET"
-        printf '       or paste the full code:\n         %s\n' "$pair"
+        printf '    2. Open Vercelify: on the same Wi-Fi pick %s%s%s and type the code   %s%s%s   (valid 1 hour)\n' \
+          "$C_BOLD" "$(hostname -s)" "$C_RESET" "$C_BOLD" "$short" "$C_RESET"
+        printf '       or, anywhere, paste the full code:\n         %s\n' "$pair"
       else
         printf '    2. Open Vercelify and paste this code:\n         %s\n' "$pair"
       fi
       printf '\n  New code any time: sudo vercelify pair\n'
     fi
     if [[ $ROLE == worker ]]; then
-      printf '\n  Next: pair this worker in the Mac app, then on its Servers page click\n  %sAdd to a pool%s so your main server deploys here.\n' "$C_BOLD" "$C_RESET"
-      printf '  (Or on the main host: sudo vercelify add-worker root@%s)\n' "${dns:-$TS_HOSTNAME}"
+      if [[ -n "$ip" ]]; then
+        printf '\n  Its main server places apps here now; nothing else to do.\n'
+      else
+        printf '\n  Next: on the main server run %ssudo vercelify mesh invite%s, then here what it prints.\n' "$C_BOLD" "$C_RESET"
+      fi
     elif [[ "$(domain_mode)" == direct ]]; then
       printf '\n  %sDNS to create at your registrar%s (public IP %s):\n' "$C_BOLD" "$C_RESET" "$(curl -fsS -m 5 https://api.ipify.org 2>/dev/null || echo '?')"
       printf '    A  *.%s  → that IP      A  %s  → that IP\n  and forward TCP 80 + 443 on your router to this machine.\n' "$DOMAIN" "$DOMAIN"
@@ -328,11 +354,9 @@ summary() {
   if [[ "$VERCELIFY_DRY_RUN" != 1 ]]; then
     {
       echo "role=$ROLE"
-      echo "dashboard=$dashboard"
-      echo "admin_email=$ADMIN_EMAIL"
-      echo "admin_password=$ADMIN_PASSWORD"
+      echo "network=$ip"
       echo "domain=$DOMAIN"
-      echo "wildcard=$(coolify_wildcard)"
+      echo "wildcard=$wildcard"
       echo "pairing_code=$pair"
     } | write_file "$summary_file" 0600 || true
   fi
@@ -355,49 +379,43 @@ main() {
   load_previous_install
   wizard
   if [[ -n "$DOMAIN" ]]; then valid_domain "$DOMAIN" || die "'$DOMAIN' is not a valid domain name"; fi
-  if [[ $ROLE == main ]] && ! coolify_installed 2>/dev/null; then
-    ADMIN_EMAIL=$(coolify_safe_email "${ADMIN_EMAIL:-admin@example.com}")
-  fi
-  if [[ $ROLE == main && -z "$ADMIN_PASSWORD" ]] && ! coolify_installed 2>/dev/null; then ADMIN_PASSWORD=$(generate_password); fi
   plan
 
   install_base_packages
+  set_machine_name
   laptop_server_mode
   tune_kernel
   harden_hardware
-  configure_ssh
   setup_storage "$STORAGE_DEVICE" "$FORMAT_STORAGE"
-  [[ $ROLE == main ]] && bind_coolify_backups
   container_slice >/dev/null
   install_docker
-  install_tailscale "$TS_HOSTNAME" "$TS_AUTHKEY"
   (( WITH_DISPLAY )) && { apt_install mpv || warn "could not install mpv"; }
 
-  if [[ $ROLE == main ]]; then
-    if coolify_installed; then install_coolify; else install_coolify "$ADMIN_EMAIL" "$ADMIN_PASSWORD"; fi
-    local wildcard
-    wildcard=$(coolify_wildcard)
-    configure_coolify "$wildcard"
-    coolify_api_token
-    if [[ -n "$DOMAIN" && -n "$CF_API_TOKEN" ]]; then
-      setup_cloudflare_domain "$DOMAIN" "$CF_API_TOKEN" "vercelify-$TS_HOSTNAME" "$FORCE_DNS"
-    fi
-  else
-    authorize_coolify_key
-  fi
-
+  # The agent reads its role from install.env from its first start on.
+  run_cmd mkdir -p "$VERCELIFY_ETC"
+  printf 'role=%s\nversion=%s\nchannel=%s\nref=%s\nprofile=%s\ndomain=%s\ndomain_mode=%s\n' \
+    "$ROLE" "$VERSION" "${VERCELIFY_INSTALL_CHANNEL:-stable}" "${VERCELIFY_INSTALL_REF:-local}" "$HW_PROFILE" "$DOMAIN" "$(domain_mode)" |
+    write_file "$VERCELIFY_ETC/install.env" 0644 || true
+  install_mesh_binary || die "could not install vercelify-mesh, Vercelify's private network"
   install_agent
-  install_mesh_binary || warn "the mesh daemon isn't installed yet — the next update brings it"
+  # The tunnel before the network: machines outside the LAN join through it.
+  if [[ $ROLE == main && -n "$DOMAIN" && -n "$CF_API_TOKEN" ]]; then
+    setup_cloudflare_domain "$DOMAIN" "$CF_API_TOKEN" "vercelify-$MACHINE_NAME" "$FORCE_DNS"
+  fi
+  setup_network
+  if [[ $ROLE == main ]]; then
+    if ! not_migrated; then
+      step "App addresses"
+      local edge=false
+      [[ "$(domain_mode)" == cloudflare ]] && edge=true
+      platform_set_domain "$(app_wildcard)" "$edge" || warn "could not set the app domain now — later: sudo vercelify domain"
+    fi
+  fi
   (( WITH_POWER_GUARD )) && install_power_guard
   (( WITH_FIREWALL )) && install_firewall
   install_cli
   step "Reboot window"
   maintenance_setup
-  printf 'role=%s\nversion=%s\nchannel=%s\nref=%s\nprofile=%s\ndomain=%s\ndomain_mode=%s\n' \
-    "$ROLE" "$VERSION" "${VERCELIFY_INSTALL_CHANNEL:-stable}" "${VERCELIFY_INSTALL_REF:-local}" "$HW_PROFILE" "$DOMAIN" "$(domain_mode)" |
-    write_file "$VERCELIFY_ETC/install.env" 0644 || true
-  # The agent reports its role from install.env.
-  [[ "$VERCELIFY_DRY_RUN" == 1 ]] || systemctl try-restart vercelify-agent >/dev/null 2>&1 || true
   if (( WITH_AI )); then install_ai "${AI_MODEL:-$(default_ai_model)}"; fi
   if [[ $ROLE == main ]] && (( WITH_BACKUP )) && [[ "$VERCELIFY_DRY_RUN" != 1 ]] && [[ ! -r "$BACKUP_ENV_FILE" ]]; then
     step "Backups"

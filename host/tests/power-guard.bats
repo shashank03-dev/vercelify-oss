@@ -32,7 +32,7 @@ teardown() { teardown_sandbox; }
   [ "$(state)" = shutting_down ]
 }
 
-@test "shutdown stops apps before Coolify core and remembers them" {
+@test "shutdown stops apps before the core (proxy, registry) and remembers them" {
   laptop 0 10 Discharging
   "$PG" --once; "$PG" --once
   apps_line=$(grep -n 'docker stop -t 60 aaa ccc' "$CALLS" | cut -d: -f1)
@@ -69,7 +69,7 @@ teardown() { teardown_sandbox; }
 
 @test "thermal: hot = builds paused, apps slowed, data and core untouched; resume when cool" {
   laptop 1 90 Charging
-  echo 'eee 1a2b3c ghcr.io/coollabsio/coolify-helper:1.0.8' >>"$SANDBOX/containers"
+  echo 'eee buildx_buildkit_vercelify0 moby/buildkit:buildx-stable-1' >>"$SANDBOX/containers"
   cpu_temp 93
   STUB_NANOCPUS=1500000000 "$PG" --once
   [ "$(state)" = thermal_paused ]

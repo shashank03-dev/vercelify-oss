@@ -176,10 +176,11 @@ JSON
 }
 
 @test "github-app and webhook (platform engine)" {
-  run "$CLI" github-app
+  # a server still on Coolify (not migrated)
+  mkdir -p "$T/coolify/source" && touch "$T/coolify/source/.env"
+  COOLIFY_DATA_DIR="$T/coolify" run "$CLI" github-app
   [ "$status" -ne 0 ]
   [[ "$output" == *"part of the platform engine"* ]]
-  printf 'engine = "platform"\n' >"$T/etc/agent.toml"
   run "$CLI" github-app --org acme
   [ "$status" -eq 0 ]
   [[ "$output" == *"https://mesh.example.com/v1/github-app/start?state=s-acme"* ]]
@@ -193,4 +194,23 @@ JSON
   run "$CLI" webhook nope
   [ "$status" -ne 0 ]
   [[ "$output" == *"git source nope not found"* ]]
+}
+
+@test "domain with a tunnel on a coordinator: devices outside the LAN join through mesh.DOMAIN" {
+  python3 "$BATS_TEST_DIRNAME/mock_cloudflare.py" "$T/cf-port" "$T/cf.json" &
+  CF_PID=$!
+  for _ in $(seq 50); do [ -s "$T/cf-port" ] && break; sleep 0.1; done
+  mkdir -p "$T/bin" "$T/systemd"
+  for b in systemctl cloudflared; do printf '#!/bin/sh\necho "%s $*" >>"%s/calls"\n' "$b" "$T" >"$T/bin/$b"; done
+  chmod +x "$T/bin/"*
+  printf 'mesh_coordinator = true\nlisten = ["127.0.0.1", "mesh"]\n' >"$T/etc/agent.toml"
+  PATH="$T/bin:$PATH" SYSTEMD_DIR="$T/systemd" CF_API_BASE="http://127.0.0.1:$(cat "$T/cf-port")/client/v4" \
+    run "$CLI" domain example.com --cloudflare-token test-cf-token
+  kill "$CF_PID" 2>/dev/null
+  [ "$status" -eq 0 ]
+  grep -q '^mesh_public_url = "https://mesh.example.com"' "$T/etc/agent.toml"
+  [ "$(jq -r '.configs[] | .ingress[0].hostname' "$T/cf.json")" = mesh.example.com ]
+  grep -q 'PUT /v1/platform/settings/domain .*"wildcard":"example.com"' "$T/requests.log"
+  grep -q '^domain_mode=cloudflare' "$T/etc/install.env"
+  grep -q 'systemctl restart vercelify-agent' "$T/calls"
 }

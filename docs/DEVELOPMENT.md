@@ -4,7 +4,7 @@
 
 - Rust stable (`rustup`), Node 22, `jq`, `shellcheck`, `bats`
 - Linux: `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev` (for the Tauri crate)
-- For the live tests: Docker and a Coolify instance you can throw away
+- For the live and contract tests: Docker (and root, for the network namespace ones)
 
 ## Everyday commands
 
@@ -13,7 +13,8 @@ cargo test --workspace --all-features        # Rust unit + fixture + agent black
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 bats host/tests                              # host scripts
-shellcheck -x -S warning install.sh host/*.sh host/vercelify host/lib/*.sh
+shellcheck -x -S warning install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/contract/*.sh
+cargo test -p vercelify-platform -p vercelify-mesh --features vercelify-mesh/daemon   # the engine and the mesh alone
 
 cd cockpit
 npm ci
@@ -24,14 +25,14 @@ npm run tauri dev                            # desktop app with hot reload
 
 ### Browser mode
 
-The UI also runs in a plain browser: Vite proxies `/__agent` and `/__coolify`,
-and settings live in `localStorage`. Point it at a running agent and Coolify:
+The UI also runs in a plain browser: Vite proxies `/__agent`, and settings live in
+`localStorage`. Point it at a running agent:
 
 ```bash
-VERCELIFY_AGENT_URL=http://127.0.0.1:7420 VERCELIFY_COOLIFY_URL=http://127.0.0.1:8000 npm run dev
+VERCELIFY_AGENT_URL=http://127.0.0.1:7420 npm run dev
 ```
 
-Desktop-only features (local Tailscale, ffmpeg sender, Moonlight) report
+Desktop-only features (the network daemon, ffmpeg sender, Moonlight) report
 "Available in the desktop app only".
 
 ### Demo mode (no host needed)
@@ -41,7 +42,7 @@ cd cockpit && VITE_DEMO=1 npm run dev
 ```
 
 Every screen gets realistic canned data from `src/lib/demo.ts` (apps,
-deployments, databases, disks, Tailscale…), so you can design and screenshot
+deployments, databases, disks, the network…), so you can design and screenshot
 the UI without a server. Pair with any text, or set
 `localStorage["vercelify.settings"]` to skip onboarding. Production builds
 never include it.
@@ -64,8 +65,9 @@ never include it.
 ### Running the agent locally
 
 ```bash
-VERCELIFY_LISTEN=127.0.0.1 VERCELIFY_TOKEN=dev-token-0123456789 \
+VERCELIFY_LISTEN=127.0.0.1 VERCELIFY_TOKEN=dev-token-0123456789 VERCELIFY_STATE_DIR=/tmp/vfy \
 VERCELIFY_REQUIRE_STORAGE_MOUNT=false VERCELIFY_HDD_VOLUME_ROOT=/tmp/hdd \
+VERCELIFY_PROXY_HTTP_PORT=8080 VERCELIFY_PROXY_HTTPS_PORT=8443 \
   cargo run -p vercelify-agent -- --config /nonexistent
 curl -H "Authorization: Bearer dev-token-0123456789" localhost:7420/v1/system | jq
 ```
@@ -76,40 +78,30 @@ which is how the tests point it at fixture sysfs trees and stub binaries.
 ## Live end-to-end tests
 
 ```bash
-# Coolify must be running on this machine (Docker), with an API token:
-COOLIFY_TOKEN='1|…' E2E_HDD=/mnt/storage cockpit/e2e/run-live.sh
+cockpit/e2e/run-live.sh          # as root, a loop-mounted ext4 "HDD" makes the tier moves real
 ```
 
-This builds the agent, starts it against the local Docker, serves the
-production UI, and runs `cockpit/e2e/live.spec.ts`: pairing, deploying,
-build logs, rollback, database provisioning, moving a live Postgres between
-tiers (with data verification), health, logs, services, screencast and unpair.
-The spec expects a Dockerfile-based app called `gitapp` whose repository has at
-least two commits that serve different pages (the test rolls back to the
-previous one and checks the live site changes), a Postgres called `pg-main`
-with a table `t` containing `survives the move`. Screenshots land in
+This builds the agent, starts it with the engine and its own proxy on spare ports
+against the local Docker (a fresh engine database each run), serves the production UI,
+and runs `cockpit/e2e/live.spec.ts`: pairing, creating and deploying an image app,
+the build log, serving it through the proxy, redeploying and rolling back, runtime
+logs, a one-click Redis with a backup (into a restic repository the script sets up),
+moving a live database between SSD and HDD with its data checked, health, container
+logs, services, the screencast receiver and unpairing. Screenshots land in
 `test-results/screens/`.
-
-Bootstrapping such a Coolify in a throwaway VM:
-
-```bash
-curl -fsSL https://cdn.coollabs.io/coolify/install.sh | sudo env ROOT_USERNAME=admin ROOT_USER_EMAIL=a@b.c ROOT_USER_PASSWORD='Pass-word-123!' bash
-docker exec coolify-db psql -U coolify -d coolify -c "update instance_settings set is_api_enabled=true"
-docker exec coolify php artisan tinker --execute="session(['currentTeam'=>\App\Models\Team::find(0)]); echo \App\Models\User::find(0)->createToken('e2e',['root'])->plainTextToken;"
-```
 
 ## Desktop end-to-end tests (real Tauri binary)
 
 Drives the actual desktop app through `tauri-driver` + WebKitWebDriver under
 Xvfb, so the Rust command layer runs for real: pairing and 0600 settings,
-HTTP to the agent and Coolify, local tool detection, a real ffmpeg test-pattern
+HTTP to the agent, local tool detection, a real ffmpeg test-pattern
 stream decoded by the agent's mpv, the orphan watchdog (force-quitting the
 app must stop ffmpeg), and settings surviving a restart.
 
 ```bash
 sudo apt install webkit2gtk-driver xvfb ffmpeg mpv
 cargo install tauri-driver --locked
-COOLIFY_TOKEN='1|…' cockpit/e2e-desktop/run-desktop.sh
+cockpit/e2e-desktop/run-desktop.sh
 ```
 
 Screenshots of every step land in `e2e-logs/desktop/`.
@@ -118,37 +110,37 @@ Screenshots of every step land in `e2e-logs/desktop/`.
 
 Runs the real installer (no dry run) inside a privileged Debian 12 container
 with systemd, nested Docker and a loop-device "HDD", then asserts on the
-result and runs it a second time to prove idempotency:
+result (the engine, its proxy, the mesh with this server as `10.77.0.1`, an image app
+deployed and served) and runs it a second time to prove idempotency:
 
 ```bash
-sudo AGENT_BINARY=target/x86_64-unknown-linux-musl/release/vercelify-agent host/tests/integration/run.sh
+rel=target/x86_64-unknown-linux-musl/release
+sudo AGENT_BINARY=$rel/vercelify-agent MESH_BINARY=$rel/vercelify-mesh host/tests/integration/run.sh
 ```
 
-## Coolify contract test
+## Migration contract test (real Coolify)
 
-Starts Coolify (the version the installer pins, or `COOLIFY_VERSION=…`) from its
-own compose files and checks everything Vercelify relies on: the database
-columns, the API routes the cockpit, `vfy` and the agent call, the agent's SQL
-against the real database, the proxy edit for sleeping apps, and a full
-sleep → visit → wake cycle through Coolify's Traefik:
+`vercelify migrate` against a real Coolify (4.4.6, or `COOLIFY_VERSION=…`) started from
+its own compose files with a shop in it (a PostgreSQL database with data, a Git app, an
+image app, a one-click service): plan, apply, the check through our proxy, rollback to
+Coolify, apply again and finish.
 
 ```bash
 cargo build -p vercelify-agent
-sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/coolify.sh   # KEEP=1 leaves it running
+sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/migrate.sh   # KEEP=1 leaves it running
 ```
 
-CI runs it (`integration.yml`) when that code changes, weekly, and against
-Coolify's newest release as an early warning.
+CI runs it (`integration.yml`) when that code changes, weekly, and against Coolify's
+newest release as an early warning.
 
-## Project rules contract test (real Traefik)
+## Project rules contract test (the real proxy)
 
-Runs the real agent against a real Traefik started the way Coolify starts it (Docker
-and file providers), with two apps labelled exactly as Coolify 4.4.6 labels them (a
-static site with real 404s, and whoami over https behind Coolify's basic auth) and a
-second whoami as an external site. Drives everything through the agent's API and
-checks redirects, rewrites, headers, the firewall in direct and Cloudflare-tunnel mode
-(including a spoofed tunnel header from another address), cron jobs with `CRON_SECRET`,
-a stopped app and removal:
+Runs the real agent with the engine and its proxy, deploys two apps as image apps (a
+static site with real 404s built from `routing_app.mjs`, and whoami over https behind
+basic auth) plus a whoami on the host as an external site. Drives everything through
+the agent's API and checks redirects, rewrites, headers, the firewall in direct and
+Cloudflare-tunnel mode (including a spoofed tunnel header from another address), cron
+jobs with `CRON_SECRET`, a stopped app and removal:
 
 ```bash
 cargo build -p vercelify-agent
@@ -156,10 +148,19 @@ sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/routing.sh 
 TRAEFIK_IMAGE=traefik:v3.4 sudo -E host/tests/contract/routing.sh                  # an older proxy
 ```
 
-Needs Docker, curl, jq and python3; uses ports 18080–18083, 18443 and 17421. Traefik
-before 3.6 speaks a Docker API that Docker 29 refuses unless dockerd runs with
-`DOCKER_MIN_API_VERSION=1.24`. CI (`integration.yml`) runs it on Traefik 3.7 (a gate)
-and 3.4 (an early warning).
+Needs Docker, curl and jq; uses ports 18080, 18083, 18084, 18443 and 17421.
+`TRAEFIK_IMAGE` becomes the proxy's image (`VERCELIFY_PROXY_IMAGE`). CI
+(`integration.yml`) runs it on the pinned Traefik (a gate) and 3.4 (an early warning).
+
+## The mesh and several servers
+
+```bash
+cargo build -p vercelify-agent && cargo build -p vercelify-mesh --features daemon
+sudo host/tests/contract/mesh.sh          # four nodes in network namespaces: joins, paths, DNS, firewall, revocation
+sudo host/tests/contract/mesh-nat.sh      # behind real NAT routers: hole punching, the relay
+sudo host/tests/contract/multinode.sh     # a worker with its own Docker: placement, registry, replicas, logs
+sudo host/tests/contract/promote.sh       # the warm standby promoted after the main server dies
+```
 
 ## arm64 (Raspberry Pi) under QEMU
 
@@ -183,13 +184,16 @@ rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl
 cargo zigbuild --release -p vercelify-agent --target aarch64-unknown-linux-musl   # Raspberry Pi 4/5
 ```
 
-Both produce ~3 MB static binaries; the release workflow publishes them with
-`.sha256` files, which `host/lib/agent.sh` verifies.
+`-p vercelify-mesh --features daemon` builds the network daemon the same way. They are
+static binaries (the agent at most 8 MiB, `vercelify-mesh` 6 MiB, both gated in CI);
+the release workflow publishes them with `.sha256` files, which `host/lib/agent.sh`
+verifies.
 
 ## Releasing
 
-Tag `vX.Y.Z` → `.github/workflows/release.yml` publishes the agent binaries
-and the cockpit bundles (macOS universal `.dmg`, Linux `.deb`/`.AppImage`).
+Tag `vX.Y.Z` → `.github/workflows/release.yml` publishes the agent and
+`vercelify-mesh` binaries (Linux x86_64 and arm64, and a universal macOS
+`vercelify-mesh`) and the cockpit bundles (macOS universal `.dmg`, Linux `.deb`/`.AppImage`).
 The macOS app is signed and notarised when the repository has these Actions
 secrets: `APPLE_CERTIFICATE` (a *Developer ID Application* certificate exported
 as `.p12`, base64 on one line: `base64 -i cert.p12 | tr -d '\n'`),

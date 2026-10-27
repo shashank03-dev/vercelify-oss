@@ -1,8 +1,9 @@
 [Unit]
-Description=Vercelify host agent (cockpit API over Tailscale)
+Description=Vercelify host agent (the engine and the app's API)
 Documentation=https://github.com/shashank03-dev/vercelify-oss
-After=network-online.target tailscaled.service docker.service
-Wants=network-online.target tailscaled.service
+# tailscaled only for ordering: a server that still has it may listen on it.
+After=network-online.target docker.service vercelify-mesh.service tailscaled.service
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -15,8 +16,6 @@ Environment=RUST_LOG=info,tower_http=warn
 NoNewPrivileges=yes
 ProtectSystem=full
 ProtectHome=read-only
-# Pools: a worker authorises the main host's Coolify key for root.
-ReadWritePaths=-/root/.ssh
 PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

@@ -62,11 +62,11 @@ vm.dirty_ratio = 15
 # File watchers for Next.js/Vite builds
 fs.inotify.max_user_watches = 524288
 fs.inotify.max_user_instances = 1024
-# Bigger socket buffers: Tailscale throughput + display stream receive
+# Bigger socket buffers: mesh (WireGuard) throughput + display stream receive
 net.core.rmem_max = 26214400
 net.core.wmem_max = 26214400
 net.core.netdev_max_backlog = 5000
-# Containers and Tailscale subnet routes
+# Containers and the mesh
 net.ipv4.ip_forward = 1
 net.ipv6.conf.all.forwarding = 1
 EOF
@@ -103,13 +103,4 @@ ensure_swap() {
   fi
   grep -qs "^/swapfile[[:space:]]" "$FSTAB_FILE" || fstab_set none_swapfile "/swapfile none swap sw 0 0" >/dev/null || true
   ok "created ${size_gb} GB swapfile"
-}
-
-# Let Coolify (and `vercelify add-worker`) log in as root with keys only.
-configure_ssh() {
-  write_file /etc/ssh/sshd_config.d/90-vercelify.conf 0644 <<'EOF' && run_cmd systemctl reload ssh 2>/dev/null || true
-# Vercelify: Coolify manages servers over SSH as root using keys.
-PermitRootLogin prohibit-password
-PubkeyAuthentication yes
-EOF
 }

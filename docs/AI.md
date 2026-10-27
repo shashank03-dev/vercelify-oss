@@ -47,7 +47,7 @@ How it keeps an old CPU fast enough:
 
 Memory: Ollama's default `gemma4:e2b` is about a 7 GB download and wants about that much
 free memory while it answers (the app's model list shows whether it fits). On an 8 GB
-server that is also running Coolify and your apps, prefer running it on your Mac with
+server that is also running your apps, prefer running it on your Mac with
 `vfy why --log`, or use the Gemini API path. `gemma4:e4b` is smarter but needs roughly 10 GB.
 
 Try it without a server: `ollama pull gemma4:e2b && ./cli/vfy why --log cli/examples/failed-build.log`.
@@ -59,7 +59,7 @@ The agent runs Ollama in a container named `vercelify-ollama` with:
 
 | Setting | Why |
 | --- | --- |
-| `OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_NUM_PARALLEL=1` | One model and one answer at a time fits in 8 GB next to Coolify and your apps. |
+| `OLLAMA_MAX_LOADED_MODELS=1`, `OLLAMA_NUM_PARALLEL=1` | One model and one answer at a time fits in 8 GB next to your apps. |
 | `OLLAMA_KEEP_ALIVE=5m` | The model leaves memory five idle minutes after the last request. |
 | `--cpu-shares 512` | Half the CPU weight of other containers: web apps stay responsive while a model thinks. |
 | Answers capped at 1,024 tokens | Small models can loop until the context fills, which takes many minutes on an old CPU. Send `max_tokens` (up to 8192) to raise it. Stopping a chat (or disconnecting) cancels generation on the server. |
@@ -72,9 +72,10 @@ Good starting points: `gemma4:e2b` to explain failed deploys (16 GB machines), `
 
 ## Use it from your Mac
 
-Port 11434 is published on the server and kept private to your tailnet by the
-Vercelify firewall (the app warns if the firewall is off). Replace `laptop` with your
-server's Tailscale name:
+Port 11434 is published on the server and kept private to your Vercelify network by
+its firewall (the app warns if the firewall is off). Replace `laptop` with your
+server's name on the network (`laptop.vfy`, or its `10.77.x.x` address; see
+[MESH.md](MESH.md)):
 
 ```bash
 # Ollama's own API
@@ -98,9 +99,13 @@ The app's **Chat** panel streams answers token by token and shows tokens per sec
 
 ## Use it from your apps
 
-The container joins Coolify's `coolify` network, so apps deployed on the same server
-reach it at `http://vercelify-ollama:11434` (`/v1` for OpenAI clients). Apps on other
-servers in the pool use the server's Tailscale address.
+The container joins the proxy's network (`vfy-proxy`), so apps deployed on the same
+server reach it at `http://vercelify-ollama:11434` (`/v1` for OpenAI clients).
+
+Containers can't reach other machines on the network (so an app can't become a way
+in). To let apps on a worker use the main server's models, allow the port on that
+worker: `CONTAINER_TAILNET_ALLOW_TCP="11434"` in `/etc/vercelify/firewall.conf`, then
+`sudo systemctl restart vercelify-firewall`; the apps call `http://10.77.0.1:11434`.
 
 ## Several servers
 

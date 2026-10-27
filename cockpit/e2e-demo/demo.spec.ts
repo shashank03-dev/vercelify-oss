@@ -243,6 +243,15 @@ test("live: activity, sleeping apps, the domain and power guard", async ({ page 
   await page.getByTestId("nav-apps").click();
   await expect(page.getByTestId("status-wiki")).toContainText("Asleep");
 
+  // Another app sleeps when idle too
+  await page.getByTestId("papp-shop").getByRole("button", { name: /shop/ }).first().click();
+  await page.getByTestId("tab-settings").click();
+  await page.getByTestId("sleep-toggle").click();
+  await expect(page.getByText("shop sleeps after 30 idle minutes")).toBeVisible();
+  await expect(page.getByTestId("sleep-toggle")).toBeChecked();
+  await expect(page.getByTestId("sleep-state")).toContainText("awake");
+  await page.keyboard.press("Escape");
+
   // A backup started from Settings shows up live in the activity list
   await page.getByTestId("nav-settings").click();
   await expect(page.getByTestId("domain")).toContainText("Cloudflare tunnel");

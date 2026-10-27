@@ -23,13 +23,15 @@ STUB
 echo "docker $*" >>"$CALLS"
 case "$1" in
   inspect) [[ "$*" == *Mounts* ]] && printf 'coolify-db\n\n'; exit 0 ;;
-  ps) if [[ "$*" == *'{{.Names}}' ]]; then printf 'coolify\ncoolify-db\npg-main\nweb\n'
+  ps) if [[ "$*" == *'{{.Names}}' ]]; then printf 'vercelify-proxy\npg-main\nweb\n'
       else printf 'a1 pg-main postgres:16\nb2 web node:22\nc3 cache redis:7\nd4 maria mariadb:11\n'; fi ;;
   exec) if [[ "$*" == *psql* ]]; then echo 1; else echo "-- dump of $2"; fi ;;
 esac
 STUB
   printf '#!/usr/bin/env bash\necho "systemctl $*" >>"$CALLS"\n' >"$T/bin/systemctl"
   printf '#!/usr/bin/env bash\necho "rsync $*" >>"$CALLS"\n' >"$T/bin/rsync"
+  printf '#!/usr/bin/env bash\necho "sqlite3 $*" >>"$CALLS"\n' >"$T/bin/sqlite3"
+  echo db >"$T/state/platform.db"
   chmod +x "$T/bin/"*
   export CALLS="$T/calls" PATH="$T/bin:$PATH" NO_COLOR=1 VERCELIFY_TEST=1
   export VERCELIFY_ETC="$T/etc" VERCELIFY_STATE="$T/state" VERCELIFY_LOG="$T/setup.log" SYSTEMD_DIR="$T/systemd"
@@ -60,7 +62,7 @@ teardown() { rm -rf "$T"; }
   grep -q "repo-b" "$T/etc/backup.env"
 }
 
-@test "run dumps every database, saves Coolify's secrets and records success" {
+@test "run dumps every database, saves the engine's state and records success" {
   "$CLI" backup setup --to "$T/repo" >/dev/null 2>&1
   : >"$CALLS"
   run "$CLI" backup run
@@ -68,11 +70,14 @@ teardown() { rm -rf "$T"; }
   grep -q 'docker exec coolify-db pg_dump -U coolify -Fc coolify' "$CALLS"
   grep -q 'docker exec a1 sh -c pg_dumpall' "$CALLS"
   grep -q 'docker exec d4 sh -c exec mariadb-dump' "$CALLS"
-  grep -q 'docker exec c3 sh -c redis-cli' "$CALLS"
+  grep -q 'docker exec c3 sh -c REDISCLI_AUTH=' "$CALLS"
+  grep -q "sqlite3 $T/state/platform.db .backup '$T/state/backup-stage/platform.db'" "$CALLS"
   ! grep -q 'docker exec b2' "$CALLS"   # not a database
   line=$(grep '^restic backup' "$CALLS")
   [[ "$line" == *"$T/coolify/source/.env"* && "$line" == *"$T/coolify/ssh"* && "$line" == *"$T/etc"* ]]
   [[ "$line" == *"$T/storage/volumes"* && "$line" == *"--exclude $T/volumes/ollama-models"* ]]
+  # never the live database (SQLite may be mid-write)
+  [[ "$line" == *"--exclude $T/state/platform.db --exclude $T/state/platform.db-wal"* ]]
   grep -q '^restic forget --tag vercelify .*--prune --keep-daily 7' "$CALLS"
   [ "$(jq -r .ok "$T/state/backup.json")" = true ]
   [ "$(jq -r .snapshot "$T/state/backup.json")" = 1a2b3c4d ]
@@ -99,19 +104,36 @@ teardown() { rm -rf "$T"; }
   [ "$status" -ne 0 ]
 }
 
-@test "--instance: no database sees its files change under it" {
+@test "--instance: the engine's state comes back and no database sees its files change under it" {
   "$CLI" backup setup --to "$T/repo" >/dev/null 2>&1
   : >"$CALLS"
-  printf '#!/usr/bin/env bash\necho OK\n' >"$T/bin/curl"; chmod +x "$T/bin/curl"
-  mkdir -p "$T/out$T/volumes/coolify-db" "$T/out$T/volumes/pg-data" "$T/out$T/storage/volumes"
-  ASSUME_YES=1 run "$CLI" backup restore latest --instance --target "$T/out"
+  printf '#!/usr/bin/env bash\necho "install $*" >>"$CALLS"\n' >"$T/bin/install"; chmod +x "$T/bin/install"
+  mkdir -p "$T/out$T/volumes/pg-data" "$T/out$T/storage/volumes" "$T/out$T/state/backup-stage"
+  echo fresh >"$T/out$T/state/backup-stage/platform.db"
+  echo bak >"$T/out$T/state/platform.db.bak"
+  echo key >"$T/out$T/state/master.key"
+  mkdir -p "$T/out$T/state/mesh" && echo coordinator >"$T/out$T/state/mesh/coordinator.key"
+  ASSUME_YES=1 MESH_DIR="$T/state/mesh" run "$CLI" backup restore latest --instance --target "$T/out"
   [ "$status" -eq 0 ]
-  calls=$(grep -E '^(docker (stop|start)|rsync)' "$CALLS")
-  # the apps' containers stop before their volumes are rewritten, and start after
-  [[ "$calls" == *"docker stop pg-main web"*"rsync"*"$T/volumes/"*"docker start pg-main web"*"docker start coolify"* ]]
-  # Coolify's database comes from its dump, not from a file copy taken while it ran
-  grep -E "^rsync .*--exclude /coolify-db/ .*$T/volumes/" "$CALLS"
-  ! grep -E '^docker stop .*coolify-db' "$CALLS"
+  # the network's identity comes back, with the daemon stopped meanwhile
+  grep -q "^rsync -a --delete $T/out$T/state/mesh/ $T/state/mesh/" "$CALLS"
+  grep -q 'systemctl stop vercelify-mesh' "$CALLS"
+  grep -q 'systemctl restart vercelify-mesh' "$CALLS"
+  calls=$(grep -E '^(systemctl (stop|start)|docker (stop|start)|rsync|install)' "$CALLS")
+  # the engine stops first, the apps' containers before their volumes are
+  # rewritten; the fresh copy (not the 5-minute one) becomes platform.db
+  [[ "$calls" == *"systemctl stop vercelify-agent"*"docker stop pg-main web"*"install -m 0600 $T/out$T/state/master.key $T/state/master.key"*"install -m 0600 $T/out$T/state/backup-stage/platform.db $T/state/platform.db"*"rsync"*"$T/volumes/"*"docker start pg-main web"*"systemctl start vercelify-agent"* ]]
+}
+
+@test "--instance: a snapshot from Coolify days is not put over the engine" {
+  "$CLI" backup setup --to "$T/repo" >/dev/null 2>&1
+  : >"$CALLS"
+  mkdir -p "$T/out$T/state/backup-stage/databases"
+  touch "$T/out$T/state/backup-stage/databases/coolify.dump"
+  ASSUME_YES=1 run "$CLI" backup restore latest --instance --target "$T/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"vercelify migrate"* ]]
+  ! grep -q 'systemctl stop' "$CALLS"
 }
 
 @test "not set up: clear message" {
@@ -128,7 +150,7 @@ teardown() { rm -rf "$T"; }
   ! grep -q 'restic init' "$CALLS"
 }
 
-@test "a database that can't be dumped doesn't stop Coolify's secrets from being saved" {
+@test "a database that can't be dumped doesn't stop the rest from being saved" {
   "$CLI" backup setup --to "$T/repo" >/dev/null 2>&1
   cat >"$T/bin/docker" <<'STUB'
 #!/usr/bin/env bash

@@ -33,8 +33,9 @@ teardown() { rm -rf "$T"; }
 }
 
 @test "options" {
+  # --no-tailscale (from older instructions) is accepted and changes nothing
   parse_args --with-display --from-source --no-tailscale --dest "$T/apps" -y
-  [ "$WITH_DISPLAY" = 1 ] && [ "$FROM_SOURCE" = 1 ] && [ "$WITH_TAILSCALE" = 0 ] && [ "$ASSUME_YES" = 1 ]
+  [ "$WITH_DISPLAY" = 1 ] && [ "$FROM_SOURCE" = 1 ] && [ "$ASSUME_YES" = 1 ]
   [ "$(app_dest)" = "$T/apps" ]
   run parse_args --bogus
   [ "$status" -ne 0 ]
@@ -50,7 +51,7 @@ teardown() { rm -rf "$T"; }
 
 @test "refuses to run anywhere but macOS" {
   [[ "$(uname -s)" == Darwin ]] && skip "running on macOS"
-  run env VERCELIFY_SOURCE_ONLY=0 bash "$BATS_TEST_DIRNAME/../../install-mac.sh" --no-tailscale
+  run env VERCELIFY_SOURCE_ONLY=0 bash "$BATS_TEST_DIRNAME/../../install-mac.sh"
   [ "$status" -ne 0 ]
   [[ "$output" == *"this installer is for macOS"* ]]
 }

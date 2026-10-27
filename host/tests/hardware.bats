@@ -1,5 +1,5 @@
 #!/usr/bin/env bats
-# Hardware profiles, Pi hardening decisions, registry trust and the staged
+# Hardware profiles, Pi hardening decisions, the registry commands and the staged
 # update with rollback.
 
 setup() {
@@ -93,15 +93,11 @@ mem() { printf 'MemTotal: %d kB\n' "$(( $1 * 1024 ))" >"$MEMINFO_FILE"; }
   [ "$(jq -r '."cgroup-parent" // "none"' "$DOCKER_DAEMON_JSON")" = none ]
 }
 
-@test "registry trust is merged into daemon.json once" {
+@test "the Coolify-era registry commands point at the engine's own registry" {
   . "$BATS_TEST_DIRNAME/../lib/registry.sh"
-  echo '{"insecure-registries":["other:5000"],"log-driver":"json-file"}' >"$DOCKER_DAEMON_JSON"
-  registry_trust laptop:5000 2>/dev/null
-  [ "$(jq -c '."insecure-registries"' "$DOCKER_DAEMON_JSON")" = '["laptop:5000","other:5000"]' ]
-  [ "$(jq -r '."log-driver"' "$DOCKER_DAEMON_JSON")" = json-file ]
-  grep -q 'systemctl restart docker' "$T/calls"
-  run registry_trust laptop:5000
-  [ "$status" -eq 1 ]   # unchanged: no restart
-  run registry_trust 'bad host:5000'
+  run registry_cli install
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"its own registry"* ]]
+  run registry_cli trust laptop:5000
   [ "$status" -ne 0 ]
 }

@@ -21,6 +21,7 @@ import {
   Link2,
   LayoutGrid,
   Lock,
+  Moon,
   Play,
   Plus,
   RefreshCw,
@@ -61,10 +62,13 @@ import {
   StatusText,
   Tabs,
   TextInput,
+  Toggle,
 } from "../components/ui";
 import { ago, bytes, hostOf, shortSha, type Health } from "../lib/format";
 import { usePoll } from "../lib/hooks";
-import { useLiveTopic } from "../lib/live";
+import { agent } from "../lib/api";
+import { hasCap } from "../lib/caps";
+import { useLive, useLiveTopic } from "../lib/live";
 import { useNav } from "../lib/nav";
 import { openExternal } from "../lib/open";
 import {
@@ -82,7 +86,7 @@ import {
   type RuntimeLine,
 } from "../lib/platform";
 import { useSession } from "../lib/session";
-import type { App, AppKind, BuildPack, Database, DatabaseKind, Deployment, StorageTier } from "../types";
+import type { App, AppKind, BuildPack, Database, DatabaseKind, Deployment, SleepTarget, StorageTier } from "../types";
 import { ExplainFailure } from "../components/ExplainFailure";
 import { MachineCard } from "../components/MachineCard";
 import { ProjectPanel } from "../components/ProjectPanel";
@@ -1212,6 +1216,82 @@ function PreviewsTab({
 
 // ----- settings --------------------------------------------------------------------
 
+const IDLE_OPTIONS = [15, 30, 60, 120, 240, 720];
+
+function sleepLabel(t: SleepTarget | undefined): { health: Health; label: string } {
+  if (!t) return { health: "idle", label: "not reached yet" };
+  if (t.state === "asleep") return { health: "idle", label: `asleep since ${ago(t.asleep_since)}` };
+  if (t.state === "waking") return { health: "warn", label: "waking up" };
+  return { health: "ok", label: t.last_request_at ? `awake · last visit ${ago(t.last_request_at)}` : "awake" };
+}
+
+/** Stop the app when nobody visits it; the next visit wakes it. */
+function SleepCard({ app }: { app: App }) {
+  const toast = useToast();
+  const { health } = useLive();
+  const withSleep = hasCap(health.data, "sleep");
+  const sleep = usePoll(() => (withSleep ? agent.sleep() : Promise.resolve(null)), withSleep ? 60_000 : 0, [withSleep]);
+  useLiveTopic("sleep", () => void sleep.refresh());
+  const [busy, setBusy] = useState(false);
+  if (!withSleep) return null;
+  const setting = sleep.data?.settings.find((s) => s.app_uuid === app.id);
+  const st = sleepLabel(sleep.data?.targets.find((t) => t.key === app.id));
+
+  async function save(enabled: boolean, idle = setting?.idle_minutes ?? 30, previews = setting?.previews ?? false) {
+    setBusy(true);
+    try {
+      await agent.setSleep(app.id, { enabled, idle_minutes: idle, previews });
+      await sleep.refresh();
+      toast.ok(enabled ? `${app.name} sleeps after ${idle} idle minutes` : `${app.name} stays awake`);
+    } catch (e) {
+      toast.bad((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card icon={<Moon />} title="Sleep when idle" testId="app-sleep">
+      {sleep.loading && !sleep.data ? (
+        <Loading rows={2} />
+      ) : (
+        <div className="space-y-3">
+          <Toggle
+            checked={!!setting?.enabled}
+            disabled={busy}
+            onChange={(v) => void save(v)}
+            label="Stop this app when nobody visits it"
+            hint="Gives its memory back to the server. The next visit starts it again; that visitor sees “waking up” for a second or two."
+            testId="sleep-toggle"
+          />
+          {setting?.enabled && (
+            <div className="flex flex-wrap items-end gap-4 pl-6">
+              <Field label="After">
+                <Select value={String(setting.idle_minutes)} disabled={busy} onChange={(e) => void save(true, Number(e.target.value))} data-testid="sleep-minutes">
+                  {[...new Set([...IDLE_OPTIONS, setting.idle_minutes])].sort((a, b) => a - b).map((m) => (
+                    <option key={m} value={m}>
+                      {m < 60 ? `${m} minutes` : `${m / 60} hour${m === 60 ? "" : "s"}`} without visits
+                    </option>
+                  ))}
+                </Select>
+              </Field>
+              <Toggle
+                checked={setting.previews}
+                disabled={busy}
+                onChange={(v) => void save(true, setting.idle_minutes, v)}
+                label="Pull request previews too"
+                hint="They are rarely visited after review."
+              />
+              <StatusText health={st.health} label={st.label} className="text-xs text-fg-muted" testId="sleep-state" />
+            </div>
+          )}
+          {sleep.data?.error && setting?.enabled && <Callout tone="warn">{sleep.data.error}</Callout>}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function SettingsTab({ app, client, onChanged, onDeleted }: { app: App; client: PlatformClient; onChanged: () => void; onDeleted: () => void }) {
   const { settings } = useSession();
   const { busy, act } = useAct();
@@ -1263,6 +1343,8 @@ function SettingsTab({ app, client, onChanged, onDeleted }: { app: App; client: 
           {hook && source && <WebhookModal client={client} source={source} onClose={() => setHook(false)} />}
         </Card>
       )}
+
+      <SleepCard app={app} />
 
       <Card icon={<Lock />} title="Password protection" description="Visitors need a user name and password (HTTP Basic Auth). Leave both empty to remove it.">
         <div className="flex flex-wrap items-end gap-2">

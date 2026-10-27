@@ -12,7 +12,7 @@ use vercelify_platform::docker::Docker;
 use vercelify_platform::engine::Engine;
 use vercelify_platform::gate::BuildGate;
 use vercelify_platform::logs::LogHub;
-use vercelify_platform::proxy::{ProxyConfig, TRAEFIK_IMAGE};
+use vercelify_platform::proxy::ProxyConfig;
 use vercelify_platform::reconcile::Reconciler;
 use vercelify_platform::secrets::MasterKey;
 use vercelify_platform::Store;
@@ -37,7 +37,7 @@ pub fn proxy_config(cfg: &Config) -> ProxyConfig {
         metrics_port: cfg.proxy_metrics_port,
         acme_email: cfg.acme_email.clone(),
         dns_challenge: false,
-        image: TRAEFIK_IMAGE.into(),
+        image: cfg.proxy_image.clone(),
     }
 }
 

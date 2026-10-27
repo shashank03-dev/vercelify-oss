@@ -2,11 +2,15 @@
 # vfy — Vercelify from your terminal, using the servers paired in the app.
 #
 #   vfy apps                    every app with its status and URL
-#   vfy deploy APP              deploy now (APP = name or uuid)
-#   vfy logs APP [LINES]        runtime logs
-#   vfy rollback APP COMMIT     put an earlier commit back live
+#   vfy deploy APP [--no-follow]  deploy and stream the build log (exit 1 if it fails)
+#   vfy logs APP [LINES] [-f]   the app's output; -f keeps following it
+#   vfy rollback APP COMMIT|#N  back to an earlier deployment (commit or number)
+#   vfy restart APP             restart the running app
 #   vfy env pull APP [FILE]     write the app's production variables to FILE (.env)
+#   vfy env set APP K=V…        set variables (secret; --plain, --build)
+#   vfy env push APP [FILE]     import a .env file (default .env)
 #   vfy open APP                open the app's URL
+#   vfy services [add ID [NAME]]  the service catalogue (Umami, MinIO…) / add one
 #   vfy status                  the server's health checks
 #   vfy alerts                  what the server reported lately
 #   vfy backup                  start a backup now
@@ -16,22 +20,13 @@
 #   vfy config sync APP         read APP's vercel.json from its GitHub repository now
 #   vfy config show|rm APP      its rules and where they came from / remove them
 #   vfy crons APP [run PATH]    APP's cron jobs and their last runs / run one now
-#   vfy servers                 paired servers (* = selected in the app)
-#
-# On servers running Vercelify's own engine (no Coolify) also:
-#   vfy deploy APP [--no-follow]  deploy and stream the build log (exit 1 if it fails)
-#   vfy logs APP [LINES] [-f]   the app's output; -f keeps following it
-#   vfy rollback APP COMMIT|#N  back to an earlier deployment (commit or number)
-#   vfy restart APP             restart the running app
-#   vfy env set APP K=V…        set variables (secret; --plain, --build)
-#   vfy env push APP [FILE]     import a .env file (default .env)
-#   vfy services [add ID [NAME]]  the service catalogue (Umami, MinIO…) / add one
 #   vfy why APP                 AI: why APP's last deployment failed and how to fix it
 #                               (Gemma 4 on your own server, through its Ollama)
 #   vfy why --log FILE          the same for any build log, with the Ollama on this
 #                               machine; no server needed. [--vercel-json FILE]
 #       --provider ollama|server|gemini   gemini = Gemma 4 through the Gemini API
 #                               (needs GEMINI_API_KEY)
+#   vfy servers                 paired servers (* = selected in the app)
 #
 #   -s, --server NAME           use another paired server than the selected one
 #
@@ -255,22 +250,15 @@ fi
 xcurl() { curl ${PROXY[@]+"${PROXY[@]}"} "$@"; }
 unreachable() {
   if on_mesh; then die "cannot reach $(field hostname) — is vercelify-mesh running? (vercelify-mesh status)"; fi
-  die "cannot reach $(field hostname) — is Tailscale connected?"
+  die "cannot reach $(field hostname) at $(field agent_url)"
 }
 
-# api agent|coolify METHOD PATH [JSON] — prints the body; dies with the error.
+# api agent METHOD PATH [JSON] — prints the body; dies with the error.
 api() {
-  local kind=$1 method=$2 path=$3 body=${4:-} base token out code
-  if [[ $kind == agent ]]; then
-    base=$(field agent_url); token=$(field agent_token)
-  else
-    base=$(field coolify_url); token=$(field coolify_token)
-    [[ -n "$base" && -n "$token" ]] || die "$(field hostname) is a worker without Coolify — use -s with your main server"
-    base="${base%/}/api/v1"
-  fi
+  local method=$2 path=$3 body=${4:-} out code
   local opts=(-sS -X "$method" -K - -w '\n%{http_code}' --max-time 60 -H 'Accept: application/json')
   [[ -n "$body" ]] && opts+=(-H 'Content-Type: application/json' --data "$body")
-  out=$(printf 'header = "Authorization: Bearer %s"\n' "$token" | xcurl "${opts[@]}" "${base%/}$path") || unreachable
+  out=$(printf 'header = "Authorization: Bearer %s"\n' "$(field agent_token)" | xcurl "${opts[@]}" "$(field agent_url)$path") || unreachable
   code=${out##*$'\n'}
   out=${out%$'\n'*}
   if [[ "$code" != 2* ]]; then
@@ -279,19 +267,16 @@ api() {
   printf '%s' "$out"
 }
 
-# Vercelify's own engine: a main server paired without a Coolify URL.
-is_platform() { [[ "$(field role)" == main && -z "$(field coolify_url)" ]]; }
+# Apps live on the main server: a worker only runs what it places there.
+need_main() {
+  [[ "$(field role)" != worker ]] || die "$(field hostname) is a worker — apps are on your main server: vfy -s MAIN …"
+}
 
-# APP name or uuid → uuid
+# APP name or id → id
 app_uuid() {
-  local want=${1:?which app? (name or uuid)} uuid
-  if is_platform; then
-    uuid=$(api agent GET /v1/platform/apps | jq -r --arg a "$want" '[.[] | select(.id == $a or .name == $a)][0].id // empty')
-    [[ -n "$uuid" ]] || die "no app named $want (see: vfy apps)"
-    echo "$uuid"
-    return
-  fi
-  uuid=$(api coolify GET /applications | jq -r --arg a "$want" '[.[] | select(.uuid == $a or .name == $a)][0].uuid // empty')
+  local want=${1:?which app? (name or id)} uuid
+  need_main
+  uuid=$(api agent GET /v1/platform/apps | jq -r --arg a "$want" '[.[] | select(.id == $a or .name == $a)][0].id // empty')
   [[ -n "$uuid" ]] || die "no app named $want (see: vfy apps)"
   echo "$uuid"
 }
@@ -499,63 +484,14 @@ platform_cmd() {
 
 cmd=${1:-apps}
 (( $# )) && shift
-if is_platform; then
-  case "$cmd" in
-    apps|ls|deploy|logs|rollback|restart|env|open|services|why) platform_cmd "$cmd" "$@"; exit 0 ;;
-  esac
-fi
+case "$cmd" in
+  apps|ls|deploy|logs|rollback|restart|env|open|services|why) need_main; platform_cmd "$cmd" "$@"; exit 0 ;;
+esac
 case "$cmd" in
   servers)
     jq -r '(if has("servers") then . else {servers: [.], active: .agent_url} end) as $c
       | $c.servers[] | [(if .agent_url == $c.active then "*" else " " end), .hostname, (.role // "main"), .agent_url] | @tsv' "$SETTINGS" |
       while IFS=$'\t' read -r mark name role url; do printf '%s %-20s %-7s %s\n' "$mark" "$name" "$role" "$url"; done
-    ;;
-  apps|ls)
-    api coolify GET /applications | jq -r '.[] | [.name, .status, ((.fqdn // "") | split(",")[0]), .uuid] | @tsv' |
-      while IFS=$'\t' read -r name status url uuid; do
-        printf '%s %-22s %-18s %s %s%s%s\n' "$(dot "$status")" "$name" "${status%%:*}" "$url" "$D" "$uuid" "$N"
-      done
-    ;;
-  deploy)
-    uuid=$(app_uuid "${1:-}")
-    api coolify POST "/deploy?uuid=$uuid&force=false" '{}' | jq -r '.deployments[0].message // "queued"'
-    printf '%sfollow it in the app, or: vfy logs %s%s\n' "$D" "$1" "$N"
-    ;;
-  logs)
-    uuid=$(app_uuid "${1:-}")
-    lines=${2:-200}
-    [[ "$lines" =~ ^[0-9]+$ ]] || die "LINES must be a number"
-    api coolify GET "/applications/$uuid/logs?lines=$lines" | jq -r '.logs // ""'
-    ;;
-  rollback)
-    uuid=$(app_uuid "${1:-}")
-    commit=${2:?usage: vfy rollback APP COMMIT}
-    [[ "$commit" =~ ^[0-9a-f]{4,40}$ ]] || die "COMMIT must be a commit SHA"
-    # Coolify needs the full SHA; take it from the app's finished production
-    # deployments (newest first), so a short one from `git log` works too.
-    shas=$(api coolify GET "/deployments/applications/$uuid?take=100" |
-      jq -r '[(.deployments // .)[] | select(.status == "finished" and (.pull_request_id // 0) == 0) | .commit // empty] | .[]')
-    full=$(printf '%s\n' "$shas" | grep "^$commit" | sort -u || true)
-    [[ -n "$full" ]] || die "no finished deployment of ${1} at $commit (rollback goes back to a commit that was live before)"
-    [[ $(printf '%s\n' "$full" | wc -l) -eq 1 ]] || die "$commit matches several commits — give more characters"
-    [[ "$full" != "$(printf '%s\n' "$shas" | head -1)" ]] || die "$commit is already live"
-    api coolify POST "/applications/$uuid/rollback" "$(jq -nc --arg c "$full" '{commit: $c}')" | jq -r '.message // "rolling back"'
-    ;;
-  env)
-    [[ "${1:-}" == pull ]] || die "usage: vfy env pull APP [FILE]"
-    uuid=$(app_uuid "${2:-}")
-    file=${3:-.env}
-    [[ ! -e "$file" ]] || [[ "${VFY_FORCE:-0}" == 1 ]] || die "$file exists — remove it or set VFY_FORCE=1"
-    envs=$(api coolify GET "/applications/$uuid/envs")
-    ( umask 077
-      jq -r '[.[] | select(.is_preview | not)] | sort_by(.key) | .[] | "\(.key)=\(.value // "" | @json)"' <<<"$envs" >"$file" )
-    printf '%s✓%s %s variables written to %s (mode 600)\n' "$G" "$N" "$(wc -l <"$file" | tr -d ' ')" "$file"
-    ;;
-  open)
-    uuid=$(app_uuid "${1:-}")
-    url=$(api coolify GET "/applications/$uuid" | jq -r '(.fqdn // "") | split(",")[0]')
-    [[ -n "$url" ]] || die "that app has no URL yet"
-    if have open; then open "$url"; elif have xdg-open; then xdg-open "$url"; else echo "$url"; fi
     ;;
   status|doctor)
     printf '%s%s%s\n' "$B" "$(field hostname)" "$N"
@@ -639,7 +575,7 @@ case "$cmd" in
       rm|remove)
         uuid=$(app_uuid "${1:-}")
         api agent DELETE "/v1/projects/$uuid" >/dev/null
-        printf '%s✓%s %s is served as Coolify configures it\n' "$G" "$N" "$1"
+        printf '%s✓%s %s is served without project rules\n' "$G" "$N" "$1"
         ;;
       *) die "usage: vfy config check [DIR] | push APP [DIR] | sync APP | show APP | rm APP" ;;
     esac
@@ -658,20 +594,6 @@ case "$cmd" in
           printf '%s %-24s %-14s %s  %snext %s%s\n' "$(dot "$st")" "$path" "$sched" "$last" "$D" "$next" "$N"
         done
     fi
-    ;;
-  why)
-    uuid=$(app_uuid "${1:-}")
-    dep=$(api coolify GET "/deployments/applications/$uuid?take=20" |
-      jq -c '[(.deployments // .)[] | select(.status == "failed")][0] // empty')
-    [[ -n "$dep" ]] || { printf '%s✓%s no failed deployments of %s lately\n' "$G" "$N" "$1"; exit 0; }
-    duuid=$(jq -r '.deployment_uuid' <<<"$dep")
-    log=$(api coolify GET "/deployments/$duuid" | jq -r '(.logs // "[]") | fromjson? // [] | .[]
-      | select(.hidden | not) | (if .type == "stderr" then "[stderr] " else "" end) + .output')
-    [[ -n "$log" ]] || die "that deployment has no build log"
-    head=$(jq -r --arg app "$1" '"App: \($app)\nCommit: \((.commit // "")[:7]) \"\((.commit_message // "") | split("\n")[0])\""' <<<"$dep")
-    printf '%s%s failed at %s (%s)%s\n' "$B" "$1" "$(jq -r '(.commit // "")[:7]' <<<"$dep")" "$(jq -r '.created_at // ""' <<<"$dep")" "$N" >&2
-    msgs=$(why_messages "$log" "$WHY_VJ" "$head")
-    why_answer "$msgs"
     ;;
   *) usage >&2; exit 2 ;;
 esac

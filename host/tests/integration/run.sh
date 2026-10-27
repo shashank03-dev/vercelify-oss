@@ -4,14 +4,16 @@
 #   sudo host/tests/integration/run.sh
 #
 # Runs the real host/setup-host.sh (no dry run): packages, kernel tuning, an
-# ext4 "HDD" on a loop device mounted at /mnt/storage, Docker, Tailscale
-# (not logged in), Coolify, agent, power guard, firewall and CLI, then checks
-# the result with `vercelify doctor`-style assertions.
+# ext4 "HDD" on a loop device mounted at /mnt/storage, Docker, the agent with
+# Vercelify's engine and its proxy, the mesh (this server coordinates it),
+# power guard, firewall and CLI, then checks the result with `vercelify
+# doctor`-style assertions and deploys an app.
 #
 # Env: EXTRA_CA (PEM bundle to trust inside, for TLS-intercepting proxies),
 #      REGISTRY_MIRROR (e.g. https://mirror.gcr.io), KEEP=1 (leave it running),
-#      AGENT_BINARY (prebuilt x86_64 musl agent; otherwise the installer
-#      downloads a release or builds from source).
+#      AGENT_BINARY / MESH_BINARY (prebuilt x86_64 musl vercelify-agent and
+#      vercelify-mesh; otherwise the installer downloads a release or builds
+#      from source).
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
@@ -43,6 +45,12 @@ if [[ -n "${AGENT_BINARY:-}" ]]; then
   args+=(-v "$AGENT_BINARY":/opt/vercelify-agent-prebuilt:ro)
   agent_env='VERCELIFY_AGENT_BINARY=/opt/vercelify-agent-prebuilt'
 fi
+if [[ -n "${MESH_BINARY:-}" ]]; then
+  args+=(-v "$MESH_BINARY":/opt/vercelify-mesh-prebuilt:ro)
+  agent_env+=' VERCELIFY_MESH_BINARY=/opt/vercelify-mesh-prebuilt'
+fi
+# The mesh's WireGuard interface.
+[[ -e /dev/net/tun ]] && args+=(--device /dev/net/tun)
 docker run -d --name "$name" "${args[@]}" "$img" >/dev/null
 
 x() { docker exec "$name" bash -o pipefail -c "$*"; }
@@ -53,18 +61,7 @@ if [[ -n "${REGISTRY_MIRROR:-}" ]]; then
   x "mkdir -p /etc/docker && printf '{\"registry-mirrors\":[\"%s\"]}\n' '$REGISTRY_MIRROR' > /etc/docker/daemon.json"
 fi
 
-# Test-harness-only workaround for kernels without IPv6 (Coolify's nginx
-# listens on [::]). Real hosts have IPv6; the installer warns otherwise.
-if [[ ! -e /proc/net/if_inet6 ]]; then
-  docker exec -i "$name" bash -c 'cat > /usr/local/bin/it-ipv6-workaround' <<'SH'
-#!/bin/sh
-until docker exec coolify true 2>/dev/null; do sleep 2; done
-docker exec -u root coolify sh -c 'for f in /etc/nginx/site-opts.d/*.conf* /etc/nginx/sites-available/*; do sed -i "/listen \[::\]/d" "$f"; done'
-SH
-  x 'chmod +x /usr/local/bin/it-ipv6-workaround && (nohup /usr/local/bin/it-ipv6-workaround >/dev/null 2>&1 &)'
-fi
-
-echo "==> running the installer (this pulls Docker, Tailscale and Coolify; several minutes)"
+echo "==> running the installer (this pulls Docker and the proxy; several minutes)"
 start=$SECONDS
 x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-host --storage-device $loop" 2>&1 | tee /tmp/vercelify-it.log | grep -E '^==>|✓|!|✗' || true
 echo "    installer finished in $((SECONDS - start))s"
@@ -73,15 +70,10 @@ fail=0
 check() { if x "$2" >/dev/null 2>&1; then echo "  ✓ $1"; else echo "  ✗ $1"; fail=1; fi; }
 echo "==> assertions"
 check "storage mounted at /mnt/storage by UUID with nofail" 'findmnt -no SOURCE /mnt/storage && grep -E "^UUID=.* /mnt/storage ext4 .*nofail" /etc/fstab'
-check "volume + backup layout on the HDD" 'test -d /mnt/storage/volumes && test -d /mnt/storage/backups/coolify'
+check "volume + backup layout on the HDD" 'test -d /mnt/storage/volumes && test -d /mnt/storage/backups'
 check "swappiness 10" '[[ $(sysctl -n vm.swappiness) == 10 ]]'
 check "lid switch ignored" 'grep -q HandleLidSwitch=ignore /etc/systemd/logind.conf.d/90-vercelify.conf'
 check "docker running with log rotation" 'docker info >/dev/null && jq -e ".\"log-opts\".\"max-size\"==\"10m\"" /etc/docker/daemon.json'
-check "tailscaled running" 'systemctl is-active --quiet tailscaled'
-check "Coolify healthy" '[[ $(curl -fsS http://127.0.0.1:8000/api/health) == OK ]]'
-check "Coolify SSH user is root" '[[ $(docker exec coolify-db psql -U coolify -d coolify -tAc "select \"user\" from servers where id=0") == root ]]'
-check "Coolify API token works" 'curl -fsS -H "Authorization: Bearer $(cat /etc/vercelify/coolify.token)" http://127.0.0.1:8000/api/v1/version'
-check "preview URL template default" 'docker exec coolify-db psql -U coolify -d coolify -c "\d applications" | grep -F "pr-{{pr_id}}-{{domain}}"'
 check "agent healthy on localhost" 'curl -fsS http://127.0.0.1:7420/v1/health'
 check "agent rejects missing token" '[[ $(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:7420/v1/system) == 401 ]]'
 check "agent sees the HDD tier" 'curl -fsS -H "Authorization: Bearer $(cat /etc/vercelify/agent.token)" http://127.0.0.1:7420/v1/system | jq -e "any(.disks[]; .role==\"storage\")"'
@@ -89,6 +81,18 @@ check "power guard running and writing state" 'systemctl is-active --quiet verce
 check "firewall chains installed" 'iptables -n -L VERCELIFY-FWD && iptables -n -L VERCELIFY-IN'
 check "vercelify CLI works" 'vercelify status && vercelify pair | grep -q "^vfy1\."'
 check "summary written 0600" '[[ $(stat -c %a /etc/vercelify/summary.txt) == 600 ]]'
+T='-H "Authorization: Bearer $(cat /etc/vercelify/agent.token)"'
+check "the agent runs Vercelify's engine" "curl -fsS $T http://127.0.0.1:7420/v1/health | jq -e '.capabilities | index(\"platform\")'"
+check "no Coolify, no Tailscale" '! docker inspect coolify >/dev/null 2>&1 && ! command -v tailscale'
+check "the mesh: this server coordinates it as 10.77.0.1" 'systemctl is-active --quiet vercelify-mesh && ip -4 addr show vfy0 | grep -q "inet 10.77.0.1/"'
+check "the agent listens on the mesh" 'curl -fsS http://10.77.0.1:7420/v1/health'
+check "apps get <name>.10.77.0.1.sslip.io" "curl -fsS $T http://127.0.0.1:7420/v1/platform/settings/domain | jq -e '.wildcard == \"10.77.0.1.sslip.io\"'"
+check "an invite for a worker" 'vercelify mesh invite | grep -q "mesh join vfyj1\..* --platform"'
+echo "==> deploying an app"
+x "curl -fsS $T -H 'Content-Type: application/json' -d '{\"name\":\"it-web\",\"kind\":\"image\",\"source\":{\"image\":\"traefik/whoami:v1.11\"},\"runtime\":{\"port\":80,\"health_timeout_secs\":90,\"drain_secs\":5}}' http://127.0.0.1:7420/v1/platform/apps >/dev/null" || fail=1
+x "curl -fsS $T -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:7420/v1/platform/apps/it-web/deploy >/dev/null" || fail=1
+for _ in $(seq 60); do x "curl -fsS -H 'Host: it-web.10.77.0.1.sslip.io' http://127.0.0.1/ | grep -q Hostname" && break; sleep 3; done
+check "the proxy serves it at it-web.10.77.0.1.sslip.io" "curl -fsS -H 'Host: it-web.10.77.0.1.sslip.io' http://127.0.0.1/ | grep -q Hostname"
 
 echo "==> re-running the installer (must be idempotent)"
 if x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-host --storage-device $loop" >/tmp/vercelify-it-2.log 2>&1; then

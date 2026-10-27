@@ -64,9 +64,17 @@ result() { jq -r .result "$T/state/maintenance.json"; }
 
 @test "never during a build, a backup, on battery, or right after boot" {
   touch "$REBOOT_REQUIRED_FILE"
-  echo 'ghcr.io/coollabsio/coolify-helper:1.0.8' >"$T/images"
+  # the engine reports a build in progress
+  echo token >"$T/etc/agent.token"
+  printf '#!/usr/bin/env bash\ncat "$T/apps"; printf "\\n200"\n' >"$T/bin/curl"; chmod +x "$T/bin/curl"
+  echo '[{"name":"shop","last_status":"healthy"},{"name":"blog","last_status":"building"}]' >"$T/apps"
   run "$CLI" maintenance run
   [ "$(result)" = skipped ]; jq -r .detail "$T/state/maintenance.json" | grep -q 'deployment is building'
+  echo '[{"name":"shop","last_status":"healthy"}]' >"$T/apps"
+  # a server still on Coolify
+  echo 'ghcr.io/coollabsio/coolify-helper:1.0.8' >"$T/images"
+  run "$CLI" maintenance run
+  jq -r .detail "$T/state/maintenance.json" | grep -q 'deployment is building'
   rm "$T/images"
   ACTIVE_UNITS=vercelify-backup run "$CLI" maintenance run
   jq -r .detail "$T/state/maintenance.json" | grep -q 'backup is running'

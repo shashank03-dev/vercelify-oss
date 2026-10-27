@@ -43,7 +43,7 @@ state() { jq -r "$1" "$T/state.json"; }
   [ "$(cf_tunnel_token acc456 "$id1")" = "eyJ-token-for-$id1" ]
 }
 
-@test "ingress routes wildcard + apex to Traefik with a catch-all" {
+@test "ingress routes wildcard + apex to the proxy with a catch-all" {
   id=$(cf_ensure_tunnel acc456 t1)
   cf_configure_ingress acc456 "$id" example.com
   [ "$(state ".configs[\"$id\"].ingress[0].hostname")" = "*.example.com" ]
@@ -90,30 +90,18 @@ state() { jq -r "$1" "$T/state.json"; }
   [ "$(state '.dns[] | select(.type == "MX") | .content')" = mail.example.com ]
 }
 
-@test "routes: apps on pooled servers get their own tunnel route, before the wildcard" {
-  out=$(printf 'https://shop.example.com,http://www.shop.example.com|100.64.0.7\nhttps://other.org|100.64.0.8\n|100.64.0.9\nhttp://pr-3-shop.example.com|100.64.0.7\nhttps://evil.example.com|1.2.3.4;rm\n' |
-    routes_from_rows example.com)
-  [ "$(jq length <<<"$out")" -eq 3 ]
-  [ "$(jq -r '.[] | select(.hostname == "shop.example.com") | .service' <<<"$out")" = "http://100.64.0.7:80" ]
-  [ "$(jq -r '[.[].hostname] | sort | join(" ")' <<<"$out")" = "pr-3-shop.example.com shop.example.com www.shop.example.com" ]
-  id=$(cf_ensure_tunnel acc456 t1)
-  cf_configure_ingress acc456 "$id" example.com "$out"
-  [ "$(state ".configs[\"$id\"].ingress[0].service")" = "http://100.64.0.7:80" ]
-  [ "$(state ".configs[\"$id\"].ingress[3].hostname")" = "*.example.com" ]
-  [ "$(state ".configs[\"$id\"].ingress[5].service")" = "http_status:404" ]
-}
-
-@test "routes: sync only talks to Cloudflare when the routes changed" {
+@test "routes: sync reapplies the routes from the stored token" {
   id=$(cf_ensure_tunnel acc456 t1)
   export VERCELIFY_ETC="$T/etc" VERCELIFY_STATE="$T/state"
   mkdir -p "$T/etc"
+  run routes_sync
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"nothing to update"* ]]
   printf 'CF_API_TOKEN=test-cf-token\nCF_ACCOUNT=acc456\nCF_TUNNEL=%s\nCF_DOMAIN=example.com\n' "$id" >"$T/etc/cloudflare.env"
-  worker_app_rows() { echo 'https://shop.example.com|100.64.0.7'; }
   run routes_sync
   [ "$status" -eq 0 ]
-  [[ "$output" == *"1 app hostname(s)"* ]]
-  [ "$(state ".configs[\"$id\"].ingress[0].hostname")" = shop.example.com ]
-  run routes_sync
-  [ "$status" -eq 0 ]
-  [ -z "$output" ]   # unchanged: no API call, no output
+  [[ "$output" == *"*.example.com and example.com"* ]]
+  # every app, on whichever server, goes through this server's proxy
+  [ "$(state ".configs[\"$id\"].ingress[0].hostname")" = "*.example.com" ]
+  [ "$(state ".configs[\"$id\"].ingress | length")" -eq 3 ]
 }

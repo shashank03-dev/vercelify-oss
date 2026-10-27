@@ -68,19 +68,19 @@ export function Network() {
           <div aria-hidden className="dot-grid absolute inset-0 [mask-image:radial-gradient(ellipse_at_center,#000,transparent_75%)]" />
           <div className="relative flex flex-col items-stretch lg:flex-row lg:items-center">
             <Node icon={<Laptop className="size-5" />} title="Your Mac" lines={["Vercelify app", "vfy command line"]} />
-            <Link label="Tailscale" note="private, encrypted" delay="0s" />
+            <Link label="vercelify-mesh" note="private, encrypted" delay="0s" />
             <Node
               hot
               icon={<Mark className="h-5" />}
               title="Your old laptop"
-              lines={["Vercelify agent · Coolify", "Traefik · your apps · databases"]}
+              lines={["Vercelify agent and engine", "Traefik · your apps · databases"]}
             />
             <Link label="Cloudflare Tunnel" note="optional, for a domain" delay="1.2s" />
             <Node icon={<Globe className="size-5" />} title="Visitors" lines={["https://you.dev", "cached at Cloudflare's edge"]} />
           </div>
           <p className="relative mx-auto mt-8 max-w-[640px] sm:mt-12 text-center text-[14.5px] leading-relaxed text-fg-muted">
-            The control panel is reachable only on your Tailscale network, never from the public internet. No ports are
-            opened on your router.
+            The control panel is reachable only on Vercelify's own WireGuard network, never from the public internet. No
+            ports are opened on your router, and there is no account to sign up for.
           </p>
         </div>
       </Reveal>

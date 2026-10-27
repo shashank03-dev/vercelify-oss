@@ -25,14 +25,7 @@ const MAX_CRONS: usize = 40;
 
 /// Keys Vercel knows that a container platform handles another way.
 const ELSEWHERE: &[(&str, &str)] = &[
-    (
-        "buildCommand",
-        "set the build command in Coolify (Nixpacks usually detects it)",
-    ),
-    ("installCommand", "set the install command in Coolify"),
     ("devCommand", "only used by `vercel dev`"),
-    ("outputDirectory", "set the publish directory in Coolify (static sites)"),
-    ("framework", "Nixpacks detects the framework"),
     (
         "functions",
         "your app runs as one container, with no per-function memory or duration limits",
@@ -56,6 +49,9 @@ const ELSEWHERE: &[(&str, &str)] = &[
     ("fluid", "your app runs as one container"),
 ];
 const IGNORED_QUIETLY: &[&str] = &["$schema", "version", "name", "scope", "alias"];
+
+/// Read by the build, not by the proxy (`vercelify_platform::detect`).
+const BUILD_KEYS: &[&str] = &["buildCommand", "installCommand", "outputDirectory", "framework"];
 
 /// A compiled `source` pattern.
 #[derive(Debug, Clone, PartialEq)]
@@ -916,7 +912,7 @@ fn firewall(v: &Value, warnings: &mut Vec<String>) -> Firewall {
 
 /// An origin on this machine or a private network (an IP literal, `localhost`,
 /// a Docker container name, `.internal`/`.local`): proxying to it would put
-/// something meant to stay private (Ollama, Coolify, a database) on the
+/// something meant to stay private (Ollama, the agent, a database) on the
 /// app's public domain.
 pub fn private_origin(origin: &str) -> bool {
     let rest = origin.split("://").nth(1).unwrap_or(origin);
@@ -993,7 +989,7 @@ pub fn plan(root: &Map<String, Value>) -> Plan {
         } else if key == "routes" {
             w.push("legacy `routes` aren't supported; use redirects, rewrites and headers".into());
         } else if key == "builds" {
-            w.push("`builds` is not used here: Coolify builds the whole app".into());
+            w.push("`builds` is not used here: the whole app is built as one container".into());
         } else if ![
             "redirects",
             "rewrites",
@@ -1005,6 +1001,7 @@ pub fn plan(root: &Map<String, Value>) -> Plan {
         ]
         .contains(&key.as_str())
             && !IGNORED_QUIETLY.contains(&key.as_str())
+            && !BUILD_KEYS.contains(&key.as_str())
         {
             w.push(format!("`{key}` is not supported and was ignored"));
         }
@@ -1296,7 +1293,8 @@ mod tests {
         assert!(w.contains("redirects[3]") && w.contains("look-ahead"), "{w}");
         assert!(w.contains("query in `/posts/:slug?from=blog` is dropped"), "{w}");
         assert!(w.contains("crons[1]"), "{w}");
-        assert!(w.contains("`buildCommand` is not used here"), "{w}");
+        // the build reads it (detect.rs): no warning
+        assert!(!w.contains("buildCommand"), "{w}");
         assert!(w.contains("`functions` is not used here"), "{w}");
         assert!(!w.contains("$schema"), "{w}");
     }

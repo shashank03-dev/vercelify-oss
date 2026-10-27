@@ -63,7 +63,7 @@ def render(t):
         text(x + 24, y + 52, title, 17, "fg", 650)
 
     add(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" role="img" '
-        f'aria-label="Vercelify architecture: the Mac app talks to the old laptop over Tailscale; the laptop runs the Vercelify agent, Coolify, Docker, Traefik and Ollama.">')
+        f'aria-label="Vercelify architecture: the Mac app talks to the old laptop over Vercelify’s own WireGuard network; the laptop runs the Vercelify agent with its engine, Docker, Traefik and Ollama.">')
     add("<title>Vercelify architecture</title>")
     add("<defs>" + "".join(
         f'<marker id="a-{c}" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">'
@@ -84,12 +84,12 @@ def render(t):
     box(64, 402, 252, 64, "Ollama", "AI for vfy why --log", tag="optional", dashed=True)
     box(64, 486, 252, 64, "Gemini API", "Hosted Gemma 4", tag="optional", dashed=True)
 
-    # Middle: the Tailscale tunnel.
+    # Middle: Vercelify's own network (vercelify-mesh).
     rect(352, 150, 136, 466, "band", "line", r=16, dashed=True)
-    text(420, 186, "Tailscale", 14, "fg", 650, anchor="middle")
-    text(420, 204, "private network", 11.5, "muted", anchor="middle")
+    text(420, 186, "vercelify-mesh", 14, "fg", 650, anchor="middle")
+    text(420, 204, "WireGuard network", 11.5, "muted", anchor="middle")
     text(420, 244, "agent API", 11.5, "accent", 600, anchor="middle")
-    text(432, 326, "Coolify API", 11.5, "muted", 600, anchor="middle")
+    text(432, 326, "engine API", 11.5, "muted", 600, anchor="middle")
     text(420, 566, "encrypted", 11.5, "muted", anchor="middle")
     text(420, 582, "no open ports", 11.5, "muted", anchor="middle")
     add(f'<circle cx="420" cy="544" r="5" fill="{t["green"]}"/>')
@@ -99,10 +99,10 @@ def render(t):
     card(500, 150, 660, 466, "OLD LAPTOP", "Main server · Ubuntu")
     arrow(316, 251, 520, 251, "accent")
     add(f'<path d="M316 282H372V335H520" fill="none" stroke="{t["strong"]}" stroke-width="1.6" marker-end="url(#a-strong)"/>')
-    box(524, 222, 612, 58, "Vercelify agent", "Health, disks, pairing, auto-deploy and AI requests", p=":7420", accent=True)
+    box(524, 222, 612, 58, "Vercelify agent", "Health, disks, pairing, the network's coordinator and AI requests", p=":7420", accent=True)
     arrow(674, 280, 674, 304)
     arrow(986, 280, 986, 304)
-    box(524, 306, 300, 58, "Coolify", "Builds and deploys your apps", p=":8000")
+    box(524, 306, 300, 58, "Engine", "Builds, deploys, previews, databases", p="in the agent")
     box(836, 306, 300, 58, "Ollama", "Gemma 4 runs here, locally", p=":11434", tag="optional")
     arrow(674, 364, 674, 388)
 

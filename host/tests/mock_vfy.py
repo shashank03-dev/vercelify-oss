@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Tiny Coolify + agent API mock for `vfy` (the Mac CLI) tests.
+"""Tiny agent API mock for `vfy` (the Mac CLI) tests: status, sleep, project
+rules, crons and the AI providers. The engine's own API is in mock_platform.py.
 
-Usage: mock_coolify.py PORT_FILE LOG_FILE
+Usage: mock_vfy.py PORT_FILE LOG_FILE
 """
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 APPS = [
-    {"uuid": "a1", "name": "blog", "status": "running:healthy", "fqdn": "https://blog.example.com"},
-    {"uuid": "a2", "name": "api", "status": "exited:unhealthy", "fqdn": None},
+    {"id": "a1", "name": "blog", "url": "https://blog.example.com"},
+    {"id": "a2", "name": "api", "url": None},
 ]
 
 
@@ -25,13 +26,7 @@ PROJECT = {
 }
 
 
-# A failed build (d2) and what a model answers about it, as Ollama streams it.
-FAILED_LOG = json.dumps([
-    {"output": "npm run build", "type": "stdout", "hidden": False, "timestamp": "t"},
-    {"output": "Module not found: Can't resolve '../components/Header'", "type": "stderr", "hidden": False, "timestamp": "t"},
-    {"output": "internal helper noise", "type": "stdout", "hidden": True, "timestamp": "t"},
-    {"output": "Deployment failed.", "type": "stdout", "hidden": False, "timestamp": "t"},
-])
+# What a model answers about a failed build, as Ollama streams it.
 ANSWER = ["**Cause:** ", "the import uses `Header` but the file is `header.tsx`.\n", "**Fix:** rename it.\n", "**Check:** `npm run build`"]
 
 FLAKED = []
@@ -115,6 +110,8 @@ class H(BaseHTTPRequestHandler):
         if p.startswith("/v1/"):
             if auth != "Bearer agent-secret":
                 return self.reply(401, {"error": "missing or invalid agent token"})
+            if p == "/v1/platform/apps":
+                return self.reply(200, APPS)
             if p == "/v1/llm":
                 return self.reply(200, {"installed": True, "ready": True, "models": [
                     {"name": "nomic-embed-text:latest"}, {"name": "llama3.2:3b"}, {"name": "gemma4:e2b"}]})
@@ -144,34 +141,7 @@ class H(BaseHTTPRequestHandler):
                     return self.reply(404, {"error": "no cron job for that path"})
                 return self.reply(200, {"id": "j9", "kind": "cron", "title": "Run /api/cron", "status": "running"})
             return self.reply(404, {"error": "not found"})
-        if auth != "Bearer coolify-secret":
-            return self.reply(401, {"message": "Unauthenticated."})
-        if p == "/api/v1/applications":
-            return self.reply(200, APPS)
-        if p == "/api/v1/applications/a1":
-            return self.reply(200, APPS[0])
-        if p.startswith("/api/v1/deploy?uuid=a1"):
-            return self.reply(200, {"deployments": [{"message": "Deployment request queued.", "deployment_uuid": "d1"}]})
-        if p == "/api/v1/applications/a1/envs":
-            return self.reply(200, [
-                {"key": "DATABASE_URL", "value": "postgres://u:p@db/x", "is_preview": False},
-                {"key": "QUOTE", "value": 'say "hi"', "is_preview": False},
-                {"key": "DATABASE_URL", "value": "postgres://preview", "is_preview": True},
-            ])
-        if p.startswith("/api/v1/deployments/applications/a1"):
-            # As Coolify 4.4: newest first; only full SHAs.
-            return self.reply(200, {"count": 4, "deployments": [
-                {"deployment_uuid": "d4", "status": "finished", "pull_request_id": 0, "commit": "9f8e7d6c5b4a39281706f5e4d3c2b1a098765432"},
-                {"deployment_uuid": "d3", "status": "finished", "pull_request_id": 7, "commit": "4b1dffff00000000000000000000000000000000"},
-                {"deployment_uuid": "d2", "status": "failed", "pull_request_id": 0, "commit": "4b1d0000aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                 "commit_message": "Add header\n\nlong body", "created_at": "2026-10-23T08:00:00Z"},
-                {"deployment_uuid": "d1", "status": "finished", "pull_request_id": 0, "commit": "4b1d2e7a9c0b1d2e3f4a5b6c7d8e9f0a1b2c3d4e"},
-            ]})
-        if p == "/api/v1/deployments/d2":
-            return self.reply(200, {"deployment_uuid": "d2", "status": "failed", "logs": FAILED_LOG})
-        if p == "/api/v1/applications/a1/rollback":
-            return self.reply(200, {"message": "Rollback queued."})
-        return self.reply(404, {"message": "Not found."})
+        return self.reply(404, {"error": "not found"})
 
     def do_GET(self):
         self.any("GET")

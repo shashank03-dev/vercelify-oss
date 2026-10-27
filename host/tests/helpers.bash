@@ -30,7 +30,7 @@ echo "POWEROFF" >>"$CALLS"
 STUB
   chmod +x "$SANDBOX/bin/"*
   export DOCKER="$SANDBOX/bin/docker"
-  printf 'aaa app-web node:22\nbbb coolify coollabsio/coolify\nccc postgres-xyz postgres:16-alpine\nddd coolify-db postgres:15\n' >"$SANDBOX/containers"
+  printf 'aaa app-web node:22\nbbb vercelify-proxy traefik:v3.1\nccc postgres-xyz postgres:16-alpine\nddd vfy-registry registry:2\n' >"$SANDBOX/containers"
 }
 
 teardown_sandbox() { rm -rf "$SANDBOX"; }

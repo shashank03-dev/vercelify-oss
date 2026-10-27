@@ -2,12 +2,12 @@
 # vercelify power-guard — keeps a laptop-hosted PaaS safe.
 #
 #   * AC unplugged and battery <= BATTERY_SHUTDOWN_PCT (2 readings in a row):
-#     stop app containers, then the Coolify core, sync, power off. Containers
+#     stop app containers, then the core (proxy, registry), sync, power off. Containers
 #     stopped this way are remembered and started again on the next boot.
 #   * CPU >= THERMAL_PAUSE_C: pause build containers and the AI model server,
 #     and cap app containers' CPU so they keep serving, more slowly.
 #   * CPU >= THERMAL_FREEZE_C: also freeze app containers. Databases and the
-#     Coolify core are never frozen (other services wait on their locks).
+#     core (proxy, registry) are never frozen (other services wait on them).
 #     Everything is undone once the CPU is at or below THERMAL_RESUME_C.
 #   * CPU >= THERMAL_SHUTDOWN_C for 3 readings: graceful shutdown.
 #
@@ -35,10 +35,11 @@ LOCAL_CONFIG_FILE=${POWER_GUARD_LOCAL_CONFIG:-/var/lib/vercelify/power-guard.loc
 : "${INTERVAL:=20}"
 : "${CONTAINER_STOP_TIMEOUT:=60}"
 : "${CHARGE_STOP_THRESHOLD:=}"
-: "${PROTECTED_CONTAINERS:=coolify coolify-db coolify-redis coolify-realtime coolify-proxy coolify-sentinel}"
+# The core: never frozen, stopped last (and Coolify's on a server not migrated yet).
+: "${PROTECTED_CONTAINERS:=vercelify-proxy vfy-registry coolify coolify-db coolify-redis coolify-realtime coolify-proxy coolify-sentinel}"
 # Images that hold data: never frozen while hot.
 : "${DATA_IMAGE_PATTERN:=postgres|postgis|mysql|mariadb|mongo|redis|valkey|keydb|dragonfly|clickhouse|minio}"
-# Build containers (Coolify's helper image) and the local AI server.
+# Build containers (BuildKit; Coolify's helper image) and the local AI server.
 : "${BUILD_IMAGE_PATTERN:=coolify-helper|buildx_buildkit_vercelify|moby/buildkit|vercelify-ollama|ollama/ollama}"
 : "${SHUTDOWN_CMD:=systemctl poweroff}"
 : "${POWER_SUPPLY_DIR:=/sys/class/power_supply}"
@@ -175,7 +176,7 @@ graceful_shutdown() {
     "$DOCKER" stop -t "$CONTAINER_STOP_TIMEOUT" "${apps[@]}" >/dev/null 2>&1 || true
   fi
   if (( ${#core[@]} )); then
-    log "stopping ${#core[@]} Coolify core container(s)"
+    log "stopping ${#core[@]} core container(s)"
     "$DOCKER" stop -t "$CONTAINER_STOP_TIMEOUT" "${core[@]}" >/dev/null 2>&1 || true
   fi
   sync
