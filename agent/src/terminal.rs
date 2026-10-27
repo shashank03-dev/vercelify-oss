@@ -257,13 +257,13 @@ fn pump(s: Arc<Session>, master: OwnedFd) {
 
 fn open_pty(cols: u16, rows: u16) -> std::io::Result<(OwnedFd, OwnedFd)> {
     let (mut m, mut sl) = (0, 0);
-    let ws = libc::winsize {
+    let mut ws = libc::winsize {
         ws_row: rows,
         ws_col: cols,
         ws_xpixel: 0,
         ws_ypixel: 0,
     };
-    if unsafe { libc::openpty(&mut m, &mut sl, std::ptr::null_mut(), std::ptr::null(), &ws) } != 0 {
+    if unsafe { libc::openpty(&mut m, &mut sl, std::ptr::null_mut(), std::ptr::null_mut(), &raw mut ws) } != 0 {
         return Err(std::io::Error::last_os_error());
     }
     let (m, sl) = unsafe { (OwnedFd::from_raw_fd(m), OwnedFd::from_raw_fd(sl)) };
@@ -428,5 +428,21 @@ mod tests {
         assert!(a.last().unwrap().contains("exec bash -l"));
         let a = exec_argv("docker", "c", Some(&["psql".into(), "-U".into(), "app".into()]));
         assert_eq!(&a[5..], ["c", "psql", "-U", "app"]);
+    }
+
+    #[test]
+    fn pty_starts_with_requested_size() {
+        let (_master, slave) = open_pty(90, 20).unwrap();
+        let mut size = libc::winsize {
+            ws_row: 0,
+            ws_col: 0,
+            ws_xpixel: 0,
+            ws_ypixel: 0,
+        };
+        assert_eq!(
+            unsafe { libc::ioctl(slave.as_raw_fd(), libc::TIOCGWINSZ as _, &mut size) },
+            0
+        );
+        assert_eq!((size.ws_col, size.ws_row), (90, 20));
     }
 }
