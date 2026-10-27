@@ -5,7 +5,7 @@
 //! a connection. Command: exits 0 inside the container. Two passes in a row
 //! are needed, so an app that answers once and then crashes isn't promoted.
 
-use crate::docker::Docker;
+use crate::docker::{Docker, Inspect};
 use crate::{Error, Result};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -67,7 +67,34 @@ pub struct Wait<'a> {
     pub interval: Duration,
 }
 
-/// Wait until healthy twice in a row. Fails early when the container exits.
+/// Restarts that mean a crash loop rather than one bad start: Docker restarts
+/// a crashed container after 100 ms, then doubles the wait, so an app that
+/// exits as it starts gets here within a few seconds.
+const CRASH_LOOP_RESTARTS: u64 = 3;
+
+/// Why a new container will never be healthy, if it already shows: it
+/// exited, or its restart policy keeps starting it again (Docker then still
+/// reports it as running).
+fn gave_up(i: &Inspect) -> Option<String> {
+    let why = if i.oom_killed {
+        " (out of memory: raise the app's memory limit)"
+    } else {
+        ""
+    };
+    if !i.running {
+        Some(format!("the app exited with code {}{why}", i.exit_code))
+    } else if i.restart_count >= CRASH_LOOP_RESTARTS {
+        Some(format!(
+            "the app keeps exiting (code {}, restarted {} times){why}",
+            i.exit_code, i.restart_count
+        ))
+    } else {
+        None
+    }
+}
+
+/// Wait until healthy twice in a row. Fails early when the container exits
+/// or crash-loops.
 pub async fn wait_healthy(w: Wait<'_>, log: &mut (dyn FnMut(&str) + Send)) -> Result<()> {
     let deadline = Instant::now() + w.timeout;
     let mut passes = 0;
@@ -77,13 +104,8 @@ pub async fn wait_healthy(w: Wait<'_>, log: &mut (dyn FnMut(&str) + Send)) -> Re
         let Some(i) = w.docker.inspect(w.container).await? else {
             return Err(Error::Invalid("the new container disappeared".into()));
         };
-        if !i.running {
-            let why = if i.oom_killed {
-                " (out of memory: raise the app's memory limit)".to_string()
-            } else {
-                String::new()
-            };
-            return Err(Error::Invalid(format!("the app exited with code {}{why}", i.exit_code)));
+        if let Some(why) = gave_up(&i) {
+            return Err(Error::Invalid(why));
         }
         let ip = i.ips.get(w.network).cloned().unwrap_or_default();
         let ok = if ip.is_empty() {
@@ -143,6 +165,30 @@ pub async fn wait_healthy(w: Wait<'_>, log: &mut (dyn FnMut(&str) + Send)) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_crash_loop_is_given_up_on_without_waiting_for_the_timeout() {
+        let i = |running, restart_count, oom_killed| Inspect {
+            running,
+            paused: false,
+            status: if running { "running" } else { "exited" }.into(),
+            exit_code: 1,
+            restart_count,
+            started_at: String::new(),
+            ips: Default::default(),
+            oom_killed,
+        };
+        assert_eq!(gave_up(&i(true, 0, false)), None);
+        // One bad start (a database still starting) gets another chance.
+        assert_eq!(gave_up(&i(true, 2, false)), None);
+        // Docker reports a container between restarts as running.
+        assert_eq!(
+            gave_up(&i(true, 3, false)).unwrap(),
+            "the app keeps exiting (code 1, restarted 3 times)"
+        );
+        assert_eq!(gave_up(&i(false, 0, false)).unwrap(), "the app exited with code 1");
+        assert!(gave_up(&i(true, 5, true)).unwrap().contains("out of memory"));
+    }
     use tokio::net::TcpListener;
 
     async fn server(status: &'static str) -> u16 {
