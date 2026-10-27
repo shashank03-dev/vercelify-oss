@@ -1112,30 +1112,28 @@ function DomainsTab({ app, client, onChanged }: { app: App; client: PlatformClie
             })}
           </div>
         )}
-        <div className="flex items-end gap-2 border-t border-line p-4">
+        <form
+          className="flex items-end gap-2 border-t border-line p-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!hostOk || busy) return;
+            void act("add", () => client.addDomain(app.id, { host: host.trim().toLowerCase(), https: setting.data?.https ?? true }), `Added ${host.trim()}`).then((ok) => {
+              if (ok) {
+                setHost("");
+                onChanged();
+              }
+            });
+          }}
+        >
           <div className="flex-1">
             <Field label="Add a domain" hint={setting.data?.wildcard ? `Apps also get <name>.${setting.data.wildcard} automatically.` : undefined}>
               <TextInput value={host} onChange={(e) => setHost(e.target.value)} placeholder="www.example.com" spellCheck={false} data-testid="domain-input" />
             </Field>
           </div>
-          <Button
-            variant="primary"
-            icon={<Plus />}
-            disabled={!hostOk}
-            busy={busy === "add"}
-            data-testid="domain-add"
-            onClick={() =>
-              void act("add", () => client.addDomain(app.id, { host: host.trim().toLowerCase(), https: setting.data?.https ?? true }), `Added ${host.trim()}`).then((ok) => {
-                if (ok) {
-                  setHost("");
-                  onChanged();
-                }
-              })
-            }
-          >
+          <Button type="submit" variant="primary" icon={<Plus />} disabled={!hostOk} busy={busy === "add"} data-testid="domain-add">
             Add
           </Button>
-        </div>
+        </form>
       </Card>
     </div>
   );

@@ -368,6 +368,10 @@ test("platform engine: deploy with a live log, roll back, variables, domains, da
   await page.getByTestId("domain-input").fill("notes.example.com");
   await page.getByTestId("domain-add").click();
   await expect(page.getByTestId("domain-notes.example.com")).toContainText("HTTPS", { timeout: 15_000 });
+  // Enter adds one too
+  await page.getByTestId("domain-input").fill("www.notes.example.com");
+  await page.getByTestId("domain-input").press("Enter");
+  await expect(page.getByTestId("domain-www.notes.example.com")).toBeVisible();
 
   // a deploy hook is shown once
   await page.getByTestId("tab-settings").click();
