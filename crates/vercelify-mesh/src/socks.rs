@@ -223,7 +223,7 @@ impl std::str::FromStr for Forward {
         }
         if target
             .rsplit_once(':')
-            .and_then(|(_, p)| p.parse::<u16>().ok())
+            .and_then(|(host, p)| (!host.is_empty()).then(|| p.parse::<u16>().ok()).flatten())
             .is_none()
         {
             return Err(format!("`{target}`: expected HOST:PORT"));
@@ -415,6 +415,13 @@ mod tests {
         assert!("0.0.0.0:80=main.vfy:80".parse::<Forward>().is_err(), "loopback only");
         assert!("127.0.0.1:80".parse::<Forward>().is_err());
         assert!("127.0.0.1:80=main.vfy".parse::<Forward>().is_err());
+    }
+
+    #[test]
+    fn forwards_file_rejects_empty_target_host() {
+        let (valid, invalid) = parse_forwards("127.0.0.1:17420=:7420\n127.0.0.1:17421=main.vfy:7420\n");
+        assert_eq!(valid.len(), 1);
+        assert_eq!(invalid.len(), 1);
     }
 
     #[test]
