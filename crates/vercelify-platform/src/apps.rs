@@ -649,6 +649,24 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn app_creation_rejects_injection_payloads_without_writing_rows() {
+        let s = Store::open_in_memory().unwrap();
+        for name in [
+            "app;touch /tmp/pwned",
+            "app$(id)",
+            "app`id`",
+            "app' OR 1=1 --",
+            "app.example.com`)",
+            "app\ntraefik.enable=true",
+            "../app",
+        ] {
+            assert!(s.tx(|c| create(c, &git_app(name))).is_err(), "accepted {name:?}");
+        }
+        assert!(s.with(|c| list(c, None)).unwrap().is_empty());
+        assert!(s.tx(|c| create(c, &git_app("valid-app"))).is_ok());
+    }
+
+    #[test]
     fn last_status_is_the_newest_production_deployment() {
         use crate::deployments::{self, NewDeployment};
         use vercelify_core::platform::{DeploymentStatus, DeploymentTrigger};
