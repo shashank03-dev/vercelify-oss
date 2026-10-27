@@ -373,6 +373,7 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
   const sources = usePoll(() => (open ? client.gitSources() : Promise.resolve([])), 0, [open, client]);
   const [ghApp, setGhApp] = useState(false);
   const [gitSource, setGitSource] = useState("");
+  const toast = useToast();
 
   useEffect(() => {
     if (!open) return;
@@ -423,6 +424,8 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
           : undefined,
         domains: [],
       });
+      // The agent only creates the app: its first deployment is asked here.
+      await client.deploy(a.id).catch((e: Error) => toast.bad(`Created ${a.name}, but its deployment didn't start: ${e.message}`));
       setRepo("");
       setImage("");
       setNamed(false);

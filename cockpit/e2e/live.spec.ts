@@ -102,8 +102,7 @@ test("apps: create from an image, live log, served by the proxy, redeploy, roll 
   await page.getByTestId("new-port").fill("80");
   await page.getByTestId("create-app").click();
   await expect(page.getByTestId("app-detail")).toContainText("e2e-whoami");
-  // an image app deploys when asked (a Git app's first build starts by itself)
-  await page.getByTestId("deploy-now").click();
+  // "Create and deploy" starts the first deployment
   await expect(page.getByTestId("deployment-1")).toContainText("Live", { timeout: 150_000 });
   await expect(page.getByTestId("deploy-log")).toContainText("healthy: http://e2e-whoami.e2e.localhost");
   await shot(page, "02-deployed");

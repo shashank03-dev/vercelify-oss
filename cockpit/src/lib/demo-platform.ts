@@ -800,7 +800,7 @@ function createApp(r: AppCreate): App {
   deployments.set(a.id, []);
   if (a.kind === "git") watches.set(a.id, { app_id: a.id, enabled: true, last_head: "", last_checked_at: null, last_error: "", skipped: 0, last_skip: "" });
   changed("apps");
-  enqueue(a, "manual");
+  // Like the agent: creating deploys nothing (the cockpit asks for it).
   return clone(a);
 }
 
@@ -991,6 +991,8 @@ function runtimeRoute(seg: string[], m: string, body: Record<string, unknown>, p
       domains: [],
     });
     env.set(a.id, [envVar("POSTGRES_PASSWORD", "", true), envVar("APP_SECRET", "", true)]);
+    // Like the agent: a service deploys as it is created.
+    enqueue(apps.find((x) => x.id === a.id)!, "manual");
     return a;
   }
   if (seg[0] === "volumes") {
