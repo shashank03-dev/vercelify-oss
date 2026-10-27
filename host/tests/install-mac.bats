@@ -109,3 +109,27 @@ teardown() { rm -rf "$T"; }
   [ "$WITH_MESH" = 0 ] && [ "$MESH_SYSTEM" = 1 ]
   [ "$(mesh_home)" = "/Library/Application Support/Vercelify" ]
 }
+
+@test "a new signature clears the stale Screen Recording entry, the same one keeps it" {
+  mkdir -p "$T/bin" "$T/new.app" "$T/dest"
+  # codesign reports the requirement written in the bundle; tccutil logs.
+  printf '#!/bin/sh\nfor a; do last=$a; done\n[ -f "$last/req" ] && echo "designated => $(cat "$last/req")"\nexit 0\n' >"$T/bin/codesign"
+  printf '#!/bin/sh\necho "tccutil $*" >>"%s/calls"\n' "$T" >"$T/bin/tccutil"
+  printf '#!/bin/sh\nexit 1\n' >"$T/bin/pgrep"
+  chmod +x "$T/bin/"*
+  PATH="$T/bin:$PATH"
+  echo 'identifier "dev.vercelify.cockpit" and certificate leaf = H"aa"' >"$T/new.app/req"
+  # First install: nothing to clear.
+  run install_bundle "$T/new.app" "$T/dest"
+  [ "$status" -eq 0 ]
+  [ ! -f "$T/calls" ]
+  # Same signature again: the permission stays.
+  run install_bundle "$T/new.app" "$T/dest"
+  [ ! -f "$T/calls" ]
+  # A new one (an ad hoc build, a new certificate): cleared.
+  echo 'cdhash H"bb"' >"$T/new.app/req"
+  run install_bundle "$T/new.app" "$T/dest"
+  [ "$status" -eq 0 ]
+  grep -qx 'tccutil reset ScreenCapture dev.vercelify.cockpit' "$T/calls"
+  [[ "$output" == *"Screen Recording will be asked for once more"* ]]
+}

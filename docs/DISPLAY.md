@@ -15,7 +15,10 @@ The cockpit's **Screencast** tab starts and stops both ends for you.
 
 - **Mac:** `brew install ffmpeg`. The first stream triggers macOS's Screen
   Recording prompt for Vercelify; allow it in System Settings → Privacy &
-  Security → Screen Recording, then restart the cockpit.
+  Security → Screen Recording, then restart the cockpit. Updates keep the
+  permission. If the prompt still comes back with Vercelify switched on (apps
+  from before 0.2.4), run `tccutil reset ScreenCapture dev.vercelify.cockpit`,
+  restart the app and allow it once more.
 - **Host:** the installer installs `mpv` (skip with `--no-display`).
 - **A real extended desktop:** macOS only lets ffmpeg capture screens that
   exist. Create a virtual display with [BetterDisplay](https://github.com/waydabber/BetterDisplay)

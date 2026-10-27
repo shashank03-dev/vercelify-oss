@@ -137,6 +137,39 @@ jobs:
             **Host:** `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash`
             **Mac:** download the `.dmg` below (or `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install-mac.sh | bash`). If this release isn't signed: right-click → Open the first time.
           releaseDraft: false
+      # Without a Developer ID the linker's signature is all the app has, and
+      # macOS can't keep Screen Recording allowed for it. MACOS_SELF_SIGNED_P12
+      # (base64 .p12 of a self-signed code-signing certificate, password in
+      # MACOS_SELF_SIGNED_PASSWORD) keeps the permission across updates.
+      - name: Seal the macOS app
+        if: runner.os == 'macOS' && env.HAS_APPLE_SIGNING != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PATHS: ${{ steps.tauri.outputs.artifactPaths }}
+          SIGN_P12: ${{ secrets.MACOS_SELF_SIGNED_P12 }}
+          SIGN_PASSWORD: ${{ secrets.MACOS_SELF_SIGNED_PASSWORD }}
+        run: |
+          if [ -n "$SIGN_P12" ]; then
+            kc="$RUNNER_TEMP/sign.keychain-db" pw=$(uuidgen)
+            security create-keychain -p "$pw" "$kc"
+            security set-keychain-settings "$kc"
+            security unlock-keychain -p "$pw" "$kc"
+            base64 --decode <<<"$SIGN_P12" >"$RUNNER_TEMP/sign.p12"
+            security import "$RUNNER_TEMP/sign.p12" -k "$kc" -P "$SIGN_PASSWORD" -T /usr/bin/codesign >/dev/null
+            rm -f "$RUNNER_TEMP/sign.p12"
+            security set-key-partition-list -S apple-tool:,apple: -k "$pw" "$kc" >/dev/null
+            MAC_SIGN_IDENTITY=$(security find-identity -p codesigning "$kc" | awk '$1 ~ /\)$/ {print $2; exit}')
+            [ -n "$MAC_SIGN_IDENTITY" ] || { echo "::error::no code-signing identity in MACOS_SELF_SIGNED_P12"; exit 1; }
+            export MAC_SIGN_IDENTITY MAC_SIGN_KEYCHAIN="$kc"
+          else
+            echo "::warning::MACOS_SELF_SIGNED_P12 is not set: signing ad hoc, so Screen Recording must be allowed again after each update"
+          fi
+          dmg=$(jq -r '.[]' <<<"$PATHS" | grep '\.dmg$' | head -1)
+          app=$(find "$(dirname "$dmg")/../macos" -maxdepth 1 -name '*.app' | head -1)
+          tgz_name=$(gh release view "${{ github.ref_name }}" --json assets -q '.assets[].name' | grep '\.app\.tar\.gz$' | head -1 || true)
+          tgz=${tgz_name:+$RUNNER_TEMP/$tgz_name}
+          .github/scripts/seal-macos-app.sh "$app" "$dmg" "$tgz"
+          gh release upload "${{ github.ref_name }}" "$dmg" ${tgz:+"$tgz"} --clobber
       # install-mac.sh refuses a disk image without its checksum.
       - name: Checksums for the disk images
         if: runner.os == 'macOS'

@@ -6,6 +6,16 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.4] - 2026-10-27
+
+### Fixed
+
+- The Mac app kept asking for Screen Recording although it was switched on: it carried
+  only the linker's signature, which macOS can't hold the permission for. Releases are
+  now signed with a stable (self-signed) certificate under the app's own id, so the
+  permission sticks and survives updates; source builds are signed too, and
+  `install-mac.sh` clears the stale entry when the app's signature changes.
+
 ## [0.2.3] - 2026-10-27
 
 ### Added

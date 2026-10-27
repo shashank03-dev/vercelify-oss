@@ -184,6 +184,11 @@ secrets: `APPLE_CERTIFICATE` (a *Developer ID Application* certificate exported
 as `.p12`, base64 on one line: `base64 -i cert.p12 | tr -d '\n'`),
 `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY` (e.g. `Developer ID
 Application: Your Name (TEAMID)`), `APPLE_ID`, `APPLE_PASSWORD` (an
-app-specific password) and `APPLE_TEAM_ID`. Without them the build is unsigned:
-right-click → Open the first time (`install-mac.sh` clears the quarantine flag
-itself).
+app-specific password) and `APPLE_TEAM_ID`. Without them the app isn't
+notarised: right-click → Open the first time (`install-mac.sh` clears the
+quarantine flag itself). It is still signed (`.github/scripts/seal-macos-app.sh`)
+with the self-signed certificate in `MACOS_SELF_SIGNED_P12` (base64 `.p12`,
+password in `MACOS_SELF_SIGNED_PASSWORD`), so macOS keeps Screen Recording
+allowed across updates; without that secret it is signed ad hoc and the
+permission must be given again after each update. Keep using the same
+certificate: a new one means everyone allows Screen Recording once more.

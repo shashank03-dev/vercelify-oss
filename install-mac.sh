@@ -22,6 +22,7 @@ set -euo pipefail
 REPO=${VERCELIFY_REPO:-shashank03-dev/vercelify-oss}
 GITHUB_API=${VERCELIFY_GITHUB_API:-https://api.github.com}
 APP_NAME=Vercelify
+BUNDLE_ID=dev.vercelify.cockpit
 
 WITH_DISPLAY=0
 FROM_SOURCE=0
@@ -123,8 +124,9 @@ quit_running_app() {
 
 # install_bundle PATH_TO_APP DEST_DIR
 install_bundle() {
-  local src=$1 dest=$2
+  local src=$1 dest=$2 before after
   mkdir -p "$dest"
+  before=$(designated_requirement "$dest/$APP_NAME.app")
   quit_running_app
   rm -rf "$dest/$APP_NAME.app.new"
   ditto "$src" "$dest/$APP_NAME.app.new"
@@ -132,7 +134,20 @@ install_bundle() {
   mv "$dest/$APP_NAME.app.new" "$dest/$APP_NAME.app"
   # Downloaded unsigned builds are quarantined by Gatekeeper; we just verified where it came from.
   xattr -dr com.apple.quarantine "$dest/$APP_NAME.app" 2>/dev/null || true
+  # macOS ties Screen Recording to the app's signature: under a new one the old
+  # entry still shows as allowed but no longer applies. Clear it so the next
+  # stream asks once, cleanly.
+  after=$(designated_requirement "$dest/$APP_NAME.app")
+  if [[ -n "$before" && "$before" != "$after" ]] && tccutil reset ScreenCapture "$BUNDLE_ID" >/dev/null 2>&1; then
+    info "the app's signature changed: Screen Recording will be asked for once more"
+  fi
   ok "installed $dest/$APP_NAME.app"
+}
+
+# How macOS recognises an installed app (its designated requirement); empty when absent.
+designated_requirement() {
+  [[ -d "$1" ]] || return 0
+  codesign --display --requirements - "$1" 2>&1 | sed -n 's/^.*designated => //p' || true
 }
 
 install_from_release() {
@@ -179,6 +194,8 @@ install_from_source() {
   # Cargo workspace builds land in the root target/; older layouts used src-tauri/target/.
   app=$(find "$src/target/release/bundle/macos" "$src/cockpit/src-tauri/target/release/bundle/macos" -maxdepth 1 -name '*.app' 2>/dev/null | head -1 || true)
   [[ -n "$app" ]] || die "the build finished but no app bundle was produced"
+  # Seal the bundle under its own id; the linker's signature alone can't hold Screen Recording.
+  codesign --force --timestamp=none --sign - --identifier "$BUNDLE_ID" "$app" >/dev/null 2>&1 || warn "couldn't sign the app: Screen Recording may not stick"
   install_bundle "$app" "$dest"
 }
 
