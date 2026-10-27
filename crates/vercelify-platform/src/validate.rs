@@ -164,7 +164,10 @@ pub fn mount_path(p: &str) -> Result<()> {
         && !matches!(
             p.trim_end_matches('/'),
             "/proc" | "/sys" | "/dev" | "/etc" | "/usr" | "/bin" | "/lib"
-        );
+        )
+        // The kernel's own trees: runc refuses a mount inside /proc at deploy
+        // time, and sysfs is no place for app data.
+        && !["/proc/", "/sys/"].iter().any(|t| p.starts_with(t));
     if ok {
         Ok(())
     } else {
@@ -253,7 +256,8 @@ mod tests {
         assert!(repo_path("dockerfile", "../etc/passwd").is_err());
         assert!(repo_path("context", "/abs").is_err());
         mount_path("/data").unwrap();
-        for bad in ["data", "/", "/etc", "/a:/b", "/x/../etc"] {
+        mount_path("/etc/nginx/conf.d").unwrap();
+        for bad in ["data", "/", "/etc", "/a:/b", "/x/../etc", "/proc/x", "/sys/fs/cgroup"] {
             assert!(mount_path(bad).is_err(), "{bad}");
         }
     }
