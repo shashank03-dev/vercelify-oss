@@ -384,7 +384,7 @@ impl Docker {
                 quick(),
             )
             .await?;
-        Ok(format!("{}{}", o.stdout, o.stderr))
+        Ok(by_time(&o.stdout, &o.stderr))
     }
 
     pub async fn exec(&self, name: &str, cmd: &[String], timeout: Duration) -> Result<proc::Output> {
@@ -469,9 +469,33 @@ pub fn parse_ps(stdout: &str) -> Vec<ContainerState> {
         .collect()
 }
 
+/// `docker logs --timestamps` output, its two streams merged into one in
+/// time order (a crash's error then follows the lines before it).
+fn by_time(stdout: &str, stderr: &str) -> String {
+    let mut lines: Vec<&str> = stdout.lines().chain(stderr.lines()).collect();
+    lines.sort_by_key(|l| l.split_once(' ').map_or(*l, |(t, _)| t));
+    let mut out = lines.join("\n");
+    if !out.is_empty() {
+        out.push('\n');
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn logs_from_both_streams_are_in_time_order() {
+        let out = "2026-10-27T11:07:38.4Z > node server.js\n2026-10-27T11:08:38.5Z > node server.js\n";
+        let err = "2026-10-27T11:07:38.5Z SyntaxError\n2026-10-27T11:08:38.6Z SyntaxError\n";
+        assert_eq!(
+            by_time(out, err),
+            "2026-10-27T11:07:38.4Z > node server.js\n2026-10-27T11:07:38.5Z SyntaxError\n\
+             2026-10-27T11:08:38.5Z > node server.js\n2026-10-27T11:08:38.6Z SyntaxError\n"
+        );
+        assert_eq!(by_time("", ""), "");
+    }
 
     #[test]
     fn pull_retries_only_what_may_pass() {
