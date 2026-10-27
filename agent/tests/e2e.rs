@@ -327,6 +327,17 @@ fn protected_routes_reject_missing_wrong_and_revoked_tokens() {
 }
 
 #[test]
+fn oversized_json_is_rejected_without_creating_an_app() {
+    let a = start_with(&[("VERCELIFY_ENGINE", "platform".into())]);
+    let body = json!({"name": "large", "kind": "git", "source": {"repository": "x".repeat(2 * 1024 * 1024 + 1)}});
+    let (status, _, _) = req(&a, "POST", "/v1/platform/apps", Some(TOKEN), Some(body));
+    assert_eq!(status, 413);
+    let (status, apps) = get(&a, "/v1/platform/apps");
+    assert_eq!(status, 200);
+    assert!(apps.as_array().unwrap().is_empty());
+}
+
+#[test]
 fn agent_end_to_end() {
     let a = start();
 
