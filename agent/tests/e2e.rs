@@ -118,6 +118,7 @@ fn start_with(extra_env: &[(&str, String)]) -> Agent {
 }
 
 /// Whether process `pid` itself has a socket listening on TCP `port`.
+#[cfg(target_os = "linux")]
 fn listens_on(pid: u32, port: u16) -> bool {
     let Ok(fds) = std::fs::read_dir(format!("/proc/{pid}/fd")) else {
         return false;
@@ -138,6 +139,23 @@ fn listens_on(pid: u32, port: u16) -> bool {
             f.len() > 9 && f[1].ends_with(&want) && f[3] == "0A" && inodes.iter().any(|i| i == f[9])
         })
     })
+}
+
+#[cfg(target_os = "macos")]
+fn listens_on(pid: u32, port: u16) -> bool {
+    Command::new("lsof")
+        .args([
+            "-nP",
+            "-a",
+            "-p",
+            &pid.to_string(),
+            &format!("-iTCP:{port}"),
+            "-sTCP:LISTEN",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .is_ok_and(|status| status.success())
 }
 
 /// The agent binary with the test environment (also used for CLI subcommands).
