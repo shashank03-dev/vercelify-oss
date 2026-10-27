@@ -962,6 +962,8 @@ pub struct GitWatchStatus {
     pub last_error: String,
     pub skipped: u32,
     pub last_skip: String,
+    /// Why a new commit waits though nothing is wrong (empty: it doesn't).
+    pub waiting: String,
 }
 
 /// A deploy hook URL (`POST /v1/hooks/deploy/<secret>`); shown once.

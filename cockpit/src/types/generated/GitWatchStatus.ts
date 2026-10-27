@@ -3,4 +3,8 @@
 /**
  * Auto-deploy state of an app (its branch head as last seen).
  */
-export type GitWatchStatus = { app_id: string, enabled: boolean, last_head: string, last_checked_at: string | null, last_error: string, skipped: number, last_skip: string, };
+export type GitWatchStatus = { app_id: string, enabled: boolean, last_head: string, last_checked_at: string | null, last_error: string, skipped: number, last_skip: string, 
+/**
+ * Why a new commit waits though nothing is wrong (empty: it doesn't).
+ */
+waiting: string, };

@@ -21,6 +21,7 @@ pub fn get(c: &Connection, app_id: &str) -> Result<GitWatchStatus> {
             last_error: r.get("last_error")?,
             skipped: r.get("skipped")?,
             last_skip: r.get("last_skip")?,
+            waiting: r.get("waiting")?,
         })
     })?)
 }
@@ -38,10 +39,20 @@ pub fn set_enabled(c: &Connection, app_id: &str, enabled: bool) -> Result<GitWat
 pub fn checked(c: &Connection, app_id: &str, head: Option<&str>, error: Option<&str>) -> Result<()> {
     ensure(c, app_id)?;
     c.execute(
-        "UPDATE git_watch SET last_checked_at = ?2, last_error = ?3,
+        "UPDATE git_watch SET last_checked_at = ?2, last_error = ?3, waiting = '',
            last_head = CASE WHEN ?4 IS NULL THEN last_head ELSE ?4 END
          WHERE app_id = ?1",
         params![app_id, now(), error.unwrap_or(""), head],
+    )?;
+    Ok(())
+}
+
+/// A check found a new commit that must wait, and why (not an error).
+pub fn held(c: &Connection, app_id: &str, why: &str) -> Result<()> {
+    ensure(c, app_id)?;
+    c.execute(
+        "UPDATE git_watch SET last_checked_at = ?2, last_error = '', waiting = ?3 WHERE app_id = ?1",
+        params![app_id, now(), why],
     )?;
     Ok(())
 }
@@ -92,6 +103,16 @@ mod tests {
             (w.last_head.as_str(), w.last_error.as_str()),
             ("abc1234", "network down")
         );
+        // A held commit is no error, and the next check clears it.
+        s.with(|c| held(c, &a.id, "new commit waiting: the power guard says hot"))
+            .unwrap();
+        let w = s.with(|c| get(c, &a.id)).unwrap();
+        assert_eq!(
+            (w.last_error.as_str(), w.waiting.as_str(), w.last_head.as_str()),
+            ("", "new commit waiting: the power guard says hot", "abc1234")
+        );
+        s.with(|c| checked(c, &a.id, Some("def5678"), None)).unwrap();
+        assert_eq!(s.with(|c| get(c, &a.id)).unwrap().waiting, "");
         s.with(|c| skipped(c, &a.id, "[skip ci]")).unwrap();
         assert_eq!(s.with(|c| get(c, &a.id)).unwrap().skipped, 1);
         assert!(!s.with(|c| set_enabled(c, &a.id, false)).unwrap().enabled);

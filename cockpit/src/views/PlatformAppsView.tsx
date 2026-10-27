@@ -1328,10 +1328,15 @@ function SettingsTab({ app, client, onChanged, onDeleted }: { app: App; client: 
           }
         >
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-fg-muted">
-            <StatusText health={git.data?.enabled ? (git.data.last_error ? "warn" : "ok") : "idle"} label={git.data?.enabled ? "Watching" : "Off"} testId="autodeploy-state" />
+            <StatusText
+              health={git.data?.enabled ? (git.data.last_error ? "warn" : git.data.waiting ? "idle" : "ok") : "idle"}
+              label={git.data?.enabled ? (git.data.waiting ? "Waiting" : "Watching") : "Off"}
+              testId="autodeploy-state"
+            />
             {git.data?.last_head && <span className="font-mono">head {shortSha(git.data.last_head)}</span>}
             {git.data?.last_checked_at && <span>checked {ago(git.data.last_checked_at)}</span>}
             {git.data?.last_error && <span className="text-warn">{git.data.last_error}</span>}
+            {git.data?.waiting && <span data-testid="autodeploy-waiting">{git.data.waiting}</span>}
             <Button size="sm" variant="ghost" icon={<RefreshCw />} busy={busy === "check"} onClick={() => void act("check", () => client.checkGit(app.id), "Checked").then(() => void git.refresh())}>
               Check now
             </Button>

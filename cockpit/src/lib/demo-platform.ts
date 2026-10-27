@@ -251,7 +251,7 @@ const tasks = new Map<string, ScheduledTask[]>([
 const watches = new Map<string, GitWatchStatus>();
 for (const a of apps) {
   if (a.kind === "git") {
-    watches.set(a.id, { app_id: a.id, enabled: true, last_head: sha(5 + a.name.length), last_checked_at: iso(1), last_error: "", skipped: 0, last_skip: "" });
+    watches.set(a.id, { app_id: a.id, enabled: true, last_head: sha(5 + a.name.length), last_checked_at: iso(1), last_error: "", skipped: 0, last_skip: "", waiting: "" });
   }
 }
 const volumes = new Map<string, AppVolume[]>([
@@ -702,7 +702,7 @@ export function platformRoute(req: HttpRequest): unknown {
         return clone(previews.get(app.id) ?? []);
       }
       case "git": {
-        const w = watches.get(app.id) ?? { app_id: app.id, enabled: false, last_head: "", last_checked_at: null, last_error: "", skipped: 0, last_skip: "" };
+        const w = watches.get(app.id) ?? { app_id: app.id, enabled: false, last_head: "", last_checked_at: null, last_error: "", skipped: 0, last_skip: "", waiting: "" };
         if (m === "PUT") w.enabled = !!body.enabled;
         if (seg[3] === "check") w.last_checked_at = isoNow();
         watches.set(app.id, w);
@@ -798,7 +798,7 @@ function createApp(r: AppCreate): App {
   for (const host of r.domains) a.domains.push(domain(host, false));
   apps.push(a);
   deployments.set(a.id, []);
-  if (a.kind === "git") watches.set(a.id, { app_id: a.id, enabled: true, last_head: "", last_checked_at: null, last_error: "", skipped: 0, last_skip: "" });
+  if (a.kind === "git") watches.set(a.id, { app_id: a.id, enabled: true, last_head: "", last_checked_at: null, last_error: "", skipped: 0, last_skip: "", waiting: "" });
   changed("apps");
   // Like the agent: creating deploys nothing (the cockpit asks for it).
   return clone(a);

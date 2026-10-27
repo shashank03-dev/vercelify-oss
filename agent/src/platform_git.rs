@@ -97,6 +97,11 @@ impl PlatformGit {
         let _ = self.engine.store.with(|c| git_watch::checked(c, &app.id, head, error));
     }
 
+    /// A new commit that waits: last_head stays, so it deploys once `why` clears.
+    fn hold(&self, app: &App, why: &str) {
+        let _ = self.engine.store.with(|c| git_watch::held(c, &app.id, why));
+    }
+
     /// Check one app now: deploy a new head, sync previews.
     pub async fn check(&self, app: &App) -> Result<GitWatchStatus, String> {
         let w = self
@@ -161,21 +166,14 @@ impl PlatformGit {
             return self.status(app);
         }
         if migrating {
-            // Leave last_head alone: it deploys once the move is finished.
-            self.record(
+            self.hold(
                 app,
-                None,
-                Some("new commit waiting: the move from Coolify isn't finished (vercelify migrate --finish)"),
+                "new commit waiting: the move from Coolify isn't finished (vercelify migrate --finish)",
             );
             return self.status(app);
         }
         if let Some(state) = self.engine.gate.held() {
-            // Leave last_head alone: it deploys once the guard clears.
-            self.record(
-                app,
-                None,
-                Some(&format!("new commit waiting: the power guard says {state}")),
-            );
+            self.hold(app, &format!("new commit waiting: the power guard says {state}"));
             return self.status(app);
         }
         if let Some(slug) = &slug {
