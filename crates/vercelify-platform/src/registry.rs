@@ -334,6 +334,9 @@ mod tests {
             }
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
+        // Tests run concurrently, so another Docker test may not have pulled
+        // this image yet. The registry test must prepare its own fixture.
+        d.pull("alpine:3.20").await.unwrap();
         let r = d
             .run(
                 &proc::args(&["tag", "alpine:3.20", "vfy/regtest:one"]),
