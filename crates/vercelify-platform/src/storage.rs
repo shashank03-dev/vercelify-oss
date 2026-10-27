@@ -189,4 +189,29 @@ mod tests {
         assert!(copy_or_init_volume(&from, &to).await.is_err());
         assert!(!to.exists());
     }
+
+    /// The case behind `4d6ae09`: Docker's volume directories are root's, so
+    /// a lookup can fail with "permission denied", which `Path::is_dir`
+    /// reported like a missing source (an empty volume moved).
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn unreadable_volume_source_must_not_be_treated_as_empty() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let locked = temp.path().join("docker-volumes");
+        let from = locked.join("app_data").join("_data");
+        let to = temp.path().join("volume-destination");
+        std::fs::create_dir_all(&from).unwrap();
+        std::fs::write(from.join("upload.txt"), b"must not discard").unwrap();
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+        let denied = matches!(std::fs::metadata(&from), Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied);
+        let result = copy_or_init_volume(&from, &to).await;
+        std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+        if !denied {
+            eprintln!("skipped: permissions don't apply to this user (root)");
+            return;
+        }
+        assert!(result.is_err(), "an unreadable source was moved as empty");
+        assert!(!to.exists());
+    }
 }
