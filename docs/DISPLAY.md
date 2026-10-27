@@ -78,23 +78,23 @@ then `sudo systemctl restart vercelify-agent`.
 
 ## Linux desktop on the Mac (Moonlight + Sunshine)
 
-Sunshine needs a graphical session on the host (it captures it). On a
-headless Debian minimal install, use the second-monitor mode above instead.
-
-Install Sunshine on the host (Debian 12 example; pick the package matching
-your distro from the [releases](https://github.com/LizardByte/Sunshine/releases)):
+Sunshine streams the logged-in desktop, so the host needs one (Ubuntu Desktop and the
+like). The installer asks *Set up remote desktop?* when it finds a desktop; later, or
+to turn it on yourself:
 
 ```bash
-cd /tmp
-curl -fLO https://github.com/LizardByte/Sunshine/releases/latest/download/sunshine-debian-bookworm-amd64.deb
-sudo apt install -y ./sunshine-debian-bookworm-amd64.deb
+sudo vercelify desktop on       # install Sunshine and start it on the desktop
+sudo vercelify desktop          # status
+sudo vercelify desktop off      # stop starting it (Sunshine stays installed)
 ```
 
-Then start it as your desktop user, either from the application menu or by following
-[Sunshine's Linux setup guide](https://docs.lizardbyte.dev/projects/sunshine/latest/md_docs_2getting__started.html),
-which also covers autostart and the `uinput` permissions it needs for mouse
-and keyboard input. If you run it as a systemd unit named `sunshine`, the
-cockpit shows its status and can restart it.
+`desktop on` downloads Sunshine's package for your distribution (Ubuntu 22.04/24.04/26.04,
+Debian 13, and Ubuntu-based ones like Linux Mint) from its GitHub release, checks it
+against the SHA-256 GitHub records for the file, and installs it with apt, which sets
+up its screen-capture permission and the input-device rules. Sunshine then runs as
+upstream intends, as the desktop user's own service, started at every graphical login.
+The agent shows its status in the cockpit and can restart it. On a headless server,
+use the second-monitor mode above instead.
 
 Then press **Launch Moonlight** in the cockpit. When the Mac's `vercelify-mesh` runs in
 app mode (the default), the app first forwards Sunshine's ports (TCP 47984, 47989,

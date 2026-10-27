@@ -216,13 +216,14 @@ what happens next:
 **1. It checks the machine.** Operating system, memory, disk space and internet. If
 something is missing, it tells you what to fix.
 
-**2. It asks three questions.** Press <kbd>Enter</kbd> to accept the default for any.
+**2. It asks three questions** (four on a machine with a desktop). Press <kbd>Enter</kbd> to accept the default for any.
 
 | Question | What to answer |
 | --- | --- |
 | *Set up local AI models too?* | `n` for now. You can add AI later in one command (see [Step 5](#step-5-optional-turn-on-ai-on-the-server)). |
 | *Your domain* | Leave it blank. Your apps will still work privately; you can add a domain any time. |
 | *Reach this server from anywhere?* | `y` (the default) to connect your Mac and other machines from any network, not just this Wi-Fi. Your router forwards Vercelify's two network ports by itself (UPnP or NAT-PMP); when it can't (or behind CGNAT) a free Cloudflare quick tunnel is used instead, with no account. Only the encrypted private network answers there. Change it later with `sudo vercelify remote on` / `off`. |
+| *Set up remote desktop?* (only on a machine with a desktop) | `y` to see and use this laptop's desktop from your Mac: it installs Sunshine, and the app's **Screencast → Launch Moonlight** connects to it. Later: `sudo vercelify desktop on`. See the [display guide](docs/DISPLAY.md). |
 
 **3. It installs everything.** You'll see one line per step. The important ones:
 

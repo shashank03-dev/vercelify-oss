@@ -2214,3 +2214,33 @@ fn github_app_and_webhooks() {
         std::thread::sleep(Duration::from_millis(100));
     }
 }
+
+/// Sunshine runs as the desktop user's own unit (`vercelify desktop on`):
+/// its status and restart go to that user's systemd.
+#[test]
+fn sunshine_on_the_desktop_users_systemd() {
+    let a = start_with(&[("VERCELIFY_DESKTOP_USER", "ana".into())]);
+    let (s, v) = get(&a, "/v1/display");
+    assert_eq!(s, 200);
+    assert_eq!(v["sunshine"]["active_state"], "active", "{v}");
+    let (s, _) = post(&a, "/v1/services/sunshine/restart", json!({}));
+    assert_eq!(s, 200);
+    let calls = std::fs::read_to_string(&a.log).unwrap();
+    assert!(calls.contains("systemctl --user -M ana@ show"), "{calls}");
+    assert!(
+        calls.contains("systemctl --user -M ana@ restart -- sunshine"),
+        "{calls}"
+    );
+    // Other units stay the system's.
+    let (s, _) = get(&a, "/v1/services");
+    assert_eq!(s, 200);
+    let calls = std::fs::read_to_string(&a.log).unwrap();
+    assert!(
+        calls.contains("systemctl show -p ActiveState,LoadState,UnitFileState -- docker"),
+        "{calls}"
+    );
+    assert!(
+        !calls.contains("ana@ show -p ActiveState,LoadState,UnitFileState -- docker"),
+        "{calls}"
+    );
+}

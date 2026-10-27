@@ -456,7 +456,7 @@ async fn build_display_status(s: &AppState) -> DisplayStatus {
         receiver_config,
         receiver_url,
         mpv_installed: crate::exec::find_on_path(&s.config.mpv_bin).is_some(),
-        sunshine: services::status(&s.config.systemctl_bin, "sunshine").await,
+        sunshine: services::status_as(&s.config.systemctl_bin, s.config.desktop_user.as_deref(), "sunshine").await,
     }
 }
 
@@ -479,13 +479,20 @@ async fn receiver_stop(State(s): State<AppState>) -> Json<DisplayStatus> {
 async fn list_services(State(s): State<AppState>) -> Json<Vec<ServiceStatus>> {
     let mut out = Vec::new();
     for unit in &s.config.services {
-        out.push(services::status(&s.config.systemctl_bin, unit).await);
+        out.push(services::status_as(&s.config.systemctl_bin, s.config.desktop_user.as_deref(), unit).await);
     }
     Json(out)
 }
 
 async fn service_action(State(s): State<AppState>, Path((name, action)): Path<(String, String)>) -> ApiResult<Value> {
-    services::control(&s.config.systemctl_bin, &s.config.services, &name, &action).await?;
+    services::control(
+        &s.config.systemctl_bin,
+        s.config.desktop_user.as_deref(),
+        &s.config.services,
+        &name,
+        &action,
+    )
+    .await?;
     Ok(Json(json!({ "ok": true })))
 }
 

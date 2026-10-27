@@ -6,7 +6,7 @@ SELF=$(readlink -f "${BASH_SOURCE[0]}")
 HOST_DIR=$(dirname "$SELF")
 # shellcheck disable=SC2034 # read by the libraries (systemd units, binaries)
 VERCELIFY_SRC=$(dirname "$HOST_DIR")
-for lib in common system hardware storage docker platform mesh cloudflare agent backup registry maintenance standby remote; do
+for lib in common system hardware storage docker platform mesh cloudflare agent backup registry maintenance standby remote desktop; do
   # shellcheck source=/dev/null
   . "$HOST_DIR/lib/$lib.sh"
 done
@@ -27,6 +27,9 @@ Usage: sudo vercelify <command> [args]
   remote [status|on|off] Reach this server from anywhere: the router forwards the network's
                          two ports by itself (UPnP/NAT-PMP), else a free Cloudflare quick
                          tunnel (no account); nothing to set up either way
+  desktop [status|on|off]
+                         Use this laptop's desktop from the Mac (remote desktop): installs
+                         and starts Sunshine for the logged-in desktop
   llm [status|install [ssd|hdd]|pull MODEL|rm MODEL|chat MODEL PROMPT|start|stop|restart]
                          Local AI models (Ollama) on this machine
   backup [status|setup [--to REPO]…|run|list|restore [SNAP] [--instance]]
@@ -521,6 +524,9 @@ cmd_uninstall() {
     rm -f "$SYSTEMD_DIR/$u.service"
   done
   [[ -r "${REMOTE_ENV:-$VERCELIFY_ETC/remote.env}" ]] && remote_unmap
+  remote_tunnel_stop
+  # Remote desktop: Sunshine stays installed, it no longer starts at login.
+  systemctl --global disable "$SUNSHINE_UNIT" >/dev/null 2>&1 || true
   for u in vercelify-backup vercelify-maintenance vercelify-remote; do
     systemctl disable --now "$u.timer" >/dev/null 2>&1 || true
     rm -f "$SYSTEMD_DIR/$u.timer" "$SYSTEMD_DIR/$u.service"
@@ -548,6 +554,7 @@ main() {
     sleep) cmd_sleep "$@" ;;
     mesh) mesh_cli "$@" ;;
     remote) [[ "${1:-status}" == status ]] || need_root remote; remote_cli "$@" ;;
+    desktop) [[ "${1:-status}" == status ]] || need_root desktop; desktop_cli "$@" ;;
     standby) need_root standby; standby_cli "$@" ;;
     github-app) need_root github-app; platform_github_app "$@" ;;
     git-source) need_root git-source; platform_git_source "$@" ;;

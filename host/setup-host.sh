@@ -30,6 +30,8 @@ VERSION=${VERSION:-dev}
 . "$VERCELIFY_SRC/host/lib/agent.sh"
 # shellcheck source=lib/remote.sh
 . "$VERCELIFY_SRC/host/lib/remote.sh"
+# shellcheck source=lib/desktop.sh
+. "$VERCELIFY_SRC/host/lib/desktop.sh"
 # shellcheck source=lib/backup.sh
 . "$VERCELIFY_SRC/host/lib/backup.sh"
 # shellcheck source=lib/maintenance.sh
@@ -72,6 +74,9 @@ Features
   --no-firewall            Don't keep the agent's and AI API's ports private
   --no-power-guard         Don't install the battery/thermal guard
   --no-display             Don't install mpv (secondary-monitor receiver)
+  --desktop                Use this machine's desktop from the Mac (remote desktop):
+                           install and start Sunshine (asked when there's a desktop)
+  --no-desktop             Don't ask about remote desktop
   --no-backup              Don't turn on nightly backups (main server)
 
 General
@@ -99,6 +104,7 @@ CF_API_TOKEN=${CF_API_TOKEN:-}
 FORCE_DNS=0
 # 1 on, 0 off, '' ask (main server without a Cloudflare domain)
 REMOTE=''
+DESKTOP=''
 STORAGE_DEVICE=auto
 FORMAT_STORAGE=0
 WITH_FIREWALL=1
@@ -120,6 +126,8 @@ parse_args() {
       --force-dns) FORCE_DNS=1 ;;
       --remote) REMOTE=1 ;;
       --no-remote) REMOTE=0 ;;
+      --desktop) DESKTOP=1 ;;
+      --no-desktop) DESKTOP=0 ;;
       --storage-device) STORAGE_DEVICE=${2:?}; shift ;;
       --format-storage) FORMAT_STORAGE=1 ;;
       --no-firewall) WITH_FIREWALL=0 ;;
@@ -203,6 +211,11 @@ wizard() {
   if [[ -z "$REMOTE" && -z "$CF_API_TOKEN" && "$DOMAIN_MODE" != cloudflare && ! -r "$REMOTE_ENV" ]]; then
     printf '\n  Connect your Mac and other machines from any network, not just this Wi-Fi?\n  Vercelify asks your router to forward its private network'"'"'s two ports here\n  (UPnP/NAT-PMP), or else opens a free Cloudflare quick tunnel (no account). Only\n  Vercelify'"'"'s encrypted network answers there; your apps and its API stay private.\n' >&2
     if confirm "Reach this server from anywhere?" y; then REMOTE=1; else REMOTE=0; fi
+  fi
+  # Only with a desktop to share (Ubuntu Desktop and the like).
+  if [[ -z "$DESKTOP" ]] && desktop_user >/dev/null 2>&1; then
+    printf '\n  Use this laptop'"'"'s desktop from your Mac (remote desktop with Moonlight)? It\n  installs Sunshine, which streams the logged-in desktop over Vercelify'"'"'s network.\n' >&2
+    if confirm "Set up remote desktop?" y; then DESKTOP=1; else DESKTOP=0; fi
   fi
 }
 
@@ -407,6 +420,10 @@ main() {
   if [[ $ROLE == main && "$REMOTE" == 1 && "$VERCELIFY_DRY_RUN" != 1 ]]; then
     step "Remote access"
     ( remote_on ) || warn "not reachable from outside your network yet — later: sudo vercelify remote on"
+  fi
+  if [[ "$DESKTOP" == 1 && "$VERCELIFY_DRY_RUN" != 1 ]]; then
+    step "Remote desktop"
+    ( desktop_on ) || warn "remote desktop isn't set up — later: sudo vercelify desktop on"
   fi
   if [[ $ROLE == main ]]; then
     if platform_engine; then

@@ -1,5 +1,13 @@
 #!/bin/sh
 echo "systemctl $*" >> "${STUB_LOG:-/dev/null}"
+# A user's own units (`--user -M ana@`): Sunshine runs there.
+if [ "$1" = --user ]; then
+  shift 3
+  case "$1" in
+    show) printf 'ActiveState=active\nLoadState=loaded\nUnitFileState=alias\n' ;;
+  esac
+  exit 0
+fi
 case "$1" in
   show)
     for last; do :; done

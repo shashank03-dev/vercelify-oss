@@ -6,6 +6,20 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.3] - 2026-10-27
+
+### Added
+
+- `sudo vercelify desktop on` (and the installer's *Set up remote desktop?*, asked when
+  the machine has a desktop): installs Sunshine from its release for this distribution,
+  checked against GitHub's SHA-256 for the file, and starts it on the logged-in desktop
+  for the Mac app's **Launch Moonlight**. The agent follows Sunshine as the desktop
+  user's own service.
+
+### Fixed
+
+- `vercelify uninstall` left the Cloudflare quick tunnel service running.
+
 ## [0.2.2] - 2026-10-27
 
 ### Added

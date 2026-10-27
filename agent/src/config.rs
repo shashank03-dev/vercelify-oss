@@ -153,6 +153,9 @@ pub struct Config {
     /// Cloudflare tunnel to `127.0.0.1:7443`, `https://mesh.example.com`):
     /// joins and the relay go there when no LAN address answers.
     pub mesh_public_url: Option<String>,
+    /// The desktop's user, whose own systemd units run Sunshine (`vercelify
+    /// desktop on` sets it): the `sunshine` service is theirs.
+    pub desktop_user: Option<String>,
 }
 
 impl Default for Config {
@@ -244,6 +247,7 @@ impl Default for Config {
             mesh_name: None,
             mesh_public_endpoints: vec![],
             mesh_public_url: None,
+            desktop_user: None,
         }
     }
 }
@@ -316,6 +320,9 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_MESH_PUBLIC_URL") {
             self.mesh_public_url = Some(v).filter(|v| !v.is_empty());
+        }
+        if let Some(v) = var("VERCELIFY_DESKTOP_USER") {
+            self.desktop_user = Some(v).filter(|v| !v.is_empty());
         }
         if let Some(v) = var("VERCELIFY_BUILD_DRIVER") {
             self.build_driver = v;
