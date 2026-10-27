@@ -6,7 +6,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.5] - 2026-10-27
+
 ### Fixed
+
+- The 0.2.4 release had no Mac app: signing couldn't find its certificate on the build
+  machine. 0.2.5 carries the 0.2.4 signing fix.
 
 - Remote desktop: Sunshine aborted right after start, at its tray icon, when run as the
   desktop user's service (GNOME on X11), so Moonlight never connected. `vercelify desktop

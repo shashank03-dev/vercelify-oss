@@ -5210,7 +5210,7 @@ checksum = "accd4ea62f7bb7a82fe23066fb0957d48ef677f6eeb8215f372f52e48bb32426"
 
 [[package]]
 name = "vercelify-agent"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -5245,7 +5245,7 @@ dependencies = [
 
 [[package]]
 name = "vercelify-cockpit"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "chrono",
  "reqwest 0.12.28",
@@ -5263,7 +5263,7 @@ dependencies = [
 
 [[package]]
 name = "vercelify-core"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "base64 0.22.1",
  "serde",
@@ -5276,7 +5276,7 @@ dependencies = [
 
 [[package]]
 name = "vercelify-mesh"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "base64 0.22.1",
  "boringtun",
@@ -5311,7 +5311,7 @@ dependencies = [
 
 [[package]]
 name = "vercelify-platform"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "base64 0.22.1",
  "bcrypt",

@@ -154,6 +154,9 @@ jobs:
             security create-keychain -p "$pw" "$kc"
             security set-keychain-settings "$kc"
             security unlock-keychain -p "$pw" "$kc"
+            # codesign finds the identity only in a keychain on the search list.
+            # shellcheck disable=SC2046
+            security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
             base64 --decode <<<"$SIGN_P12" >"$RUNNER_TEMP/sign.p12"
             security import "$RUNNER_TEMP/sign.p12" -k "$kc" -P "$SIGN_PASSWORD" -T /usr/bin/codesign >/dev/null
             rm -f "$RUNNER_TEMP/sign.p12"
