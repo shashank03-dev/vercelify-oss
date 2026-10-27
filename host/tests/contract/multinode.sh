@@ -47,7 +47,8 @@ ok "deployed on the worker ($container)"
 wdocker inspect -f '{{.Config.Image}}' "$container" | grep -q '^127.0.0.1:5055/vfy/web:' || fail "the worker didn't pull from the mesh registry"
 docker inspect vfy-registry >/dev/null || fail "no registry on the main server"
 ok "image pulled once here, served to the worker by the mesh registry"
-answer() { curl -sf -H "Host: web.test" "http://127.0.0.1:$PORT_HTTP/" | grep -qi caddy; }
+# Not grep -q: it quits at the match, curl dies of SIGPIPE mid-page and pipefail fails the check.
+answer() { curl -sf -H "Host: web.test" "http://127.0.0.1:$PORT_HTTP/" | grep -i caddy >/dev/null; }
 until_ok 30 answer || fail "web.test doesn't answer through the main server's proxy: $(curl -s -H 'Host: web.test' "http://127.0.0.1:$PORT_HTTP/" | head -5)"
 ok "web.test answers through the main server's proxy → the worker's proxy → the container"
 grep -q "10.77.0.2:80" "$work/main/state/proxy/dynamic/base-web.yaml" || fail "the main route doesn't forward to the worker"
@@ -89,10 +90,19 @@ ok "two replicas (main + worker) behind one route; the old instance retired"
 
 echo "a replica dies on the worker"
 replica=$(jq -r '.[] | select(.node == "pi") | .container' <<<"$inst")
-wdocker stop "$replica" >/dev/null
+# It crashes over and over (killed, so Docker restarts it and counts that).
+# Not `docker stop`: the reconciler starts a stopped container again, and when
+# its tick comes first the engine sees a healthy replica.
+crash() {
+  local pid
+  pid=$(wdocker inspect -f '{{.State.Pid}}' "$replica" 2>/dev/null) || return 0
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] && kill -9 "$pid" 2>/dev/null
+  return 0
+}
 # Within 3 minutes of going live that is a failed deploy: the engine sees it
 # on the worker and rolls back.
 rolled() {
+  crash
   api GET /v1/platform/apps/web/deployments |
     jq -e '.[] | select(.trigger == "auto-rollback" and .status == "healthy")'
 }

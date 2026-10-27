@@ -74,7 +74,8 @@ deploy() { # NAME NODE_ID HOST
 main_id=$(api GET /v1/platform/nodes | jq -r '.[] | select(.role == "main") | .id')
 deploy web "$main_id" web.test
 deploy edge "$wid" edge.test
-answers() { curl -sf -H "Host: $2" "http://$1/" | grep -qi caddy; }
+# Not grep -q: it quits at the match, curl dies of SIGPIPE mid-page and pipefail fails the check.
+answers() { curl -sf -H "Host: $2" "http://$1/" | grep -i caddy >/dev/null; }
 until_ok 30 answers "127.0.0.1:$PORT_HTTP" web.test || fail "web doesn't answer"
 until_ok 30 answers "127.0.0.1:$PORT_HTTP" edge.test || fail "edge doesn't answer"
 ok "web runs on the main server, edge on pi"
