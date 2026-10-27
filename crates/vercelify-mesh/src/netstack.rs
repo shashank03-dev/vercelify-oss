@@ -22,6 +22,10 @@ use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 const MTU: usize = 1280;
 const TCP_BUFFER: usize = 64 * 1024;
 const UDP_PACKETS: usize = 64;
+/// What a UDP socket holds of what arrives: a burst of remote-desktop video
+/// (a keyframe is hundreds of ~1.4 kB packets) at once.
+const UDP_IN_PACKETS: usize = 1024;
+const UDP_IN_BUFFER: usize = UDP_IN_PACKETS * 1500;
 /// Chunks waiting on either side of a connection.
 const CHUNKS: usize = 16;
 /// TCP connections open at once at most.
@@ -310,7 +314,10 @@ async fn run(
                 }
                 Cmd::Udp(to, reply) => {
                     let mut s = udp::Socket::new(
-                        udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; UDP_PACKETS], vec![0; 64 * 1024]),
+                        udp::PacketBuffer::new(
+                            vec![udp::PacketMetadata::EMPTY; UDP_IN_PACKETS],
+                            vec![0; UDP_IN_BUFFER],
+                        ),
                         udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; UDP_PACKETS], vec![0; 64 * 1024]),
                     );
                     if let Err(e) = s.bind(port()) {
@@ -319,7 +326,7 @@ async fn run(
                     }
                     let handle = sockets.add(s);
                     let (out_tx, out) = mpsc::channel(UDP_PACKETS);
-                    let (in_tx, in_rx) = mpsc::channel(UDP_PACKETS);
+                    let (in_tx, in_rx) = mpsc::channel(UDP_IN_PACKETS);
                     udps.push(UdpEntry {
                         handle,
                         remote: endpoint(to),
@@ -509,4 +516,120 @@ fn service_udp(udps: &mut Vec<UdpEntry>, sockets: &mut SocketSet<'_>) -> bool {
         true
     });
     queued
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::net::Ipv4Addr;
+
+    const ME: Ipv4Addr = Ipv4Addr::new(10, 77, 0, 2);
+    const SERVER: Ipv4Addr = Ipv4Addr::new(10, 77, 0, 1);
+
+    fn checksum(b: &[u8]) -> u16 {
+        let mut s: u32 = b
+            .chunks(2)
+            .map(|c| u32::from(c[0]) << 8 | u32::from(*c.get(1).unwrap_or(&0)))
+            .sum();
+        while s > 0xffff {
+            s = (s & 0xffff) + (s >> 16);
+        }
+        !(s as u16)
+    }
+
+    /// An IPv4 packet from the server; `frag` = (more fragments, offset in bytes).
+    fn ipv4(id: u16, frag: (bool, usize), body: &[u8]) -> Vec<u8> {
+        let mut p = vec![0u8; 20];
+        p[0] = 0x45;
+        p[2..4].copy_from_slice(&((20 + body.len()) as u16).to_be_bytes());
+        p[4..6].copy_from_slice(&id.to_be_bytes());
+        let flags = (u16::from(frag.0) << 13) | (frag.1 / 8) as u16;
+        p[6..8].copy_from_slice(&flags.to_be_bytes());
+        p[8] = 64;
+        p[9] = 17;
+        p[12..16].copy_from_slice(&SERVER.octets());
+        p[16..20].copy_from_slice(&ME.octets());
+        let c = checksum(&p);
+        p[10..12].copy_from_slice(&c.to_be_bytes());
+        p.extend_from_slice(body);
+        p
+    }
+
+    /// A UDP datagram from the server's `from` port to ours.
+    fn udp(from: u16, to: u16, payload: &[u8]) -> Vec<u8> {
+        let len = (8 + payload.len()) as u16;
+        let mut u = vec![];
+        u.extend_from_slice(&from.to_be_bytes());
+        u.extend_from_slice(&to.to_be_bytes());
+        u.extend_from_slice(&len.to_be_bytes());
+        u.extend_from_slice(&[0, 0]);
+        u.extend_from_slice(payload);
+        let mut pseudo = vec![];
+        pseudo.extend_from_slice(&SERVER.octets());
+        pseudo.extend_from_slice(&ME.octets());
+        pseudo.extend_from_slice(&[0, 17]);
+        pseudo.extend_from_slice(&len.to_be_bytes());
+        pseudo.extend_from_slice(&u);
+        let c = checksum(&pseudo);
+        u[6..8].copy_from_slice(&c.to_be_bytes());
+        u
+    }
+
+    /// A UDP socket to the server's `port`, and the local port it uses.
+    async fn open(port: u16) -> (UdpConn, StackDevice, u16, Stack) {
+        let (stack, dev) = Stack::start(vec![(IpAddr::V4(ME), 16)]);
+        let conn = stack.open_udp(SocketAddr::from((SERVER, port))).await.unwrap();
+        conn.send(b"ping".to_vec()).await;
+        let mut buf = vec![0u8; 2048];
+        let n = tokio::time::timeout(Duration::from_secs(5), dev.recv(&mut buf))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(buf[9], 17, "the ping goes out as UDP");
+        let local = u16::from_be_bytes([buf[20], buf[21]]);
+        assert!(n > 28);
+        (conn, dev, local, stack)
+    }
+
+    async fn next(conn: &mut UdpConn) -> Option<Vec<u8>> {
+        tokio::time::timeout(Duration::from_secs(5), conn.recv())
+            .await
+            .ok()
+            .flatten()
+    }
+
+    // Moonlight asks Sunshine for ~1400-byte video packets on what it takes
+    // for a LAN (127.0.0.1); over the mesh's 1280 MTU they arrive in pieces.
+    #[tokio::test]
+    async fn a_fragmented_datagram_arrives_whole() {
+        let (mut conn, dev, local, _stack) = open(47998).await;
+        let payload: Vec<u8> = (0..1400u32).map(|i| i as u8).collect();
+        let d = udp(47998, local, &payload);
+        dev.send(&ipv4(7, (true, 0), &d[..1200])).await.unwrap();
+        dev.send(&ipv4(7, (false, 1200), &d[1200..])).await.unwrap();
+        assert_eq!(next(&mut conn).await, Some(payload));
+    }
+
+    // A keyframe is a burst of such packets, sent faster than the reader drains them.
+    #[tokio::test]
+    async fn a_video_burst_fits() {
+        let (mut conn, dev, local, _stack) = open(47998).await;
+        let burst = 400u16;
+        for i in 0..burst {
+            let mut payload = vec![0u8; 1024];
+            payload[..2].copy_from_slice(&i.to_be_bytes());
+            dev.send(&ipv4(i, (false, 0), &udp(47998, local, &payload)))
+                .await
+                .unwrap();
+        }
+        let mut got = 0u16;
+        while let Some(p) = next(&mut conn).await {
+            assert_eq!(u16::from_be_bytes([p[0], p[1]]), got, "in order, none missing");
+            got += 1;
+            if got == burst {
+                break;
+            }
+        }
+        assert_eq!(got, burst);
+    }
 }

@@ -6,6 +6,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Remote desktop from the Mac (app mode) showed "No video received from host": Sunshine's
+  ~1.4 kB video packets arrive in IP fragments over the mesh's 1280-byte MTU, and the Mac's
+  userspace network stack dropped fragments. It now reassembles them, and its UDP sockets
+  hold a keyframe's burst (1024 packets) instead of 64.
+
 ## [0.2.5] - 2026-10-27
 
 ### Fixed
