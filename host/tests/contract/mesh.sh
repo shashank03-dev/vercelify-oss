@@ -247,6 +247,30 @@ s.sendto(b"frame", ("127.0.0.1", 15600)); sys.exit(0 if s.recv(2048) == b"echo:f
 }
 until_ok 15 udp_echo || fail "no answer through the UDP forward"
 ok "UDP forward 127.0.0.1:15600 → main.vfy:5600 and back (the display stream's path)"
+# Forwards the app adds while the daemon runs (the stream and Moonlight, design §13.5).
+printf 'udp:127.0.0.1:15601=10.77.0.1:5600 # sender\n127.0.0.1:17421=main.vfy:7420 # moonlight\nnot a forward\n' \
+  >"$work/app/run/forwards"
+udp_echo2() {
+  ns_run $ns_app python3 -c '
+import socket, sys
+s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM); s.settimeout(2)
+s.sendto(b"frame", ("127.0.0.1", 15601)); sys.exit(0 if s.recv(2048) == b"echo:frame" else 1)'
+}
+tcp17421() { ns_run $ns_app curl -sf --max-time 2 http://127.0.0.1:17421/v1/health | grep -q '"mesh"'; }
+until_ok 10 udp_echo2 || fail "a forward added to the file doesn't carry UDP"
+until_ok 10 tcp17421 || fail "a forward added to the file doesn't carry TCP"
+grep -q "forwards: .*not a forward\|not a forward" "$work/mesh-app.log" || fail "a bad line in the forwards file wasn't reported"
+printf 'udp:127.0.0.1:15601=10.77.0.1:5600 # sender\n' >"$work/app/run/forwards"
+gone17421() { ! ns_run $ns_app curl -s --max-time 1 -o /dev/null http://127.0.0.1:17421/; }
+until_ok 10 gone17421 || fail "a forward removed from the file still listens"
+udp_echo2 || fail "removing one forward stopped another"
+ok "forwards added and removed while the daemon runs (the forwards file)"
+# Sunshine (Moonlight's remote desktop) is a device port; a port that isn't stays closed.
+ip netns exec $ns_main python3 -m http.server 47989 --bind 10.77.0.1 --directory "$work" >/dev/null 2>&1 &
+echo $! >"$work/http47989.pid"
+until_ok 10 ns_run $ns_main curl -sf -o /dev/null --max-time 1 http://10.77.0.1:47989/ || fail "the stand-in for Sunshine didn't start"
+until_ok 15 socks -f -o /dev/null http://10.77.0.1:47989/ || fail "a device can't reach Sunshine's port"
+ok "a device reaches Sunshine's ports (Moonlight)"
 code=$(socks -o /dev/null -w '%{http_code}' http://example.com/ || true)
 [[ "$code" == 000 ]] || fail "SOCKS let a request out to the internet ($code)"
 code=$(T=15 socks -o /dev/null -w '%{http_code}' http://10.77.0.1:9999/ || true)

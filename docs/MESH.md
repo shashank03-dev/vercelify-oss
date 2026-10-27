@@ -57,10 +57,20 @@ works as a worker too.
 - **Servers** reach each other on any port (the main server's proxy forwards visitors to
   apps on workers; workers pull images from its registry).
 - **Your devices** reach only the agent (7420), the proxy (80/443), Ollama (11434), the
-  display stream (5600–5610/udp) and the databases' public ports.
+  display stream (5600–5610/udp), Sunshine for Moonlight (47984–48010) and the
+  databases' public ports.
 - **Containers** can't reach the mesh at all, except each server's proxy and the
   databases' public ports: an app (or a pull request preview) never becomes a way into
   your other machines.
+
+## On a Mac: app mode and system mode
+
+By default `vercelify-mesh` runs in your login session without root ("app mode"): there
+is no network interface, and only the app (and `vfy`) use the network, through the
+daemon's SOCKS proxy (`socks5h://127.0.0.1:7480`). For the display stream and Moonlight
+the app adds forwards from `127.0.0.1` by itself. Any other program can use the SOCKS
+proxy. To give the whole Mac a real interface and `*.vfy` names, install with
+`install-mac.sh --mesh-system` (it asks for your password once).
 
 ## Day to day
 

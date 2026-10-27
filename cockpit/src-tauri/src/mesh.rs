@@ -3,7 +3,8 @@
 //! (a LaunchAgent runs it in app mode) to find servers on the LAN, pair by
 //! short code and join; and it reads the daemon's status file for the
 //! network panel. In app mode servers are reached through the daemon's
-//! SOCKS proxy (`client_for` in lib.rs).
+//! SOCKS proxy (`client_for` in lib.rs); programs that can't use SOCKS
+//! (ffmpeg's stream, Moonlight) through forwards the app hands the daemon.
 
 use serde_json::Value;
 use std::path::PathBuf;
@@ -207,9 +208,133 @@ pub fn wait_connected(timeout: Duration) -> Result<(), String> {
     }
 }
 
+/// Forwards the app-mode daemon serves while it runs (design §13.5).
+pub fn forwards_file() -> PathBuf {
+    home().join("run/forwards")
+}
+
+/// The forwards file with `owner`'s lines replaced by `lines`
+/// (`[udp:]127.0.0.1:PORT=HOST:PORT`, tagged `# owner`).
+pub fn with_forwards(current: &str, owner: &str, lines: &[String]) -> String {
+    let tag = format!("# {owner}");
+    let mut out: Vec<String> = current
+        .lines()
+        .filter(|l| !l.trim().is_empty() && !l.trim_end().ends_with(&tag))
+        .map(String::from)
+        .collect();
+    out.extend(lines.iter().map(|l| format!("{l} {tag}")));
+    let mut s = out.join("\n");
+    if !s.is_empty() {
+        s.push('\n');
+    }
+    s
+}
+
+/// Set `owner`'s forwards (none removes them). The daemon applies the file
+/// within a second.
+pub fn set_forwards(owner: &str, lines: &[String]) -> std::io::Result<()> {
+    let path = forwards_file();
+    let current = std::fs::read_to_string(&path).unwrap_or_default();
+    let next = with_forwards(&current, owner, lines);
+    if next == current {
+        return Ok(());
+    }
+    if let Some(d) = path.parent() {
+        std::fs::create_dir_all(d)?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, next)?;
+    std::fs::rename(&tmp, &path)
+}
+
+/// Whether programs on this computer need a forward to reach `host`: it is on
+/// the mesh and the daemon runs in app mode (no interface of its own).
+pub fn needs_forward(host: &str) -> bool {
+    on_mesh(host) && status().userspace
+}
+
+/// Wait until the daemon listens on each local `ports` (TCP or UDP): our own
+/// bind fails once it does.
+pub fn wait_forwarded(ports: &[(bool, u16)], timeout: Duration) -> Result<(), String> {
+    let until = std::time::Instant::now() + timeout;
+    loop {
+        let taken = ports.iter().all(|&(udp, port)| {
+            let addr = ("127.0.0.1", port);
+            if udp {
+                std::net::UdpSocket::bind(addr).is_err()
+            } else {
+                std::net::TcpListener::bind(addr).is_err()
+            }
+        });
+        if taken {
+            return Ok(());
+        }
+        if std::time::Instant::now() > until {
+            return Err(
+                "vercelify-mesh didn't open the forward to the server — is it running? (vercelify-mesh status)".into(),
+            );
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// `udp://10.77.0.1:5600?pkt_size=1316` → the target `10.77.0.1:5600` and
+/// the same URL to a local forward on `local_port`.
+pub fn via_forward(url: &str, local_port: u16) -> Option<(String, String)> {
+    let (scheme, rest) = url.split_once("://")?;
+    let end = rest.find(['?', '/']).unwrap_or(rest.len());
+    let (authority, tail) = rest.split_at(end);
+    let (_, port) = authority.rsplit_once(':')?;
+    port.parse::<u16>().ok()?;
+    Some((
+        authority.to_string(),
+        format!("{scheme}://127.0.0.1:{local_port}{tail}"),
+    ))
+}
+
+/// Sunshine's ports (Moonlight connects to them all, on the same numbers).
+pub const SUNSHINE_PORTS: &[(bool, u16)] = &[
+    (false, 47984),
+    (false, 47989),
+    (false, 47990),
+    (false, 48010),
+    (true, 47998),
+    (true, 47999),
+    (true, 48000),
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn forwards_file_lines_per_owner() {
+        let one = with_forwards("", "sender", &["udp:127.0.0.1:15600=10.77.0.1:5600".into()]);
+        assert_eq!(one, "udp:127.0.0.1:15600=10.77.0.1:5600 # sender\n");
+        let two = with_forwards(&one, "moonlight", &["127.0.0.1:47989=10.77.0.1:47989".into()]);
+        assert!(two.contains("# sender") && two.contains("# moonlight"));
+        // replacing one owner's lines leaves the other's
+        let three = with_forwards(&two, "sender", &[]);
+        assert_eq!(three, "127.0.0.1:47989=10.77.0.1:47989 # moonlight\n");
+        assert_eq!(with_forwards(&three, "moonlight", &[]), "");
+    }
+
+    #[test]
+    fn stream_urls_through_a_forward() {
+        assert_eq!(
+            via_forward("udp://10.77.0.1:5600?pkt_size=1316", 15600),
+            Some(("10.77.0.1:5600".into(), "udp://127.0.0.1:15600?pkt_size=1316".into()))
+        );
+        assert_eq!(
+            via_forward("srt://10.77.0.2:5601?mode=caller&latency=120000", 15601),
+            Some((
+                "10.77.0.2:5601".into(),
+                "srt://127.0.0.1:15601?mode=caller&latency=120000".into()
+            ))
+        );
+        assert_eq!(via_forward("udp://10.77.0.1", 1), None);
+        assert_eq!(via_forward("nonsense", 1), None);
+    }
 
     #[test]
     fn mesh_hosts() {

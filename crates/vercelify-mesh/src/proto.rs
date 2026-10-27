@@ -23,9 +23,20 @@ pub const JOIN_PREFIX: &str = "vfyj1";
 pub const DNS_ZONE: &str = "vfy";
 
 /// What a device (a Mac) may reach on a server (design §13.8): the agent,
-/// the proxy, Ollama and the display stream. Database public ports are added
-/// per server.
-pub const DEVICE_PORTS: &[&str] = &["7420/tcp", "80/tcp", "443/tcp", "11434/tcp", "5600-5610/udp"];
+/// the proxy, Ollama, the display stream and Sunshine (remote desktop with
+/// Moonlight; it pairs with a PIN and has its own login). Database public
+/// ports are added per server.
+pub const DEVICE_PORTS: &[&str] = &[
+    "7420/tcp",
+    "80/tcp",
+    "443/tcp",
+    "11434/tcp",
+    "5600-5610/udp",
+    "47984/tcp",
+    "47989-47990/tcp",
+    "48010/tcp",
+    "47998-48000/udp",
+];
 
 /// Pasted on a new machine: `sudo vercelify mesh join vfyj1.…`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

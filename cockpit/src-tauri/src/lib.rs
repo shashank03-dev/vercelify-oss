@@ -347,16 +347,55 @@ async fn capture_screens() -> CmdResult<Vec<CaptureScreen>> {
 
 // --- display streaming --------------------------------------------------------
 
+/// A server on the mesh while this computer's daemon runs in app mode has no
+/// route here: hand the daemon forwards for `owner` and wait until they
+/// listen. Whether it did (false: the host is reachable as it is).
+fn forward_to(owner: &str, host: &str, ports: &[(bool, u16, u16)]) -> CmdResult<bool> {
+    if !mesh::needs_forward(&format!("http://{host}")) {
+        mesh::set_forwards(owner, &[]).map_err(|e| e.to_string())?;
+        return Ok(false);
+    }
+    let lines: Vec<String> = ports
+        .iter()
+        .map(|&(udp, local, remote)| format!("{}127.0.0.1:{local}={host}:{remote}", if udp { "udp:" } else { "" }))
+        .collect();
+    mesh::set_forwards(owner, &lines).map_err(|e| format!("telling vercelify-mesh about the forward: {e}"))?;
+    let local: Vec<(bool, u16)> = ports.iter().map(|&(udp, l, _)| (udp, l)).collect();
+    mesh::wait_forwarded(&local, std::time::Duration::from_secs(5))?;
+    Ok(true)
+}
+
 #[tauri::command]
-fn sender_start(state: State<'_, AppState>, config: SenderConfig) -> CmdResult<ProcessStatus> {
-    let args = sender_args(&config).map_err(|e| e.to_string())?;
+async fn sender_start(state: State<'_, AppState>, mut config: SenderConfig) -> CmdResult<ProcessStatus> {
+    sender_args(&config).map_err(|e| e.to_string())?;
     let bin = local::ffmpeg().ok_or("ffmpeg is not installed — on macOS: brew install ffmpeg")?;
+    // The stream (UDP, or SRT over UDP) to a server on the mesh in app mode
+    // goes through a forward: 127.0.0.1:<port + 10000>.
+    let url = config.url.clone();
+    let forwarded = tauri::async_runtime::spawn_blocking(move || -> CmdResult<Option<String>> {
+        let Some((target, _)) = mesh::via_forward(&url, 0) else {
+            return Ok(None);
+        };
+        let (host, port) = target.rsplit_once(':').ok_or("bad stream address")?;
+        let port: u16 = port.parse().map_err(|_| "bad stream port")?;
+        let local = port.checked_add(10_000).ok_or("bad stream port")?;
+        Ok(forward_to("sender", host, &[(true, local, port)])?
+            .then(|| mesh::via_forward(&url, local).map(|(_, u)| u))
+            .flatten())
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    if let Some(u) = forwarded {
+        config.url = u;
+    }
+    let args = sender_args(&config).map_err(|e| e.to_string())?;
     state.procs.start(SENDER, &bin.to_string_lossy(), &args, true)
 }
 
 #[tauri::command]
 fn sender_stop(state: State<'_, AppState>) -> ProcessStatus {
     state.procs.stop(SENDER);
+    let _ = mesh::set_forwards("sender", &[]);
     state.procs.status(SENDER)
 }
 
@@ -366,9 +405,21 @@ fn sender_status(state: State<'_, AppState>) -> ProcessStatus {
 }
 
 #[tauri::command]
-fn moonlight_start(state: State<'_, AppState>, launch: MoonlightLaunch) -> CmdResult<ProcessStatus> {
-    let args = moonlight_args(&launch).map_err(|e| e.to_string())?;
+async fn moonlight_start(state: State<'_, AppState>, mut launch: MoonlightLaunch) -> CmdResult<ProcessStatus> {
+    moonlight_args(&launch).map_err(|e| e.to_string())?;
     let bin = local::moonlight().ok_or("Moonlight is not installed — get it from moonlight-stream.org")?;
+    // Moonlight reaches Sunshine on fixed ports: forward each one, same number.
+    let host = launch.host.clone();
+    let forwarded = tauri::async_runtime::spawn_blocking(move || {
+        let ports: Vec<(bool, u16, u16)> = mesh::SUNSHINE_PORTS.iter().map(|&(udp, p)| (udp, p, p)).collect();
+        forward_to("moonlight", &host, &ports)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    if forwarded {
+        launch.host = "127.0.0.1".into();
+    }
+    let args = moonlight_args(&launch).map_err(|e| e.to_string())?;
     // Moonlight is a visible window the user can close; let it outlive us.
     state.procs.start(MOONLIGHT, &bin.to_string_lossy(), &args, false)
 }
@@ -376,6 +427,7 @@ fn moonlight_start(state: State<'_, AppState>, launch: MoonlightLaunch) -> CmdRe
 #[tauri::command]
 fn moonlight_stop(state: State<'_, AppState>) -> ProcessStatus {
     state.procs.stop(MOONLIGHT);
+    let _ = mesh::set_forwards("moonlight", &[]);
     state.procs.status(MOONLIGHT)
 }
 

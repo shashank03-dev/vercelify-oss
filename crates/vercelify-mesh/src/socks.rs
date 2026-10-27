@@ -1,12 +1,16 @@
 //! What app mode offers the Mac (design §13.5): a SOCKS5 proxy on
-//! loopback (CONNECT only, `*.vfy` names resolved from the map) and fixed
+//! loopback (CONNECT only, `*.vfy` names resolved from the map) and
 //! forwards (`127.0.0.1:17420` → `main.vfy:7420`, TCP or UDP), both onto
-//! the userspace stack. Only mesh destinations are served: the proxy is
-//! not a way out to the internet.
+//! the userspace stack. Forwards are given at start (`--forward`) or by the
+//! app while the daemon runs (`<run-dir>/forwards`, for programs that can't
+//! use SOCKS: the display stream, Moonlight). Only mesh destinations are
+//! served: neither is a way out to the internet.
 
 use crate::netstack::Stack;
 use crate::proto::Dns;
+use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -193,7 +197,7 @@ pub async fn serve_socks(listener: TcpListener, stack: Stack, r: Resolver) {
 }
 
 /// `[tcp:|udp:]LISTEN=TARGET`: `127.0.0.1:17420=main.vfy:7420`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Forward {
     pub udp: bool,
     pub listen: SocketAddr,
@@ -229,6 +233,68 @@ impl std::str::FromStr for Forward {
             listen,
             target: target.to_string(),
         })
+    }
+}
+
+/// The forwards file: one `[udp:]LISTEN=TARGET` per line, `#` starts a
+/// comment (the app tags its lines with their owner). Bad lines are
+/// returned separately, so one typo doesn't stop the others.
+pub fn parse_forwards(raw: &str) -> (Vec<Forward>, Vec<String>) {
+    let (mut ok, mut bad) = (vec![], vec![]);
+    for line in raw.lines() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        match line.parse::<Forward>() {
+            Ok(f) if !ok.contains(&f) => ok.push(f),
+            Ok(_) => {}
+            Err(e) => bad.push(e),
+        }
+    }
+    (ok, bad)
+}
+
+/// Keep the forwards in `path` running: checked every second, new lines
+/// start, removed ones stop. The ones given at start (`fixed`) run on their
+/// own and are left alone here.
+pub async fn watch_forwards(path: PathBuf, fixed: Vec<Forward>, stack: Stack, r: Resolver) {
+    let mut running: HashMap<Forward, tokio::task::JoinHandle<()>> = HashMap::new();
+    let mut last: Option<String> = None;
+    loop {
+        let raw = tokio::fs::read_to_string(&path).await.unwrap_or_default();
+        if last.as_deref() != Some(raw.as_str()) {
+            let (want, bad) = parse_forwards(&raw);
+            for e in bad {
+                tracing::warn!("{}: {e}", path.display());
+            }
+            let want: HashSet<Forward> = want.into_iter().filter(|f| !fixed.contains(f)).collect();
+            running.retain(|f, task| {
+                let keep = want.contains(f) && !task.is_finished();
+                if !keep {
+                    task.abort();
+                    tracing::info!("forward {} stopped", f.listen);
+                }
+                keep
+            });
+            for f in want {
+                if running.contains_key(&f) {
+                    continue;
+                }
+                tracing::info!("forward {}{} → {}", if f.udp { "udp " } else { "" }, f.listen, f.target);
+                let (stack, r, ff) = (stack.clone(), r.clone(), f.clone());
+                running.insert(
+                    f,
+                    tokio::spawn(async move {
+                        if let Err(e) = serve_forward(ff.clone(), stack, r).await {
+                            tracing::warn!("forward {}: {e}", ff.listen);
+                        }
+                    }),
+                );
+            }
+            last = Some(raw);
+        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
 
@@ -349,5 +415,17 @@ mod tests {
         assert!("0.0.0.0:80=main.vfy:80".parse::<Forward>().is_err(), "loopback only");
         assert!("127.0.0.1:80".parse::<Forward>().is_err());
         assert!("127.0.0.1:80=main.vfy".parse::<Forward>().is_err());
+    }
+
+    #[test]
+    fn forwards_file() {
+        let (ok, bad) = parse_forwards(
+            "# set by the app\nudp:127.0.0.1:15600=10.77.0.1:5600 # sender\n\n127.0.0.1:47989=10.77.0.1:47989 # moonlight\n\
+             0.0.0.0:1=10.77.0.1:1\nudp:127.0.0.1:15600=10.77.0.1:5600\n",
+        );
+        assert_eq!(ok.len(), 2, "comments and repeats dropped: {ok:?}");
+        assert!(ok[0].udp && ok[0].target == "10.77.0.1:5600");
+        assert_eq!(ok[1].listen, "127.0.0.1:47989".parse().unwrap());
+        assert_eq!(bad.len(), 1, "{bad:?}");
     }
 }

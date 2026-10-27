@@ -216,11 +216,16 @@ mod tests {
             pf = pidfile.display()
         );
         let mut app = Command::new("/bin/sh").args(["-c", &script]).spawn().unwrap();
+        // The shell creates the file before it writes the pid: wait for both.
         let deadline = Instant::now() + Duration::from_secs(5);
-        while !pidfile.exists() && Instant::now() < deadline {
+        let mut child: Option<u32> = None;
+        while child.is_none() && Instant::now() < deadline {
+            child = std::fs::read_to_string(&pidfile)
+                .ok()
+                .and_then(|s| s.trim().parse().ok());
             std::thread::sleep(Duration::from_millis(50));
         }
-        let child: u32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+        let child = child.expect("the fake app never wrote its child's pid");
         assert!(alive(child));
         app.kill().unwrap(); // SIGKILL: no exit hooks run
         let _ = app.wait();

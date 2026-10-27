@@ -641,6 +641,13 @@ pub async fn up(opts: UpOptions) -> Result<()> {
                     }
                 });
             }
+            // The ones the app adds while it runs (the display stream, Moonlight).
+            tokio::spawn(crate::socks::watch_forwards(
+                opts.run_dir.join("forwards"),
+                us.forwards.clone(),
+                stack.clone(),
+                resolver.clone(),
+            ));
             tracing::info!("{} is {} (userspace)", state.name, state.ipv4);
             "userspace".to_string()
         }

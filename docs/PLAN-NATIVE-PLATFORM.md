@@ -1,6 +1,9 @@
 # Plan: replace Coolify and Tailscale with our own platform
 
-Status: **accepted**, October 2026. Engineering design: [design/SYSTEM-DESIGN.md](design/SYSTEM-DESIGN.md).
+Status: **done**, October 2026: M0–M10 are built, and a fresh install has neither Coolify
+nor Tailscale (servers installed earlier move with `sudo vercelify migrate`). This page is
+kept as the record of the plan; the engineering design, kept current, is
+[design/SYSTEM-DESIGN.md](design/SYSTEM-DESIGN.md).
 
 Goal: Vercelify keeps everything it does today (push-to-deploy, PR previews,
 rollbacks, databases, custom domains with HTTPS, pools of servers, private
@@ -458,6 +461,10 @@ default until M10, so nothing is half-replaced at any point.
 | M8 | Mesh: NAT + Mac | STUN, hole punching, relay (tunnel/public), userspace boringtun+smoltcp, SOCKS5 + forwards, LaunchAgent, system mode, mDNS discovery, pairing v2, cockpit and `vfy` over the mesh, display over the mesh | Mesh test incl. symmetric NAT → relay; cockpit talks to a server with Tailscale off |
 | M9 | Multi-node | Worker runtime API, placement, mesh registry, multi-arch builds, replicas, tunnel routes for workers, warm standby + `promote`, GitHub App + webhooks | Two-node contract test; promote test |
 | M10 | Migration + switch default | `vercelify migrate` (+rollback/finish), installer without Coolify/Tailscale, docs/website/README, remove `coolify.rs`, `ssh.rs`, `tailscale.rs`, `types/coolify.ts` | Migration test passes; fresh install has neither |
+
+All of the above is done. Contract tests cover each milestone against real software
+(the engine and its proxy, the mesh in network namespaces and behind NAT, two servers,
+the standby, a real Coolify for the migration); what they can't cover is listed next.
 
 On doing this "in one shot in this session": I will work through the milestones in
 order and commit each one when it's green, so the branch is always in a usable state.

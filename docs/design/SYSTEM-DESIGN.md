@@ -698,8 +698,13 @@ depends on re-serialising JSON (`vercelify-mesh::cert`).
 - App mode (`up --userspace`, the Mac without root; works on Linux too, which is how it is
   tested): no tun; a `smoltcp` stack (`netstack.rs`) is the engine's device. SOCKS5
   (`--socks 127.0.0.1:7480`, CONNECT only, `*.vfy` and bare node names resolved from the
-  map, anything off the mesh refused) and fixed forwards (`--forward
-  [udp:]127.0.0.1:PORT=HOST:PORT`, loopback only; UDP for the display stream). The daemon's
+  map, anything off the mesh refused) and forwards (`[udp:]127.0.0.1:PORT=HOST:PORT`,
+  loopback only): fixed ones from `--forward`, and the ones the app adds while the daemon
+  runs in `<run-dir>/forwards` (one per line, `# owner` comments; checked every second,
+  new lines start, removed ones stop, bad lines logged). The app uses them for programs
+  that can't speak SOCKS when the target is on the mesh: ffmpeg's display stream
+  (`udp:127.0.0.1:<port+10000>`, the sender's URL rewritten to it) and Moonlight
+  (Sunshine's ports on the same numbers, Moonlight started on `127.0.0.1`). The daemon's
   own requests to mesh addresses (map stream, endpoint reports, renewal) go over the same
   stack. Devices bind a random UDP port (`--port 0`) and report the real one. No DNS
   server (nothing could query it); the server's firewall applies as to any device.
@@ -793,7 +798,8 @@ container block). A database's public port changing bumps the map version.
   rebuilds two chains for both address families: `VERCELIFY-MESH` (jumped to from INPUT for
   `vfy0`) and `VERCELIFY-MESH-FWD` (from `DOCKER-USER`, matching published ports with
   `conntrack --ctorigdstport`). Servers: accept all. Devices: accept only their
-  `allowed_ports` (`DEVICE_PORTS`: 7420, 80, 443, 11434/tcp, 5600–5610/udp). Anything else
+  `allowed_ports` (`DEVICE_PORTS`: 7420, 80, 443, 11434/tcp, 5600–5610/udp, and Sunshine's
+  47984, 47989–47990, 48010/tcp and 47998–48000/udp for Moonlight). Anything else
   from the mesh: drop. Plain iptables rules, no ipset: a mesh has tens of devices, not
   thousands. `vfy0` joins `tailscale0` in the container isolation rules (containers can't
   reach the mesh).
