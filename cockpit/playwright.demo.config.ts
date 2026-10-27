@@ -3,7 +3,12 @@ import { existsSync } from "node:fs";
 
 // UI regression suite against the built-in demo backend (VITE_DEMO=1):
 // no host or agent needed, so it runs in CI.
-const chromium = process.env.PW_CHROMIUM_PATH ?? "/opt/pw-browsers/chromium-1194/chrome-linux/chrome";
+// A pre-installed Chromium if there is one (PW_CHROMIUM_PATH, or the
+// version-independent symlink in cloud containers); else Playwright's own.
+const chromium =
+  [process.env.PW_CHROMIUM_PATH, "/opt/pw-browsers/chromium", "/opt/pw-browsers/chromium-1194/chrome-linux/chrome"].find(
+    (p) => p && existsSync(p),
+  ) ?? "";
 
 export default defineConfig({
   testDir: "./e2e-demo",
