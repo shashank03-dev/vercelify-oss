@@ -344,8 +344,89 @@ pub async fn ensure(docker: &Docker, c: &ProxyConfig, env: Vec<(String, String)>
     Ok(true)
 }
 
+/// The proxy's own answer for a host it has no route for (yet).
+const NO_ROUTE: &str = "404 page not found";
+
+/// Does the proxy on `port` still answer `host` with its own "no route" 404?
+/// None: nothing answered (no proxy here), so there is nothing to wait for.
+async fn unrouted(port: u16, host: &str) -> Option<bool> {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.ok()?;
+    let req = format!("GET / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: vercelify-route/1\r\nConnection: close\r\n\r\n");
+    s.write_all(req.as_bytes()).await.ok()?;
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 512];
+    while buf.len() < 1024 {
+        match s.read(&mut chunk).await {
+            Ok(0) | Err(_) => break,
+            Ok(n) => buf.extend_from_slice(&chunk[..n]),
+        }
+    }
+    let text = String::from_utf8_lossy(&buf);
+    let (head, body) = text.split_once("\r\n\r\n")?;
+    Some(head.starts_with("HTTP/1.1 404") && body.trim_end() == NO_ROUTE)
+}
+
+/// Traefik loads a new route file a second or two after it is written: wait
+/// (up to `limit`) until it routes `host`, so a first deployment isn't
+/// called live while its URL still answers 404.
+pub async fn wait_routed(port: u16, host: &str, limit: std::time::Duration) {
+    let deadline = tokio::time::Instant::now() + limit;
+    while unrouted(port, host).await == Some(true) && tokio::time::Instant::now() < deadline {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    /// A proxy that has no route for its first `misses` requests.
+    async fn proxy(misses: usize) -> (u16, Arc<AtomicUsize>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let seen = Arc::new(AtomicUsize::new(0));
+        let n = seen.clone();
+        tokio::spawn(async move {
+            while let Ok((mut s, _)) = l.accept().await {
+                let mut buf = [0u8; 512];
+                let _ = s.read(&mut buf).await;
+                let answer = if n.fetch_add(1, Ordering::SeqCst) < misses {
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: 19\r\n\r\n404 page not found\n"
+                } else {
+                    "HTTP/1.1 404 Not Found\r\nContent-Length: 9\r\n\r\nno such page"
+                };
+                let _ = s.write_all(answer.as_bytes()).await;
+            }
+        });
+        (port, seen)
+    }
+
+    #[tokio::test]
+    async fn a_first_deployment_waits_until_the_proxy_routes_it() {
+        // Routed after three tries; the app's own 404 counts as routed.
+        let (port, seen) = proxy(3).await;
+        super::wait_routed(port, "blog.example.com", Duration::from_secs(5)).await;
+        assert_eq!(seen.load(Ordering::SeqCst), 4);
+        // Never routed: gives up at the limit.
+        let (port, _) = proxy(usize::MAX).await;
+        let t = Instant::now();
+        super::wait_routed(port, "blog.example.com", Duration::from_millis(500)).await;
+        assert!(t.elapsed() >= Duration::from_millis(500) && t.elapsed() < Duration::from_secs(2));
+        // No proxy at all: nothing to wait for.
+        let free = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let t = Instant::now();
+        super::wait_routed(free, "blog.example.com", Duration::from_secs(5)).await;
+        assert!(t.elapsed() < Duration::from_secs(1));
+    }
+
     use super::*;
 
     fn route() -> Route {

@@ -733,6 +733,11 @@ impl Engine {
             self.remove_placed(&started).await;
             return Err(e);
         }
+        if previous_placed.is_empty() {
+            if let Some(h) = base.hosts.first() {
+                crate::proxy::wait_routed(self.deployer.proxy.http_port, &h.host, Duration::from_secs(5)).await;
+            }
+        }
         let (id, app_id, url2) = (d.id.clone(), app.id.clone(), url.clone());
         let pr = d.pr_number;
         let list: Vec<Instance> = started.iter().map(|p| p.instance.clone()).collect();
