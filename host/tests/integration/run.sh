@@ -102,4 +102,45 @@ if x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-
 else
   echo "  ✗ second run failed (see /tmp/vercelify-it-2.log)"; fail=1
 fi
+
+served='curl -fsS -H "Host: it-web.10.77.0.1.sslip.io" http://127.0.0.1/ | grep -q Hostname'
+healthy='curl -fsS http://127.0.0.1:7420/v1/health'
+echo "==> update, a failed update, rollback"
+# `vercelify update` runs the installer it is given from a copy: this one runs
+# the checkout's install.sh in place, so the update installs this tree.
+x 'printf "#!/usr/bin/env bash\nexec bash /src/install.sh \"\$@\"\n" >/tmp/installer-local.sh'
+# An update whose agent never comes up.
+x 'printf "#!/usr/bin/env bash\ninstall -m 0755 /bin/false /usr/local/bin/vercelify-agent\nsystemctl restart vercelify-agent\n" >/tmp/installer-broken.sh'
+if x "NO_COLOR=1 VERCELIFY_INSTALLER=/tmp/installer-local.sh $agent_env vercelify update" >/tmp/vercelify-it-update.log 2>&1; then
+  echo "  ✓ update succeeded"
+else
+  echo "  ✗ update failed (see /tmp/vercelify-it-update.log)"; fail=1
+fi
+check "after the update: agent healthy, app served, previous version kept" "$healthy && $served && test -x /usr/local/lib/vercelify/rollback/vercelify-agent"
+if x "NO_COLOR=1 UPDATE_HEALTH_SECS=20 VERCELIFY_INSTALLER=/tmp/installer-broken.sh vercelify update" >/tmp/vercelify-it-update-bad.log 2>&1; then
+  echo "  ✗ a broken update reported success"; fail=1
+else
+  echo "  ✓ a broken update fails"
+fi
+check "a broken update puts the previous agent back" "! cmp -s /bin/false /usr/local/bin/vercelify-agent && $healthy && $served"
+grep -q 'rolled back; the previous version is running again' /tmp/vercelify-it-update-bad.log ||
+  { echo "  ✗ the broken update didn't say it rolled back (see /tmp/vercelify-it-update-bad.log)"; fail=1; }
+check "vercelify rollback" "vercelify rollback && $healthy && $served"
+
+echo "==> uninstall, then install again"
+x "ASSUME_YES=1 NO_COLOR=1 vercelify uninstall" >/tmp/vercelify-it-uninstall.log 2>&1 || { echo "  ✗ uninstall failed (see /tmp/vercelify-it-uninstall.log)"; fail=1; }
+# vercelify.slice stays: the apps' containers keep running in it, memory-capped.
+check "no Vercelify services or timers left" '! systemctl list-unit-files "vercelify*" --no-legend | grep -v "^vercelify.slice " | grep -q .'
+check "agent, mesh and CLI binaries removed" '! test -e /usr/local/bin/vercelify-agent && ! test -e /usr/local/bin/vercelify-mesh && ! command -v vercelify'
+check "firewall chains removed" '! iptables -n -L VERCELIFY-IN && ! iptables -n -L VERCELIFY-FWD'
+check "the mesh interface is gone" '! ip link show vfy0'
+check "config, the engine's state and the app's container kept" 'test -s /etc/vercelify/agent.token && test -s /var/lib/vercelify/platform.db && docker ps -a --filter label=vercelify.app-name=it-web -q | grep -q .'
+check "the app keeps running in its memory-capped slice" "systemctl cat vercelify.slice | grep -q MemoryMax= && $served"
+if x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-host --storage-device $loop" >/tmp/vercelify-it-3.log 2>&1; then
+  echo "  ✓ installed again"
+else
+  echo "  ✗ the install after uninstall failed (see /tmp/vercelify-it-3.log)"; fail=1
+fi
+for _ in $(seq 40); do x "$served" 2>/dev/null && break; sleep 3; done
+check "the app is back, from the kept state" "curl -fsS $T http://127.0.0.1:7420/v1/platform/apps | jq -e 'any(.[]; .name == \"it-web\")' && $served"
 exit $fail
