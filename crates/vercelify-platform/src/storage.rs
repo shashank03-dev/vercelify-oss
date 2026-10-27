@@ -161,17 +161,13 @@ impl Engine {
 
 async fn copy_or_init_volume(from: &Path, to: &Path) -> Result<()> {
     match std::fs::metadata(from) {
-        Ok(meta) if meta.is_dir() => crate::dbengine::copy_tree(from, to).await,
-        Ok(_) => Err(Error::Invalid(format!(
-            "volume source {} is not a directory",
-            from.display()
-        ))),
         // An app that has never mounted the volume has no data to copy.
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
             std::fs::create_dir_all(to)?;
             Ok(())
         }
-        Err(e) => Err(e.into()),
+        // Anything else (unreadable, not a directory) is copy_tree's to refuse.
+        _ => crate::dbengine::copy_tree(from, to).await,
     }
 }
 
