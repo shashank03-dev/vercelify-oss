@@ -53,7 +53,8 @@ coolify_start() { # VERSION
   set_env PUSHER_APP_KEY "$(openssl rand -hex 32)"
   set_env PUSHER_APP_SECRET "$(openssl rand -hex 32)"
   set_env ROOT_USERNAME admin
-  set_env ROOT_USER_EMAIL admin@example.com
+  # Coolify validates email:rfc,dns; example.com publishes a null MX record.
+  set_env ROOT_USER_EMAIL vercelify-contract@github.com
   set_env ROOT_USER_PASSWORD "Contract-$(openssl rand -hex 8)"
   set_env REGISTRY_URL ghcr.io
   ssh-keygen -q -t ed25519 -N '' -C root@coolify -f /data/coolify/ssh/keys/id.root@host.docker.internal
