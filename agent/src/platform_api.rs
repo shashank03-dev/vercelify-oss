@@ -397,15 +397,21 @@ async fn app_patch(State(s): State<AppState>, Path(app): Path<String>, Json(req)
     .await?;
     // Stopping or starting an app happens now, not at the next reconcile.
     if stop_or_start {
-        let p = platform(&s)?;
-        tokio::spawn(async move {
-            if let Err(e) = p.reconciler.once().await {
-                tracing::warn!("reconcile after a stop or start: {e}");
-            }
-        });
+        reconcile_now(&s, "a stop or start")?;
     }
     changed(&s, "apps");
     Ok(Json(a))
+}
+
+/// Runs a reconcile in the background instead of waiting up to 30 s for the next one.
+fn reconcile_now(s: &AppState, after: &'static str) -> Result<(), AppError> {
+    let p = platform(s)?;
+    tokio::spawn(async move {
+        if let Err(e) = p.reconciler.once().await {
+            tracing::warn!("reconcile after {after}: {e}");
+        }
+    });
+    Ok(())
 }
 
 #[derive(Deserialize, Default)]
@@ -452,6 +458,8 @@ async fn app_domain_add(
         apps::add_domain(c, &id, &req)
     })
     .await?;
+    // A new domain routes now, not at the next reconcile.
+    reconcile_now(&s, "a domain change")?;
     changed(&s, "apps");
     Ok(Json(d))
 }
@@ -462,6 +470,7 @@ async fn app_domain_remove(State(s): State<AppState>, Path((app, host)): Path<(S
         apps::remove_domain(c, &id, &host)
     })
     .await?;
+    reconcile_now(&s, "a domain change")?;
     changed(&s, "apps");
     Ok(Json(json!({ "deleted": true })))
 }
