@@ -84,6 +84,19 @@ sunshine_install() {
   rm -rf "$tmp"
 }
 
+# Sunshine's tray icon aborts it when it runs as a service (seen on GNOME,
+# X11); the Mac app and Sunshine's web page are its interface. Written as the
+# user, once: a system_tray line the user set stays.
+sunshine_configure() {
+  local user=$1 home dir
+  home=$(getent passwd "$user" | cut -d: -f6)
+  [[ -n "$home" && -d "$home" ]] || return 0
+  dir="$home/.config/sunshine"
+  grep -qE '^[[:space:]]*system_tray[[:space:]]*=' "$dir/sunshine.conf" 2>/dev/null && return 0
+  run_cmd runuser -u "$user" -- sh -c 'mkdir -p "$1" && printf "system_tray = disabled\n" >>"$1/sunshine.conf"' _ "$dir" ||
+    warn "couldn't write $dir/sunshine.conf: if Sunshine stops at 'Starting system tray', add system_tray = disabled there"
+}
+
 desktop_on() {
   local user session
   user=$(desktop_user) || {
@@ -91,6 +104,7 @@ desktop_on() {
     return 1
   }
   sunshine_install || return 1
+  sunshine_configure "$user"
   run_cmd modprobe uinput 2>/dev/null || true
   run_cmd modprobe uhid 2>/dev/null || true
   run_cmd udevadm trigger --subsystem-match=misc 2>/dev/null || true
@@ -99,6 +113,8 @@ desktop_on() {
   session=$(systemctl --user -M "$user@" is-system-running 2>/dev/null || true)
   if [[ "$session" == running || "$session" == degraded || "$session" == starting ]]; then
     run_cmd systemctl --user -M "$user@" daemon-reload >/dev/null 2>&1 || true
+    # Earlier crashes may have left it failed, past systemd's restart limit.
+    run_cmd systemctl --user -M "$user@" reset-failed "$SUNSHINE_UNIT" >/dev/null 2>&1 || true
     run_cmd systemctl --user -M "$user@" restart "$SUNSHINE_UNIT" >/dev/null 2>&1 || warn "Sunshine didn't start yet: it starts with $user's next login"
   else
     info "Sunshine starts when $user logs in to the desktop"

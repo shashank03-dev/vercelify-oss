@@ -86,6 +86,7 @@ sudo vercelify status
 | --- | --- |
 | Receiver stops immediately with a DRM error | A desktop session owns the GPU. Set `display_backend = "x11"` (or `"wayland"`) and `display_env` in `/etc/vercelify/agent.toml`. |
 | Black screen, sender running | macOS Screen Recording permission missing: System Settings → Privacy & Security → Screen Recording → enable Vercelify, restart the app. |
+| Moonlight stops at "Establishing connection" | Sunshine isn't running on the server: `systemctl --user status app-dev.lizardbyte.app.Sunshine` as the desktop user. If its log ends at *Starting system tray* with a core dump, add `system_tray = disabled` to `~/.config/sunshine/sunshine.conf` (`sudo vercelify desktop on` does this), then `systemctl --user reset-failed app-dev.lizardbyte.app.Sunshine` and start it. |
 | Screen Recording prompt keeps coming back although Vercelify is switched on | The entry belongs to an older signature of the app (before 0.2.4). `tccutil reset ScreenCapture dev.vercelify.cockpit`, restart the app, allow it once more. |
 | Laggy or blocky | Check that `vercelify-mesh status` shows the server as `lan` or `direct`, not `relay`. Lower the quality, or switch to SRT on lossy Wi-Fi. |
 

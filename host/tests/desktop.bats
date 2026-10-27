@@ -46,6 +46,10 @@ exit 0
 STUB
   printf '#!/usr/bin/env bash\necho "apt-get $*" >>"$CALLS"\n' >"$T/bin/apt-get"
   printf '#!/usr/bin/env bash\necho amd64\n' >"$T/bin/dpkg"
+  mkdir -p "$T/home/ana"
+  printf '#!/usr/bin/env bash\n[ "$2" = ana ] && echo "ana:x:1000:1000::%s/home/ana:/bin/bash"\n' "$T" >"$T/bin/getent"
+  # runuser -u USER -- CMD…: run it (as ourselves) and log who for.
+  printf '#!/usr/bin/env bash\necho "runuser $2" >>"$CALLS"\nshift 3\nexec "$@"\n' >"$T/bin/runuser"
   printf '#!/usr/bin/env bash\necho "$(basename "$0") $*" >>"$CALLS"\n' >"$T/bin/modprobe"
   cp "$T/bin/modprobe" "$T/bin/udevadm"
   chmod +x "$T/bin/"*
@@ -94,10 +98,23 @@ teardown() { rm -rf "$T"; }
   grep -qx 'desktop_user = "ana"' "$T/etc/agent.toml"
   grep -q 'systemctl restart vercelify-agent' "$CALLS"
   [[ "$output" == *"Launch Moonlight"* ]]
+  # No tray (it aborts Sunshine as a service), written as ana.
+  grep -qx 'runuser ana' "$CALLS"
+  grep -qx 'system_tray = disabled' "$T/home/ana/.config/sunshine/sunshine.conf"
   # Again: nothing to tell the agent.
   : >"$CALLS"
   run desktop_on
   run ! grep -q 'restart vercelify-agent' "$CALLS"
+  [ "$(grep -c system_tray "$T/home/ana/.config/sunshine/sunshine.conf")" -eq 1 ]
+}
+
+@test "on: a system_tray the user chose stays" {
+  mkdir -p "$T/home/ana/.config/sunshine"
+  printf 'system_tray = enabled\n' >"$T/home/ana/.config/sunshine/sunshine.conf"
+  run desktop_on
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/home/ana/.config/sunshine/sunshine.conf")" = 'system_tray = enabled' ]
+  run ! grep -q runuser "$CALLS"
 }
 
 @test "not logged in yet: enabled, starts at login" {

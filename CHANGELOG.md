@@ -6,6 +6,13 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Remote desktop: Sunshine aborted right after start, at its tray icon, when run as the
+  desktop user's service (GNOME on X11), so Moonlight never connected. `vercelify desktop
+  on` now turns the tray off in the user's Sunshine settings (a `system_tray` line the
+  user set stays) and clears a failed state left by earlier crashes.
+
 ## [0.2.4] - 2026-10-27
 
 ### Fixed
