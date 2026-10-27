@@ -165,7 +165,8 @@ function loadWebSettings(): CockpitSettings | null {
 
 async function webHttp(base: string, token: string | null, req: HttpRequest): Promise<unknown> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), (req.timeout ?? 30) * 1000);
+  const secs = req.timeout ?? 30;
+  const timer = setTimeout(() => controller.abort(), secs * 1000);
   let resp: Response;
   try {
     resp = await fetch(base + req.path, {
@@ -179,7 +180,7 @@ async function webHttp(base: string, token: string | null, req: HttpRequest): Pr
       signal: controller.signal,
     });
   } catch (e) {
-    throw new CockpitError(`cannot reach the server (${(e as Error).message})`, 0);
+    throw new CockpitError(controller.signal.aborted ? `the server didn't answer within ${secs}s` : `cannot reach the server (${(e as Error).message})`, 0);
   } finally {
     clearTimeout(timer);
   }
@@ -194,6 +195,10 @@ async function webHttp(base: string, token: string | null, req: HttpRequest): Pr
   }
   if (!resp.ok) {
     const obj = (value ?? {}) as { error?: string; message?: string };
+    // The dev server's proxy answers by itself when the agent is down (the agent's own errors are JSON).
+    if ((resp.status === 502 || resp.status === 504) && !obj.error && !obj.message) {
+      throw new CockpitError("cannot reach the server — is it on and on the same network?", 0);
+    }
     throw new CockpitError(obj.error ?? obj.message ?? (typeof value === "string" ? value : resp.statusText), resp.status);
   }
   return value;
