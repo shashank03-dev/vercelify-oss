@@ -282,6 +282,51 @@ fn post(a: &Agent, path: &str, body: Value) -> (u16, Value) {
 }
 
 #[test]
+fn protected_routes_reject_missing_wrong_and_revoked_tokens() {
+    let a = start_with(&[("VERCELIFY_ENGINE", "platform".into())]);
+    let (status, created) = post(&a, "/v1/tokens", json!({"name": "auth-matrix", "role": "owner"}));
+    assert_eq!(status, 200, "{created}");
+    let secret = created["secret"].as_str().unwrap();
+    let id = created["token"]["id"].as_str().unwrap();
+    assert_eq!(req(&a, "GET", "/v1/system", Some(secret), None).0, 200);
+    assert_eq!(req(&a, "DELETE", &format!("/v1/tokens/{id}"), Some(TOKEN), None).0, 200);
+    let routes = [
+        ("GET", "/v1/system"),
+        ("GET", "/v1/containers"),
+        ("GET", "/v1/containers/app/logs"),
+        ("POST", "/v1/containers/app/restart"),
+        ("POST", "/v1/volumes"),
+        ("GET", "/v1/services"),
+        ("POST", "/v1/display/receiver/start"),
+        ("GET", "/v1/doctor"),
+        ("GET", "/v1/tokens"),
+        ("GET", "/v1/audit"),
+        ("GET", "/v1/backup"),
+        ("POST", "/v1/backup/run"),
+        ("POST", "/v1/llm/chat"),
+        ("GET", "/v1/events"),
+        ("PUT", "/v1/projects/app"),
+        ("GET", "/v1/platform/apps"),
+        ("POST", "/v1/platform/apps"),
+        ("GET", "/v1/platform/apps/app/env?reveal=true"),
+        ("POST", "/v1/platform/apps/app/deploy"),
+        ("POST", "/v1/platform/apps/app/terminal"),
+        ("GET", "/v1/platform/deployments/id/logs"),
+        ("POST", "/v1/platform/databases/db/restore"),
+        ("POST", "/v1/platform/databases/db/terminal"),
+        ("DELETE", "/v1/platform/terminals/id"),
+        ("GET", "/v1/runtime/status"),
+        ("GET", "/v1/mesh/nodes"),
+    ];
+    for (method, path) in routes {
+        for token in [None, Some("wrong-token-wrong-token"), Some(secret)] {
+            let status = req(&a, method, path, token, None).0;
+            assert_eq!(status, 401, "{method} {path} with {token:?}");
+        }
+    }
+}
+
+#[test]
 fn agent_end_to_end() {
     let a = start();
 
