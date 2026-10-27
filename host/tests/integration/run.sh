@@ -79,7 +79,8 @@ check "agent rejects missing token" '[[ $(curl -s -o /dev/null -w "%{http_code}"
 check "agent sees the HDD tier" 'curl -fsS -H "Authorization: Bearer $(cat /etc/vercelify/agent.token)" http://127.0.0.1:7420/v1/system | jq -e "any(.disks[]; .role==\"storage\")"'
 check "power guard running and writing state" 'systemctl is-active --quiet vercelify-power-guard && jq -e .state /run/vercelify/power-guard.state'
 check "firewall chains installed" 'iptables -n -L VERCELIFY-FWD && iptables -n -L VERCELIFY-IN'
-check "vercelify CLI works" 'vercelify status && vercelify pair | grep -q "^vfy1\."'
+# On the mesh, pairing codes are vfy2. (they carry the mesh join token).
+check "vercelify CLI works" 'vercelify status && vercelify pair | grep -q "^vfy2\."'
 check "summary written 0600" '[[ $(stat -c %a /etc/vercelify/summary.txt) == 600 ]]'
 T='-H "Authorization: Bearer $(cat /etc/vercelify/agent.token)"'
 check "the agent runs Vercelify's engine" "curl -fsS $T http://127.0.0.1:7420/v1/health | jq -e '.capabilities | index(\"platform\")'"
@@ -91,7 +92,7 @@ check "an invite for a worker" 'vercelify mesh invite | grep -q "mesh join vfyj1
 echo "==> deploying an app"
 x "curl -fsS $T -H 'Content-Type: application/json' -d '{\"name\":\"it-web\",\"kind\":\"image\",\"source\":{\"image\":\"traefik/whoami:v1.11\"},\"runtime\":{\"port\":80,\"health_timeout_secs\":90,\"drain_secs\":5}}' http://127.0.0.1:7420/v1/platform/apps >/dev/null" || fail=1
 x "curl -fsS $T -X POST -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:7420/v1/platform/apps/it-web/deploy >/dev/null" || fail=1
-for _ in $(seq 60); do x "curl -fsS -H 'Host: it-web.10.77.0.1.sslip.io' http://127.0.0.1/ | grep -q Hostname" && break; sleep 3; done
+for _ in $(seq 60); do x "curl -fsS -H 'Host: it-web.10.77.0.1.sslip.io' http://127.0.0.1/ | grep -q Hostname" 2>/dev/null && break; sleep 3; done
 check "the proxy serves it at it-web.10.77.0.1.sslip.io" "curl -fsS -H 'Host: it-web.10.77.0.1.sslip.io' http://127.0.0.1/ | grep -q Hostname"
 
 echo "==> re-running the installer (must be idempotent)"
