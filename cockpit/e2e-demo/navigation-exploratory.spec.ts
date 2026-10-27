@@ -13,13 +13,14 @@ for (const theme of ["dark", "light"] as const) {
     await expect(page.getByTestId("nav-apps")).toBeVisible();
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 
+    const modifier = theme === "dark" ? "Control" : "Meta";
     for (const [index, id] of ["apps", "ai", "servers", "health", "storage", "screencast", "settings"].entries()) {
-      await page.keyboard.press(`Control+${index + 1}`);
+      await page.keyboard.press(`${modifier}+${index + 1}`);
       await expect(page.getByTestId(`nav-${id}`)).toHaveAttribute("aria-current", "page");
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
     }
 
-    await page.keyboard.press("Control+k");
+    await page.keyboard.press(`${modifier}+k`);
     await page.getByTestId("palette-input").fill("AI models");
     await page.keyboard.press("Enter");
     await expect(page.getByTestId("nav-ai")).toHaveAttribute("aria-current", "page");
