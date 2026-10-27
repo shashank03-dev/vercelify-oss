@@ -263,7 +263,7 @@ pub async fn watch_forwards(path: PathBuf, fixed: Vec<Forward>, stack: Stack, r:
     let mut last: Option<String> = None;
     loop {
         let raw = tokio::fs::read_to_string(&path).await.unwrap_or_default();
-        if last.as_deref() != Some(raw.as_str()) {
+        if last.as_deref() != Some(raw.as_str()) || running.values().any(|task| task.is_finished()) {
             let (want, bad) = parse_forwards(&raw);
             for e in bad {
                 tracing::warn!("{}: {e}", path.display());
@@ -422,6 +422,32 @@ mod tests {
         let (valid, invalid) = parse_forwards("127.0.0.1:17420=:7420\n127.0.0.1:17421=main.vfy:7420\n");
         assert_eq!(valid.len(), 1);
         assert_eq!(invalid.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn forwards_file_retries_after_listen_port_becomes_free() {
+        let occupied = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = occupied.local_addr().unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("forwards");
+        tokio::fs::write(&path, format!("{addr}=main.vfy:7420\n"))
+            .await
+            .unwrap();
+        let (stack, _device) = Stack::start(vec![("10.77.0.2".parse().unwrap(), 16)]);
+        let watcher = tokio::spawn(watch_forwards(path, vec![], stack, resolver()));
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        drop(occupied);
+        let result = tokio::time::timeout(Duration::from_secs(4), async {
+            loop {
+                if TcpStream::connect(addr).await.is_ok() {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await;
+        watcher.abort();
+        assert!(result.is_ok(), "forward did not recover after its port became free");
     }
 
     #[test]

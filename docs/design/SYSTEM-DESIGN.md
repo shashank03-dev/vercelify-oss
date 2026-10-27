@@ -701,7 +701,8 @@ depends on re-serialising JSON (`vercelify-mesh::cert`).
   map, anything off the mesh refused) and forwards (`[udp:]127.0.0.1:PORT=HOST:PORT`,
   loopback only): fixed ones from `--forward`, and the ones the app adds while the daemon
   runs in `<run-dir>/forwards` (one per line, `# owner` comments; checked every second,
-  new lines start, removed ones stop, bad lines logged). The app uses them for programs
+  new lines start, removed ones stop, bad lines logged; a forward that fails to bind is
+  retried while its line remains). The app uses them for programs
   that can't speak SOCKS when the target is on the mesh: ffmpeg's display stream
   (`udp:127.0.0.1:<port+10000>`, the sender's URL rewritten to it) and Moonlight
   (Sunshine's ports on the same numbers, Moonlight started on `127.0.0.1`). The daemon's
