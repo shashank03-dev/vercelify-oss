@@ -116,6 +116,9 @@ teardown() { rm -rf "$T"; }
   printf '#!/bin/sh\nfor a; do last=$a; done\n[ -f "$last/req" ] && echo "designated => $(cat "$last/req")"\nexit 0\n' >"$T/bin/codesign"
   printf '#!/bin/sh\necho "tccutil $*" >>"%s/calls"\n' "$T" >"$T/bin/tccutil"
   printf '#!/bin/sh\nexit 1\n' >"$T/bin/pgrep"
+  # macOS tools, for runs on Linux.
+  printf '#!/bin/sh\ncp -R "$1" "$2"\n' >"$T/bin/ditto"
+  printf '#!/bin/sh\nexit 0\n' >"$T/bin/xattr"
   chmod +x "$T/bin/"*
   PATH="$T/bin:$PATH"
   echo 'identifier "dev.vercelify.cockpit" and certificate leaf = H"aa"' >"$T/new.app/req"

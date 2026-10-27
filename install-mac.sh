@@ -63,7 +63,7 @@ cleanup() {
   if [[ -n "$MOUNTED" ]]; then hdiutil detach -quiet "$MOUNTED" 2>/dev/null || true; fi
   if [[ -n "$WORK" ]]; then rm -rf "$WORK"; fi
 }
-trap cleanup EXIT
+[[ "${VERCELIFY_SOURCE_ONLY:-0}" == 1 ]] || trap cleanup EXIT
 
 usage() { sed -n '2,20p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null | sed 's/^# \{0,1\}//' || true; }
 
