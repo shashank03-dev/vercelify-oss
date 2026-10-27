@@ -1,5 +1,7 @@
 # Testing report
 
+> **Later change:** the one-way migration from Coolify (`vercelify migrate`, its contract test and the Tailscale fallbacks) was removed before the first release. The migration rows and bugs 9, 10, 15 and 22 below describe code that no longer exists.
+
 Updated: 2026-10-27. Baseline: `ef20712fafbd1ada89c84e42ae8536cb47d9b4d2` (main). Branch: `test/full-pass`. Host: Apple Silicon macOS, Rust 1.99.0, Node 26.11.1, Bats 1.14.0; isolated aarch64 Linux Colima VM (4 vCPUs, 8 GiB RAM) for privileged Docker and namespace tests. This is a partial test pass, not a production-readiness assessment. A second pass reran every suite in sequence in the VM, then drove the cockpit by hand against the demo backend and a real agent, and probed the platform API for validation gaps (see "Full rerun" and "Hands-on run"). A third pass ran six end-to-end scenarios against a real agent in the VM and reran everything at `2d41a14` (see "Scenario tests").
 
 ## Suites

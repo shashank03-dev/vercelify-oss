@@ -1,7 +1,6 @@
 # System design: the Vercelify platform and mesh
 
-This is the engineering design behind [PLAN-NATIVE-PLATFORM.md](../PLAN-NATIVE-PLATFORM.md).
-The plan says *what* and *in which order*; this document fixes *how*: process and crate
+This document fixes how Vercelify works: process and crate
 boundaries, the database schema, state machines, wire protocols, security, and what
 happens when things fail. Code follows this document. A change of design changes this
 document in the same commit.
@@ -25,6 +24,7 @@ Contents
 15. [Failure modes](#15-failure-modes)
 16. [Resource budgets](#16-resource-budgets)
 17. [Decisions log](#17-decisions-log)
+18. [Setup and reaching the main server](#18-setup-and-reaching-the-main-server)
 
 ---
 
@@ -143,8 +143,7 @@ the 5-minute copy; `platform.db`, `-wal` and `-shm` are excluded. The master key
 mesh directory go with it. `vercelify backup restore --instance` stops the agent and the
 app containers, puts back the master key, the state copy (as `platform.db`, without a
 stale WAL) and the mesh directory (so workers and devices keep their certificates), then
-the volumes, and starts the agent, whose reconciler brings apps and databases back. A
-snapshot holding Coolify's dump (taken before `vercelify migrate`) is refused.
+the volumes, and starts the agent, whose reconciler brings apps and databases back.
 
 ## 5. Secrets
 
@@ -444,7 +443,7 @@ main server, and the old one stepping down.
     (`Host(...)`, priority 100, TLS when `https`), service with the container's address on
     `vfy-proxy`, Basic Auth middleware when set, HTTPS redirect middleware.
   - `vercelify-routes-<key>.yaml`: the existing `vercel.json` layer from `routing.rs`,
-    priorities 5000–50000 (unchanged), now copying our base routers instead of Coolify's.
+    priorities 5000–50000 (unchanged), copying our base routers.
   - `vercelify-wake.yaml`: priority 1 catch-all to the wake listener (unchanged).
 - Router naming keeps today's `http-0-<app>` / `…-pr-<n>` pattern so `sleep.rs` reads the
   same Prometheus series.
@@ -488,7 +487,7 @@ Templates in `crates/vercelify-platform/templates/databases.toml` (versioned wit
 
 ### 10.1 Service catalogue
 
-`vercelify-platform::templates` replaces Coolify's one-click services: Umami, Plausible,
+`vercelify-platform::templates` holds the one-click services: Umami, Plausible,
 MinIO, Unleash, Uptime Kuma, Vaultwarden (more by adding an entry). A template is a compose
 file with images pinned to a version (a test refuses `latest`), the routed service, its
 port and health path, and the secrets it needs. `POST /v1/platform/templates/{id}` creates
@@ -570,10 +569,9 @@ request per app.
   The cockpit loads xterm.js only when a terminal opens, and batches keystrokes for 12 ms
   into one ordered request.
 
-The cockpit (M6) tells a platform server by its pairing: `role: "main"` with an empty
-`coolify_url` (the agent leaves Coolify out of `vfy1.` codes when `engine = "platform"`).
-Pairings without a role and without a Coolify URL stay workers. On such a server the
-Apps page, ⌘K and the sidebar use `/v1/platform`; everything else is shared.
+The cockpit tells a main server by its pairing (`role: "main"`) and its health (the
+`platform` capability). There the Apps page, ⌘K and the sidebar use `/v1/platform`;
+everything else is shared.
 
 ## 13. Mesh
 
@@ -634,8 +632,8 @@ lifetime 30 days, renewed after day 20 (§13.9). Checked with 5 min clock skew.
 `vfy2.<base64url JSON>`: the `vfy1.` fields plus `mesh_join` (a single-use device join
 token, `vfyj1.…`, at least a day valid); `agent_url` is the server's mesh address
 (`http://10.77.0.1:7420`). `sudo vercelify pair` prints one on a mesh coordinator; the
-app joins with `mesh_join`, then talks to `agent_url` over the mesh. `vfy1.` codes keep
-working (their old `coolify_*` fields are ignored since M10).
+app joins with `mesh_join`, then talks to `agent_url` over the mesh. A `vfy1.` code
+(`pair --host`) points at an address the Mac reaches directly, without the mesh.
 
 The 8-symbol short code works without typing an address:
 
@@ -804,8 +802,8 @@ container block). A database's public port changing bumps the map version.
   `allowed_ports` (`DEVICE_PORTS`: 7420, 80, 443, 11434/tcp, 5600–5610/udp, and Sunshine's
   47984, 47989–47990, 48010/tcp and 47998–48000/udp for Moonlight). Anything else
   from the mesh: drop. Plain iptables rules, no ipset: a mesh has tens of devices, not
-  thousands. `vfy0` joins `tailscale0` in the container isolation rules (containers can't
-  reach the mesh).
+  thousands. `vfy0` is in the container isolation rules (containers can't reach the
+  mesh).
 
 ### 13.9 Rotation and revocation
 
@@ -864,7 +862,7 @@ container block). A database's public port changing bumps the map version.
 | GitHub App | Private key and webhook secret sealed; the manifest flow gated by a one-time state; installation tokens per repository, an hour at most, signed JWTs 9 minutes |
 
 Threats explicitly out of scope: a root compromise of the main server (it holds the master
-key and the coordinator key, as Coolify's host held its `APP_KEY`); a malicious Docker image
+key and the coordinator key); a malicious Docker image
 the user chose to deploy.
 
 ## 15. Failure modes
@@ -926,87 +924,35 @@ webpki roots for `wss://` and `https://` through a tunnel, 0.3 MiB the userspace
 | D8 | Single main + warm standby | Raft cluster (needs 3 always-on machines) |
 | D9 | Enrollment sealed to the coordinator's WireGuard key, everything else inside the mesh (changed in M7) | Self-signed TLS pinned by fingerprint (a second key and certificate to rotate, a TLS stack in a 6 MB daemon), plain HTTP (tokens in the clear), ACME (needs a public name) |
 | D10 | Workers pull images from the main server's registry as `127.0.0.1:5055`, forwarded by their agent over the mesh (M9) | An insecure registry in every `daemon.json` (a Docker restart per server, trust in a plain-HTTP registry on the network), `docker save`/`load` per deploy (no layer sharing, full images over the relay) |
-| D11 | The migration reads Coolify through a PHP script run in Coolify's own container (its models' tables, its `decrypt`) | Decrypting Laravel's AES-256-CBC payloads ourselves (Coolify mixes `encrypt` and `encryptString`, keeps Redis passwords in variables, and has a secret-manager path: its own code knows) |
-| D12 | One proxy swap for every app at once, from Coolify's built images (no builds) | Per-app switch with two proxies (only one can own :80/:443; a per-app switch needed our proxy to forward to Coolify's network for the apps not yet moved) |
 
-## 18. Migration from Coolify
+## 18. Setup and reaching the main server
 
-`sudo vercelify migrate` (`host/lib/migrate.sh`) moves a Coolify server to the
-platform engine. The work is in the agent (`vercelify-agent migrate …`,
-`agent/src/migrate.rs`) and the platform crate (`import.rs`); the host script
-runs it around the agent restart.
+The server installer (`install.sh` → `host/setup-host.sh`) and the Mac installer
+(`install-mac.sh`) are the whole setup; neither needs an account anywhere.
 
-1. **Plan** (`vercelify migrate`, nothing changes). `migrate_export.php` runs in
-   the `coolify` container (`docker exec -i coolify php`) and prints one JSON
-   document: projects and environments, applications (source, branch, build
-   pack, ports, domains, health check, limits, watch paths, auto-deploy,
-   previews, basic auth, variables, volumes, scheduled tasks), standalone
-   databases (credentials, image, public port, volumes), one-click services
-   (raw compose, routes, variables), git sources (GitHub Apps with their key,
-   deploy keys), shared variables, servers. `import::plan` maps it: names made
-   valid and unique, Coolify's build packs onto ours (`nixpacks`/`railpack` →
-   detected, `dockerfile`, `static`, `dockerimage` → image app, `dockercompose`
-   → compose app, an inline Dockerfile → the image Coolify built), services →
-   compose apps. Skipped, with the reason: resources on other Coolify servers
-   (they join as workers first), databases whose data isn't where our template
-   keeps it.
-2. **Apply.** The mesh is set up first if it isn't (Tailscale keeps working).
-   One transaction writes the records (`import::apply`): variables keep
-   preview-only values only where they differ; a database's Coolify host name
-   (its uuid) becomes `${{db.<name>.host}}`; `{{project.X}}`-style shared
-   references are resolved; databases are *adopted* with Coolify's credentials
-   and exact image (`databases::adopt`); every app gets a queued deployment of
-   the image Coolify runs (`vfy/<app>:coolify`, tagged from Coolify's), so
-   nothing is built. A basic-auth password we can't accept leaves that app
-   stopped, never open. Then Coolify stops: Coolify itself first, then every
-   `coolify.managed` container and the stack, each set to `--restart=no` with its
-   old policy kept in `migrate/state.json`. With nothing writing, volume data
-   is copied (`cp -a` between Docker volume mount points) into our volumes;
-   Coolify's are left untouched. Compose projects' volumes are matched by
-   compose label or the `<uuid>_` prefix. Coolify's Let's Encrypt
-   `acme.json` becomes ours (resolver renamed), so no certificates are asked for
-   again.
-3. **Switch.** The host script sets `engine = "platform"` and restarts the agent;
-   the reconciler starts the databases, the queued deployments start Coolify's
-   images, our proxy takes :80/:443. Downtime is one container start and health
-   check (D12). `migrate check` waits for every first deployment and asks each
-   domain through our proxy (404 tolerated only after 30 s: Traefik answers 404
-   until it has read new routes); then the phase is `switched`.
-   Until `finish` (or a rollback), push-to-deploy holds new commits and
-   previews of the migrated apps (`migrate::in_progress`), so the switch
-   builds nothing; a commit pushed meanwhile deploys after `finish`.
-4. **Rollback** (until finish): our containers of the migrated resources and our
-   proxy removed, the records (`import::remove`), copies and tags deleted,
-   Coolify's containers started with their restart policies, database first,
-   Coolify last. Data written after the switch isn't carried back.
-5. **Finish**: Coolify's containers, images and network removed; `--purge`
-   also its volumes and `/data/coolify`.
-6. **Tailscale off** (`--tailscale-off`): only when every non-revoked mesh node
-   was seen within 24 hours (`--force` overrides).
+1. **Server.** The installer sets up Docker, the agent with the engine, the mesh
+   (`vercelify mesh init`: this server coordinates it as `10.77.0.1`), storage, the
+   guard and the firewall, then prints a one-time short code and a full `vfy2.` code.
+2. **Mac.** `install-mac.sh --pair vfy2.…` (the command the server prints) installs the
+   app, `vercelify-mesh` and `vfy`, and leaves the code in the app's config directory
+   (`pending-pairing`, mode 0600). On its first start the app reads it once, deletes
+   it (a day old at most, decoded before use), joins the mesh with `mesh_join` and
+   saves the server. With the app installed already, the short code works on the LAN
+   (SPAKE2 at the control port, found by mDNS).
+3. **Outside the LAN.** Joining needs the control port (TCP 7443) and WireGuard
+   (UDP 51820) of the main server. `vercelify remote on` (`host/lib/remote.sh`; the
+   installer asks) maps both on the router with UPnP IGD (`upnpc`), else NAT-PMP
+   (`natpmpc`), for an hour, renewed every 20 minutes by `vercelify-remote.timer`. The
+   router's external address is accepted only when public (not RFC 1918, CGNAT
+   100.64/10 or link-local; behind CGNAT the mappings are removed and a Cloudflare
+   tunnel is the way). It goes into `agent.toml` as `mesh_public_endpoints`
+   (`IP:51820`, in every peer map) and `mesh_public_url` (`http://IP:7443`, in every
+   invite; an `https://` tunnel URL is left alone), and the agent restarts only when the
+   address changed. Nothing else is exposed: WireGuard drops packets from unknown keys,
+   and the control port takes sealed, single-use, rate-limited enrollments and SPAKE2.
+   `vercelify remote off` removes the mappings, the timer and only the keys it wrote.
 
-The state file's phases are `importing` → `imported` → `switched` →
-`finished`, or `rolled_back`; a step interrupted halfway is rolled back
-rather than resumed, except `imported`, which resumes at the switch. Tested
-against a real Coolify 4.4.6 by `host/tests/contract/migrate.sh`.
-
-### 18.1 After the switch
-
-Vercelify's engine is the only one. What the agent still knows about Coolify
-is what the migration needs: `coolify_container`, `coolify_data_dir` and the
-export script. A server that still runs Coolify (an `agent.toml` without
-`engine`, and Coolify's `.env` present) reports no `platform` capability: its
-apps keep running, the cockpit's Apps page shows how to migrate, and project
-rules, sleeping apps and push-to-deploy say they need the engine. The
-Coolify, SSH-key and Tailscale integrations of the agent (`coolify.rs`,
-`autodeploy.rs`, `ssh.rs`, `tailscale.rs`) and of the cockpit
-(`types/coolify.ts`, the embedded Coolify window, pools of Coolify servers) are
-gone.
-
-Tailscale is not required anywhere. Two things still accept it on a server
-that has it, so nobody is cut off mid-move: the `"tailscale"` entry of the
-agent's `listen` list, and a private address taken from `tailscale ip -4`
-when the server is on no mesh (`pair --tailscale`, the display receiver's
-address, the AI endpoint). The cockpit finds servers among its own mesh
+The cockpit finds servers among its own mesh
 peers (`discover_servers` probes each server peer's `/v1/health`) and on the
 LAN (mDNS); a worker joins with the invite its install command carries
 (`--join`).

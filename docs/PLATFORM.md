@@ -14,7 +14,6 @@ servers. The engineering details are in [the design](design/SYSTEM-DESIGN.md).
 - [5. Databases and storage on the HDD](#5-databases-and-storage-on-the-hdd)
 - [6. More servers: workers and a standby](#6-more-servers-workers-and-a-standby)
 - [7. Settings for an 8 GB laptop](#7-settings-for-an-8-gb-laptop)
-- [8. Coming from Coolify](#8-coming-from-coolify)
 
 ## What the installer set up
 
@@ -200,20 +199,3 @@ server's state on a worker, refreshed every 5 minutes. If the main server dies, 
 - The engine cleans old images and build caches by itself, keeping what rollbacks need.
 - Turn on alerts (**Settings → Alerts** in the app) to hear about failed deployments,
   backups and battery or thermal events.
-
-## 8. Coming from Coolify
-
-Servers installed before Vercelify had its own engine run Coolify and Tailscale. They
-keep working as they are until you move them:
-
-```bash
-sudo vercelify migrate            # shows what would happen; changes nothing
-sudo vercelify migrate --apply    # moves apps, databases, data and settings
-```
-
-It takes over apps, previews, variables, domains, databases (with their data) and
-services, stops Coolify (kept on disk until `--finish`), and can be undone with `sudo
-vercelify migrate --rollback`. When everything works: `sudo vercelify migrate --finish`
-removes Coolify, and `sudo vercelify migrate --tailscale-off` stops listening on
-Tailscale once your devices are on the mesh. Updates never move a server by
-themselves.

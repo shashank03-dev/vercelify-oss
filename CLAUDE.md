@@ -15,7 +15,7 @@ running several deployments on a weak machine more reliable.
 | Path | What it is |
 | --- | --- |
 | `crates/vercelify-core` | Shared Rust library: system collection (disks, power, thermal, the mesh), models, pairing codes, volume/stream helpers. Models export TS types via `ts-rs`. |
-| `crates/vercelify-platform` | Vercelify's PaaS engine: SQLite state + migrations, sealed secrets, builds, deployments, previews, databases, proxy routes, reconciler, multi-node, the Coolify import. A library the agent mounts. |
+| `crates/vercelify-platform` | Vercelify's PaaS engine: SQLite state + migrations, sealed secrets, builds, deployments, previews, databases, proxy routes, reconciler, multi-node. A library the agent mounts. |
 | `crates/vercelify-mesh` | Vercelify's private network: addressing, keys, coordinator certificates and peer maps, NAT traversal and relay, and the `vercelify-mesh` daemon. |
 | `agent/` | `vercelify-agent`, the small Rust daemon on the host (`:7420`, bearer token). Reports system state, manages containers/services/volumes and the display receiver. |
 | `cockpit/` | Tauri v2 desktop app (React 19, TypeScript, Tailwind v4, Framer Motion). `src/` = UI, `src-tauri/` = Rust command layer. |
@@ -29,15 +29,14 @@ running several deployments on a weak machine more reliable.
 
 The stack is Vercelify's own engine (`vercelify-platform`, in the agent: builds with
 BuildKit, deployments, previews, databases, a pinned Traefik with Let's Encrypt) and
-its own WireGuard network (`vercelify-mesh`) for private access with no open ports,
-plus an optional **Cloudflare Tunnel** for public HTTPS behind CGNAT. The cockpit
-talks to the agent over the mesh.
+its own WireGuard network (`vercelify-mesh`) for private access, plus two optional
+ways in from outside the LAN: `vercelify remote` (the router forwards the mesh's two
+ports by UPnP/NAT-PMP) and a **Cloudflare Tunnel** (public HTTPS, works behind CGNAT).
+The cockpit talks to the agent over the mesh. `install-mac.sh --pair CODE` installs the
+app and pairs it in one step.
 
-The binding engineering design is `docs/design/SYSTEM-DESIGN.md` (the history is in
-`docs/PLAN-NATIVE-PLATFORM.md`). Change the design doc in the same commit as code that
-departs from it. Servers installed before the engine still run Coolify and Tailscale
-until `sudo vercelify migrate` (`agent.toml` without `engine` and Coolify's `.env`
-present); keep that path and the migration working, but build nothing new on Coolify.
+The binding engineering design is `docs/design/SYSTEM-DESIGN.md`. Change the design doc
+in the same commit as code that departs from it.
 
 ## Commands
 
@@ -55,7 +54,6 @@ sudo host/tests/contract/mesh.sh                 # four mesh nodes in network na
 sudo host/tests/contract/mesh-nat.sh             # NAT traversal: hole punching and the relay behind real Linux NAT
 sudo host/tests/contract/multinode.sh            # a worker with its own Docker: placement, mesh registry, replicas, logs/terminal
 sudo host/tests/contract/promote.sh              # the warm standby promoted after the main server dies
-sudo host/tests/contract/migrate.sh              # vercelify migrate from a real Coolify: plan, apply, rollback, finish
 
 cd cockpit
 npm ci && npm run typecheck && npm test && npx vite build
@@ -79,8 +77,8 @@ suites.
 - **Think before building.** Before implementing a feature, check that it fits the
   goal above, works on low-end hardware (8 GB RAM, HDD, possibly on battery), and
   doesn't add a recurring cost or a required cloud service. Keep Docker, BuildKit,
-  Traefik and WireGuard (`boringtun`) as dependencies; build everything Coolify and
-  Tailscale did for us on top of them (design doc §17).
+  Traefik and WireGuard (`boringtun`) as the dependencies; build the rest on top of
+  them (design doc §17).
 - **Low-end first:** keep the agent small (static musl binary, ≤ 8 MB, gated in CI;
   `vercelify-mesh` ≤ 6 MB). Keep cockpit
   polling intervals modest. Avoid canvas/WebGL or heavy always-on animation in

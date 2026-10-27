@@ -1,8 +1,8 @@
 ---
 name: vercelify
-description: Deploy, inspect and debug apps on a self-hosted Vercelify server (an old x86 laptop or Raspberry Pi running Coolify, Tailscale and a small agent), and explain failed builds with Gemma 4 running locally in Ollama. Use when the user mentions Vercelify, the vfy CLI, self-hosting a Vercel-style PaaS on their own hardware, Coolify deployments, a failed or broken deploy or build log, "why did my deploy fail", vercel.json on their own server, rolling back, pulling env vars, or running Gemma or other open models with Ollama on a home server.
+description: Deploy, inspect and debug apps on a self-hosted Vercelify server (an old x86 laptop or Raspberry Pi running the Vercelify agent and its private network), and explain failed builds with Gemma 4 running locally in Ollama. Use when the user mentions Vercelify, the vfy CLI, self-hosting a Vercel-style PaaS on their own hardware, a failed or broken deploy or build log, "why did my deploy fail", vercel.json on their own server, rolling back, pulling env vars, or running Gemma or other open models with Ollama on a home server.
 license: MIT
-compatibility: Needs bash, curl and jq. vfy APP commands need a server paired in the Vercelify desktop app (reached over Tailscale). vfy why --log needs Ollama on the same machine, or a GEMINI_API_KEY for the Gemini API.
+compatibility: Needs bash, curl and jq. vfy APP commands need a server paired in the Vercelify desktop app (reached over Vercelify's private network). vfy why --log needs Ollama on the same machine, or a GEMINI_API_KEY for the Gemini API.
 metadata:
   repository: https://github.com/shashank03-dev/vercelify-oss
   version: "0.2.0"
@@ -11,9 +11,10 @@ metadata:
 # Vercelify
 
 Vercelify turns a spare Linux laptop into a free, self-hosted Vercel: push-to-deploy,
-PR previews, rollbacks, databases and HTTPS domains. Coolify v4 does the builds,
-Tailscale gives private access with no open ports, and `vercelify-agent` (port 7420,
-bearer token) reports the machine's state and runs a local Ollama for AI.
+PR previews, rollbacks, databases and HTTPS domains. `vercelify-agent` (port 7420,
+bearer token) builds and runs the apps with its own engine (BuildKit, Traefik), reports
+the machine's state and runs a local Ollama for AI; `vercelify-mesh` (WireGuard) gives
+private access to it from the user's devices.
 
 You drive it with three tools:
 
@@ -21,7 +22,7 @@ You drive it with three tools:
 | --- | --- | --- |
 | `vfy` (`cli/vfy` in the repo) | The developer's Mac or Linux machine | Apps, deploys, logs, rollbacks, env, vercel.json, **`vfy why`** |
 | `vercelify` | On the server, with `sudo` | Health, backups, the local AI runtime (`vercelify llm …`) |
-| Agent HTTP API | `http://SERVER:7420/v1/…` over Tailscale | Anything scripted; see [references/agent-api.md](references/agent-api.md) |
+| Agent HTTP API | `http://SERVER:7420/v1/…` over the private network | Anything scripted; see [references/agent-api.md](references/agent-api.md) |
 
 ## Getting vfy
 
@@ -40,7 +41,7 @@ settings path). Commands that name an app need a paired server; `vfy why --log` 
 ## Workflow: a deploy failed
 
 1. Find the app: `vfy apps` (name, status, URL). The APP argument can be the name or the uuid.
-2. Ask why it failed: `vfy why APP`. This fetches the app's last failed Coolify
+2. Ask why it failed: `vfy why APP`. This fetches the app's last failed
    deployment, trims the build log, and asks the model on the server that built it
    (Gemma 4 E2B when installed) for an answer in three parts:
    - **Cause:** the failing step and the root cause
@@ -57,7 +58,7 @@ Node version drift.
 
 ### A log with no server
 
-When the user has a build log as a file (a CI log, or a Vercel/Coolify log they copied):
+When the user has a build log as a file (a CI log, or a Vercel log they copied):
 
 ```bash
 vfy why --log build.log                       # local Ollama at http://localhost:11434
@@ -107,14 +108,14 @@ ollama pull gemma4:e2b       # Gemma 4 E2B, Apache 2.0
 On a Vercelify server (models are shared by the cockpit, `vfy why APP` and the user's apps):
 
 ```bash
-sudo vercelify llm install [ssd|hdd]   # Ollama in a container, port 11434, tailnet only
+sudo vercelify llm install [ssd|hdd]   # Ollama in a container, port 11434, private network only
 sudo vercelify llm pull gemma4:e2b
 sudo vercelify llm                     # status, endpoints, installed models
 ```
 
 Gemma 4 E2B is the default because it is the smallest Gemma 4. Ollama's default build is
 still about a 7 GB download and needs about that much free memory while it answers, and a
-server loads one model at a time next to Coolify and the user's apps. On an 8 GB server,
+server loads one model at a time next to the user's apps. On an 8 GB server,
 prefer `vfy why --log` on the user's own computer, or `--provider gemini` if they agree.
 `gemma4:e4b` needs roughly 10 GB.
 
@@ -147,8 +148,9 @@ curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/i
 curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install.sh | sudo bash -s -- --ai gemma4:e2b
 ```
 
-On the Mac: `curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash`
-installs Tailscale and the desktop app, which pairs with the server.
+On the Mac: `curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash -s -- --pair vfy2.…`
+(the command the server installer prints) installs the desktop app, `vercelify-mesh` and
+`vfy`, and pairs with the server.
 Always tell the user before running an installer: it changes the machine.
 
 ## Rules

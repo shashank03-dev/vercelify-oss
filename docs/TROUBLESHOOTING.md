@@ -29,12 +29,12 @@ sudo vercelify status
    `journalctl -u vercelify-agent -n 50`.
 3. "missing or invalid agent token": run `sudo vercelify pair` and pair again.
 4. The server isn't in the list: discovery lists servers on the same LAN (multicast
-   DNS) and on your network. On another network, paste the full code (`vfy2.…`) instead.
+   DNS) and on your network. On another network, paste the full code (`vfy2.…`) instead;
+   that needs the server reachable from outside: `sudo vercelify remote on` (or a
+   Cloudflare domain). `sudo vercelify remote` says why it isn't (no UPnP/NAT-PMP on the
+   router, or CGNAT).
 5. *wrong pairing code* / *no pairing code is waiting*: codes work once, for 15
    minutes, and five wrong tries discard them. Run `sudo vercelify pair` for a new one.
-6. A server still on Coolify and Tailscale (installed before the engine): the app
-   shows how to move it (`sudo vercelify migrate`); until then pair it over Tailscale
-   with `sudo vercelify pair --tailscale`.
 
 ## Deployments
 
@@ -114,12 +114,11 @@ sudo vercelify status
 | The app says *missing or invalid agent token* after a reinstall or revoke | `sudo vercelify pair` and pair again (device tokens are per pairing). |
 | `vercelify update` says it rolled back | Read the reason in `sudo vercelify logs setup`; fix it, then update again. `sudo vercelify rollback` returns to the previous version by hand. |
 | An app on a worker isn't reachable | The main server's proxy forwards it over the network: the worker must be online (Servers page) and `vercelify-mesh status` on the main server must show a handshake with it. |
-| An app needs a service on another server | Containers can't reach other machines on the network except their proxies and databases' public ports. Allow a port in `/etc/vercelify/firewall.conf` on the app's server: `CONTAINER_TAILNET_ALLOW_TCP="6379"`, then `sudo systemctl restart vercelify-firewall`. |
+| An app needs a service on another server | Containers can't reach other machines on the network except their proxies and databases' public ports. Allow a port in `/etc/vercelify/firewall.conf` on the app's server: `CONTAINER_MESH_ALLOW_TCP="6379"`, then `sudo systemctl restart vercelify-firewall`. |
 | A visitor sees *Waking up …* | The app was asleep (no visits for its idle time) and is starting; the page reloads by itself. Turn sleep off in the app's **Sleep when idle** card or `sudo vercelify sleep off APP`. |
 | *Waking up* never ends | The app's container doesn't become healthy: open its logs. An app you stopped yourself isn't woken by visits: start it in the app. |
 | Sleep is on but the app never sleeps | `sudo vercelify sleep` shows why (e.g. *the proxy's request counters are unreachable*: check `docker ps` shows `vercelify-proxy` running). A build in progress also postpones sleeping. |
 | Doctor: *Platform* is red (the engine couldn't open its state database) | `journalctl -u vercelify-agent -n 50` says why; if the database is damaged, `sudo vercelify restore-state` puts back its last good copy (at most 5 minutes old). |
-| A server on Coolify: *Coolify still runs this server's apps* | Expected until you move it: `sudo vercelify migrate` shows the plan, `--apply` moves it, `--rollback` goes back. See [PLATFORM.md §8](PLATFORM.md#8-coming-from-coolify). |
 | The server rebooted at night | The reboot window applied security updates (`sudo vercelify maintenance` shows the last run). Change the time with `sudo vercelify maintenance on 03:15`, or turn it off. |
 | Doctor: *Security updates — skipped last night* | Something was running (a build, a backup, battery). It retries the next night; `sudo reboot` now if you prefer. |
 | Power guard thresholds don't match `power-guard.conf` | Values changed in the app win: Settings → Power guard → **Use this machine's defaults**, or delete `/var/lib/vercelify/power-guard.local.conf`. |

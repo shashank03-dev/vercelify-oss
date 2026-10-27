@@ -1,6 +1,6 @@
 # vfy command reference
 
-`vfy [-s SERVER] COMMAND …`. APP is an app's name or Coolify uuid. Exit status is
+`vfy [-s SERVER] COMMAND …`. APP is an app's name or id. Exit status is
 non-zero on any error, with the reason on stderr prefixed `vfy:`.
 
 | Command | Does | Changes anything? |
@@ -24,10 +24,7 @@ non-zero on any error, with the reason on stderr prefixed `vfy:`.
 | `vfy why APP` | AI: why APP's last deployment failed and how to fix it | no |
 | `vfy why --log FILE\|-` | The same for any build log, local Ollama, no server | no |
 
-### On servers running Vercelify's own engine
-
-A main server paired without a Coolify URL runs the platform engine; there APP is an
-app's name or id, and these change or add to the commands above:
+### Deploys, logs, variables and services in detail
 
 | Command | Does | Changes anything? |
 | --- | --- | --- |

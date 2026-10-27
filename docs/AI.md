@@ -104,7 +104,7 @@ server reach it at `http://vercelify-ollama:11434` (`/v1` for OpenAI clients).
 
 Containers can't reach other machines on the network (so an app can't become a way
 in). To let apps on a worker use the main server's models, allow the port on that
-worker: `CONTAINER_TAILNET_ALLOW_TCP="11434"` in `/etc/vercelify/firewall.conf`, then
+worker: `CONTAINER_MESH_ALLOW_TCP="11434"` in `/etc/vercelify/firewall.conf`, then
 `sudo systemctl restart vercelify-firewall`; the apps call `http://10.77.0.1:11434`.
 
 ## Several servers

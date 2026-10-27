@@ -1,7 +1,8 @@
 # Security Policy
 
-Vercelify runs on machines that host your apps and hold credentials (Coolify API
-tokens, Tailscale keys, GitHub tokens), so we take security reports seriously.
+Vercelify runs on machines that host your apps and hold credentials (device tokens,
+the master key that seals app secrets, mesh keys, Git and Cloudflare tokens), so we
+take security reports seriously.
 
 ## Supported versions
 
@@ -25,5 +26,17 @@ work on a fix and credit you in the advisory unless you prefer to stay anonymous
 
 ## Scope
 
-In scope: code in this repository. Vulnerabilities in Coolify, Tailscale, Cloudflare,
-Traefik or other upstream projects should be reported to those projects.
+In scope: code in this repository. Vulnerabilities in Docker, BuildKit, Traefik,
+WireGuard/boringtun, Cloudflare or other upstream projects should be reported to those
+projects.
+
+## What is exposed
+
+- The agent API (TCP 7420) listens on 127.0.0.1 and the mesh address only, behind
+  per-device bearer tokens (hashed at rest, revocable, role-checked, audited).
+- The mesh control port (TCP 7443) and WireGuard (UDP 51820) are the only ports meant
+  for outside the LAN (`vercelify remote` or a Cloudflare tunnel). The control port
+  accepts sealed, single-use, rate-limited joins and SPAKE2 pairing only.
+- Apps are published through the proxy on 80/443. Containers can't reach the mesh
+  beyond its ACL; Ollama and the image registry are firewalled to the mesh.
+- Installers verify SHA-256 checksums of the release binaries and the Mac disk image.

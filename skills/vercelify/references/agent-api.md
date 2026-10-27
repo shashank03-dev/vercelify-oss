@@ -1,7 +1,8 @@
 # Vercelify agent API
 
-`vercelify-agent` listens on port 7420 of each server, reachable over Tailscale
-(`http://SERVER.TAILNET.ts.net:7420`). Everything under `/v1` except `/v1/health` and
+`vercelify-agent` listens on port 7420 of each server, on 127.0.0.1 and its address on
+Vercelify's private network (`http://10.77.0.1:7420` for the main server, or
+`http://SERVER.vfy:7420`). Everything under `/v1` except `/v1/health` and
 `/v1/pair/claim` needs `Authorization: Bearer TOKEN`. The token is in
 `/etc/vercelify/agent.token` on the server (mode 600) and in the desktop app's
 settings after pairing. Pass it to curl on stdin so it never shows in `ps`:
@@ -30,8 +31,8 @@ printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" |
 | `POST /v1/llm/models/delete` `{"model":"…"}` | Remove a model. |
 | `POST /v1/llm/chat` | Chat with an installed model (below). |
 
-Deployments, apps, env vars and rollbacks are Coolify's API (`http://SERVER:8000/api/v1`,
-its own token); `vfy` wraps both.
+Apps, deployments, env vars, rollbacks, databases and services are under
+`/v1/platform/…` on the same agent and token; `vfy` wraps them.
 
 ## POST /v1/llm/chat
 
@@ -59,6 +60,6 @@ they send is `EXPLAIN_SYSTEM` in `cli/vfy` (identical to `cockpit/src/lib/explai
 
 ## Ollama directly
 
-Port 11434 is open to the tailnet only (Vercelify firewall). OpenAI-compatible clients
+Port 11434 is open to the private network only (Vercelify firewall). OpenAI-compatible clients
 use `http://SERVER:11434/v1` with any API key; apps deployed on the same server use
 `http://vercelify-ollama:11434`.

@@ -118,21 +118,6 @@ rel=target/x86_64-unknown-linux-musl/release
 sudo AGENT_BINARY=$rel/vercelify-agent MESH_BINARY=$rel/vercelify-mesh host/tests/integration/run.sh
 ```
 
-## Migration contract test (real Coolify)
-
-`vercelify migrate` against a real Coolify (4.4.6, or `COOLIFY_VERSION=…`) started from
-its own compose files with a shop in it (a PostgreSQL database with data, a Git app, an
-image app, a one-click service): plan, apply, the check through our proxy, rollback to
-Coolify, apply again and finish.
-
-```bash
-cargo build -p vercelify-agent
-sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/migrate.sh   # KEEP=1 leaves it running
-```
-
-CI runs it (`integration.yml`) when that code changes, weekly, and against Coolify's
-newest release as an early warning.
-
 ## Project rules contract test (the real proxy)
 
 Runs the real agent with the engine and its proxy, deploys two apps as image apps (a

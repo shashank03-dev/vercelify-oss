@@ -216,12 +216,13 @@ what happens next:
 **1. It checks the machine.** Operating system, memory, disk space and internet. If
 something is missing, it tells you what to fix.
 
-**2. It asks two questions.** Press <kbd>Enter</kbd> to accept the default for either.
+**2. It asks three questions.** Press <kbd>Enter</kbd> to accept the default for any.
 
 | Question | What to answer |
 | --- | --- |
 | *Set up local AI models too?* | `n` for now. You can add AI later in one command (see [Step 5](#step-5-optional-turn-on-ai-on-the-server)). |
 | *Your domain* | Leave it blank. Your apps will still work privately; you can add a domain any time. |
+| *Reach this server from anywhere?* | `y` if you want to use the Mac away from home. Your router forwards Vercelify's two network ports by itself (UPnP or NAT-PMP); only the encrypted private network answers there. Change it later with `sudo vercelify remote on` / `off`. |
 
 **3. It installs everything.** You'll see one line per step. The important ones:
 
@@ -234,9 +235,10 @@ something is missing, it tells you what to fix.
 - **Laptop server mode** keeps the laptop running with the lid closed, and the
   **power & thermal guard** protects the battery and slows things down if it gets too hot.
 
-**4. It prints a summary.** Look for the line with your **8-character pairing code**
-(like `K7QF-M2XD`). Keep this window open; you'll need the code in Step 3. The code is
-valid for one hour. If it expires, run `sudo vercelify pair` to get a new one.
+**4. It prints a summary.** It ends with **one command for your Mac** that installs the
+app and connects it to this server, and an **8-character pairing code** (like
+`K7QF-M2XD`) for a Mac that already has the app. Keep this window open for Step 2. The
+codes are valid for one hour; `sudo vercelify pair` prints new ones.
 
 > **Why `--storage-device none`?** It keeps everything on the laptop's main disk. If the
 > machine has a second disk you'd like to use for databases and backups, pass
@@ -247,11 +249,15 @@ From now on, leave the laptop plugged in and connected. You can close the lid.
 
 ### Step 2: Install the app on your Mac
 
-Open **Terminal** on your Mac (press <kbd>⌘</kbd>+<kbd>Space</kbd>, type *Terminal*) and run:
+Open **Terminal** on your Mac (press <kbd>⌘</kbd>+<kbd>Space</kbd>, type *Terminal*) and
+paste the Mac command from the end of Step 1. It looks like this:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash
+curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash -s -- --pair vfy2.…
 ```
+
+With `--pair` the app connects to your server by itself the first time it opens, so you
+can skip Step 3. Without it, the installer only installs the app.
 
 <p align="center">
   <img src="docs/demos/install-mac.svg" width="900" alt="Animated terminal showing the Mac installer: builds the Vercelify app, installs its network daemon and the vfy tool, then opens the app" />
@@ -273,7 +279,8 @@ This installs three things:
 
 ### Step 3: Connect the app to your server
 
-Vercelify opens automatically when the installer finishes.
+Installed with `--pair`? The app is already connected: go to Step 4. Otherwise
+Vercelify opens when the installer finishes.
 
 <p align="center">
   <img src="docs/screenshots/pairing.jpg" width="860" alt="The Vercelify welcome screen listing servers on the private network, with an 8-character pairing code typed in" />
@@ -286,8 +293,9 @@ Vercelify opens automatically when the installer finishes.
 
 Don't see your laptop? The list shows servers on the same Wi-Fi or wired network. If
 the Mac is elsewhere, paste the **full pairing code** from Step 1 instead (it starts with
-`vfy2.`); joining from outside your home network needs a domain with a Cloudflare tunnel
-(Step 6) or two forwarded ports, see the [network guide](docs/MESH.md).
+`vfy2.`). Joining from outside your home network works when you answered `y` to *Reach
+this server from anywhere?* (or later: `sudo vercelify remote on`), or with a domain on a
+Cloudflare tunnel (Step 6); see the [network guide](docs/MESH.md).
 
 ### Step 4: Deploy your first app
 
@@ -346,7 +354,7 @@ without Cloudflare, are in the [platform guide](docs/PLATFORM.md#1-domains-and-h
 | The installer stopped with an error | Fix what it mentions and **run the same command again**. Finished steps are skipped. |
 | Not sure what's wrong with the server | `sudo vercelify doctor` checks everything and suggests fixes. |
 | Pairing code expired | `sudo vercelify pair` prints a new one. |
-| The Mac app can't see the server | Make sure the laptop is awake and online. On another network, paste the full pairing code (`sudo vercelify pair`); `vercelify-mesh status` on the Mac shows how it reaches each server. |
+| The Mac app can't see the server | Make sure the laptop is awake and online. On another network, paste the full pairing code (`sudo vercelify pair`); that needs `sudo vercelify remote on` (or a Cloudflare domain) on the server. `vercelify-mesh status` on the Mac shows how it reaches each server. |
 | Need the full installer log | It's in `/var/log/vercelify-setup.log` on the server. |
 
 More answers are in [troubleshooting](docs/TROUBLESHOOTING.md).
@@ -463,8 +471,7 @@ rest itself: builds, deployments, previews, databases, the private network, hard
 care, `vercel.json` support and the AI workflow. The connection between your Mac and the
 server stays inside your private network and uses revocable access tokens. More in
 [architecture](docs/ARCHITECTURE.md), [the platform guide](docs/PLATFORM.md) and
-[security](SECURITY.md). Servers set up with an earlier version (Coolify and Tailscale)
-move over with `sudo vercelify migrate`.
+[security](SECURITY.md).
 
 **Coming from Vercel?** Vercelify reads the common parts of `vercel.json` (redirects,
 rewrites, headers and cron jobs). See [what's supported](docs/VERCEL-PARITY.md) and the
@@ -560,7 +567,5 @@ Vercelify stands on the shoulders of [Docker](https://github.com/moby/moby),
 [BuildKit](https://github.com/moby/buildkit), [Traefik](https://github.com/traefik/traefik),
 [WireGuard](https://www.wireguard.com) and [boringtun](https://github.com/cloudflare/boringtun),
 [Ollama](https://github.com/ollama/ollama), [Gemma](https://ai.google.dev/gemma) and
-[Tauri](https://github.com/tauri-apps/tauri). Earlier versions ran on
-[Coolify](https://github.com/coollabsio/coolify) and [Tailscale](https://tailscale.com),
-which showed what a self-hosted platform should do.
+[Tauri](https://github.com/tauri-apps/tauri).
 Vercelify is an independent project and is not affiliated with Vercel.

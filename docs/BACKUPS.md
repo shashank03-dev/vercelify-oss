@@ -66,9 +66,5 @@ A whole server, onto a fresh machine after a disk failure:
 With a worker to spare, a [warm standby](PLATFORM.md#6-more-servers-workers-and-a-standby)
 takes over in minutes instead (`sudo vercelify promote`).
 
-A snapshot taken while the server still ran Coolify is restored onto a server running
-Coolify, then moved with `sudo vercelify migrate`; `--instance` refuses to put it over
-the engine.
-
 Practice it once on a spare machine: a backup you have never restored is a hope,
 not a plan.
