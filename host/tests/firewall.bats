@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 # firewall.sh against a stub iptables that records the rules it is given.
 
 setup() {
@@ -31,7 +32,7 @@ teardown() { rm -rf "$T"; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"containers reach other servers only through the mesh's ACL"* ]]
   grep -q -- '^iptables -w -A VERCELIFY-FWD -i br-+ -o tailscale0 -d 100.100.100.100 -j RETURN$' "$RULES"
-  ! grep -q -- '--dport 22 -j RETURN' "$RULES"
+  run ! grep -q -- '--dport 22 -j RETURN' "$RULES"
   grep -q -- '^iptables -w -A VERCELIFY-FWD -i br-+ -o vfy0 -j DROP$' "$RULES"
   grep -q -- '^iptables -w -A VERCELIFY-FWD -i docker0 -o tailscale0 -j DROP$' "$RULES"
   grep -q -- '^ip6tables -w -A VERCELIFY-FWD -i br-+ -o tailscale0 -d fd7a:115c:a1e0::53 -j RETURN$' "$RULES"
@@ -45,7 +46,7 @@ teardown() { rm -rf "$T"; }
 @test "the isolation can be turned off or widened in firewall.conf" {
   echo 'CONTAINER_TAILNET=allow' >"$FIREWALL_CONF"
   "$FW" apply >/dev/null
-  ! grep -q -- '-o tailscale0' "$RULES"
+  run ! grep -q -- '-o tailscale0' "$RULES"
   : >"$RULES"
   echo 'CONTAINER_TAILNET_ALLOW_TCP="22 5432"' >"$FIREWALL_CONF"
   "$FW" apply >/dev/null

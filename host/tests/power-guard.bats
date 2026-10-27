@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 load helpers
 
 PG="$BATS_TEST_DIRNAME/../power-guard.sh"
@@ -12,7 +13,7 @@ teardown() { teardown_sandbox; }
   [ "$status" -eq 0 ]
   [ "$(state)" = ok ]
   grep -q '"reason":"AC power, CPU 50°C"' "$STATE_DIR/power-guard.state"
-  ! grep -q -E 'stop|pause|POWEROFF' "$CALLS"
+  run ! grep -q -E 'stop|pause|POWEROFF' "$CALLS"
 }
 
 @test "on battery above warn threshold: warning" {
@@ -25,7 +26,7 @@ teardown() { teardown_sandbox; }
 @test "low battery needs two consecutive readings before shutdown" {
   laptop 0 14 Discharging
   "$PG" --once
-  ! grep -q POWEROFF "$CALLS"
+  run ! grep -q POWEROFF "$CALLS"
   [ "$(state)" = warning ]
   "$PG" --once
   grep -q POWEROFF "$CALLS"
@@ -48,7 +49,7 @@ teardown() { teardown_sandbox; }
   laptop 0 12 Discharging; "$PG" --once
   laptop 1 12 Charging;    "$PG" --once
   laptop 0 12 Discharging; "$PG" --once
-  ! grep -q POWEROFF "$CALLS"
+  run ! grep -q POWEROFF "$CALLS"
 }
 
 @test "restore starts remembered containers when back on AC" {
@@ -63,7 +64,7 @@ teardown() { teardown_sandbox; }
   laptop 0 20 Discharging
   printf 'aaa\n' >"$PERSIST_DIR/power-guard.restore"
   "$PG" --restore
-  ! grep -q 'docker start' "$CALLS"
+  run ! grep -q 'docker start' "$CALLS"
   [ -s "$PERSIST_DIR/power-guard.restore" ]
 }
 
@@ -75,12 +76,12 @@ teardown() { teardown_sandbox; }
   [ "$(state)" = thermal_paused ]
   grep -q 'docker pause eee' "$CALLS"                 # the build
   grep -q 'docker update --cpus .* aaa' "$CALLS"      # the app keeps serving, slower
-  ! grep -q 'docker pause aaa' "$CALLS"
-  ! grep -q -E 'docker (pause|update).* (bbb|ccc|ddd)$' "$CALLS"   # core + databases
+  run ! grep -q 'docker pause aaa' "$CALLS"
+  run ! grep -q -E 'docker (pause|update).* (bbb|ccc|ddd)$' "$CALLS"   # core + databases
   cpu_temp 85        # between resume and pause: stay in this state
   "$PG" --once
   [ "$(state)" = thermal_paused ]
-  ! grep -q unpause "$CALLS"
+  run ! grep -q unpause "$CALLS"
   [ "$(grep -c 'docker update' "$CALLS")" -eq 1 ]    # not capped twice
   cpu_temp 70
   "$PG" --once
@@ -95,8 +96,8 @@ teardown() { teardown_sandbox; }
   "$PG" --once
   [ "$(state)" = thermal_paused ]
   grep -q 'docker pause aaa' "$CALLS"
-  ! grep -q 'docker pause ccc' "$CALLS"
-  ! grep -q 'docker pause ddd' "$CALLS"
+  run ! grep -q 'docker pause ccc' "$CALLS"
+  run ! grep -q 'docker pause ddd' "$CALLS"
   cpu_temp 60
   "$PG" --once
   grep -q 'docker unpause aaa' "$CALLS"
@@ -117,7 +118,7 @@ teardown() { teardown_sandbox; }
   laptop 1 90 Charging
   cpu_temp 99
   "$PG" --once; "$PG" --once
-  ! grep -q POWEROFF "$CALLS"
+  run ! grep -q POWEROFF "$CALLS"
   "$PG" --once
   grep -q POWEROFF "$CALLS"
 }
@@ -130,7 +131,7 @@ teardown() { teardown_sandbox; }
   "$PG" --once; "$PG" --once
   [ "$(state)" = ok ]
   grep -q 'no battery' "$STATE_DIR/power-guard.state"
-  ! grep -q POWEROFF "$CALLS"
+  run ! grep -q POWEROFF "$CALLS"
 }
 
 @test "config file overrides thresholds" {
@@ -150,7 +151,7 @@ teardown() { teardown_sandbox; }
   laptop 0 25 Discharging
   echo 'BATTERY_SHUTDOWN_PCT=15' >"$POWER_GUARD_CONFIG"
   "$PG" --once; "$PG" --once
-  ! grep -q POWEROFF "$CALLS"
+  run ! grep -q POWEROFF "$CALLS"
   echo 'BATTERY_SHUTDOWN_PCT=30' >"$POWER_GUARD_LOCAL_CONFIG"
   "$PG" --once; "$PG" --once
   grep -q POWEROFF "$CALLS"

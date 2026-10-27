@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 # `vercelify` commands (llm, sleep, doctor, pair…) against a mock agent API.
 
 setup() {
@@ -70,9 +71,13 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
 }
 
 @test "the agent token goes to curl on stdin, never on the command line" {
-  "$CLI" llm >/dev/null
+  mkdir -p "$T/bin"
+  printf '#!/bin/sh\necho "$*" >>"%s"\nexec %s "$@"\n' "$T/curl-argv" "$(command -v curl)" >"$T/bin/curl"
+  chmod +x "$T/bin/curl"
+  PATH="$T/bin:$PATH" "$CLI" llm >/dev/null
   grep -q 'auth=Bearer test-agent-token' "$T/requests.log"
-  ! grep -q -- 'test-agent-token' <(ps -eo args) 2>/dev/null || true
+  [ -s "$T/curl-argv" ]
+  run ! grep -q -- 'test-agent-token' "$T/curl-argv"
   grep -q -- '-K -' "$BATS_TEST_DIRNAME/../lib/agent.sh"
 }
 
@@ -186,9 +191,9 @@ STUB
   grep -q 'PUT /v1/sleep/app1 .*"enabled":false' "$T/requests.log"
   # without the firewall, Ollama's API would be open to the network
   grep -q 'docker rm -f vercelify-ollama' "$T/docker.log"
-  ! grep -q 'docker rm -f vercelify-registry' "$T/docker.log"
   [[ "$output" == *"removed the vercelify-ollama container"* ]]
   [[ "$output" != *"vercelify-registry"* ]]
+  run ! grep -q 'docker rm -f vercelify-registry' "$T/docker.log"
 }
 
 @test "git-source: a token from stdin (never an argument), a deploy key, list and remove" {

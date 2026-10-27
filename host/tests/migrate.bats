@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 # `vercelify migrate`: the steps around the agent's (a fake agent binary
 # here, systemctl stubbed). The real migration, against a real Coolify, is
 # host/tests/contract/migrate.sh.
@@ -45,7 +46,7 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   run "$CLI" migrate
   [ "$status" -eq 0 ]
   [[ "$output" == *"+ app web"* && "$output" == *"Nothing changed"* ]]
-  ! grep -q systemctl "$T/calls"
+  run ! grep -q systemctl "$T/calls"
   grep -qx 'engine = "coolify"' "$T/etc/agent.toml"
 }
 
@@ -114,7 +115,7 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   run env MIGRATE_NOW="$(date -d 2026-10-27T00:00:00Z +%s)" "$CLI" migrate --tailscale-off
   [ "$status" -ne 0 ]
   [[ "$output" == *"not seen on the mesh in the last 24 hours: cabin"* ]]
-  ! grep -q "tailscale down" "$T/calls"
+  run ! grep -q "tailscale down" "$T/calls"
   run env MIGRATE_NOW="$(date -d 2026-10-25T12:00:00Z +%s)" "$CLI" migrate --tailscale-off
   [ "$status" -eq 0 ]
   grep -q "tailscale down" "$T/calls"

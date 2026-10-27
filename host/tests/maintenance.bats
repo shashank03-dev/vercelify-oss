@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 # `vercelify maintenance`: the nightly reboot window and its guards.
 
 setup() {
@@ -33,7 +34,7 @@ result() { jq -r .result "$T/state/maintenance.json"; }
   run "$CLI" maintenance run
   [ "$status" -eq 0 ]
   [ "$(result)" = none ]
-  ! grep -q REBOOT "$CALLS"
+  run ! grep -q REBOOT "$CALLS"
 }
 
 @test "reboots when updates need it and nothing is running" {
@@ -56,7 +57,7 @@ result() { jq -r .result "$T/state/maintenance.json"; }
   touch -d '3 days ago' "$T/modules/6.1.0-distro"   # installed long before this boot (2 h ago)
   run "$CLI" maintenance run
   [ "$(result)" = none ]
-  ! grep -q REBOOT "$CALLS"
+  run ! grep -q REBOOT "$CALLS"
   rm -rf "$T/modules"
   run "$CLI" maintenance run
   [ "$(result)" = none ]
@@ -84,7 +85,7 @@ result() { jq -r .result "$T/state/maintenance.json"; }
   rm "$POWER_GUARD_STATE"; echo '120.0 1.0' >"$T/uptime"
   run "$CLI" maintenance run
   jq -r .detail "$T/state/maintenance.json" | grep -q 'less than an hour'
-  ! grep -q REBOOT "$CALLS"
+  run ! grep -q REBOOT "$CALLS"
 }
 
 @test "off means off; on sets the window and the timer" {
@@ -93,7 +94,7 @@ result() { jq -r .result "$T/state/maintenance.json"; }
   [ "$status" -eq 0 ]
   grep -q 'disable --now vercelify-maintenance.timer' "$CALLS"
   run "$CLI" maintenance run
-  ! grep -q REBOOT "$CALLS"
+  run ! grep -q REBOOT "$CALLS"
   run "$CLI" maintenance on 03:15
   [ "$status" -eq 0 ]
   grep -q 'OnCalendar=\*-\*-\* 03:15' "$T/systemd/vercelify-maintenance.timer"

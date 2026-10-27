@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 # Hardware profiles, Pi hardening decisions, the registry commands and the staged
 # update with rollback.
 
@@ -54,8 +55,8 @@ mem() { printf 'MemTotal: %d kB\n' "$(( $1 * 1024 ))" >"$MEMINFO_FILE"; }
 
 @test "SD card roots are recognised" {
   on_sd_card /dev/mmcblk0p2
-  ! on_sd_card /dev/sda2
-  ! on_sd_card /dev/nvme0n1p2
+  run ! on_sd_card /dev/sda2
+  run ! on_sd_card /dev/nvme0n1p2
 }
 
 @test "memory cgroup: added to cmdline.txt once, and a reboot is requested" {

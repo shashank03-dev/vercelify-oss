@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 # `vercelify backup` with stub restic, docker and systemctl.
 
 setup() {
@@ -55,7 +56,7 @@ teardown() { rm -rf "$T"; }
   # the password never appears on a command line
   pw=$(sed -n 's/^RESTIC_PASSWORD=//p' "$T/etc/backup.env")
   [ "${#pw}" -ge 40 ]
-  ! grep -q "$pw" "$CALLS"
+  run ! grep -q "$pw" "$CALLS"
   # re-running keeps the password and repositories
   "$CLI" backup setup >/dev/null 2>&1
   grep -q "RESTIC_PASSWORD=$pw" "$T/etc/backup.env"
@@ -72,7 +73,7 @@ teardown() { rm -rf "$T"; }
   grep -q 'docker exec d4 sh -c exec mariadb-dump' "$CALLS"
   grep -q 'docker exec c3 sh -c REDISCLI_AUTH=' "$CALLS"
   grep -q "sqlite3 $T/state/platform.db .backup '$T/state/backup-stage/platform.db'" "$CALLS"
-  ! grep -q 'docker exec b2' "$CALLS"   # not a database
+  run ! grep -q 'docker exec b2' "$CALLS"   # not a database
   line=$(grep '^restic backup' "$CALLS")
   [[ "$line" == *"$T/coolify/source/.env"* && "$line" == *"$T/coolify/ssh"* && "$line" == *"$T/etc"* ]]
   [[ "$line" == *"$T/storage/volumes"* && "$line" == *"--exclude $T/volumes/ollama-models"* ]]
@@ -99,7 +100,7 @@ teardown() { rm -rf "$T"; }
   [ "$status" -eq 0 ]
   grep -q "restic restore 1a2b3c4d --target $T/out" "$CALLS"
   [[ "$output" == *"--instance"* ]]
-  ! grep -q 'docker stop coolify' "$CALLS"
+  run ! grep -q 'docker stop coolify' "$CALLS"
   run "$CLI" backup restore '../x'
   [ "$status" -ne 0 ]
 }
@@ -133,7 +134,7 @@ teardown() { rm -rf "$T"; }
   ASSUME_YES=1 run "$CLI" backup restore latest --instance --target "$T/out"
   [ "$status" -ne 0 ]
   [[ "$output" == *"vercelify migrate"* ]]
-  ! grep -q 'systemctl stop' "$CALLS"
+  run ! grep -q 'systemctl stop' "$CALLS"
 }
 
 @test "not set up: clear message" {
@@ -147,7 +148,7 @@ teardown() { rm -rf "$T"; }
   VERCELIFY_BACKUP_PASSWORD=kept-secret run "$CLI" backup setup --to "$T/old"
   [ "$status" -eq 0 ]
   grep -q '^RESTIC_PASSWORD=kept-secret$' "$T/etc/backup.env"
-  ! grep -q 'restic init' "$CALLS"
+  run ! grep -q 'restic init' "$CALLS"
 }
 
 @test "a database that can't be dumped doesn't stop the rest from being saved" {

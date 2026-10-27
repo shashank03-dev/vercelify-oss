@@ -1,4 +1,5 @@
 #!/usr/bin/env bats
+bats_require_minimum_version 1.5.0
 # `vfy` against a server on Vercelify's own engine:
 # apps, deploys with a streamed build log, logs, rollbacks, variables,
 # restart, the service catalogue and `why`.
@@ -25,7 +26,7 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"✓ blog"*"live"*"https://blog.example.com"* ]]
   [[ "$output" == *"✗ api"*"failed"* ]]
-  ! grep -q '/api/v1/' "$T/requests.log"
+  run ! grep -q '/api/v1/' "$T/requests.log"
   grep -q '^GET /v1/platform/apps auth=Bearer agent-secret' "$T/requests.log"
 }
 
@@ -89,7 +90,7 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   [ "$status" -eq 0 ]
   [ "$(stat -c %a .env 2>/dev/null || stat -f %Lp .env)" = 600 ]
   grep -qx 'DATABASE_URL="postgres://u:p@db/x"' .env
-  ! grep -q PREVIEW_ONLY .env
+  run ! grep -q PREVIEW_ONLY .env
   grep -q '^GET /v1/platform/apps/blog/env?reveal=true ' "$T/requests.log"
   run "$VFY" env pull blog
   [ "$status" -ne 0 ]
