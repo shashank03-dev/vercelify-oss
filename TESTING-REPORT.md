@@ -1,6 +1,6 @@
 # Testing report
 
-Updated: 2026-10-27. Baseline: `ef20712fafbd1ada89c84e42ae8536cb47d9b4d2` (main). Branch: `test/full-pass`. Host: Apple Silicon macOS, Rust 1.99.0, Node 26.11.1, Bats 1.14.0; isolated aarch64 Linux Colima VM (4 vCPUs, 8 GiB RAM) for privileged Docker and namespace tests. This is a partial test pass, not a production-readiness assessment.
+Updated: 2026-10-27. Baseline: `ef20712fafbd1ada89c84e42ae8536cb47d9b4d2` (main). Branch: `test/full-pass`. Host: Apple Silicon macOS, Rust 1.99.0, Node 26.11.1, Bats 1.14.0; isolated aarch64 Linux Colima VM (4 vCPUs, 8 GiB RAM) for privileged Docker and namespace tests. This is a partial test pass, not a production-readiness assessment. A second pass reran every suite in sequence in the VM, then drove the cockpit by hand against the demo backend and a real agent, and probed the platform API for validation gaps (see "Full rerun" and "Hands-on run").
 
 ## Suites
 
@@ -9,7 +9,7 @@ Updated: 2026-10-27. Baseline: `ef20712fafbd1ada89c84e42ae8536cb47d9b4d2` (main)
 | Formatting | `cargo fmt --all --check` | Pass. |
 | Workspace Clippy | `cargo clippy --workspace --all-targets -- -D warnings` | Pass on macOS and Linux after the portable openpty fix. |
 | Mesh Clippy | `cargo clippy -p vercelify-mesh --all-targets --features daemon -- -D warnings` | Pass, including after the fix. |
-| Workspace Rust | `cargo test --workspace --all-features` | Pass: 490 on macOS at the final commit (earlier: 487 macOS, 489 Linux); seven Docker-gated tests returned early without exercising Docker. No generated-type diff. |
+| Workspace Rust | `cargo test --workspace --all-features` | Pass: 491 on macOS at the final commit (earlier: 490 and 487 macOS, 489 Linux); seven Docker-gated tests returned early without exercising Docker. No generated-type diff. |
 | Core Rust | `cargo test -p vercelify-core` | Pass: 177 tests. Generated types left no Git diff. |
 | Mesh Rust | `cargo test -p vercelify-mesh --features daemon` | Pass: 45 tests, including both new regressions. |
 | Platform Rust | `cargo test -p vercelify-platform` | Latest workspace run reports 114 passed; six Docker-gated cases immediately return without testing when `VERCELIFY_DOCKER_TESTS` is unset. Thus 108 actually executed, six not exercised. |
@@ -17,17 +17,17 @@ Updated: 2026-10-27. Baseline: `ef20712fafbd1ada89c84e42ae8536cb47d9b4d2` (main)
 | ShellCheck | `shellcheck -x -S warning install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/contract/*.sh host/tests/integration/run.sh` | Pass. |
 | Cockpit install | `cd cockpit && npm ci` | Pass; 179 packages installed, audit reported zero vulnerabilities. |
 | Cockpit types | `cd cockpit && npm run typecheck` | Pass. |
-| Cockpit unit | `cd cockpit && npm test` | Pass: 18 files, 75 tests. |
+| Cockpit unit | `cd cockpit && npm test` | Pass: 18 files, 76 tests. |
 | Cockpit production build | `cd cockpit && npx vite build` | Pass. |
 | Website | `cd website && npm ci && npm run typecheck && npm run build` | Pass; npm audit reported two high-severity advisories through a tooling dependency, detailed below. |
-| Cockpit demo | `cd cockpit && npm run e2e:demo` | Pass: 17 Chromium tests, including new navigation checks in both themes. Demo backend only. |
+| Cockpit demo | `cd cockpit && npm run e2e:demo` | Pass: 18 Chromium tests, including new navigation checks in both themes and the second-main wizard. Demo backend only. |
 | Bash 3.2 | `/bin/bash -n cli/vfy install-mac.sh` and `/bin/bash` invoking each `--help` | Pass on Bash 3.2.57. A separate Bash 3.2 Bats run of `vfy.bats`, `vfy-platform.bats`, and `install-mac.bats` reported 24 passing of 26 expected; its two skipped-case results were not emitted and Bats exited nonzero. Full behavioral coverage remains incomplete. |
 | Linux binaries | `cargo build -p vercelify-agent && cargo build -p vercelify-mesh --features daemon` | Pass: both debug binaries built in the Linux VM (aarch64). |
 | Routing contract | `sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/routing.sh` | Pass: 69 real-proxy checks in the Linux VM. |
 | Mesh contract | `sudo host/tests/contract/mesh.sh` | Pass: 28 checks with real Linux namespaces, WireGuard, pairing, forwarding, rotation, revocation and restart. |
 | NAT contract | `sudo host/tests/contract/mesh-nat.sh` | Pass: eight checks with real Linux namespace NAT, hole punching, relay and revocation. |
-| Multi-node contract | `sudo host/tests/contract/multinode.sh` | Pass: 15 checks with two Docker daemons, worker placement, replicas, terminal, rollback and revocation. |
-| Promote contract | `sudo host/tests/contract/promote.sh` | Pass: 19 checks including standby promotion, recovery and old-main step-down. |
+| Multi-node contract | `sudo host/tests/contract/multinode.sh` | Pass after `e19370d` (twice, 15/15 each); the full rerun first failed on two test races, see bug 14. 15 checks with two Docker daemons, worker placement, replicas, terminal, rollback and revocation. |
+| Promote contract | `sudo host/tests/contract/promote.sh` | Pass after `e19370d` (twice, 19/19 each). 19 checks including standby promotion, recovery and old-main step-down. |
 | Migration contract | `sudo env AGENT_BIN=<linux agent> host/tests/contract/migrate.sh` in the isolated VM | Pass: 14/14 against real Coolify 4.4.6, covering plan, apply, no-build adoption, proxy, data and volume copies, scheduled task, rollback to Coolify, second migration, and finish. The first runs failed at Coolify root-user setup (fixture, fixed in `c4dd177`), then at "site was built" (product bug, fixed in `25621ee`). |
 | Installer integration | arm64 musl release binaries built in `rust:1-alpine` (the installer's own source-build path) for `vercelify-agent` and `vercelify-mesh --features daemon`, then `sudo env AGENT_BINARY=… MESH_BINARY=… host/tests/integration/run.sh` in the isolated VM | Pass: 21/21 on the aarch64 path (privileged Debian 12 systemd container). The real installer ran in 394 s: storage by UUID with nofail, Docker 29.9.2 with log rotation, the agent on the platform engine with token enforcement, power guard, firewall chains, mesh coordinator 10.77.0.1, CLI pairing (`vfy2.`), summary at mode 0600, an image app deployed and served through the proxy, and an idempotent second run with one fstab entry. The script's x86_64 note only reflects CI. The installer picks `aarch64-unknown-linux-musl` on arm64, so x86_64 was not exercised. The swapfile step was skipped on the container's overlay root filesystem (as the installer intends). Release agent size: 7.0 MB, within the ~7.6 MiB budget in `Cargo.toml` (design §16); the "~3 MB" in CLAUDE.md and PLAN-NATIVE-PLATFORM.md is stale. |
 | Desktop E2E | `bash cockpit/e2e-desktop/run-desktop.sh` from a VM-local copy of the branch (tauri-driver 2.1.0, WebKitWebDriver, Xvfb) | Pass: 6/6 in 10.2 s. Real Tauri binary and Linux agent: pairing through Rust with settings persisted at mode 0600, engine apps via the Rust HTTP proxy, local tool detection, an ffmpeg test pattern streamed into the host's mpv receiver, no ffmpeg left after a force-quit, and settings that survive a restart. Run from a copy because the shared `target/` and `node_modules` hold macOS builds; the runner was unchanged. |
@@ -37,6 +37,38 @@ Updated: 2026-10-27. Baseline: `ef20712fafbd1ada89c84e42ae8536cb47d9b4d2` (main)
 | Docker database integration | `sudo env VERCELIFY_DOCKER_TESTS=1 target/debug/deps/databases_docker-03c501f6b8dfba7c --nocapture` | Pass: 1/1. Real PostgreSQL, data persistence, backup, restore and SSD/HDD storage moves. Root is required to access Docker-managed volume data. |
 | Docker engine integration | `sudo env VERCELIFY_DOCKER_TESTS=1 target/debug/deps/engine_docker-88ab0d3d5378c1aa --nocapture` | Pass: 1/1 (about 68 seconds), including real deploy, redeploy, rollback, recovery, auth, automatic rollback, app restart and storage moves. Initial non-root run exposed the inaccessible-source issue fixed in `4d6ae09`. |
 | Low-end resource test | five-plus apps under 8 GB cgroup, slow loop-backed disk | Not run: requires a Linux host with Docker, cgroups and loop devices. |
+
+## Full rerun
+
+`full-run.sh` (kept outside the repo) ran each suite above in sequence in the VM against the branch at `68e2750`, one log per suite:
+
+| Suite | Result | Time |
+| --- | --- | --- |
+| fmt, clippy, clippy-mesh | Pass | 1 s, 108 s, 13 s |
+| Workspace Rust, mesh daemon, Linux binaries | Pass | 222 s, 24 s, 24 s |
+| Platform lib with Docker; `databases_docker` and `engine_docker` as root | Pass | 12 s, 17 s, 52 s |
+| Generated types identical to the macOS checkout | Pass | 0 s |
+| Bats, ShellCheck | Pass | 25 s, 3 s |
+| Cockpit types, unit, build | Pass | 3 s, 5 s, 1 s |
+| Cockpit demo E2E | Failed to start (root-owned `test-results` in the VM copy from an earlier root run); after `chown`, pass | — |
+| Routing, mesh, NAT contracts | Pass | 24 s, 48 s, 19 s |
+| Multi-node, promote contracts | Fail, then pass after `e19370d` (bug 14) | 51 s, 63 s |
+| Migration contract | Pass, 14/14 | 350 s |
+| Live E2E | Non-root 6/7 as before (the storage case needs root); storage as root pass | 4 s, 14 s |
+| Desktop E2E | Pass | 40 s |
+| arm64 musl release binaries, installer integration | Pass | 71 s, 558 s |
+
+On macOS at the final commit `a5bf6b8`: workspace Rust 491 passed, cockpit types, unit 76/76 and demo E2E 18/18; no generated-type diff.
+
+## Hands-on run
+
+The cockpit ran in the in-app browser against the demo backend, then against a real platform agent in the VM (`127.0.0.1:17501`, its own state directory and proxy ports). Checked by hand: pairing, the add-server wizard, the new-app form, domain entry, settings (the ntfy URL is masked), light theme and a narrow window in the demo; pairing and the Apps page against the real agent. Bugs 12, 13, 15 and 16 came from this run.
+
+API probes against the real agent, all with a valid token:
+
+- Rejected as expected: `file://` and `ext::` repositories, `--upload-pack` as repository or branch, an image of `alpine;id`, a 64-character domain label, a wildcard domain (400), a duplicate domain (409), volume name `../../etc` and mount path `/` (400), a traversing app id (404). No file appeared at the injected paths.
+- Env keys `1BAD`, `A-B`, `A=B` and the empty key are rejected (400); `.env` import names the bad line (`line 2: 9X`). A newline in a value is accepted and stays one variable: compose's env file escapes it (`env_line`) and `docker run` reads values from its environment (`-e KEY`). `LD_PRELOAD` is accepted; it only affects the user's own container.
+- Accepted but wrong: mount path `/proc/x` (bug 16).
 
 ## Bugs and observations
 
@@ -57,6 +89,19 @@ Updated: 2026-10-27. Baseline: `ef20712fafbd1ada89c84e42ae8536cb47d9b4d2` (main)
 
 11. **Low — unreadable data directories were reported as missing. Fixed in `858f19f` and `b12b3fb`.** Run `VERCELIFY_DOCKER_TESTS=1 cargo test -p vercelify-platform --test databases_docker` as a non-root Docker user. `move_database` failed with a 404 `NotFound("/var/lib/docker/volumes/vfy-db-pgtest-data/_data doesn't exist")`, though the directory exists and is only unreadable. Nothing was lost: the move stopped and restarted the database. But the error points an operator at missing data rather than the agent's privileges. Root cause: `copy_tree` used the same `Path::is_dir` check as bug 7. Missing, not-a-directory and unreadable sources now return distinct errors. App volume moves now reuse those checks, so they name the path instead of a bare "Permission denied (os error 13)". Regression: `dbengine::tests::copy_tree_says_why_a_source_is_unreadable`, red before and green after.
 
+12. **Medium — adding a second main server closed the wizard before its last step. Fixed in `0775589`.** In the demo, pair one server, open "Add a machine", choose "A server", "Already installed", and pair a second main. Adding a main selects it, which changes the `LiveProvider` key; the wizard sat inside that subtree, so it remounted on its first step (or vanished) instead of showing the checks and "Done". The modal now lives outside the per-server key. Regression: demo E2E "add a second main server: the wizard finishes on it", red before, green after.
+13. **Low — a refused port gave no reason. Fixed in `445d2ed`.** In "New app", type port 99999: "Create" was disabled with the hint still reading "Leave empty to detect it". The hint now says "From 1 to 65535". The demo new-app test checks it.
+14. **Test harness — two contract checks were racy. Fixed in `e19370d`.** In multinode and promote, `curl … | grep -qi caddy` runs under `pipefail`: `grep -q` exits on the first match, `curl` can then die of SIGPIPE, and the pipeline fails though the page was right. Over 20 runs of the same check, 13 failed. Multi-node's crash check stopped the replica with `docker stop`, which races the reconciler: it starts exited containers every 30 s, so the restart count could stay below the auto-rollback threshold. The check now kills the container's process (a real crash; `--restart unless-stopped` restarts it), as a crash loop does. Done by hand first: the watcher rolled back in 21 s ("deployment #3 restarted 2 times; rolling back"). Expectations unchanged; both pass twice in a row.
+15. **Medium — the Apps page told a server whose engine failed to migrate from Coolify. Fixed in `68e2750`.** Start an agent whose platform engine fails (for example a superseded main): `/v1/platform/*` answers 503 "the platform engine failed to start: …", and the Apps page showed the Coolify migration guide. It also counted a worker as a main when the worker role only showed up in health, and listed the current server among "other mains". The page now polls the engine, shows the reason and `sudo vercelify doctor`, and treats a health role of `worker` as a worker. Unit test for `engineDownReason`; checked in the browser against the real agent.
+16. **Low — a volume could be mounted inside `/proc` or `/sys`. Fixed in `a5bf6b8`.** `POST /v1/platform/apps/{app}/volumes` with `"mount_path":"/proc/x"` returned 200: only the exact `/proc`, `/sys` and so on were refused. runc refuses a mount inside `/proc` when the container starts, so the next deploy failed far from the cause. Paths under `/proc/` and `/sys/` are now refused when saved; `/etc/nginx/conf.d` stays allowed. Regression: extended `validate::tests`.
+
+Observations, not fixed:
+
+- On a server with no engine, the Apps page polls `/v1/platform/apps` every 15 s. One cheap request; fine on low-end hardware.
+- The domain form accepts what the server then refuses (64-character label, wildcard), so the error arrives only after submit. The server's message is clear.
+- Demo fixture: `hp-elitebook` pairs as "main" but its health says "worker", and its AI endpoint shows the mesh address `10.77.0.1`. Demo data only.
+- CLAUDE.md and PLAN-NATIVE-PLATFORM.md say the agent is "~3 MB"; the release build is 7.0 MB (see the installer row).
+
 The mocked git-source test originally failed both on macOS and Linux because it omitted `VERCELIFY_TEST=1` while the CLI requires root (`host/vercelify:69`). Commit `b3da2be` corrects its setup without changing any expectations; all 140 Linux Bats tests then passed. Other macOS Bats failures are partly explained by GNU-only utilities. No test expectations were changed.
 
 ## New tests
@@ -71,11 +116,14 @@ The mocked git-source test originally failed both on macOS and Linux because it 
 - `migrate::tests::push_to_deploy_waits_until_the_move_is_finished`: push-to-deploy is held during `importing`/`imported`/`switched` and resumes after `rolled_back`/`finished`.
 - `storage::tests::unreadable_volume_source_must_not_be_treated_as_empty`: the permission-denied case behind `4d6ae09` (mode-000 parent directory). Red against the old `is_dir` logic, green after; it ran with real assertions as non-root on macOS and Linux. It skips with a message when run as root, where permissions don't apply.
 - `dbengine::tests::copy_tree_says_why_a_source_is_unreadable`: an unreadable source is not reported as `NotFound`, and a missing one still is.
+- Demo E2E "add a second main server: the wizard finishes on it", and a port-range check in the new-app test.
+- `caps.test.ts`: `engineDownReason` returns the reason only for an engine start failure.
+- `validate::tests`: `/proc/x` and `/sys/fs/cgroup` refused as mount paths, `/etc/nginx/conf.d` allowed.
 - `storage::tests::non_directory_volume_source_must_not_be_treated_as_empty`: prevents a non-directory source being initialized as an empty destination during a storage move; red before `4d6ae09`, green afterward.
 
 ## Untested scope
 
-The requested broad exploratory matrix is incomplete. Real deployment, redeployment, rollback, real database backups and storage moves, and multi-node mesh behavior have now been exercised in the isolated VM. Remaining gaps include restart or interruption during a build or a migration step, whether a commit held during migration deploys after `finish`, preview cap, end-to-end secret exposure, full API authorization matrix, comprehensive path traversal and all oversized-body cases, host update/uninstall on Linux, slow-disk/OOM endurance, visual inspection of all pages in both themes, agent-down/slow UI flows, and comprehensive Bash 3.2 behavior. Existing unit and demo tests cover portions of these but are not substitutes for the requested scenarios.
+The requested broad exploratory matrix is incomplete. Real deployment, redeployment, rollback, real database backups and storage moves, and multi-node mesh behavior have now been exercised in the isolated VM. Remaining gaps include restart or interruption during a build or a migration step, deploying from the cockpit against a real agent (the hands-on run created an app and probed the API but deployed nothing), whether a commit held during migration deploys after `finish`, preview cap, end-to-end secret exposure, full API authorization matrix, comprehensive path traversal and all oversized-body cases, host update/uninstall on Linux, slow-disk/OOM endurance, agent-down/slow UI flows beyond the engine-down case, and comprehensive Bash 3.2 behavior. Existing unit and demo tests cover portions of these but are not substitutes for the requested scenarios.
 
 Real macOS utun/mDNS and DMG installation, physical Raspberry Pi hardware, real CGNAT/Cloudflare Tunnel, and actual laptop battery/lid behavior were not tested. Demo runs do not establish hardware or network behavior.
 
