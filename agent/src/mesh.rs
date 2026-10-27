@@ -101,6 +101,7 @@ impl Coordinator {
             relay: Default::default(),
         });
         co.write_own_state(&me)?;
+        co.write_beacon();
         Ok(Some(co))
     }
 
@@ -121,6 +122,36 @@ impl Coordinator {
     /// Where the relay is: the control addresses, and the public URL.
     fn relays(&self) -> Vec<String> {
         vercelify_mesh::relay::relay_urls(&control_addresses(&self.cfg), self.cfg.mesh_public_url.as_deref())
+    }
+
+    /// With a public address, the signed note nodes look for when they lose
+    /// this server (`<topic> <note>` in mesh_dir/beacon; `vercelify remote`
+    /// posts it). Signed at startup: the address only changes with a restart.
+    fn write_beacon(&self) {
+        let path = self.cfg.mesh_dir.join("beacon");
+        let public = self
+            .cfg
+            .mesh_public_url
+            .as_deref()
+            .is_some_and(|u| !u.trim().is_empty())
+            || !self.cfg.mesh_public_endpoints.is_empty();
+        if !public {
+            let _ = std::fs::remove_file(&path);
+            return;
+        }
+        let note = vercelify_mesh::beacon::Beacon {
+            v: 1,
+            relays: self.relays(),
+            issued_at: unix_now(),
+        };
+        let line = format!(
+            "{} {}\n",
+            vercelify_mesh::beacon::topic(&self.key.verifying()),
+            note.sign(&self.key)
+        );
+        if let Err(e) = std::fs::write(&path, line) {
+            tracing::warn!("writing {}: {e}", path.display());
+        }
     }
 
     /// The coordinator's own daemon joins without a token: the agent writes

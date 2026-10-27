@@ -6,6 +6,23 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-27
+
+### Added
+
+- `vercelify remote on` works on any network: when the router won't forward the ports
+  (or behind CGNAT) it opens a free Cloudflare quick tunnel to the private network's
+  control port, with no account or domain, and switches back to a direct forward when
+  it can. The main server posts its address, signed with the mesh's key, to a public
+  message drop (ntfy.sh), so Macs and servers that lose it after a restart find it
+  again. The installer's *Reach this server from anywhere?* now covers this.
+
+### Fixed
+
+- `vercelify remote on` asked the router to forward empty ports when `agent.toml` didn't
+  set `mesh_port` and `mesh_control_listen` (the default): the lookup failed under the
+  CLI's `pipefail`.
+
 ## [0.2.0] - 2026-10-27
 
 ### Added

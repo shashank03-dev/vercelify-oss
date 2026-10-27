@@ -78,6 +78,10 @@ enum Cmd {
             default_value = "stun.cloudflare.com:3478,stun.l.google.com:19302"
         )]
         stun: String,
+        /// Where to look for the main server's signed address after losing it
+        /// ("" for nowhere).
+        #[arg(long, env = "VERCELIFY_MESH_BEACON", default_value = vercelify_mesh::beacon::DEFAULT_BEACON_URL)]
+        beacon: String,
     },
     /// This node and its peers.
     Status {
@@ -220,6 +224,7 @@ fn main() {
             no_dns,
             acl_hook,
             stun,
+            beacon,
         } => {
             let opts = UpOptions {
                 dir: cli.dir,
@@ -235,6 +240,7 @@ fn main() {
                     .map(String::from)
                     .collect(),
                 userspace: userspace.then_some(daemon::Userspace { socks, forwards }),
+                beacon: Some(beacon.trim().trim_end_matches('/').to_string()).filter(|b| !b.is_empty()),
             };
             if let Err(e) = rt.block_on(daemon::up(opts)) {
                 fail(e)

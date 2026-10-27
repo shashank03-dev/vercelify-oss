@@ -3,6 +3,7 @@
 //! (`vercelify-mesh`) and the coordinator in the agent both build on this.
 
 pub mod addr;
+pub mod beacon;
 pub mod cert;
 #[cfg(all(feature = "daemon", any(target_os = "linux", target_os = "macos")))]
 pub mod daemon;

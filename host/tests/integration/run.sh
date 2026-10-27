@@ -63,7 +63,7 @@ fi
 
 echo "==> running the installer (this pulls Docker and the proxy; several minutes)"
 start=$SECONDS
-x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-host --storage-device $loop" 2>&1 | tee /tmp/vercelify-it.log | grep -E '^==>|✓|!|✗' || true
+x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-host --storage-device $loop --no-remote" 2>&1 | tee /tmp/vercelify-it.log | grep -E '^==>|✓|!|✗' || true
 echo "    installer finished in $((SECONDS - start))s"
 
 fail=0
@@ -95,7 +95,7 @@ for _ in $(seq 60); do x "curl -fsS -H 'Host: it-web.10.77.0.1.sslip.io' http://
 check "the proxy serves it at it-web.10.77.0.1.sslip.io" "curl -fsS -H 'Host: it-web.10.77.0.1.sslip.io' http://127.0.0.1/ | grep -q Hostname"
 
 echo "==> re-running the installer (must be idempotent)"
-if x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-host --storage-device $loop" >/tmp/vercelify-it-2.log 2>&1; then
+if x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-host --storage-device $loop --no-remote" >/tmp/vercelify-it-2.log 2>&1; then
   echo "  ✓ second run succeeded"
   check "fstab has exactly one storage entry" '[[ $(grep -c " /mnt/storage ext4 " /etc/fstab) == 1 ]]'
 else
@@ -135,7 +135,7 @@ check "firewall chains removed" '! iptables -n -L VERCELIFY-IN && ! iptables -n 
 check "the mesh interface is gone" '! ip link show vfy0'
 check "config, the engine's state and the app's container kept" 'test -s /etc/vercelify/agent.token && test -s /var/lib/vercelify/platform.db && docker ps -a --filter label=vercelify.app-name=it-web -q | grep -q .'
 check "the app keeps running in its memory-capped slice" "systemctl cat vercelify.slice | grep -q MemoryMax= && $served"
-if x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-host --storage-device $loop" >/tmp/vercelify-it-3.log 2>&1; then
+if x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-host --storage-device $loop --no-remote" >/tmp/vercelify-it-3.log 2>&1; then
   echo "  ✓ installed again"
 else
   echo "  ✗ the install after uninstall failed (see /tmp/vercelify-it-3.log)"; fail=1

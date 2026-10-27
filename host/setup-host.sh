@@ -56,8 +56,9 @@ Network & domain
   --cloudflare-token TOK   Cloudflare API token: creates a tunnel + DNS for you
                            (no port forwarding, works behind CGNAT)
   --force-dns              Replace existing DNS records for *.DOMAIN and DOMAIN
-  --remote                 Reach this server from anywhere without Cloudflare: the
-                           router forwards two ports by itself (UPnP/NAT-PMP)
+  --remote                 Reach this server from anywhere: the router forwards two
+                           ports by itself (UPnP/NAT-PMP), else a free Cloudflare
+                           quick tunnel (no account, works behind CGNAT)
   --no-remote              Don't ask about it (LAN only, or a Cloudflare domain)
 
 Storage
@@ -200,7 +201,7 @@ wizard() {
     ask_secret CF_API_TOKEN "Cloudflare API token (blank = I'll point DNS/ports myself):"
   fi
   if [[ -z "$REMOTE" && -z "$CF_API_TOKEN" && "$DOMAIN_MODE" != cloudflare && ! -r "$REMOTE_ENV" ]]; then
-    printf '\n  Use your Mac (or add servers) away from home? Vercelify can ask your router to\n  forward its private network'"'"'s two ports here (UPnP/NAT-PMP). Only Vercelify'"'"'s\n  encrypted network answers there; your apps and its API stay private.\n' >&2
+    printf '\n  Connect your Mac and other machines from any network, not just this Wi-Fi?\n  Vercelify asks your router to forward its private network'"'"'s two ports here\n  (UPnP/NAT-PMP), or else opens a free Cloudflare quick tunnel (no account). Only\n  Vercelify'"'"'s encrypted network answers there; your apps and its API stay private.\n' >&2
     if confirm "Reach this server from anywhere?" y; then REMOTE=1; else REMOTE=0; fi
   fi
 }

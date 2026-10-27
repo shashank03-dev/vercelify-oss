@@ -41,21 +41,40 @@ and run what it prints on the new machine.
 
 ## Reaching your servers from anywhere
 
-Joining needs the main server's control port (TCP 7443) and WireGuard (UDP 51820):
+Joining needs the main server's control port (TCP 7443), and direct paths use WireGuard
+(UDP 51820). With `sudo vercelify remote on` (the installer asks, and the answer defaults
+to yes) there is nothing to set up, whatever the network:
+
+1. **Your router forwards both ports** to the main server by itself, over UPnP or
+   NAT-PMP. The public address goes into `/etc/vercelify/agent.toml`
+   (`mesh_public_endpoints`, `mesh_public_url`).
+2. **Otherwise a Cloudflare quick tunnel** carries the control port: a free
+   `https://<random>.trycloudflare.com` address, with no account and no domain. This is
+   what happens behind CGNAT, on a mobile hotspot, or with a router that won't forward.
+   Joins and the relay go through it (`vercelify-quicktunnel.service`); once joined,
+   machines still connect directly whenever their networks allow, and fall back to the
+   relay otherwise.
+
+A timer (`vercelify-remote.timer`, every 20 minutes) renews the forwards, follows a new
+public address or tunnel, and switches back to a direct forward when the router allows
+it. Each time the address changes, the agent signs it with the mesh's coordinator key and
+the server posts it to a public message drop (ntfy.sh, under a topic derived from that
+key). A machine that hasn't heard from the main server for three minutes reads the
+newest note there, checks the signature, and follows it, so a reboot that gives the
+quick tunnel a new address doesn't strand your Mac. `sudo vercelify remote` shows the
+current address; `sudo vercelify remote off` removes the forwards and the tunnel.
+
+Other ways:
 
 - **On your LAN** nothing is needed.
-- **With `sudo vercelify remote on`** (the installer asks) your router forwards both
-  ports to the main server by itself, over UPnP or NAT-PMP. The public address goes into
-  `/etc/vercelify/agent.toml` (`mesh_public_endpoints`, `mesh_public_url`) and a timer
-  renews the forwards every 20 minutes and follows a new public address. Behind CGNAT
-  (the router's own address is `100.64.x.x` or private) nothing can be opened: use a
-  Cloudflare tunnel. `sudo vercelify remote off` removes the forwards.
-- **With a Cloudflare tunnel** (`sudo vercelify domain example.com --cloudflare-token …`)
-  `mesh.example.com` reaches the control port through the tunnel, so you can join and
-  use the relay from any network, with no port forwarding.
-- **By hand** (a router without UPnP/NAT-PMP): forward TCP 7443 and UDP 51820 on your
-  router to the main server, and list the public address in `/etc/vercelify/agent.toml`
-  (`mesh_public_endpoints = ["203.0.113.7:51820"]`).
+- **Your own Cloudflare domain** (`sudo vercelify domain example.com --cloudflare-token …`)
+  gives a permanent `https://mesh.example.com` for the control port, and `remote on`
+  uses it instead of a quick tunnel. Quick tunnels have no uptime guarantee from
+  Cloudflare and a limit of 200 requests in flight, which joins and the relay stay far
+  below, but a domain is the sturdier choice for a server you rely on.
+- **By hand** (a router without UPnP/NAT-PMP, and no tunnel wanted): forward TCP 7443 and
+  UDP 51820 to the main server, and list the public address in
+  `/etc/vercelify/agent.toml` (`mesh_public_endpoints = ["203.0.113.7:51820"]`).
 
 Once joined, machines find their own paths (direct or relayed); a server behind CGNAT
 works as a worker too.

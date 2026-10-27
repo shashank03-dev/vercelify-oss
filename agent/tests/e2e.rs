@@ -1692,6 +1692,8 @@ fn mesh_coordinator() {
     let own: Value = serde_json::from_str(&std::fs::read_to_string(mesh_dir.join("state.json")).unwrap()).unwrap();
     assert_eq!(own["ipv4"], "10.77.0.1");
     assert_eq!(own["api_url"], format!("http://127.0.0.1:{}", a.port));
+    // No public address: no note to post.
+    assert!(!mesh_dir.join("beacon").exists());
 
     // Owners invite; deployers can't.
     let (s, t) = post(&a, "/v1/tokens", json!({"name": "ci", "role": "deployer"}));
@@ -1995,6 +1997,19 @@ fn github_app_and_webhooks() {
         assert!(Instant::now() < deadline, "no control listener");
         std::thread::sleep(Duration::from_millis(50));
     }
+    // With a public address, the signed note for nodes that lose this server.
+    let mesh_dir = a.root.join("state/mesh");
+    let own: Value = serde_json::from_str(&std::fs::read_to_string(mesh_dir.join("state.json")).unwrap()).unwrap();
+    let vk = vercelify_mesh::keys::VerifyingKey::from_base64(own["coordinator_key"].as_str().unwrap()).unwrap();
+    let line = std::fs::read_to_string(mesh_dir.join("beacon")).unwrap();
+    let (topic, note) = line.trim().split_once(' ').unwrap();
+    assert_eq!(topic, vercelify_mesh::beacon::topic(&vk));
+    let b = vercelify_mesh::beacon::Beacon::verify(&vk, note, vercelify_mesh::cert::unix_now()).unwrap();
+    assert!(
+        b.relays.contains(&format!("ws://127.0.0.1:{control}/v1/mesh/relay")),
+        "{:?}",
+        b.relays
+    );
 
     // The manifest flow: a start page that posts to GitHub, GitHub's
     // callback with a code, the app stored as a git source.

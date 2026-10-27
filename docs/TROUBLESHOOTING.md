@@ -30,9 +30,9 @@ sudo vercelify status
 3. "missing or invalid agent token": run `sudo vercelify pair` and pair again.
 4. The server isn't in the list: discovery lists servers on the same LAN (multicast
    DNS) and on your network. On another network, paste the full code (`vfy2.…`) instead;
-   that needs the server reachable from outside: `sudo vercelify remote on` (or a
-   Cloudflare domain). `sudo vercelify remote` says why it isn't (no UPnP/NAT-PMP on the
-   router, or CGNAT).
+   that needs `sudo vercelify remote on` on the server. `sudo vercelify remote` shows
+   how it's reached (router forward, quick tunnel or Cloudflare domain); if the quick
+   tunnel didn't start, see `journalctl -u vercelify-quicktunnel`.
 5. *wrong pairing code* / *no pairing code is waiting*: codes work once, for 15
    minutes, and five wrong tries discard them. Run `sudo vercelify pair` for a new one.
 

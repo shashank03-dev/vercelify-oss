@@ -1,10 +1,18 @@
 #!/usr/bin/env bash
-# `vercelify remote`: reach the main server from anywhere, with no Cloudflare
-# tunnel and no manual port forwarding. The router is asked (UPnP IGD, else
-# NAT-PMP) to forward two ports to this machine: the mesh's WireGuard port
-# (UDP) and its control port (TCP). The public address then goes into
-# agent.toml, so invites and the mesh map carry it. A timer renews the
-# lease and follows a public address that changes.
+# `vercelify remote`: reach the main server from anywhere, with nothing to set
+# up. Two ways, the first that works:
+#
+#  1. Direct: the router is asked (UPnP IGD, else NAT-PMP) to forward two
+#     ports to this machine, the mesh's WireGuard port (UDP) and its control
+#     port (TCP). The public address goes into agent.toml.
+#  2. A Cloudflare quick tunnel (no account, no domain) to the control port,
+#     when the router says no or the connection is behind CGNAT. Joins and
+#     the relay go through https://<random>.trycloudflare.com; machines still
+#     connect directly to each other whenever their networks allow.
+#
+# A timer renews the forwards and follows a new public address or tunnel.
+# Each change is signed by the agent (the mesh's coordinator key) and posted
+# to a public message drop, where machines that lost this server look.
 #
 # Nothing else is opened: WireGuard answers only peers it already knows, and
 # the control port only takes sealed, single-use, rate-limited joins.
@@ -14,8 +22,15 @@
 : "${UPNPC:=upnpc}"
 : "${NATPMPC:=natpmpc}"
 : "${AGENT_CONFIG:=$VERCELIFY_ETC/agent.toml}"
+: "${MESH_DIR:=/var/lib/vercelify/mesh}"
+: "${QUICK_TUNNEL_METRICS:=127.0.0.1:20241}"
+: "${QUICK_TUNNEL_WAIT:=40}"
+: "${MESH_BEACON_URL:=https://ntfy.sh}"
+: "${BEACON_WAIT:=20}"
 
-_remote_toml() { grep -E "^[[:space:]]*$1[[:space:]]*=" "$AGENT_CONFIG" 2>/dev/null | head -1 | sed -E 's/^[^=]*=[[:space:]]*//; s/^"//; s/"$//'; }
+# A key's value, or nothing (never a failure: the CLI runs with pipefail).
+_remote_toml() { { grep -E "^[[:space:]]*$1[[:space:]]*=" "$AGENT_CONFIG" 2>/dev/null || true; } | head -1 | sed -E 's/^[^=]*=[[:space:]]*//; s/^"//; s/"$//'; }
+_remote_toml_del() { [[ ! -f "$AGENT_CONFIG" ]] || sed -i -E "/^[[:space:]]*$1[[:space:]]*=/d" "$AGENT_CONFIG"; }
 
 # The forwarded ports: "udp PORT" and "tcp PORT".
 remote_ports() {
@@ -43,6 +58,10 @@ remote_public_ip() {
   (( a == 100 && b >= 64 && b <= 127 )) && return 1
   return 0
 }
+
+# A Cloudflare domain's tunnel (https://mesh.DOMAIN), set up by
+# `vercelify domain`: it already reaches the control port from anywhere.
+_remote_named_tunnel() { [[ "$1" == https://* && "$1" != *.trycloudflare.com* ]]; }
 
 # Map every port with UPnP; print the router's external address.
 remote_map_upnp() {
@@ -74,39 +93,152 @@ remote_unmap() {
   return 0
 }
 
-# Ask the router, record the public address in agent.toml (restarting the
-# agent only when it changed). Fails with the reason.
-remote_apply() {
-  local lan ip method mesh control url changed=0
-  lan=$(remote_lan_ip)
-  [[ -n "$lan" ]] || { err "no LAN address (is this machine online?)"; return 1; }
-  if ip=$(remote_map_upnp "$lan") && [[ -n "$ip" ]]; then method=upnp
-  elif ip=$(remote_map_natpmp) && [[ -n "$ip" ]]; then method=natpmp
+# The quick tunnel's service: cloudflared with no account, to the control
+# port on loopback. Its address is on cloudflared's metrics endpoint.
+remote_tunnel_start() {
+  local control=$1 unit="$SYSTEMD_DIR/vercelify-quicktunnel.service" want
+  install_cloudflared || return 1
+  want="[Unit]
+Description=Vercelify: a Cloudflare quick tunnel to the private network's control port
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate --metrics $QUICK_TUNNEL_METRICS --url http://127.0.0.1:$control
+Restart=always
+RestartSec=5
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target"
+  # A changed unit (another port, an upgrade) needs a restart: enable --now
+  # leaves a running tunnel as it is.
+  if [[ "$(cat "$unit" 2>/dev/null)" != "$want" ]]; then
+    printf '%s\n' "$want" | write_file "$unit" 0644 || true
+    run_cmd systemctl daemon-reload
+    run_cmd systemctl enable vercelify-quicktunnel >/dev/null 2>&1 || true
+    run_cmd systemctl restart vercelify-quicktunnel >/dev/null 2>&1 || return 1
   else
-    err "the router didn't open the ports: turn on UPnP (or NAT-PMP) in its settings, or forward $(remote_ports | tr '\n' ' ')to $lan by hand"
-    return 1
+    run_cmd systemctl enable --now vercelify-quicktunnel >/dev/null 2>&1 || return 1
   fi
-  if ! remote_public_ip "$ip"; then
-    remote_unmap
-    err "the router's own address is $ip, not a public one: your ISP shares it (CGNAT), so nothing can be opened. Use a Cloudflare domain instead: sudo vercelify domain DOMAIN --cloudflare-token TOKEN"
-    return 1
-  fi
-  read -r _ mesh < <(remote_ports | sed -n 1p)
-  read -r _ control < <(remote_ports | sed -n 2p)
-  if [[ "$(_remote_toml mesh_public_endpoints)" != "[\"$ip:$mesh\"]" ]]; then
-    toml_set mesh_public_endpoints "[\"$ip:$mesh\"]" "$AGENT_CONFIG"; changed=1
-  fi
-  # A Cloudflare tunnel (https://mesh.DOMAIN) stays the control address.
-  url=$(_remote_toml mesh_public_url)
-  if [[ "$url" != https://* && "$url" != "http://$ip:$control" ]]; then
-    toml_set mesh_public_url "\"http://$ip:$control\"" "$AGENT_CONFIG"; changed=1
-  fi
-  printf 'method=%s\npublic_ip=%s\nlan_ip=%s\nupdated_at=%s\n' "$method" "$ip" "$lan" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" |
+}
+
+remote_tunnel_stop() {
+  [[ -e "$SYSTEMD_DIR/vercelify-quicktunnel.service" ]] || return 0
+  run_cmd systemctl disable --now vercelify-quicktunnel >/dev/null 2>&1 || true
+  run_cmd rm -f "$SYSTEMD_DIR/vercelify-quicktunnel.service"
+  run_cmd systemctl daemon-reload
+}
+
+# The tunnel's hostname, once cloudflared has one and is connected to
+# Cloudflare (the name comes first; until /ready, it answers 530).
+remote_tunnel_host() {
+  local i host=''
+  for ((i = 0; i < QUICK_TUNNEL_WAIT; i++)); do
+    [[ -n "$host" ]] || host=$(curl -fsS -m 3 "http://$QUICK_TUNNEL_METRICS/quicktunnel" 2>/dev/null | jq -r '.hostname // empty' 2>/dev/null)
+    if [[ "$host" =~ ^[a-z0-9-]+\.trycloudflare\.com$ ]] && curl -fsS -m 3 -o /dev/null "http://$QUICK_TUNNEL_METRICS/ready" 2>/dev/null; then
+      printf '%s\n' "$host"
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
+# Post the agent's signed note (mesh_dir/beacon: "<topic> <note>") to the
+# public drop. Notes newer than `since` only: the agent rewrites it on start.
+remote_post_beacon() {
+  local since=${1:-0} f="$MESH_DIR/beacon" topic note i
+  for ((i = 0; i < BEACON_WAIT; i++)); do
+    [[ -s "$f" ]] && (( $(stat -c %Y "$f" 2>/dev/null || echo 0) >= since )) && break
+    sleep 1
+  done
+  [[ -s "$f" ]] || return 0
+  read -r topic note <"$f" || true
+  [[ "$topic" =~ ^vfy[0-9a-f]{40}$ && "$note" == vfyb1.* ]] || return 0
+  curl -fsS -m 15 -o /dev/null -d "$note" "$MESH_BEACON_URL/$topic" 2>/dev/null ||
+    warn "could not post this server's address to $MESH_BEACON_URL (machines away from home find it once it works)"
+}
+
+_remote_record() {
+  printf 'method=%s\npublic_ip=%s\npublic_url=%s\nlan_ip=%s\nupdated_at=%s\n' "$1" "$2" "$3" "$4" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" |
     write_file "$REMOTE_ENV" 0644 || true
+}
+
+# Restart the agent when its address changed (it signs a new note on start),
+# then post the note.
+_remote_settle() {
+  local changed=$1 since
+  since=$(date +%s)
   if (( changed )); then
     run_cmd systemctl restart vercelify-agent 2>/dev/null || true
+  else
+    since=0
   fi
-  ok "reachable from anywhere at $ip ($method; UDP $mesh and TCP $control forwarded to $lan)"
+  remote_post_beacon "$since"
+}
+
+# Directly, else through a quick tunnel; record the address in agent.toml.
+# Fails with the reason.
+remote_apply() {
+  local lan ip='' method='' mesh control url changed=0 host
+  lan=$(remote_lan_ip)
+  [[ -n "$lan" ]] || { err "no LAN address (is this machine online?)"; return 1; }
+  read -r _ mesh < <(remote_ports | sed -n 1p)
+  read -r _ control < <(remote_ports | sed -n 2p)
+  url=$(_remote_toml mesh_public_url)
+  if ip=$(remote_map_upnp "$lan") && [[ -n "$ip" ]]; then method=upnp
+  elif ip=$(remote_map_natpmp) && [[ -n "$ip" ]]; then method=natpmp
+  fi
+  if [[ -n "$method" ]] && ! remote_public_ip "$ip"; then
+    remote_unmap
+    info "the router's own address is $ip, not a public one: your ISP shares it (CGNAT)"
+    method=''
+  fi
+
+  if [[ -n "$method" ]]; then
+    remote_tunnel_stop
+    if [[ "$(_remote_toml mesh_public_endpoints)" != "[\"$ip:$mesh\"]" ]]; then
+      toml_set mesh_public_endpoints "[\"$ip:$mesh\"]" "$AGENT_CONFIG"; changed=1
+    fi
+    # A Cloudflare domain's tunnel stays the control address.
+    if ! _remote_named_tunnel "$url" && [[ "$url" != "http://$ip:$control" ]]; then
+      toml_set mesh_public_url "\"http://$ip:$control\"" "$AGENT_CONFIG"; changed=1
+    fi
+    _remote_record "$method" "$ip" "" "$lan"
+    _remote_settle "$changed"
+    ok "reachable from anywhere at $ip ($method; UDP $mesh and TCP $control forwarded to $lan)"
+    return 0
+  fi
+
+  # The router didn't open anything: what `remote on` wrote for a direct
+  # forward is wrong now.
+  case "$(sed -n 's/^method=//p' "$REMOTE_ENV" 2>/dev/null)" in
+    upnp | natpmp) [[ -n "$(_remote_toml mesh_public_endpoints)" ]] && { _remote_toml_del mesh_public_endpoints; changed=1; } ;;
+  esac
+  if _remote_named_tunnel "$url"; then
+    remote_tunnel_stop
+    _remote_record cloudflare "" "$url" "$lan"
+    _remote_settle "$changed"
+    ok "reachable from anywhere through your Cloudflare domain ($url)"
+    return 0
+  fi
+  info "the router didn't open the ports: using a Cloudflare quick tunnel (no account needed)"
+  if ! remote_tunnel_start "$control" || ! host=$(remote_tunnel_host); then
+    err "the Cloudflare quick tunnel didn't start (journalctl -u vercelify-quicktunnel). Or turn on UPnP in your router, or forward $(remote_ports | tr '\n' ' ')to $lan by hand"
+    (( changed )) && run_cmd systemctl restart vercelify-agent 2>/dev/null
+    return 1
+  fi
+  if [[ "$url" != "https://$host" ]]; then
+    toml_set mesh_public_url "\"https://$host\"" "$AGENT_CONFIG"; changed=1
+  fi
+  _remote_record tunnel "" "https://$host" "$lan"
+  _remote_settle "$changed"
+  ok "reachable from anywhere at https://$host (a Cloudflare quick tunnel; machines connect directly when they can)"
 }
 
 remote_on() {
@@ -115,7 +247,7 @@ remote_on() {
   remote_apply || return 1
   write_file "$SYSTEMD_DIR/vercelify-remote.service" 0644 <<'EOF' || true
 [Unit]
-Description=Keep the router's port forwards for Vercelify's network
+Description=Keep Vercelify's network reachable from anywhere (port forwards or tunnel)
 After=network-online.target
 Wants=network-online.target
 
@@ -125,7 +257,7 @@ ExecStart=/usr/local/bin/vercelify remote refresh
 EOF
   write_file "$SYSTEMD_DIR/vercelify-remote.timer" 0644 <<'EOF' || true
 [Unit]
-Description=Renew the router's port forwards (and follow a new public IP)
+Description=Renew the port forwards, follow a new address, post it for away machines
 
 [Timer]
 OnBootSec=1min
@@ -139,23 +271,30 @@ EOF
 }
 
 remote_off() {
-  local ip
+  local ip url
   ip=$(sed -n 's/^public_ip=//p' "$REMOTE_ENV" 2>/dev/null)
+  url=$(_remote_toml mesh_public_url)
   run_cmd systemctl disable --now vercelify-remote.timer >/dev/null 2>&1 || true
   run_cmd rm -f "$SYSTEMD_DIR/vercelify-remote.timer" "$SYSTEMD_DIR/vercelify-remote.service" "$REMOTE_ENV"
+  remote_tunnel_stop
   remote_unmap
-  # Only what `remote on` wrote: a hand-set or Cloudflare address stays.
-  if [[ -n "$ip" && -f "$AGENT_CONFIG" ]]; then
-    sed -i -E "/^[[:space:]]*mesh_public_endpoints[[:space:]]*=[[:space:]]*\[\"$ip:[0-9]+\"\]/d; /^[[:space:]]*mesh_public_url[[:space:]]*=[[:space:]]*\"http:\/\/$ip:[0-9]+\"/d" "$AGENT_CONFIG"
+  # Only what `remote on` wrote: a hand-set or Cloudflare domain address stays.
+  if [[ -f "$AGENT_CONFIG" ]]; then
+    [[ -n "$ip" ]] && sed -i -E "/^[[:space:]]*mesh_public_endpoints[[:space:]]*=[[:space:]]*\[\"$ip:[0-9]+\"\]/d; /^[[:space:]]*mesh_public_url[[:space:]]*=[[:space:]]*\"http:\/\/$ip:[0-9]+\"/d" "$AGENT_CONFIG"
+    [[ "$url" == *.trycloudflare.com* ]] && _remote_toml_del mesh_public_url
     run_cmd systemctl restart vercelify-agent 2>/dev/null || true
   fi
-  ok "remote access off: the router forwards nothing for Vercelify"
+  ok "remote access off: nothing forwarded or tunnelled for Vercelify"
 }
 
 remote_status() {
+  local method
   if [[ -r "$REMOTE_ENV" ]]; then
-    printf '  on (%s): public %s, last renewed %s\n' "$(sed -n 's/^method=//p' "$REMOTE_ENV")" \
-      "$(sed -n 's/^public_ip=//p' "$REMOTE_ENV")" "$(sed -n 's/^updated_at=//p' "$REMOTE_ENV")"
+    method=$(sed -n 's/^method=//p' "$REMOTE_ENV")
+    case "$method" in
+      tunnel | cloudflare) printf '  on (%s): %s, last checked %s\n' "$method" "$(sed -n 's/^public_url=//p' "$REMOTE_ENV")" "$(sed -n 's/^updated_at=//p' "$REMOTE_ENV")" ;;
+      *) printf '  on (%s): public %s, last renewed %s\n' "$method" "$(sed -n 's/^public_ip=//p' "$REMOTE_ENV")" "$(sed -n 's/^updated_at=//p' "$REMOTE_ENV")" ;;
+    esac
   else
     printf '  off — on the LAN only (or through a Cloudflare domain). Turn on: sudo vercelify remote on\n'
   fi

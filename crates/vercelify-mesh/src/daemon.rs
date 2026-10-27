@@ -225,6 +225,9 @@ pub struct UpOptions {
     /// App mode (the Mac without root): a userspace stack instead of a tun
     /// device, reached through SOCKS5 and forwards.
     pub userspace: Option<Userspace>,
+    /// The public drop holding the coordinator's signed address (ntfy.sh),
+    /// read after the coordinator has been out of reach for a while.
+    pub beacon: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -305,6 +308,41 @@ fn apply_map(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>, map: Pe
     tracing::info!("map {} (epoch {}): {} peers", map.version, map.epoch, map.peers.len());
     *live.map.write().unwrap() = Some(map);
     true
+}
+
+/// Out of touch with the coordinator: its address may have moved (a new
+/// quick tunnel, a new public IP). Read its signed note and follow it.
+async fn check_beacon(live: &Live, base: &str) {
+    let Ok(vk) = live.verifying() else { return };
+    let url = format!("{base}/{}/json?poll=1&since=12h", crate::beacon::topic(&vk));
+    let body = match http::request("GET", &url, None, None, Duration::from_secs(15)).await {
+        Ok(b) => b,
+        Err(e) => {
+            tracing::debug!("beacon: {e}");
+            return;
+        }
+    };
+    let Some(b) = crate::beacon::newest(&vk, &String::from_utf8_lossy(&body), unix_now()) else {
+        return;
+    };
+    // The map in hand is as new: nothing moved.
+    if live
+        .map
+        .read()
+        .unwrap()
+        .as_ref()
+        .is_some_and(|m| m.issued_at >= b.issued_at)
+    {
+        return;
+    }
+    let moved = live.relays.send_if_modified(|r| {
+        let changed = *r != b.relays;
+        r.clone_from(&b.relays);
+        changed
+    });
+    if moved {
+        tracing::info!("the main server moved: relay at {}", b.relays.join(", "));
+    }
 }
 
 /// Follow the coordinator's map stream for as long as it lasts.
@@ -738,6 +776,13 @@ pub async fn up(opts: UpOptions) -> Result<()> {
             _ = every5.tick() => {
                 ticks += 1;
                 write_status(&live, &opts, &ctl).await;
+                // No word from the coordinator for 3 minutes: every 5 minutes,
+                // see whether it posted a new address.
+                let lost = live.coordinator_seen.read().unwrap().is_none_or(|t| t.elapsed() > Duration::from_secs(180));
+                if let (true, true, Some(base)) = (lost, ticks >= 36 && ticks % 60 == 36, opts.beacon.clone()) {
+                    let live = live.clone();
+                    tokio::spawn(async move { check_beacon(&live, &base).await });
+                }
                 // Endpoints every minute (sooner at start); renewal hourly.
                 if ticks == 2 || ticks == 6 || ticks.is_multiple_of(12) {
                     report_endpoints(&live, &ctl, live.port, &mut last_endpoints).await;

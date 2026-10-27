@@ -222,7 +222,7 @@ something is missing, it tells you what to fix.
 | --- | --- |
 | *Set up local AI models too?* | `n` for now. You can add AI later in one command (see [Step 5](#step-5-optional-turn-on-ai-on-the-server)). |
 | *Your domain* | Leave it blank. Your apps will still work privately; you can add a domain any time. |
-| *Reach this server from anywhere?* | `y` if you want to use the Mac away from home. Your router forwards Vercelify's two network ports by itself (UPnP or NAT-PMP); only the encrypted private network answers there. Change it later with `sudo vercelify remote on` / `off`. |
+| *Reach this server from anywhere?* | `y` (the default) to connect your Mac and other machines from any network, not just this Wi-Fi. Your router forwards Vercelify's two network ports by itself (UPnP or NAT-PMP); when it can't (or behind CGNAT) a free Cloudflare quick tunnel is used instead, with no account. Only the encrypted private network answers there. Change it later with `sudo vercelify remote on` / `off`. |
 
 **3. It installs everything.** You'll see one line per step. The important ones:
 
@@ -293,9 +293,9 @@ Vercelify opens when the installer finishes.
 
 Don't see your laptop? The list shows servers on the same Wi-Fi or wired network. If
 the Mac is elsewhere, paste the **full pairing code** from Step 1 instead (it starts with
-`vfy2.`). Joining from outside your home network works when you answered `y` to *Reach
-this server from anywhere?* (or later: `sudo vercelify remote on`), or with a domain on a
-Cloudflare tunnel (Step 6); see the [network guide](docs/MESH.md).
+`vfy2.`). Joining from another network works when you answered `y` to *Reach this
+server from anywhere?* (or later: `sudo vercelify remote on`); see the
+[network guide](docs/MESH.md).
 
 ### Step 4: Deploy your first app
 
