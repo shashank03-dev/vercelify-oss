@@ -332,6 +332,11 @@ test("platform engine: deploy with a live log, roll back, variables, domains, da
   await page.getByTestId("new-app").click();
   await page.getByTestId("new-repo").fill("https://github.com/you/My-Site.git");
   await expect(page.getByTestId("new-name")).toHaveValue("my-site");
+  // an impossible port says why the app can't be created yet
+  await page.getByTestId("new-port").fill("99999");
+  await expect(page.getByTestId("create-app")).toBeDisabled();
+  await expect(page.getByText("From 1 to 65535")).toBeVisible();
+  await page.getByTestId("new-port").fill("");
   await page.getByTestId("create-app").click();
   await expect(page.getByTestId("app-detail")).toContainText("my-site");
   await expect(page.getByTestId("deploy-log")).toContainText("Detected Next.js");

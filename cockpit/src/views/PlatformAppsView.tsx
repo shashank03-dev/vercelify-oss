@@ -538,7 +538,7 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
               data-testid="new-name"
             />
           </Field>
-          <Field label="Port" hint={kind === "service" ? "Set by the service" : "Leave empty to detect it"}>
+          <Field label="Port" hint={kind === "service" ? "Set by the service" : portOk ? "Leave empty to detect it" : "From 1 to 65535"}>
             <TextInput disabled={kind === "service"} value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} placeholder="3000" inputMode="numeric" data-testid="new-port" />
           </Field>
         </div>
