@@ -61,10 +61,11 @@ impl Plan {
     }
 }
 
-/// `2026-10-25 05:00:00 +0000 UTC` (docker ps) → age.
+/// `2026-10-25 05:00:00 +0000 UTC` (docker ps) → age. Docker writes the
+/// server's own zone (`+0530 IST`), so its name after the offset is ignored.
 fn age(created: &str, now: chrono::DateTime<chrono::Utc>) -> Option<Duration> {
-    let trimmed = created.trim_end_matches(" UTC");
-    let t = chrono::DateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S %z").ok()?;
+    let stamp = created.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
+    let t = chrono::DateTime::parse_from_str(&stamp, "%Y-%m-%d %H:%M:%S %z").ok()?;
     (now - t.with_timezone(&chrono::Utc)).to_std().ok()
 }
 
@@ -556,5 +557,31 @@ mod tests {
             Some(Duration::from_secs(600))
         );
         assert_eq!(age("garbage", now), None);
+    }
+
+    #[test]
+    fn orphans_are_found_on_a_server_outside_utc() {
+        let now = chrono::DateTime::parse_from_rfc3339("2026-10-25T10:10:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        for created in [
+            "2026-10-25 15:30:00 +0530 IST",
+            "2026-10-25 03:00:00 -0700 PDT",
+            "2026-10-25 12:00:00 +0200 CEST",
+        ] {
+            assert_eq!(age(created, now), Some(Duration::from_secs(600)), "{created}");
+        }
+        let stray = ContainerState {
+            name: "vfy-blog-old".into(),
+            labels: [(LABEL_DEPLOYMENT.to_string(), "dpl_failed".to_string())].into(),
+            created: "2026-10-25 15:20:00 +0530 IST".into(),
+            id: "c1".into(),
+            image: "vfy/blog:old".into(),
+            state: "running".into(),
+        };
+        assert_eq!(
+            plan(&[], &[], &[stray], &HashSet::new(), &[], now).remove,
+            vec!["vfy-blog-old".to_string()]
+        );
     }
 }
