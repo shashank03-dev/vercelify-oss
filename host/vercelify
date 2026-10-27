@@ -89,6 +89,9 @@ cmd_status() {
   local ip
   ip=$(jq -r '.ipv4 // empty' "${MESH_DIR}/state.json" 2>/dev/null || true)
   line Network "$([[ -n "$ip" ]] && svc_state vercelify-mesh || echo "not set up")" "${ip:+vfy0 $ip}"
+  if [[ -r "$REMOTE_ENV" ]]; then
+    line "Remote access" ok "$(sed -n 's/^public_ip=//p' "$REMOTE_ENV") via $(sed -n 's/^method=//p' "$REMOTE_ENV")"
+  fi
   line Docker "$(svc_state docker)" "$(docker ps -q 2>/dev/null | wc -l) running containers"
   if [[ $ROLE == main ]]; then
     if platform_engine; then
