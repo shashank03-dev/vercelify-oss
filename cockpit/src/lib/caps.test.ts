@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { compareVersions, hasCap, newestVersion } from "./caps";
+import { compareVersions, engineDownReason, hasCap, newestVersion } from "./caps";
 
 describe("capabilities and versions", () => {
   it("reads capabilities, old agents have none", () => {
@@ -15,5 +15,14 @@ describe("capabilities and versions", () => {
     expect(compareVersions("0.1", "0.1.1")).toBe(-1);
     expect(newestVersion(["0.1.0", undefined, "0.2.0", "0.1.9"])).toBe("0.2.0");
     expect(newestVersion([])).toBeUndefined();
+  });
+  it("tells an engine that didn't start from Coolify", () => {
+    expect(
+      engineDownReason(
+        "the platform engine failed to start: this server was replaced as the main server by pi5 (epoch 2): sudo vercelify demote, then join it as a worker",
+      ),
+    ).toBe("this server was replaced as the main server by pi5 (epoch 2): sudo vercelify demote, then join it as a worker");
+    expect(engineDownReason("Coolify still runs this server's apps: sudo vercelify migrate moves them to Vercelify's engine")).toBeUndefined();
+    expect(engineDownReason(undefined)).toBeUndefined();
   });
 });
