@@ -93,6 +93,7 @@ EOF
 
 # --- options -----------------------------------------------------------------
 ROLE=main
+ROLE_EXPLICIT=0
 MACHINE_NAME=$(hostname -s 2>/dev/null || echo vercelify)
 MACHINE_NAME=${MACHINE_NAME,,}
 RENAME=0
@@ -118,7 +119,7 @@ ASSUME_YES=${ASSUME_YES:-0}
 parse_args() {
   while (( $# )); do
     case "$1" in
-      --worker) ROLE=worker ;;
+      --worker) ROLE=worker; ROLE_EXPLICIT=1 ;;
       --join) JOIN_TOKEN=${2:?}; shift ;;
       --hostname) MACHINE_NAME=${2:?}; RENAME=1; shift ;;
       --domain) DOMAIN=${2:?}; shift ;;
@@ -239,7 +240,13 @@ plan() {
 # Re-runs (`vercelify update`) pass no --domain: keep the one set before.
 load_previous_install() {
   local file="$VERCELIFY_ETC/install.env" prev mode
-  [[ -r "$file" && -z "$DOMAIN" ]] || return 0
+  [[ -r "$file" ]] || return 0
+  if [[ "$ROLE_EXPLICIT" == 0 ]]; then
+    local saved_role
+    saved_role=$(sed -n 's/^role=//p' "$file" | tail -1)
+    case "$saved_role" in main|worker) ROLE=$saved_role ;; esac
+  fi
+  [[ -z "$DOMAIN" ]] || return 0
   prev=$(sed -n 's/^domain=//p' "$file" | tail -1)
   mode=$(sed -n 's/^domain_mode=//p' "$file" | tail -1)
   [[ -n "$prev" ]] || return 0
@@ -337,7 +344,7 @@ summary() {
     if [[ -n "$wildcard" ]]; then
       printf '  %sApps%s               %s\n' "$C_BOLD" "$C_RESET" "${wildcard/:\/\//:\/\/<app>.}"
     fi
-    printf '  %sNetwork%s            %s\n' "$C_BOLD" "$C_RESET" "${ip:+$(hostname -s) at $ip (vfy0)}${ip:-not on a Vercelify network yet}"
+    printf '  %sNetwork%s            %s\n' "$C_BOLD" "$C_RESET" "${ip:+$(hostname -s) at }${ip:-not on a Vercelify network yet}${ip:+ (vfy0)}"
     printf '  %sStorage%s            %s\n' "$C_BOLD" "$C_RESET" "$(findmnt -no SOURCE,SIZE "$STORAGE_MOUNT" 2>/dev/null || echo "single disk ($STORAGE_MOUNT on /)")"
     (( WITH_AI )) && printf '  %sAI models%s          http://%s:11434 (Ollama, OpenAI-compatible at /v1)\n' "$C_BOLD" "$C_RESET" "${ip:-<this server>}"
     if [[ -n "$pair" && $ROLE == main ]]; then

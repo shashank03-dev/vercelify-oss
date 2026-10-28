@@ -324,9 +324,17 @@ leave_pairing() {
 install_display_tools() {
   step "Display streaming tools"
   have brew || { warn "Homebrew is needed for ffmpeg and Moonlight: https://brew.sh"; return 0; }
-  have ffmpeg || brew install ffmpeg >/dev/null
-  [[ -d /Applications/Moonlight.app ]] || brew install --cask moonlight >/dev/null || warn "could not install Moonlight"
-  ok "ffmpeg and Moonlight ready"
+  local ready=1
+  if ! have ffmpeg && ! brew install ffmpeg >/dev/null; then
+    warn "could not install ffmpeg — retry later: brew install ffmpeg"
+    ready=0
+  fi
+  if [[ ! -d /Applications/Moonlight.app ]] && ! brew install --cask moonlight >/dev/null; then
+    warn "could not install Moonlight — retry later: brew install --cask moonlight"
+    ready=0
+  fi
+  if [[ "$ready" == 1 ]]; then ok "ffmpeg and Moonlight ready"; fi
+  return 0
 }
 
 main() {

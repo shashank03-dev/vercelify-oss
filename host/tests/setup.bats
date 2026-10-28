@@ -314,3 +314,29 @@ fake_pgrep() {
   APT_LOCK_POLL=1 APT_LOCK_WAIT=1 run strict apt_update_once
   [[ "$output" == *"waiting for another"* ]]
 }
+
+@test "an explicitly selected partition is accepted" {
+  export LSBLK_JSON="$FIX/lsblk-laptop.json"
+  run storage_target /dev/sdb1
+  [ "$status" -eq 0 ]
+  [[ "$output" == /dev/sdb1${S}ext4${S}*${S}part ]]
+}
+
+@test "rerunning setup preserves a worker role even without a domain" {
+  export VERCELIFY_ETC="$T/etc"
+  mkdir -p "$VERCELIFY_ETC"
+  printf 'role=worker\ndomain=\n' >"$VERCELIFY_ETC/install.env"
+  load_previous_install
+  [ "$ROLE" = worker ]
+}
+
+@test "edge installs build matching binaries instead of downloading an older release" {
+  export VERCELIFY_INSTALL_REF=main VERCELIFY_INSTALL_CHANNEL=edge
+  curl() { touch "$T/release-download"; return 1; }
+  have() { [[ "$1" == docker ]]; }
+  run_cmd() { echo source-build >&2; }
+  run obtain_binary vercelify-agent VERCELIFY_AGENT_BINARY '-p vercelify-agent'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *source-build* ]]
+  [ ! -e "$T/release-download" ]
+}
