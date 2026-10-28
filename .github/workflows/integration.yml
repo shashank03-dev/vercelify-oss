@@ -19,6 +19,7 @@ on:
     paths:
       - host/setup-host.sh
       - host/lib/**
+      - host/systemd/**
       - host/tests/contract/**
       - host/tests/integration/**
       - crates/vercelify-platform/src/databases.rs

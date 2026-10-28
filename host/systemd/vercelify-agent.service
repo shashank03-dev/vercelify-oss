@@ -17,7 +17,7 @@ ProtectSystem=full
 ProtectHome=read-only
 # BuildKit (git builds): buildx keeps its builder and activity in /root/.docker.
 ExecStartPre=+/bin/mkdir -p /root/.docker
-ReadWritePaths=/root/.docker
+ReadWritePaths=-/root/.docker
 PrivateTmp=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

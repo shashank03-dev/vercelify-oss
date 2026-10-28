@@ -40,8 +40,10 @@ teardown() { rm -rf "$T"; }
 @test "the agent's sandbox lets BuildKit keep its state, so git builds work" {
   local unit="$BATS_TEST_DIRNAME/../systemd/vercelify-agent.service"
   # With /root read-only, `docker buildx` can't write /root/.docker and every build fails.
+  # The path is optional (-): on a new machine it doesn't exist until the mkdir, and
+  # systemd won't start the agent with a missing ReadWritePaths entry.
   if grep -qE '^ProtectHome=(yes|read-only|tmpfs)' "$unit"; then
-    grep -qx 'ReadWritePaths=/root/.docker' "$unit"
+    grep -qx 'ReadWritePaths=-/root/.docker' "$unit"
     grep -qx 'ExecStartPre=+/bin/mkdir -p /root/.docker' "$unit"
   fi
 }
