@@ -105,13 +105,31 @@ rust_target() {
   esac
 }
 
+# The agent and the mesh daemon for one Linux target, within their size
+# budgets (docs/design/SYSTEM-DESIGN.md §16); prints the agent's path last.
 build_agent() {
   local target=$1
   have cargo-zigbuild || die "cargo-zigbuild is missing — run ./dev setup"
   rustup target list --installed | grep -qx "$target" || rustup target add "$target"
-  say "building the agent for $target"
-  cargo zigbuild --release --locked -p vercelify-agent --target "$target"
+  say "building the agent and mesh for $target" >&2
+  cargo zigbuild --release --locked -p vercelify-agent --target "$target" >&2
+  cargo zigbuild --release --locked -p vercelify-mesh --features daemon --target "$target" >&2
+  size_budget "target/$target/release/vercelify-agent" 8 >&2
+  size_budget "target/$target/release/vercelify-mesh" 6 >&2
   echo "$ROOT/target/$target/release/vercelify-agent"
+}
+
+size_budget() {
+  local size
+  size=$(wc -c <"$1" | tr -d ' ')
+  echo "$(basename "$1"): $((size / 1024)) KiB (budget $2 MiB)"
+  (( size <= $2 * 1024 * 1024 )) || { echo "$1 is over its $2 MiB budget"; return 1; }
+}
+
+mesh_macos() {
+  cargo test -p vercelify-mesh --features daemon &&
+    cargo build --release -p vercelify-mesh --features daemon &&
+    size_budget target/release/vercelify-mesh 6
 }
 
 # ---------------------------------------------------------------- check
@@ -170,7 +188,7 @@ installer_dry_run() {
 # disk list, so the one test that expects a root disk is left to CI.
 agent_linux_tests() {
   docker_ready || { echo "Docker is not running"; return 1; }
-  local test='cargo test --locked -p vercelify-core -p vercelify-agent'
+  local test='cargo test --locked -p vercelify-core -p vercelify-platform -p vercelify-mesh -p vercelify-agent --features vercelify-mesh/daemon'
   if [[ "${DOCKER_CONTEXT:-}" == colima* ]] || docker context show 2>/dev/null | grep -q '^colima'; then
     colima ssh -- bash -lc "
       set -e
@@ -225,21 +243,24 @@ cmd_check() {
     dist_placeholder
     step "cargo fmt" cargo fmt --all --check
     step "cargo clippy" cargo clippy --workspace --all-targets -- -D warnings
+    step "cargo clippy (mesh daemon)" cargo clippy -p vercelify-mesh --all-targets --features daemon -- -D warnings
     if [[ $OS == Linux ]]; then
       step "cargo test (+ TS types)" cargo test --workspace --all-features
     else
-      # The agent's black-box tests watch /proc: they run in the Linux step below.
+      # The agent's black-box tests watch /proc and the platform's drive Docker:
+      # they run in the Linux step below.
       step "cargo test (+ TS types)" cargo test --workspace --all-features --no-fail-fast --lib --bins --test core
-      if docker_ready; then step "agent + core tests on Linux" agent_linux_tests
-      else skip "agent + core tests on Linux" "Docker not running"; fi
+      if docker_ready; then step "agent, platform, mesh tests on Linux" agent_linux_tests
+      else skip "agent, platform, mesh tests on Linux" "Docker not running"; fi
     fi
     step "generated TS types committed" generated_types_committed
     if ((full)); then
       local arch
       for arch in x86_64 aarch64; do
-        if have cargo-zigbuild; then step "agent binary $arch-linux-musl" build_agent "$(rust_target $arch)"
-        else skip "agent binary $arch-linux-musl" "cargo-zigbuild missing (./dev setup)"; fi
+        if have cargo-zigbuild; then step "agent + mesh binaries $arch-linux-musl" build_agent "$(rust_target $arch)"
+        else skip "agent + mesh binaries $arch-linux-musl" "cargo-zigbuild missing (./dev setup)"; fi
       done
+      [[ $OS == Darwin ]] && step "mesh on macOS (tests, 6 MiB budget)" mesh_macos
     fi
   fi
 
@@ -355,23 +376,25 @@ cmd_agent_bin() {
     *) rust_target "$which" >/dev/null || die "unknown arch $which (x86_64, aarch64)"
        build_agent "$(rust_target "$which")" ;;
   esac
-  ls -lh target/*-unknown-linux-musl/release/vercelify-agent 2>/dev/null || true
+  ls -lh target/*-unknown-linux-musl/release/vercelify-{agent,mesh} 2>/dev/null || true
 }
 
 cmd_host() {
   local target=${1:-}
-  [[ -n "$target" ]] || die "usage: ./dev host USER@HOST   (a machine reachable over SSH, e.g. its Tailscale name)"
+  [[ -n "$target" ]] || die "usage: ./dev host USER@HOST   (a machine reachable over SSH)"
   local arch rt bin
   arch=$(ssh -o ConnectTimeout=10 "$target" uname -m) || die "cannot reach $target over SSH"
   rt=$(rust_target "$arch") || die "$target is $arch — Vercelify hosts are x86_64 or aarch64"
-  bin=$(build_agent "$rt" | tail -1)
+  bin=$(build_agent "$rt")
 
   # Global, so the EXIT trap still sees it after this function returns.
   stage=$(mktemp -d)
   trap 'rm -rf "$stage"' EXIT
   tar -C "$ROOT" -c host install.sh Cargo.toml Cargo.lock | tar -C "$stage" -x
   mkdir -p "$stage/dist"
+  # host/lib/agent.sh picks these up instead of downloading or building them.
   cp "$bin" "$stage/dist/vercelify-agent-$rt"
+  cp "$(dirname "$bin")/vercelify-mesh" "$stage/dist/vercelify-mesh-$rt"
 
   say "copying this checkout ($(git rev-parse --short HEAD)$(git diff --quiet HEAD || echo '+changes')) to $target"
   tar -C "$stage" -cz . | ssh "$target" 'rm -rf /tmp/vercelify-dev && mkdir -p /tmp/vercelify-dev && tar -xz -C /tmp/vercelify-dev' ||

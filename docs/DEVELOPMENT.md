@@ -39,11 +39,12 @@ A typical loop:
    GitHub builds the signed `.dmg`, `.deb`/`.AppImage` and agent binaries.
 
 On macOS the host tests (bats) run in a Debian 12 container, so Docker (or
-Colima, started automatically) must be installed. The agent's tests need a real
-Linux machine: with Colima they run inside its VM (Rust is installed there on
-the first run, ~15 min once); with another Docker they run in a container and
-skip the one test that needs a real root disk. `./dev setup` installs `zig`
-for the static agent binaries, a large one-time Homebrew download.
+Colima, started automatically) must be installed. The agent, platform and mesh
+tests need a real Linux machine: with Colima they run inside its VM (Rust is
+installed there on the first run, ~15 min once); with another Docker they run
+in a container and skip the one test that needs a real root disk. `./dev setup`
+installs `zig` for the static agent and mesh binaries, a large one-time
+Homebrew download.
 
 ### A real host to test against
 
@@ -55,16 +56,12 @@ limactl start --name vfy-host --cpus 4 --memory 6 template://debian-12
 # so ./dev host and ssh can reach it as lima-vfy-host:
 echo "Include $HOME/.lima/vfy-host/ssh.config" >> ~/.ssh/config
 ./dev host lima-vfy-host
-cockpit/e2e/run-host.sh lima-vfy-host http://127.0.0.1:7420 http://127.0.0.1:8000
 ```
 
-`e2e/run-host.sh` pairs the production UI with the host using a fresh code,
-opens every page, deploys a small static site from Git, serves it, redeploys,
-rolls back and creates a database. Lima forwards the VM's ports to the Mac,
-which is why the agent and Coolify URLs are `127.0.0.1`. App URLs need a
-wildcard domain: on a VM without Tailscale, `sudo vercelify domain` has no
-address to use, so set one by hand (see the e2e notes in that script's
-header).
+`./dev host` builds the agent and mesh for the machine's architecture, copies
+them with the host scripts and runs the installer (or `vercelify update` when
+it is already installed, which rolls back on its own if the agent doesn't come
+up). Lima forwards the VM's ports to the Mac's `127.0.0.1`.
 
 ## Everyday commands
 
