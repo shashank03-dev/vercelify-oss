@@ -478,14 +478,17 @@ cmd_update() {
     esac
     shift
   done
+  # A local installer runs in place, so it installs the checkout it lives in
+  # (`./dev host` ships one); otherwise fetch the published one.
   tmp=$(mktemp)
-  if [[ -n "${VERCELIFY_INSTALLER:-}" ]]; then cp "$VERCELIFY_INSTALLER" "$tmp"
+  local installer=$tmp
+  if [[ -n "${VERCELIFY_INSTALLER:-}" ]]; then installer=$VERCELIFY_INSTALLER
   else fetch "https://raw.githubusercontent.com/$VERCELIFY_REPO/main/install.sh" "$tmp" || die "download failed"; fi
   snapshot_for_rollback
   info "previous version kept for rollback (vercelify rollback)"
   local args=(-y)
   [[ $ROLE == worker ]] && args+=(--worker)
-  VERCELIFY_NONINTERACTIVE=1 VERCELIFY_CHANNEL=$chan VERCELIFY_REF=$ref bash "$tmp" "${args[@]}" || rc=$?
+  VERCELIFY_NONINTERACTIVE=1 VERCELIFY_CHANNEL=$chan VERCELIFY_REF=$ref bash "$installer" "${args[@]}" || rc=$?
   rm -f "$tmp"
   if (( rc != 0 )) || ! agent_healthy "${UPDATE_HEALTH_SECS:-60}"; then
     err "update failed (exit $rc) — restoring the previous agent and scripts"

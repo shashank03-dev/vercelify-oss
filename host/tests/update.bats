@@ -66,3 +66,12 @@ serve_health() {
   run "$CLI" update --ref 'v0.2.0'
   grep -q 'channel=stable ref=v0.2.0' "$T/lib/installer-args"
 }
+
+@test "a local installer runs in place, so it installs the checkout it lives in" {
+  serve_health
+  echo 'echo "from=${BASH_SOURCE[0]}" >"$VERCELIFY_LIB/installer-path"' >>"$T/installer.sh"
+  sed -i '/^exit /d' "$T/installer.sh"
+  run "$CLI" update
+  [ "$status" -eq 0 ]
+  grep -qx "from=$T/installer.sh" "$T/lib/installer-path"
+}
