@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CommandPalette } from "./components/CommandPalette";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { AddServerWizard } from "./components/AddServer";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -182,13 +183,15 @@ function Shell() {
                         transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
                         className="mx-auto max-w-[1240px] px-7 pt-6 pb-14"
                       >
-                        {tab === "apps" && <AppsView />}
-                        {tab === "ai" && <AiView />}
-                        {tab === "servers" && <ServersView />}
-                        {tab === "storage" && <StorageView />}
-                        {tab === "screencast" && <ScreencastView />}
-                        {tab === "health" && <HealthView />}
-                        {tab === "settings" && <SettingsView />}
+                        <ErrorBoundary>
+                          {tab === "apps" && <AppsView />}
+                          {tab === "ai" && <AiView />}
+                          {tab === "servers" && <ServersView />}
+                          {tab === "storage" && <StorageView />}
+                          {tab === "screencast" && <ScreencastView />}
+                          {tab === "health" && <HealthView />}
+                          {tab === "settings" && <SettingsView />}
+                        </ErrorBoundary>
                       </motion.div>
                     </AnimatePresence>
                   </div>
