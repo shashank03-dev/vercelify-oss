@@ -707,7 +707,7 @@ pub async fn gather(s: &AppState) -> Facts {
             &[
                 "inspect",
                 "-f",
-                "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}",
+                "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}|{{range $p, $b := .NetworkSettings.Ports}}{{if $b}}{{$p}} {{end}}{{end}}",
                 &cfg.proxy_container,
             ],
             Duration::from_secs(10),
@@ -716,7 +716,7 @@ pub async fn gather(s: &AppState) -> Facts {
         .ok()
         .map(|o| {
             if o.success() {
-                o.stdout.trim().to_string()
+                proxy_state(&o.stdout)
             } else {
                 "missing".into()
             }
@@ -837,6 +837,18 @@ pub async fn report(s: &AppState) -> DoctorReport {
     }
 }
 
+/// The proxy's state from `docker inspect` (`STATUS|PUBLISHED PORTS`). Running
+/// without port 80 published (another program had it when Docker started it,
+/// an old Coolify proxy for one) serves nothing, so it isn't "running".
+fn proxy_state(inspect: &str) -> String {
+    let (status, ports) = inspect.trim().split_once('|').unwrap_or((inspect.trim(), "80/tcp"));
+    let running = status == "healthy" || status == "running";
+    if running && !ports.split_whitespace().any(|p| p == "80/tcp") {
+        return "running, but not on port 80 — another program holds it (sudo ss -ltnp 'sport = :80')".into();
+    }
+    status.to_string()
+}
+
 #[cfg(test)]
 mod maintenance_tests {
     use super::*;
@@ -871,6 +883,14 @@ mod tests {
     use super::*;
     use vercelify_core::{Pressure, Throttling};
     use CheckStatus::{Bad, Ok as Fine, Warn};
+
+    #[test]
+    fn a_proxy_without_port_80_is_not_running() {
+        assert_eq!(proxy_state("running|443/tcp 443/udp 80/tcp 8082/tcp \n"), "running");
+        assert_eq!(proxy_state("healthy|80/tcp "), "healthy");
+        assert_eq!(proxy_state("exited|"), "exited");
+        assert!(proxy_state("running|").contains("another program holds it"));
+    }
 
     fn laptop_hw() -> HardwareInfo {
         HardwareInfo {

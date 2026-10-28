@@ -384,6 +384,8 @@ snapshot_for_rollback() {
   [[ -f "$PLATFORM_DB.bak" ]] && cp -a "$PLATFORM_DB.bak" "$tmp/platform.db"
   [[ -d "$VERCELIFY_LIB/host" ]] && cp -a "$VERCELIFY_LIB/host" "$tmp/host"
   [[ -f "$VERCELIFY_ETC/install.env" ]] && cp -a "$VERCELIFY_ETC/install.env" "$tmp/install.env"
+  # The installer edits it too (new listen addresses the old agent can't read).
+  [[ -f "$VERCELIFY_ETC/agent.toml" ]] && cp -a "$VERCELIFY_ETC/agent.toml" "$tmp/agent.toml"
   for u in $UNITS; do [[ -f "$SYSTEMD_DIR/$u.service" ]] && cp -a "$SYSTEMD_DIR/$u.service" "$tmp/units/"; done
   rm -rf "$ROLLBACK_DIR"
   mv "$tmp" "$ROLLBACK_DIR"
@@ -406,6 +408,7 @@ restore_rollback() {
     rsync -a --checksum --delete "$ROLLBACK_DIR/host/" "$VERCELIFY_LIB/host/"
   fi
   [[ -f "$ROLLBACK_DIR/install.env" ]] && cp -a "$ROLLBACK_DIR/install.env" "$VERCELIFY_ETC/install.env"
+  [[ -f "$ROLLBACK_DIR/agent.toml" ]] && cp -a "$ROLLBACK_DIR/agent.toml" "$VERCELIFY_ETC/agent.toml"
   cp -a "$ROLLBACK_DIR/units/." "$SYSTEMD_DIR/" 2>/dev/null || true
   systemctl daemon-reload 2>/dev/null || true
   local u

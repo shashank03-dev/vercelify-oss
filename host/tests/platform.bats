@@ -36,3 +36,12 @@ teardown() { rm -rf "$T"; }
   run platform_domain_json "" false
   [ "$output" = '{"wildcard":null,"https":false,"edge_tls":false}' ]
 }
+
+@test "the agent's sandbox lets BuildKit keep its state, so git builds work" {
+  local unit="$BATS_TEST_DIRNAME/../systemd/vercelify-agent.service"
+  # With /root read-only, `docker buildx` can't write /root/.docker and every build fails.
+  if grep -qE '^ProtectHome=(yes|read-only|tmpfs)' "$unit"; then
+    grep -qx 'ReadWritePaths=/root/.docker' "$unit"
+    grep -qx 'ExecStartPre=+/bin/mkdir -p /root/.docker' "$unit"
+  fi
+}

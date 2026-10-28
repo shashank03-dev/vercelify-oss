@@ -364,6 +364,14 @@ async fn serve(cfg: Config) {
         let app = app.clone();
         let cfg = state.config.clone();
         tasks.spawn(async move {
+            if spec == "tailscale" {
+                // Before 0.2.0 the installer wrote it. Skip it: an update must not
+                // stop the agent, which still answers on 127.0.0.1 and the mesh.
+                tracing::warn!(
+                    "listen address `tailscale` is no longer supported (Vercelify's network replaced it): skipped"
+                );
+                return;
+            }
             let ip = resolve_listen(&spec, &cfg).await;
             let addr = SocketAddr::new(ip, port);
             // vercelify-mesh may put the address on vfy0 a moment later; retry.

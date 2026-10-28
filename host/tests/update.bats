@@ -5,6 +5,7 @@ setup() {
   T=$(mktemp -d)
   mkdir -p "$T/etc" "$T/lib/host" "$T/systemd" "$T/bin" "$T/www/v1"
   printf 'role=main\nversion=0.1.0\nchannel=stable\n' >"$T/etc/install.env"
+  echo 'listen = ["127.0.0.1"]' >"$T/etc/agent.toml"
   printf '#!/bin/sh\necho old-agent\n' >"$T/agent"; chmod +x "$T/agent"
   echo 'old cli' >"$T/lib/host/marker"
   echo '[Service]' >"$T/systemd/vercelify-agent.service"
@@ -17,6 +18,7 @@ setup() {
   cat >"$T/installer.sh" <<'INST'
 printf '#!/bin/sh\necho new-agent\n' >"$AGENT_BIN"
 echo 'new cli' >"$VERCELIFY_LIB/host/marker"
+echo 'listen = ["127.0.0.1", "mesh"]' >"$VERCELIFY_ETC/agent.toml"
 echo "channel=$VERCELIFY_CHANNEL ref=$VERCELIFY_REF args=$*" >"$VERCELIFY_LIB/installer-args"
 exit "${FAKE_EXIT:-0}"
 INST
@@ -43,6 +45,8 @@ serve_health() {
   [[ "$output" == *"rolled back"* ]]
   [ "$("$T/agent")" = old-agent ]
   [ "$(cat "$T/lib/host/marker")" = "old cli" ]
+  # The old agent gets the configuration it can read back.
+  [ "$(cat "$T/etc/agent.toml")" = 'listen = ["127.0.0.1"]' ]
   grep -q 'systemctl try-restart vercelify-agent' "$T/calls"
 }
 
