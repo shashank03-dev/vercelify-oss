@@ -6,6 +6,8 @@
 # api/api_raw/in_w/wdocker/until_ok/ok/fail, main_env and w_env.
 # shellcheck disable=SC2034 # the variables are for the scripts that source this
 export NO_PROXY="*" no_proxy="*"
+# shellcheck source=lib-guard.sh
+. "${here:?}/lib-guard.sh"
 repo=$(cd "${here:?set by the script that sources this}/../../.." && pwd)
 agent=${AGENT_BIN:-$repo/target/debug/vercelify-agent}
 mesh=${MESH_BIN:-$repo/target/debug/vercelify-mesh}

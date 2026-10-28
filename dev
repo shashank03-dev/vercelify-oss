@@ -35,6 +35,9 @@ cd "$ROOT"
 DEV_TOKEN=dev-token-0123456789
 LINUX_IMAGE=vercelify-dev-linux
 OS=$(uname -s)
+ORIGINAL_PATH=$PATH
+# Where ./dev setup puts tools on Linux (and rustup's default).
+PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
 if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
   B=$'\033[1m' D=$'\033[2m' R=$'\033[31m' G=$'\033[32m' Y=$'\033[33m' C=$'\033[36m' N=$'\033[0m'
@@ -49,6 +52,14 @@ have() { command -v "$1" >/dev/null 2>&1; }
 usage() { sed -n '2,/^# Bash 3.2/p' "$0" | sed '$d; s/^# \{0,1\}//'; }
 
 # ---------------------------------------------------------------- helpers
+
+# A machine that serves apps (install.sh made /etc/vercelify). The dev agent and the
+# Docker test suites run an engine of their own, which would replace its proxy
+# and remove its apps' containers as strays.
+not_a_server() {
+  [[ -d "${VERCELIFY_ETC:-/etc/vercelify}" && "${VERCELIFY_TESTS_ON_SERVER:-}" != 1 ]] || return 0
+  die "this machine is a Vercelify server: $1 would take over its Docker (proxy, app containers). Use ./dev host to try changes on it, or a machine that isn't serving apps (VERCELIFY_TESTS_ON_SERVER=1 overrides)."
+}
 
 npm_deps() {
   local dir=$1
@@ -309,6 +320,7 @@ cmd_app() {
 }
 
 cmd_agent() {
+  not_a_server "a dev agent"
   mkdir -p "${TMPDIR:-/tmp}/vercelify-hdd"
   say "agent on http://127.0.0.1:7420 — token $DEV_TOKEN"
   printf '    curl -H "Authorization: Bearer %s" localhost:7420/v1/system\n' "$DEV_TOKEN"
@@ -477,27 +489,114 @@ cmd_setup() {
     have docker || pkgs="$pkgs colima docker"
     [[ -n "$pkgs" ]] && { say "brew install$pkgs"; brew install $pkgs; }
   else
-    local miss='' t
-    for t in shellcheck jq bats zig node; do have "$t" || miss="$miss $t"; done
-    [[ -n "$miss" ]] && warn "install with your package manager:$miss (zig: https://ziglang.org/download)"
-    have cargo && ! dpkg -s libwebkit2gtk-4.1-dev >/dev/null 2>&1 &&
-      warn "Tauri needs: sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev"
+    linux_setup
   fi
   have rustup || die "install Rust first: https://rustup.rs"
   rustup component add rustfmt clippy >/dev/null 2>&1 || true
   rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl >/dev/null
   [[ $OS == Darwin ]] && rustup target add x86_64-apple-darwin aarch64-apple-darwin >/dev/null
-  have cargo-zigbuild || { say "cargo install cargo-zigbuild"; cargo install --locked cargo-zigbuild; }
+  if [[ $OS == Darwin ]]; then
+    have cargo-zigbuild || { say "cargo install cargo-zigbuild"; cargo install --locked cargo-zigbuild; }
+  else
+    linux_zig
+  fi
 
   npm_deps cockpit
   npm_deps website
   say "Playwright browser (for the UI flows)"
-  (cd cockpit && npx playwright install chromium >/dev/null)
+  if [[ $OS == Linux ]]; then
+    # --with-deps installs the browser's system libraries through apt.
+    (cd cockpit && npx playwright install --with-deps chromium >/dev/null)
+  else
+    (cd cockpit && npx playwright install chromium >/dev/null)
+  fi
   dist_placeholder
 
-  if docker_ready; then linux_image; else warn "Docker isn't running: start Docker/Colima for the host tests (bats run in Debian)"; fi
+  if docker_ready; then [[ $OS == Darwin ]] && linux_image
+  elif [[ $OS == Linux ]] && have docker; then warn "Docker isn't reachable yet: log in again so the docker group applies"
+  else warn "Docker isn't running: start Docker/Colima for the host tests (bats run in Debian)"; fi
   [[ -f "$(git rev-parse --git-path hooks)/pre-push" ]] || cmd_hooks
   say "ready. Try: ./dev ui   ·   ./dev app   ·   ./dev check"
+}
+
+# Debian/Ubuntu (what CI and the hosts run): the system packages, Docker,
+# Node 22 and Rust. Other distributions get the list to install themselves.
+LINUX_PKGS='build-essential pkg-config curl git jq rsync shellcheck bats python3 python3-venv file xdg-utils
+  libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev'
+# The cockpit's test libraries (undici) need Node 22.19 or later.
+NODE_MIN=22.19
+
+# Right after boot the system's own update holds apt's lock for minutes (the
+# same wait as host/lib/system.sh; unattended-upgrade-shutdown is always there).
+apt_wait_idle() {
+  local waited=0
+  while pgrep -x 'apt|apt-get|aptitude|dpkg' >/dev/null || pgrep -f '/unattended-upgrade( |$)' >/dev/null; do
+    ((waited == 0)) && say "waiting for another package install (system updates) to finish…"
+    ((waited >= 600)) && { warn "still running after ${waited}s — trying anyway"; return 0; }
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
+
+linux_setup() {
+  local sudo=() p miss=''
+  ((EUID == 0)) || sudo=(sudo)
+  if ! have apt-get; then
+    warn "not Debian/Ubuntu: install these (or your distribution's names for them):"
+    printf '    %s\n' $LINUX_PKGS docker node22 rustup >&2
+    return 0
+  fi
+  # shellcheck disable=SC2086 # a list
+  for p in $LINUX_PKGS; do dpkg -s "$p" >/dev/null 2>&1 || miss="$miss $p"; done
+  if [[ -n "$miss" ]]; then
+    say "apt-get install$miss"
+    apt_wait_idle
+    ${sudo[@]+"${sudo[@]}"} apt-get update -qq
+    # shellcheck disable=SC2086 # a list
+    DEBIAN_FRONTEND=noninteractive ${sudo[@]+"${sudo[@]}"} apt-get install -y -qq $miss >/dev/null
+  fi
+  if ! have docker; then
+    say "apt-get install docker.io"
+    apt_wait_idle
+    DEBIAN_FRONTEND=noninteractive ${sudo[@]+"${sudo[@]}"} apt-get install -y -qq docker.io >/dev/null
+  fi
+  if ((EUID != 0)) && ! id -nG | tr ' ' '\n' | grep -qx docker; then
+    ${sudo[@]+"${sudo[@]}"} usermod -aG docker "$(id -un)"
+    warn "added you to the docker group: log out and back in (or run: newgrp docker) before ./dev check"
+  fi
+  if ! have node || ! node -e "const [a,b]=process.versions.node.split('.').map(Number), [x,y]='$NODE_MIN'.split('.').map(Number); process.exit(a>x||(a==x&&b>=y)?0:1)"; then
+    local arch dist=https://nodejs.org/dist/latest-v22.x tarball
+    case "$(uname -m)" in x86_64) arch=x64 ;; aarch64) arch=arm64 ;; *) die "no Node build for $(uname -m)" ;; esac
+    tarball=$(curl -fsSL "$dist/SHASUMS256.txt" | awk -v a="linux-$arch.tar.xz" '$2 ~ a"$" { print $2; exit }')
+    [[ -n "$tarball" ]] || die "couldn't find Node 22 for linux-$arch at $dist"
+    say "${tarball%-linux-*} in ~/.local"
+    mkdir -p "$HOME/.local/lib" "$HOME/.local/bin"
+    rm -rf "$HOME/.local/lib/node" "$HOME/.local/lib/${tarball%.tar.xz}"
+    curl -fsSL "$dist/$tarball" | tar -xJ -C "$HOME/.local/lib"
+    mv "$HOME/.local/lib/${tarball%.tar.xz}" "$HOME/.local/lib/node"
+    for p in node npm npx; do ln -sf "$HOME/.local/lib/node/bin/$p" "$HOME/.local/bin/$p"; done
+  fi
+  if ! have rustup; then
+    say "Rust (rustup)"
+    curl -fsSL https://sh.rustup.rs | sh -s -- -y -q --profile minimal >/dev/null
+  fi
+  case ":$ORIGINAL_PATH:" in
+    *":$HOME/.local/bin:"*) ;;
+    *) warn "add ~/.local/bin and ~/.cargo/bin to your PATH (e.g. in ~/.bashrc): export PATH=\"\$HOME/.local/bin:\$HOME/.cargo/bin:\$PATH\"" ;;
+  esac
+}
+
+# zig and cargo-zigbuild from PyPI (as CI does), in their own venv.
+linux_zig() {
+  have cargo-zigbuild && have zig && return 0
+  local venv="$HOME/.local/share/vercelify-dev/zig"
+  say "zig + cargo-zigbuild in $venv"
+  python3 -m venv "$venv"
+  "$venv/bin/pip" install -q cargo-zigbuild
+  mkdir -p "$HOME/.local/bin"
+  ln -sf "$venv/bin/cargo-zigbuild" "$HOME/.local/bin/cargo-zigbuild"
+  printf '#!/bin/sh\nexec "%s/bin/python" -m ziglang "$@"\n' "$venv" >"$HOME/.local/bin/zig"
+  chmod +x "$HOME/.local/bin/zig"
 }
 
 # ---------------------------------------------------------------- main

@@ -10,6 +10,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$(cd .. && pwd)
+# shellcheck source=../../host/tests/contract/lib-guard.sh
+. "$ROOT/host/tests/contract/lib-guard.sh"
 : "${AGENT_PORT:=7431}"
 : "${E2E_PROXY_HTTP:=18480}"
 : "${E2E_HDD:=$(mktemp -d)}"

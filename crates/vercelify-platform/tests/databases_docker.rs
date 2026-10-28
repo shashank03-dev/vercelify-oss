@@ -47,6 +47,12 @@ async fn databases_end_to_end() {
     if std::env::var("VERCELIFY_DOCKER_TESTS").as_deref() != Ok("1") {
         return;
     }
+    // It runs an engine on this machine's Docker: never on a real server.
+    assert!(
+        !std::path::Path::new("/etc/vercelify").exists()
+            || std::env::var("VERCELIFY_TESTS_ON_SERVER").as_deref() == Ok("1"),
+        "this machine is a Vercelify server: this test would change its containers (VERCELIFY_TESTS_ON_SERVER=1 runs it anyway)"
+    );
     image("postgres:17-alpine");
     image("valkey/valkey:8-alpine");
     let dir = tempfile::tempdir().unwrap();

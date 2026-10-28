@@ -4,6 +4,13 @@
 
 - Rust stable (`rustup`), Node 22, `jq`, `shellcheck`, `bats`
 - Linux: `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev` (for the Tauri crate)
+
+On macOS, `./dev setup` installs what's missing with Homebrew. On Debian and
+Ubuntu it installs everything itself: the packages above, Docker (and adds you
+to the `docker` group), Node 22 (22.19 or later) and Rust when they're missing or too old, and
+zig with `cargo-zigbuild` from PyPI, as CI does. Node and zig go under
+`~/.local`, so add `~/.local/bin` and `~/.cargo/bin` to your `PATH`. Other
+distributions get the list to install themselves.
 - For the live and contract tests: Docker (and root, for the network namespace ones)
 
 ## The `./dev` script
@@ -37,6 +44,21 @@ A typical loop:
 4. Push the branch and open a PR. CI runs the same checks again, on Linux.
 5. To release: `./dev release X.Y.Z` on `main`, then `git push origin main vX.Y.Z`.
    GitHub builds the signed `.dmg`, `.deb`/`.AppImage` and agent binaries.
+
+### Working on a Mac and a Linux machine
+
+Each machine has its own clone and runs `./dev setup` once; git keeps them in
+step (push a branch on one, pull it on the other). On Linux, `./dev check` runs
+everything natively, including the agent, platform and mesh tests that a Mac
+runs in a VM.
+
+A Linux machine can also be a Vercelify server. Develop there as usual, but
+the dev agent (`./dev agent`) and the suites that drive Docker with an engine of
+their own (the live e2e, `routing.sh`, `multinode.sh`, `promote.sh` and the
+`VERCELIFY_DOCKER_TESTS` Rust tests) refuse to run on it: they replace the
+`vercelify-proxy` container and would remove the server's app containers as
+strays. Use `./dev host USER@HOST` to try your changes on a server, or set
+`VERCELIFY_TESTS_ON_SERVER=1` on a server you don't mind breaking.
 
 On macOS the host tests (bats) run in a Debian 12 container, so Docker (or
 Colima, started automatically) must be installed. The agent, platform and mesh

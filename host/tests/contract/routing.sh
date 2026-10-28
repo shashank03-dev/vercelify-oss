@@ -17,6 +17,8 @@ set -euo pipefail
 # Everything here talks to this machine.
 export NO_PROXY="*" no_proxy="*"
 here=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source=lib-guard.sh
+. "$here/lib-guard.sh"
 repo=$(cd "$here/../../.." && pwd)
 image=${TRAEFIK_IMAGE:-traefik:v3.7}
 whoami=${WHOAMI_IMAGE:-traefik/whoami:v1.11}

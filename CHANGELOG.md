@@ -11,9 +11,15 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - The app says when a newer release is out: "Update the app" at the bottom of the
   sidebar opens the release with the `.dmg`, and server cards show `0.2.5 → 0.3.0`
   against the newest release, not only against each other.
+- Development on Linux: `./dev setup` on Debian or Ubuntu installs everything itself
+  (system packages, Docker, Node 22, Rust, zig), so `./dev check` runs natively there.
 
 ### Fixed
 
+- On a Linux machine that is also a Vercelify server, `./dev agent` and the test suites
+  that run an engine of their own (live e2e, routing, multinode, promote, the Docker
+  Rust tests) replaced the server's proxy and removed its apps' containers. They now
+  refuse to run there.
 - Git deployments failed on every installed server ("could not create the BuildKit
   builder: … read-only file system"): the agent's sandbox kept `/root` read-only, where
   `docker buildx` keeps its builder. The agent's unit now lets it write `/root/.docker`.
