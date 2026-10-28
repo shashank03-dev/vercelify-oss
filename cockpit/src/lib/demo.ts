@@ -602,6 +602,8 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
         mesh_join: "vfyj1.demo",
       };
     }
+    case "latest_release":
+      return { version: "0.3.0", url: "https://github.com/shashank03-dev/vercelify-oss/releases/tag/v0.3.0", current: "0.2.5" };
     case "tools_status":
       return [
         { name: "ffmpeg", installed: true, path: "/opt/homebrew/bin/ffmpeg", install_hint: "brew install ffmpeg" },

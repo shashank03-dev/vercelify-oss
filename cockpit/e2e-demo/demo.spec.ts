@@ -107,6 +107,10 @@ test("several servers: add, switch, see them side by side, add a worker", async 
   // the workers its engine places apps on
   await expect(page.getByTestId("server-dell-e7450").getByTestId("pool")).toContainText("pi-5");
 
+  // a newer release: the servers and the app say so
+  await expect(page.getByTestId("update-available-dell-e7450")).toContainText("→ 0.3.0");
+  await expect(page.getByTestId("app-update")).toContainText("0.3.0");
+
   // update every machine from the Mac
   await page.getByTestId("update-all").click();
   await expect(page.getByTestId("update-dell-e7450")).toContainText("Updating", { timeout: 15_000 });

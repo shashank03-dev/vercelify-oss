@@ -11,6 +11,7 @@ import { compareVersions, newestVersion } from "../lib/caps";
 import { bytes, duration, pct } from "../lib/format";
 import { usePoll } from "../lib/hooks";
 import { useNav } from "../lib/nav";
+import { useLatestRelease } from "../lib/release";
 import { useSession } from "../lib/session";
 import { toCockpitError } from "../lib/transport";
 import type { CockpitSettings, UpdateStatus } from "../types";
@@ -21,9 +22,10 @@ export function ServersView() {
   // Bumped by "Update all" so every card starts following its update.
   const [updateAll, setUpdateAll] = useState(0);
   const [updatingAll, setUpdatingAll] = useState(false);
-  // Agents of different versions: the older ones get an "update available" note.
+  // Agents older than the newest release (or than another server) get an "update available" note.
   const [versions, setVersions] = useState<Record<string, string>>({});
-  const newest = newestVersion(Object.values(versions));
+  const release = useLatestRelease();
+  const newest = newestVersion([...Object.values(versions), release?.version]);
 
   async function startAll() {
     setUpdatingAll(true);

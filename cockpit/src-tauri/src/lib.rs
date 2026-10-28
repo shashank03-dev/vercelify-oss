@@ -347,6 +347,50 @@ async fn test_connection(state: State<'_, AppState>, settings: CockpitSettings) 
     .await?;
     Ok(serde_json::json!({ "hostname": health["host"]["hostname"] }))
 }
+// --- releases ---------------------------------------------------------------
+
+/// Where releases are published (the installers' `VERCELIFY_REPO`).
+const RELEASES_REPO: &str = match option_env!("VERCELIFY_REPO") {
+    Some(r) => r,
+    None => "shashank03-dev/vercelify-oss",
+};
+
+/// The newest published release, which `vercelify update` and install-mac.sh install.
+#[derive(Debug, PartialEq, serde::Serialize)]
+struct LatestRelease {
+    version: String,
+    url: String,
+    /// This app's version.
+    current: &'static str,
+}
+
+fn parse_release(v: &Value) -> Option<LatestRelease> {
+    let version = v["tag_name"].as_str()?.trim_start_matches('v');
+    let url = v["html_url"].as_str()?;
+    (!version.is_empty() && url.starts_with("https://")).then(|| LatestRelease {
+        version: version.into(),
+        url: url.into(),
+        current: env!("CARGO_PKG_VERSION"),
+    })
+}
+
+#[tauri::command]
+async fn latest_release(state: State<'_, AppState>) -> CmdResult<LatestRelease> {
+    let res = state
+        .http
+        .get(format!("https://api.github.com/repos/{RELEASES_REPO}/releases/latest"))
+        .header("Accept", "application/vnd.github+json")
+        .timeout(std::time::Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| format!("checking for updates: {e}"))?;
+    if !res.status().is_success() {
+        return Err(format!("checking for updates: GitHub answered {}", res.status()));
+    }
+    let v: Value = res.json().await.map_err(|e| format!("checking for updates: {e}"))?;
+    parse_release(&v).ok_or_else(|| "checking for updates: unexpected answer from GitHub".into())
+}
+
 // --- this machine -----------------------------------------------------------
 
 #[tauri::command]
@@ -520,6 +564,7 @@ pub fn run() {
             moonlight_stop,
             moonlight_status,
             tray_status,
+            latest_release,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the Vercelify cockpit");
@@ -531,6 +576,35 @@ pub fn run() {
             }
         }
     });
+}
+
+#[cfg(test)]
+mod release_tests {
+    use super::*;
+
+    #[test]
+    fn a_release_is_its_version_without_the_v_and_its_page() {
+        let v = serde_json::json!({ "tag_name": "v0.3.0", "html_url": "https://github.com/o/r/releases/tag/v0.3.0" });
+        assert_eq!(
+            parse_release(&v),
+            Some(LatestRelease {
+                version: "0.3.0".into(),
+                url: "https://github.com/o/r/releases/tag/v0.3.0".into(),
+                current: env!("CARGO_PKG_VERSION"),
+            })
+        );
+    }
+
+    #[test]
+    fn anything_else_is_not_a_release() {
+        for v in [
+            serde_json::json!({ "message": "Not Found" }),
+            serde_json::json!({ "tag_name": "v", "html_url": "https://github.com/o/r" }),
+            serde_json::json!({ "tag_name": "v1.0.0", "html_url": "javascript:alert(1)" }),
+        ] {
+            assert_eq!(parse_release(&v), None, "{v}");
+        }
+    }
 }
 
 #[cfg(all(test, unix))]

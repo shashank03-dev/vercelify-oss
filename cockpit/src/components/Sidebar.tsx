@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "framer-motion";
 import {
+  ArrowUpCircle,
   Box,
   Check,
   ChevronsUpDown,
@@ -20,6 +21,8 @@ import { isWorker } from "../lib/api";
 import { pct } from "../lib/format";
 import { useLive } from "../lib/live";
 import { NAV, NAV_GROUPS, useNav, type NavItem } from "../lib/nav";
+import { openExternal } from "../lib/open";
+import { appBehind, useLatestRelease } from "../lib/release";
 import { agentHost, useSession } from "../lib/session";
 import type { SystemSnapshot } from "../types";
 import { useToast } from "./Toast";
@@ -200,6 +203,7 @@ export function Sidebar() {
 
       <div className="flex flex-col gap-1 border-t border-line px-3 pt-2 pb-3">
         {NAV.filter((n) => n.group === "footer").map((n) => item(n, NAV.indexOf(n) + 1))}
+        <AppUpdate collapsed={collapsed} />
         <Rail collapsed={collapsed} label={dark ? "Light mode" : "Dark mode"}>
           <button
             type="button"
@@ -241,6 +245,34 @@ function NavTip({ label, hint, keys }: { label?: string; hint: string; keys: str
 }
 
 /** Wraps a sidebar control so it gets a tooltip only when the labels are hidden. */
+/** A newer release of the app: where to download it (install-mac.sh does the same). */
+function AppUpdate({ collapsed }: { collapsed: boolean }) {
+  const release = useLatestRelease();
+  if (!release || !appBehind(release)) return null;
+  return (
+    <Tooltip content={`Vercelify ${release.version} is out (this app is ${release.current}). Opens the release with the .dmg.`}>
+      <button
+        type="button"
+        data-testid="app-update"
+        aria-label={`Update the app to ${release.version}`}
+        onClick={() => void openExternal(release.url)}
+        className={cx(
+          "flex h-9 w-full items-center gap-2.5 rounded-lg text-[13px] text-fg-muted transition hover:bg-fg/[0.05] hover:text-fg",
+          collapsed ? "justify-center" : "px-2.5",
+        )}
+      >
+        <ArrowUpCircle className="size-[17px] shrink-0 text-accent" />
+        {!collapsed && (
+          <>
+            <span className="flex-1 truncate text-left">Update the app</span>
+            <span className="text-[11px] text-fg-dim tabular-nums">{release.version}</span>
+          </>
+        )}
+      </button>
+    </Tooltip>
+  );
+}
+
 function Rail({ collapsed, label, children }: { collapsed: boolean; label: string; children: React.ReactElement<Record<string, unknown>> }) {
   return collapsed ? <Tooltip content={label}>{children}</Tooltip> : children;
 }
