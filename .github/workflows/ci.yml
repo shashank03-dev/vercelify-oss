@@ -69,7 +69,13 @@ jobs:
         run: |
           pip install ziglang
           mkdir -p "$HOME/.local/bin"
-          printf '#!/bin/sh\nexec python3 -m ziglang cc -target aarch64-linux-musl "$@"\n' >"$HOME/.local/bin/aarch64-musl-cc"
+          # cc-rs (ring) adds --target=<rust triple>, which zig can't parse: drop it.
+          # zig turns on UBSan in debug builds, whose runtime rust-lld doesn't link.
+          cat >"$HOME/.local/bin/aarch64-musl-cc" <<'EOF'
+          #!/bin/sh
+          for a; do shift; case $a in --target=*) ;; *) set -- "$@" "$a" ;; esac; done
+          exec python3 -m ziglang cc -target aarch64-linux-musl -fno-sanitize=undefined "$@"
+          EOF
           printf '#!/bin/sh\nexec python3 -m ziglang ar "$@"\n' >"$HOME/.local/bin/aarch64-musl-ar"
           chmod +x "$HOME/.local/bin/aarch64-musl-cc" "$HOME/.local/bin/aarch64-musl-ar"
           echo "$HOME/.local/bin" >>"$GITHUB_PATH"
