@@ -1,17 +1,38 @@
 #!/usr/bin/env bash
 # Base packages, laptop-as-server tuning, kernel parameters and swap.
 
+# Right after boot Debian's own apt-daily / unattended-upgrades (or cloud-init)
+# hold apt's locks for a few minutes: wait for them instead of failing.
+APT_LOCK_WAIT=${APT_LOCK_WAIT:-600}
+APT_LOCK_POLL=${APT_LOCK_POLL:-5}
+
+apt_wait_idle() {
+  [[ "$VERCELIFY_DRY_RUN" == 1 ]] && return 0
+  local waited=0
+  while pgrep -x 'apt|apt-get|aptitude|dpkg|unattended-upgr' >/dev/null 2>&1; do
+    (( waited == 0 )) && info "waiting for another package install (system updates) to finish…"
+    (( waited >= APT_LOCK_WAIT )) && { warn "still running after ${APT_LOCK_WAIT}s — trying anyway"; return 0; }
+    sleep "$APT_LOCK_POLL"
+    waited=$(( waited + APT_LOCK_POLL ))
+  done
+}
+
+apt_get() {
+  apt_wait_idle
+  run_cmd env DEBIAN_FRONTEND=noninteractive apt-get -o "DPkg::Lock::Timeout=$APT_LOCK_WAIT" "$@"
+}
+
 apt_install() {
   local missing=() p
   for p in "$@"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
   (( ${#missing[@]} )) || return 0
   info "installing: ${missing[*]}"
-  run_cmd env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends "${missing[@]}" >/dev/null
+  apt_get install -y -qq --no-install-recommends "${missing[@]}" >/dev/null
 }
 
 apt_update_once() {
   [[ -n "${_APT_UPDATED:-}" ]] && return 0
-  retry 3 3 run_cmd env DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null || die "apt-get update failed"
+  retry 3 3 apt_get update -qq >/dev/null || die "apt-get update failed"
   _APT_UPDATED=1
 }
 
