@@ -8,7 +8,7 @@
 | P1 | Rerun the server installer directly on a worker. Defaults overwrite its saved role with main, potentially initializing coordinator/platform behavior. The normal `vercelify update` command already passes `--worker`. | Recover the saved role even when there is no domain, preserving an explicit worker flag. |
 | P2 | Follow setup's advice to choose `/dev/<partition>`. Storage lookup searches only top-level disks and cannot inspect the partition. | Walk the lsblk tree and preserve partition identity, so formatting a partition does not treat it as a whole disk. |
 | P2 | Request optional Mac display tools and Homebrew fails. ffmpeg failure can abort setup; Moonlight failure still prints that everything is ready. | Warn with retry commands, continue installing the app, and print readiness only when both install steps succeed. |
-| P2 | Streaming an existing Mac screen is presented as automatically creating an extended desktop. | Label it screen sharing and explain that extension requires a virtual display or adapter. Prevent starting with missing capture prerequisites. |
+| P2 | Streaming an existing Mac screen is presented as automatically creating an extended desktop. | Label it screen sharing and explain that extension requires a virtual display or adapter. |
 | P2 | Remote desktop instructions say Sunshine supplies the PIN. | Explain that Moonlight shows the PIN and the user submits it in Sunshine. |
 | P2 | Successful setup prints the mesh IP twice in the Network line. | Print one address. |
 
@@ -29,7 +29,7 @@ Reviewed bootstrap and Mac installation, host setup/storage/update/desktop helpe
 
 The full Rust workspace command passes on this Mac. Docker integration test entrypoints return without exercising Docker unless `VERCELIFY_DOCKER_TESTS=1` is set; their green result is not deployment evidence. Live Linux installation, systemd/firewall/network-namespace contracts, GPU output, physical mirroring, Screen Recording permission prompts and actual Sunshine pairing still need Linux/Mac hardware validation.
 
-The broad host Bats run encounters macOS incompatibilities (`stat -c`, GNU `sed -i`, `touch -d`) and Linux kernel assumptions. Those failures must be rechecked on supported Linux rather than interpreted as confirmed product defects. Targeted installer regression suites run locally.
+The broad host Bats run encounters macOS incompatibilities (`stat -c`, GNU `sed -i`, `touch -d`) and Linux kernel assumptions. The repository’s pre-push check subsequently ran all 163 host tests in its Debian container and all passed, confirming these were host-environment failures. Targeted installer regression suites also pass locally.
 
 ## Research references
 
