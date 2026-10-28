@@ -195,6 +195,21 @@ rel=target/x86_64-unknown-linux-musl/release
 sudo AGENT_BINARY=$rel/vercelify-agent MESH_BINARY=$rel/vercelify-mesh host/tests/integration/run.sh
 ```
 
+## Display receiver contract
+
+Generate a real MPEG-TS fixture and exercise the agent's receiver and playback IPC:
+
+```bash
+ffmpeg -f lavfi -i testsrc2=size=1280x720:rate=30 -t 4 -c:v libx264 -preset ultrafast -f mpegts /tmp/pattern.ts
+AGENT_BIN=$PWD/target/debug/vercelify-agent STREAM_FIXTURE=/tmp/pattern.ts python3 host/tests/contract/display.py
+# As root, also test automatic session detection and unprivileged X11 output:
+sudo env AGENT_BIN=$PWD/target/debug/vercelify-agent STREAM_FIXTURE=/tmp/pattern.ts DISPLAY_TEST_USER="$USER" python3 host/tests/contract/display.py
+```
+
+The default uses mpv's null sink. The X11 variant uses real Xvfb and Xauthority,
+with isolated logind responses, and needs `xvfb` and `xauth`. Neither requires a
+physical panel. The agent has its own temporary state and no platform engine.
+
 ## Project rules contract test (the real proxy)
 
 Runs the real agent with the engine and its proxy, deploys two apps as image apps (a

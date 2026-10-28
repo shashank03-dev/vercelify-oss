@@ -489,6 +489,34 @@ async fn moonlight_start(state: State<'_, AppState>, mut launch: MoonlightLaunch
     state.procs.start(MOONLIGHT, &bin.to_string_lossy(), &args, false)
 }
 
+/// Establish the same private forwards used by Moonlight before opening setup.
+#[tauri::command]
+async fn moonlight_setup(host: String) -> CmdResult<String> {
+    moonlight_args(&MoonlightLaunch {
+        host: host.clone(),
+        app: "Desktop".into(),
+        resolution: None,
+        fps: None,
+        bitrate_kbps: None,
+    })
+    .map_err(|e| e.to_string())?;
+    let target = host.clone();
+    let forwarded = tauri::async_runtime::spawn_blocking(move || {
+        let ports: Vec<(bool, u16, u16)> = mesh::SUNSHINE_PORTS.iter().map(|&(udp, p)| (udp, p, p)).collect();
+        forward_to("moonlight", &target, &ports)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let address = if forwarded {
+        "127.0.0.1".into()
+    } else if host.contains(':') && !host.starts_with('[') {
+        format!("[{host}]")
+    } else {
+        host
+    };
+    Ok(format!("https://{address}:47990"))
+}
+
 #[tauri::command]
 fn moonlight_stop(state: State<'_, AppState>) -> ProcessStatus {
     state.procs.stop(MOONLIGHT);
@@ -561,6 +589,7 @@ pub fn run() {
             sender_stop,
             sender_status,
             moonlight_start,
+            moonlight_setup,
             moonlight_stop,
             moonlight_status,
             tray_status,

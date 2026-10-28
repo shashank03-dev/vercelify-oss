@@ -71,7 +71,7 @@ export function Onboarding({ onPaired }: { onPaired: (s: CockpitSettings, note?:
               <CodeBlock code={HOST_INSTALL} prompt />
               <p className="mt-2 text-xs text-fg-dim">
                 Debian 12/13 or Ubuntu 22.04/24.04. It sets up Docker, Vercelify's engine, its private network, storage and the agent, then
-                shows an 8-character code.
+                shows an 8-character code. Optional domains, AI and remote desktop can be added later.
               </p>
             </Step>
             <Step n={2} title="Connect" last>

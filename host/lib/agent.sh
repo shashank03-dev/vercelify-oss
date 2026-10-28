@@ -46,7 +46,9 @@ obtain_binary() {
   tmp=$(mktemp -d)
   local tag="v${VERSION:-0}"
   url="https://github.com/$VERCELIFY_REPO/releases/download/$tag/$name-$target"
-  if [[ "${VERSION:-dev}" != dev && "${VERCELIFY_INSTALL_REF:-}" != main && "${VERCELIFY_INSTALL_CHANNEL:-stable}" != edge ]] &&
+  local source_ref=${VERCELIFY_INSTALL_REF:-}
+  if [[ "${VERSION:-dev}" != dev && "${VERCELIFY_INSTALL_CHANNEL:-stable}" != edge ]] &&
+     [[ -z "$source_ref" || "$source_ref" == "$tag" || "$source_ref" == "${VERSION:-dev}" ]] &&
      curl -fsSL --connect-timeout 15 -o "$tmp/bin" "$url" 2>/dev/null &&
      curl -fsSL --connect-timeout 15 -o "$tmp/bin.sha256" "$url.sha256" 2>/dev/null; then
     if (cd "$tmp" && echo "$(awk '{print $1}' bin.sha256)  bin" | sha256sum -c --quiet -); then
@@ -63,7 +65,9 @@ obtain_binary() {
   run_cmd docker run --rm -v "$VERCELIFY_SRC":/src:ro -v "$tmp":/out -w /tmp -e NAME="$name" -e ARGS="$cargo_args" \
     rust:1-alpine sh -ec '
       apk add --no-cache musl-dev >/dev/null
-      cp -r /src /tmp/build && cd /tmp/build
+      mkdir /tmp/build
+      tar -C /src --exclude=target --exclude=node_modules --exclude=.git -cf - . | tar -C /tmp/build -xf -
+      cd /tmp/build
       # shellcheck disable=SC2086
       cargo build --release --locked $ARGS
       cp "target/release/$NAME" /out/bin' >&2 || die "building $name failed"

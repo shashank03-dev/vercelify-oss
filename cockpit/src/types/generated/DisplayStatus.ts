@@ -7,4 +7,4 @@ export type DisplayStatus = { receiver: ProcessStatus, receiver_config: Receiver
 /**
  * Address the Mac should stream to, e.g. `udp://100.101.102.103:5600`.
  */
-receiver_url: string | null, mpv_installed: boolean, sunshine: ServiceStatus, };
+receiver_url: string | null, mpv_installed: boolean, sunshine: ServiceStatus, playback_active?: boolean, };

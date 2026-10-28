@@ -45,11 +45,40 @@ docker_daemon_config() {
   jq . <<<"$merged" | write_file "$DOCKER_DAEMON_JSON" 0644
 }
 
+# Existing distro Docker installations can run containers while lacking the
+# Buildx CLI plugin required by both of the platform's build drivers.
+ensure_buildx() {
+  [[ "$VERCELIFY_DRY_RUN" == 1 ]] && { info "[dry-run] would verify Docker Buildx"; return 0; }
+  docker buildx version >/dev/null 2>&1 && return 0
+  info "Docker Buildx is missing — installing the build plugin"
+  apt_update_once
+  # Docker CE's repository and Ubuntu's repository use different names.
+  if ! apt_install docker-buildx-plugin && ! apt_install docker-buildx; then
+    die "Docker runs, but its Buildx plugin could not be installed. Install Docker from https://docs.docker.com/engine/install/ and rerun setup; existing apps and data are preserved."
+  fi
+  docker buildx version >/dev/null 2>&1 || die "Docker Buildx is still unavailable after package installation — repair Docker's CLI plugins and rerun setup"
+  ok "Docker Buildx ready"
+}
+
+ensure_compose() {
+  [[ "$VERCELIFY_DRY_RUN" == 1 ]] && { info "[dry-run] would verify Docker Compose"; return 0; }
+  docker compose version >/dev/null 2>&1 && return 0
+  info "Docker Compose is missing — installing the application runtime plugin"
+  apt_update_once
+  if ! apt_install docker-compose-plugin && ! apt_install docker-compose-v2; then
+    die "Docker runs, but its Compose v2 plugin could not be installed. Install Docker from https://docs.docker.com/engine/install/ and rerun setup; existing apps and data are preserved."
+  fi
+  docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is still unavailable after package installation — repair Docker's CLI plugins and rerun setup"
+  ok "Docker Compose ready"
+}
+
 install_docker() {
   step "Docker Engine"
   local changed=0 mount_unit
   if docker_daemon_config; then changed=1; fi
-  if have docker && docker info >/dev/null 2>&1; then
+  if [[ "$VERCELIFY_DRY_RUN" == 1 ]]; then
+    info "[dry-run] would install or configure Docker (no installer downloaded)"
+  elif have docker && docker info >/dev/null 2>&1; then
     ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null || true) already installed"
     if (( changed )); then
       info "daemon.json changed — restarting Docker"
@@ -66,6 +95,9 @@ install_docker() {
     run_cmd systemctl enable --now docker >/dev/null 2>&1
     ok "Docker $(docker version --format '{{.Server.Version}}' 2>/dev/null || true) installed"
   fi
+
+  ensure_buildx
+  ensure_compose
 
   # Start Docker after the storage tier is mounted. `Wants`, not `Requires`:
   # Docker must still come up when the HDD is missing.

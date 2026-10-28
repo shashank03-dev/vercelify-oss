@@ -83,11 +83,13 @@ test("local tools are detected on this machine", async () => {
 
 test("Screencast streams a test pattern into the host's mpv receiver", async () => {
   await (await find("nav-screencast")).click();
+  await (await find("display-advanced")).click();
   await (await find("source-test")).click();
   await (await find("start-extend")).click();
   // both ends report running
   await find("stop-extend", 30_000);
-  await waitText("extend-status", /^\s*Live\s*$/, 30_000);
+  await waitText("extend-status", /^\s*Playing\s*$/, 30_000);
+  assert.equal((await agentGet("/v1/display")).playback_active, true);
   // mpv decoded real H.264 frames from ffmpeg (VO line from the receiver's stderr)
   await driver.wait(
     async () => (await agentGet("/v1/display")).receiver.last_output.some((l) => /VO: \[null\] \d+x\d+/.test(l)),

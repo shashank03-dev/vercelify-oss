@@ -6,6 +6,7 @@ mod cli;
 mod config;
 mod cron;
 mod display;
+mod display_session;
 mod docker;
 mod doctor;
 mod error;

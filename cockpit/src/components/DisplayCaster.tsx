@@ -1,8 +1,9 @@
-import { AlertTriangle, Laptop, MonitorPlay, MonitorUp, Play, ScreenShare, Square, TerminalSquare } from "lucide-react";
+import { AlertTriangle, ExternalLink, Laptop, MonitorPlay, MonitorUp, Play, ScreenShare, Square, TerminalSquare } from "lucide-react";
 import { useEffect, useState } from "react";
 import { agentOn, local } from "../lib/api";
 import { usePoll } from "../lib/hooks";
 import { agentHost, useSession } from "../lib/session";
+import { openExternal } from "../lib/open";
 import { inTauri } from "../lib/transport";
 import type { CaptureSource, StreamTransport, VideoEncoder } from "../types";
 import { useToast } from "./Toast";
@@ -24,6 +25,7 @@ export const QUALITIES: Quality[] = [
 ];
 
 export function DisplayCaster() {
+  const isMac = navigator.userAgent.includes("Mac");
   const { settings } = useSession();
   const agent = agentOn(settings.agent_url);
   const toast = useToast();
@@ -35,10 +37,11 @@ export function DisplayCaster() {
 
   const [transport, setTransport] = useState<StreamTransport>("udp");
   const [qualityId, setQualityId] = useState("smooth");
-  const [encoder, setEncoder] = useState<VideoEncoder>(inTauri && navigator.userAgent.includes("Mac") ? "hardware" : "software");
+  const [encoder, setEncoder] = useState<VideoEncoder>(inTauri && isMac ? "hardware" : "software");
   const [screen, setScreen] = useState<number | null>(null);
-  const [source, setSource] = useState<CaptureSource>(navigator.userAgent.includes("Mac") ? "avfoundation" : "test_pattern");
+  const [source, setSource] = useState<CaptureSource>(isMac ? "avfoundation" : "test_pattern");
   const [busy, setBusy] = useState(false);
+  const [moonBusy, setMoonBusy] = useState(false);
   const [moonApp, setMoonApp] = useState("Desktop");
 
   useEffect(() => {
@@ -51,17 +54,29 @@ export function DisplayCaster() {
   const moonlight = tool("moonlight");
   const receiverOn = !!display.data?.receiver.running;
   const senderOn = !!sender.data?.running;
-  const live = receiverOn && senderOn;
+  const streaming = receiverOn && senderOn;
+  const live = streaming && display.data?.playback_active === true;
 
   async function startExtend() {
     setBusy(true);
+    let receiverRequested = false;
     try {
+      const available = tools.data ?? await local.tools();
+      const captureTool = available.find((t) => t.name === "ffmpeg");
+      if (!captureTool?.installed) {
+        if (!inTauri) throw new Error("Available in the desktop app only — open Vercelify to share a screen.");
+        throw new Error(captureTool?.install_hint || "Install ffmpeg on this computer, then refresh setup.");
+      }
+      const receiver = display.data ?? await agent.display();
+      if (!receiver.mpv_installed) throw new Error("Install the Linux display receiver: sudo apt install mpv");
+      if (source === "avfoundation" && !(screens.data ?? await local.captureScreens()).length) throw new Error("No screens are available. Allow Screen Recording for Vercelify in System Settings, restart the app, then retry.");
+      receiverRequested = true;
       const st = await agent.receiverStart({ transport, port: 5600, latency_ms: transport === "srt" ? 120 : null });
       if (!st.receiver.running) {
         throw new Error(`The display receiver on the host stopped: ${st.receiver.last_output.slice(-3).join(" ") || "no output"}`);
       }
       if (!st.receiver_url) throw new Error("The host has no private address yet: is vercelify-mesh running on it? (sudo vercelify doctor)");
-      await local.senderStart({
+      const started = await local.senderStart({
         url: st.receiver_url,
         source,
         screen_index: screen ?? 0,
@@ -71,22 +86,27 @@ export function DisplayCaster() {
         encoder,
         show_cursor: true,
       });
-      toast.ok("Streaming to the Linux screen");
-      void display.refresh();
-      void sender.refresh();
+      if (!started.running) throw new Error(started.last_output.slice(-3).join(" ") || "Screen capture stopped before streaming began. Check Screen Recording permission and retry.");
+      toast.ok("Stream started — waiting for the Linux receiver to confirm playback");
     } catch (e) {
       toast.bad((e as Error).message);
-      await agent.receiverStop().catch(() => undefined);
+      if (receiverRequested) {
+        await local.senderStop().catch(() => undefined);
+        await agent.receiverStop().catch(() => undefined);
+      }
     } finally {
       setBusy(false);
+      void display.refresh();
+      void sender.refresh();
     }
   }
 
   async function stopExtend() {
     setBusy(true);
     try {
-      await local.senderStop().catch(() => undefined);
-      await agent.receiverStop();
+      const stopped = await Promise.allSettled([local.senderStop(), agent.receiverStop()]);
+      const failed = stopped.find((result) => result.status === "rejected");
+      if (failed?.status === "rejected") throw failed.reason;
       toast.info("Stopped streaming");
     } catch (e) {
       toast.bad((e as Error).message);
@@ -97,14 +117,22 @@ export function DisplayCaster() {
     }
   }
 
+  async function openSunshine() {
+    setMoonBusy(true);
+    try { await openExternal(await local.moonlightSetup(agentHost(settings))); }
+    catch (e) { toast.bad((e as Error).message); }
+    finally { setMoonBusy(false); }
+  }
+
   async function toggleMoonlight() {
+    setMoonBusy(true);
     try {
       if (moon.data?.running) await local.moonlightStop();
       else await local.moonlightStart({ host: agentHost(settings), app: moonApp, resolution: null, fps: null, bitrate_kbps: null });
       void moon.refresh();
     } catch (e) {
       toast.bad((e as Error).message);
-    }
+    } finally { setMoonBusy(false); }
   }
 
   const sunshine = display.data?.sunshine;
@@ -112,34 +140,36 @@ export function DisplayCaster() {
   return (
     <div className="space-y-6">
       <Card
-        title="Share your Mac screen"
-        description="Mirror an existing screen. To extend your desktop, first create a virtual display or connect a display adapter."
+        title="Share a screen"
+        description={isMac ? "Mirror an existing screen. To extend your desktop, first create a virtual display or connect a display adapter." : "Send a test picture to verify the Linux receiver. Mac screen capture is available in the macOS app."}
         icon={<MonitorUp />}
         testId="extend-card"
         actions={
           receiverOn && !live ? (
             <span className="flex items-center gap-2 text-[12px]">
               <PixelWave size={3} pixel={3} gap={1.5} />
-              <ShimmerText>Waiting for stream</ShimmerText>
+              <ShimmerText>{streaming ? (display.data?.playback_active == null ? "Streaming — update server for playback confirmation" : "Awaiting playback confirmation") : "Waiting for stream"}</ShimmerText>
             </span>
           ) : (
-            <StatusText health={live ? "ok" : "idle"} label={live ? "Live" : "Idle"} testId="extend-status" className="text-[12px] text-fg-muted" />
+            <StatusText health={live ? "ok" : "idle"} label={live ? "Playing" : "Idle"} testId="extend-status" className="text-[12px] text-fg-muted" />
           )
         }
       >
         <div className="dot-grid relative mb-5 flex items-center gap-4 rounded-xl border border-line bg-bg px-5 py-6">
-          <Endpoint icon={<Laptop className="size-5" />} title="This Mac" sub={`ffmpeg ${encoder === "hardware" ? "VideoToolbox" : "x264"}`} on={senderOn} />
+          <Endpoint icon={<Laptop className="size-5" />} title="This computer" sub="Capture" on={senderOn} />
           <div className="relative h-px flex-1 overflow-hidden bg-line-strong">
             {live && <span className="absolute inset-y-[-1px] left-0 w-1/3 animate-[stream_1.2s_linear_infinite] bg-gradient-to-r from-transparent via-accent to-transparent" />}
           </div>
           <div className="pointer-events-none absolute left-1/2 -translate-x-1/2 -translate-y-5 text-[11px] whitespace-nowrap text-fg-dim">
               {transport.toUpperCase()} over your network · {quality.kbps / 1000} Mbps
           </div>
-          <Endpoint icon={<MonitorPlay className="size-5" />} title={settings.hostname} sub="mpv · fullscreen" on={receiverOn} />
+          <Endpoint icon={<MonitorPlay className="size-5" />} title={settings.hostname} sub="Full screen" on={receiverOn} />
         </div>
 
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          <Field label="Mac screen" hint={screens.data?.length ? "Tip: a virtual display (e.g. BetterDisplay) makes it a true extended desktop" : undefined}>
+        {(tools.error || screens.error || display.error) && <p role="alert" className="mb-4 text-sm text-warn">{display.error?.message || tools.error?.message || screens.error?.message}</p>}
+        <Button variant="ghost" size="sm" onClick={() => { void tools.refresh(); void screens.refresh(); void display.refresh(); }} data-testid="refresh-display">Refresh setup</Button>
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="Screen" hint={screens.data?.length ? "Tip: a virtual display (e.g. BetterDisplay) makes it a true extended desktop" : undefined}>
             {source === "avfoundation" ? (
               <Select value={screen ?? ""} onChange={(e) => setScreen(Number(e.target.value))} disabled={!screens.data?.length} data-testid="screen">
                 {!screens.data?.length && <option value="">{inTauri ? "no screens found" : "desktop app only"}</option>}
@@ -164,6 +194,12 @@ export function DisplayCaster() {
               ))}
             </Select>
           </Field>
+
+        </div>
+
+        <details className="mt-4 text-[12px]">
+          <summary className="cursor-pointer text-fg-muted" data-testid="display-advanced">Advanced streaming settings</summary>
+          <div className="mt-3 grid grid-cols-2 gap-4 lg:grid-cols-3">
           <Field label="Transport" hint={transport === "udp" ? "Lowest latency (home / office)" : "Survives packet loss (cellular)"}>
             <Segmented label="transport" value={transport} onChange={setTransport} options={[{ value: "udp", label: "UDP" }, { value: "srt", label: "SRT" }]} />
           </Field>
@@ -173,33 +209,37 @@ export function DisplayCaster() {
               value={source}
               onChange={setSource}
               options={[
-                { value: "avfoundation", label: "Screen" },
+                ...(isMac ? [{ value: "avfoundation" as const, label: "Screen" }] : []),
                 { value: "test_pattern", label: "Test", testId: "source-test" },
               ]}
             />
           </Field>
-        </div>
-
-        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex flex-wrap gap-2 text-[12px]">
-            <Prereq ok={!!ffmpeg?.installed} label="ffmpeg on this Mac" hint={ffmpeg?.install_hint ?? (inTauri ? "" : "desktop app only")} />
-            <Prereq ok={!!display.data?.mpv_installed} label="mpv on the host" hint="sudo apt install mpv" />
+            <Field label="Encoder">
             <Segmented
               label="encoder"
               value={encoder}
               onChange={setEncoder}
               options={[
-                { value: "hardware", label: "Hardware" },
+                ...(isMac ? [{ value: "hardware" as const, label: "Hardware" }] : []),
                 { value: "software", label: "Software" },
               ]}
             />
+            </Field>
+          </div>
+        </details>
+
+        <div className="mt-5 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2 text-[12px]">
+            <Prereq ok={!!ffmpeg?.installed} label="ffmpeg on this computer" hint={ffmpeg?.install_hint ?? (inTauri ? "" : "desktop app only")} />
+            <Prereq ok={!!display.data?.mpv_installed} label="mpv on the host" hint="sudo apt install mpv" />
+
           </div>
           {receiverOn || senderOn ? (
             <Button variant="danger" icon={<Square />} busy={busy} onClick={() => void stopExtend()} data-testid="stop-extend">
               Stop
             </Button>
           ) : (
-            <OrbitButton icon={<ScreenShare />} busy={busy} disabled={!ffmpeg?.installed || !display.data?.mpv_installed || (source === "avfoundation" && !screens.data?.length)} busyLabel="Connecting" onRun={startExtend} testId="start-extend">
+            <OrbitButton icon={<ScreenShare />} busy={busy} busyLabel="Connecting" onRun={startExtend} testId="start-extend">
               Start streaming
             </OrbitButton>
           )}
@@ -225,7 +265,7 @@ export function DisplayCaster() {
         ) : null}
       </Card>
 
-      <Card title="Linux desktop on this Mac" description="Low-latency remote desktop with Sunshine and Moonlight" icon={<MonitorPlay />} testId="moonlight-card">
+      <Card title="Linux desktop on this computer" description="Low-latency remote desktop with Sunshine and Moonlight" icon={<MonitorPlay />} testId="moonlight-card">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-2 text-[13px]">
             <div className="flex items-center gap-2">
@@ -235,14 +275,15 @@ export function DisplayCaster() {
             </div>
             <div className="flex items-center gap-2">
               <StatusDot health={moonlight?.installed ? "ok" : "idle"} />
-              Moonlight on this Mac: <span className="text-fg-muted">{moonlight ? (moonlight.installed ? "installed" : moonlight.install_hint) : "desktop app only"}</span>
+              Moonlight on this computer: <span className="text-fg-muted">{moonlight ? (moonlight.installed ? "installed" : moonlight.install_hint) : "desktop app only"}</span>
             </div>
             <p className="max-w-xl pt-1 text-xs leading-relaxed text-fg-dim">
               Game-streaming tech: hardware-encoded, about 10 ms on a LAN. Launch Moonlight and select the server to see a PIN. Enter that PIN in Sunshine’s web page
               (HTTPS port <InlineCode>47990</InlineCode>; in app network mode, use 127.0.0.1 while Moonlight runs). Pair once, then launch from here.
             </p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="ghost" icon={<ExternalLink />} busy={moonBusy} onClick={() => void openSunshine()} data-testid="sunshine-setup">Open Sunshine setup</Button>
             <Select value={moonApp} onChange={(e) => setMoonApp(e.target.value)} className="w-36">
               <option>Desktop</option>
               <option>Steam Big Picture</option>
@@ -251,6 +292,7 @@ export function DisplayCaster() {
               variant={moon.data?.running ? "danger" : "primary"}
               icon={moon.data?.running ? <Square /> : <Play />}
               disabled={!moonlight?.installed}
+              busy={moonBusy}
               onClick={() => void toggleMoonlight()}
             >
               {moon.data?.running ? "Close Moonlight" : "Launch Moonlight"}

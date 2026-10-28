@@ -7,9 +7,12 @@
 use crate::config::Config;
 use chrono::Utc;
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::net::UnixStream;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 use vercelify_core::{ProcessStatus, ReceiverConfig, StreamTransport};
@@ -104,6 +107,19 @@ struct Running {
     command: String,
     started_at: String,
     config: ReceiverConfig,
+    ipc: PathBuf,
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        // Also clean up mpv when the agent shuts down or an in-flight start
+        // replaces a receiver, rather than leaving a runuser child behind.
+        if let Some(pid) = self.pid {
+            unsafe {
+                libc::kill(-(pid as i32), libc::SIGKILL);
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -117,6 +133,7 @@ struct Inner {
 #[derive(Clone, Default)]
 pub struct Receiver {
     inner: Arc<Mutex<Inner>>,
+    lifecycle: Arc<Mutex<()>>,
 }
 
 impl Receiver {
@@ -124,11 +141,56 @@ impl Receiver {
         if cfg.port < 1024 {
             return Err("port must be >= 1024".into());
         }
-        self.stop().await;
-        let args = mpv_args(config, &cfg);
-        let mut cmd = Command::new(&config.mpv_bin);
+        let _operation = self.lifecycle.lock().await;
+        self.stop_inner().await;
+        let session = crate::display_session::resolve(config).await?;
+        let mut resolved = config.clone();
+        resolved.display_env.extend(session.env);
+        let ipc_dir = config.run_dir.join("display");
+        tokio::fs::create_dir_all(&ipc_dir)
+            .await
+            .map_err(|e| format!("cannot create display runtime directory: {e}"))?;
+        // A previous session may have owned this directory. Never leave a
+        // root mpv control socket writable by a logged-out desktop user.
+        if unsafe { libc::geteuid() } == 0 {
+            let uid = if session.user.is_some() {
+                resolved.display_env["XDG_RUNTIME_DIR"]
+                    .rsplit('/')
+                    .next()
+                    .unwrap_or("0")
+            } else {
+                "0"
+            };
+            let result = crate::exec::run("chown", &[uid, &ipc_dir.to_string_lossy()], Duration::from_secs(2))
+                .await
+                .map_err(|e| e.to_string())?;
+            if !result.success() {
+                return Err("Could not prepare the Linux desktop receiver directory".into());
+            }
+        }
+        use std::os::unix::fs::PermissionsExt;
+        tokio::fs::set_permissions(&ipc_dir, std::fs::Permissions::from_mode(0o700))
+            .await
+            .map_err(|e| e.to_string())?;
+        // Each receiver has its own socket, including simultaneous API calls.
+        let ipc = ipc_dir.join(format!(
+            "mpv-{}.sock",
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let mut args = mpv_args(&resolved, &cfg);
+        args.insert(0, format!("--input-ipc-server={}", ipc.display()));
+        let mut cmd = if let Some(user) = session.user {
+            let mut cmd = Command::new("runuser");
+            cmd.args(["--preserve-environment", "--user", &user, "--", &config.mpv_bin]);
+            cmd
+        } else {
+            Command::new(&config.mpv_bin)
+        };
+        // Kill the process group on stop, including runuser's mpv child.
+        use std::os::unix::process::CommandExt;
+        cmd.as_std_mut().process_group(0);
         cmd.args(&args)
-            .envs(&config.display_env)
+            .envs(&resolved.display_env)
             .stdin(Stdio::null())
             // mpv prints status/info on stdout and warnings on stderr; keep both.
             .stdout(Stdio::piped())
@@ -157,20 +219,21 @@ impl Receiver {
             command: format!("{} {}", config.mpv_bin, args.join(" ")),
             started_at: Utc::now().to_rfc3339(),
             config: cfg,
+            ipc,
         });
         drop(inner);
 
         if let Some(out) = stdout {
-            self.collect(out);
+            self.collect(out, pid);
         }
         if let Some(err) = stderr {
-            self.collect(err);
+            self.collect(err, pid);
         }
         Ok(())
     }
 
     /// Keep the last lines of a child stream in the shared ring buffer.
-    fn collect<R: tokio::io::AsyncRead + Unpin + Send + 'static>(&self, stream: R) {
+    fn collect<R: tokio::io::AsyncRead + Unpin + Send + 'static>(&self, stream: R, pid: Option<u32>) {
         let state = self.inner.clone();
         tokio::spawn(async move {
             let mut lines = BufReader::new(stream).lines();
@@ -180,6 +243,9 @@ impl Receiver {
                     continue;
                 }
                 let mut g = state.lock().await;
+                if g.running.as_ref().and_then(|r| r.pid) != pid {
+                    continue;
+                }
                 if g.output.len() >= OUTPUT_LINES {
                     g.output.pop_front();
                 }
@@ -189,14 +255,34 @@ impl Receiver {
     }
 
     pub async fn stop(&self) -> bool {
+        let _operation = self.lifecycle.lock().await;
+        self.stop_inner().await
+    }
+
+    async fn stop_inner(&self) -> bool {
         let mut inner = self.inner.lock().await;
         if let Some(mut r) = inner.running.take() {
+            if let Some(pid) = r.pid {
+                // This group was created for this receiver, never the agent's.
+                unsafe {
+                    libc::kill(-(pid as i32), libc::SIGKILL);
+                }
+            }
             let _ = r.child.start_kill();
             let status = r.child.wait().await.ok();
             inner.last_exit = status.and_then(|s| s.code());
+            let _ = tokio::fs::remove_file(&r.ipc).await;
             true
         } else {
             false
+        }
+    }
+
+    pub async fn playback_active(&self) -> bool {
+        let ipc = self.inner.lock().await.running.as_ref().map(|r| r.ipc.clone());
+        match ipc {
+            Some(path) => playback_at(&path).await,
+            None => false,
         }
     }
 
@@ -206,7 +292,9 @@ impl Receiver {
         if let Some(r) = inner.running.as_mut() {
             if let Ok(Some(status)) = r.child.try_wait() {
                 inner.last_exit = status.code().or(Some(-1));
-                inner.running = None;
+                if let Some(r) = inner.running.take() {
+                    let _ = tokio::fs::remove_file(&r.ipc).await;
+                }
             }
         }
         let output: Vec<String> = inner.output.iter().cloned().collect();
@@ -235,9 +323,55 @@ impl Receiver {
     }
 }
 
+/// time-pos is unavailable until mpv has opened and decoded the media.
+async fn playback_at(path: &Path) -> bool {
+    tokio::time::timeout(Duration::from_millis(150), async {
+        let mut socket = UnixStream::connect(path).await.ok()?;
+        socket
+            .write_all(b"{\"command\":[\"get_property\",\"time-pos\"],\"request_id\":1}\n")
+            .await
+            .ok()?;
+        let mut lines = BufReader::new(socket).lines();
+        for _ in 0..8 {
+            let line = lines.next_line().await.ok()??;
+            let response: serde_json::Value = serde_json::from_str(&line).ok()?;
+            if response["request_id"] == 1 {
+                return Some(response["error"] == "success" && response["data"].is_number());
+            }
+        }
+        None
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn playback_needs_media_and_handles_unresponsive_receiver() {
+        for (response, expected) in [
+            ("{\"request_id\":1,\"error\":\"success\",\"data\":0.0}\n", true),
+            ("{\"request_id\":1,\"error\":\"property unavailable\"}\n", false),
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = dir.path().join("mpv.sock");
+            let listener = tokio::net::UnixListener::bind(&path).unwrap();
+            let server = tokio::spawn(async move {
+                let (mut conn, _) = listener.accept().await.unwrap();
+                use tokio::io::AsyncReadExt;
+                let mut buffer = [0; 256];
+                assert!(conn.read(&mut buffer).await.unwrap() > 0);
+                conn.write_all(response.as_bytes()).await.unwrap();
+            });
+            assert_eq!(playback_at(&path).await, expected);
+            server.await.unwrap();
+        }
+        assert!(!playback_at(Path::new("/nonexistent/mpv.sock")).await);
+    }
 
     fn rc(t: StreamTransport) -> ReceiverConfig {
         ReceiverConfig {

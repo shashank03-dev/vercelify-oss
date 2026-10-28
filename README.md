@@ -209,21 +209,25 @@ Type your Ubuntu password when asked (it won't show as you type; that's normal).
 what happens next:
 
 <p align="center">
-  <img src="docs/demos/install-server.svg" width="900" alt="Animated terminal showing the Vercelify server installer: system checks, three questions, installation steps, and the final summary with a pairing code" />
+  <img src="docs/demos/install-server.svg" width="900" alt="Animated terminal showing the Vercelify server installer: system checks, optional configuration, installation steps, and the final summary with a pairing code" />
   <br/><sub>The server installer from start to finish (shortened; the real run takes 10–20 minutes).</sub>
 </p>
 
 **1. It checks the machine.** Operating system, memory, disk space and internet. If
 something is missing, it tells you what to fix.
 
-**2. It asks three questions** (four on a machine with a desktop). Press <kbd>Enter</kbd> to accept the default for any.
+**2. It uses simple defaults.** Your server and apps stay private. You do not need
+an AI model, domain, Cloudflare account or remote-desktop setup to get started.
+After connecting, add those features when you need them:
 
-| Question | What to answer |
+| Optional feature | Add it later |
 | --- | --- |
-| *Set up local AI models too?* | `n` for now. You can add AI later in one command (see [Step 5](#step-5-optional-turn-on-ai-on-the-server)). |
-| *Your domain* | Leave it blank. Your apps will still work privately; you can add a domain any time. |
-| *Reach this server from anywhere?* | `y` (the default) to connect your Mac and other machines from any network, not just this Wi-Fi. Your router forwards Vercelify's two network ports by itself (UPnP or NAT-PMP); when it can't (or behind CGNAT) a free Cloudflare quick tunnel is used instead, with no account. Only the encrypted private network answers there. Change it later with `sudo vercelify remote on` / `off`. |
-| *Set up remote desktop?* (only on a machine with a desktop) | `y` to see and use this laptop's desktop from your Mac: it installs Sunshine, and the app's **Screencast → Launch Moonlight** connects to it. Later: `sudo vercelify desktop on`. See the [display guide](docs/DISPLAY.md). |
+| Your domain | `sudo vercelify domain` |
+| Access from other networks | `sudo vercelify remote on` |
+| Local AI | See [Step 5](#step-5-optional-turn-on-ai-on-the-server) |
+| Control the Linux desktop | `sudo vercelify desktop on`, then open Sunshine setup in the app |
+
+For the original guided questions, add `--configure` to the server installer.
 
 **3. It installs everything.** You'll see one line per step. The important ones:
 
@@ -241,7 +245,7 @@ app and connects it to this server, and an **8-character pairing code** (like
 `K7QF-M2XD`) for a Mac that already has the app. Keep this window open for Step 2. The
 codes are valid for one hour; `sudo vercelify pair` prints new ones.
 
-> **Why `--storage-device none`?** It keeps everything on the laptop's main disk. If the
+> **Storage defaults to the main disk.** `--storage-device none` makes that explicit. If the
 > machine has a second disk you'd like to use for databases and backups, pass
 > `--storage-device /dev/sdb` (your disk's name) instead. Vercelify only erases a disk
 > if you also add `--format-storage`, so it never wipes anything by surprise.

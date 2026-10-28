@@ -198,15 +198,15 @@ test("node health: resources, power, containers, logs, services", async ({ page 
   await expect(page.getByTestId("services")).toContainText("docker");
 });
 
-test("screencast: host receiver starts; desktop-only sender is reported clearly", async ({ page }) => {
+test("screencast: browser explains desktop-only capture before starting a stream", async ({ page }) => {
   await paired(page);
   await page.getByTestId("nav-screencast").click();
   await expect(page.getByTestId("extend-card")).toContainText("mpv on the host");
+  await page.getByTestId("display-advanced").click();
   await page.getByTestId("source-test").click();
   await page.getByTestId("start-extend").click();
   // In the browser preview there is no local ffmpeg (and a host off the mesh has
-  // no address to stream to): the UI must say so and roll back the receiver it
-  // started on the host.
+  // no address to stream to): the UI must explain the requirement.
   await expect(page.getByText(/Available in the desktop app only|has no private address yet/)).toBeVisible();
   await expect(page.getByTestId("start-extend")).toBeVisible();
   await shot(page, "08-screencast");

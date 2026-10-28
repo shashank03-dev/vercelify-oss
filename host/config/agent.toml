@@ -13,7 +13,8 @@ hdd_volume_root = "/mnt/storage/volumes"
 require_storage_mount = true
 
 # Display receiver: "drm" draws straight to the laptop panel (no desktop
-# needed). Use "x11"/"wayland" plus display_env when a desktop is running:
+# needed). Auto detects an active local desktop and uses its user/session.
+# Override only for unusual setups:
 #   display_backend = "x11"
 #   display_env = { DISPLAY = ":0", XAUTHORITY = "/home/you/.Xauthority" }
 display_backend = "auto"

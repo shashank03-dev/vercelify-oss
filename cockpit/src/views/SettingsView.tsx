@@ -26,22 +26,26 @@ export function SettingsView() {
       const res = await settingsApi.test(s);
       await update({ ...s, hostname: res.hostname || s.hostname });
       toast.ok(`Connected to ${res.hostname || s.hostname}`);
+      return true;
     } catch (e) {
       toast.bad((e as Error).message);
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
   async function repair() {
+    setBusy(true);
     try {
-      const next = pairingToSettings(await settingsApi.decodePairing(code));
-      setForm(next);
-      await save(next);
-      setCode("");
+      const next = pairingToSettings(await settingsApi.joinPairing(code));
+      if (await save(next)) {
+        setForm(next);
+        setCode("");
+      }
     } catch (e) {
       toast.bad((e as Error).message);
-    }
+    } finally { setBusy(false); }
   }
 
   return (
@@ -112,8 +116,8 @@ export function SettingsView() {
                 Paste a fresh code from <InlineCode>sudo vercelify pair</InlineCode>.
               </p>
               <div className="flex gap-2">
-                <TextInput placeholder="vfy1.…" value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} className="font-mono" />
-                <Button onClick={() => void repair()} disabled={!code.trim()}>
+                <TextInput placeholder="vfy2.…" value={code} onChange={(e) => setCode(e.target.value)} spellCheck={false} className="font-mono" />
+                <Button onClick={() => void repair()} disabled={!code.trim()} busy={busy}>
                   Apply
                 </Button>
               </div>

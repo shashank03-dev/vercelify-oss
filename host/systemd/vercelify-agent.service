@@ -19,6 +19,9 @@ ProtectHome=read-only
 ExecStartPre=+/bin/mkdir -p /root/.docker
 ReadWritePaths=-/root/.docker
 PrivateTmp=yes
+# The receiver runs as the logged-in user. Share X11's socket directory with
+# the private /tmp namespace; XAUTHORITY still controls access.
+BindReadOnlyPaths=-/tmp/.X11-unix
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes

@@ -197,6 +197,7 @@ export const local = {
   senderStart: (config: SenderConfig) => call<ProcessStatus>("sender_start", { config }),
   senderStop: () => call<ProcessStatus>("sender_stop"),
   senderStatus: () => call<ProcessStatus>("sender_status"),
+  moonlightSetup: (host: string) => call<string>("moonlight_setup", { host }),
   moonlightStart: (launch: MoonlightLaunch) => call<ProcessStatus>("moonlight_start", { launch }),
   moonlightStop: () => call<ProcessStatus>("moonlight_stop"),
   moonlightStatus: () => call<ProcessStatus>("moonlight_status"),

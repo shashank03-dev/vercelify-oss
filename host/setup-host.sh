@@ -43,7 +43,8 @@ Vercelify host setup $VERSION
 
 Usage: sudo $0 [options]
 
-Most people need no options: the installer asks a few questions.
+Most people need no options: install, then connect with the code shown.
+Use --configure to choose optional features during installation.
 
 Role
   --worker                 Worker (e.g. a Raspberry Pi): runs apps the main server
@@ -65,7 +66,7 @@ Network & domain
 
 Storage
   --storage-device DEV     Disk for databases/volumes, mounted at /mnt/storage
-                           (default: auto-detect; 'none' = single-disk mode)
+                           (default: none; 'auto' = detect a second disk)
   --format-storage         Allow formatting that disk as ext4 (ERASES IT)
 
 Features
@@ -80,6 +81,7 @@ Features
   --no-backup              Don't turn on nightly backups (main server)
 
 General
+  --configure              Ask about optional domains, remote access, AI and desktop
   -y, --yes                Accept all defaults, never prompt
   --dry-run                Print what would be done without changing anything
   -h, --help               Show this help
@@ -106,7 +108,7 @@ FORCE_DNS=0
 # 1 on, 0 off, '' ask (main server without a Cloudflare domain)
 REMOTE=''
 DESKTOP=''
-STORAGE_DEVICE=auto
+STORAGE_DEVICE=none
 FORMAT_STORAGE=0
 WITH_FIREWALL=1
 WITH_POWER_GUARD=1
@@ -114,11 +116,13 @@ WITH_DISPLAY=1
 WITH_AI=0
 AI_MODEL=''
 WITH_BACKUP=1
+CONFIGURE=0
 ASSUME_YES=${ASSUME_YES:-0}
 
 parse_args() {
   while (( $# )); do
     case "$1" in
+      --configure) CONFIGURE=1 ;;
       --worker) ROLE=worker; ROLE_EXPLICIT=1 ;;
       --join) JOIN_TOKEN=${2:?}; shift ;;
       --hostname) MACHINE_NAME=${2:?}; RENAME=1; shift ;;
@@ -183,13 +187,20 @@ preflight() {
   ok "${mem_mb} MB RAM, ${disk_gb} GB free on /"
   (( disk_gb < 20 )) && [[ $ROLE == main ]] && warn "less than 20 GB free on / — Docker images and builds need room"
 
-  curl -fsS -m 10 -o /dev/null https://get.docker.com || die "no internet access (https://get.docker.com unreachable)"
-  ok "internet access"
+  if [[ "$VERCELIFY_DRY_RUN" != 1 ]]; then
+    have curl || apt_install curl ca-certificates
+    curl -fsS -m 10 -o /dev/null https://get.docker.com || die "no internet access (https://get.docker.com unreachable)"
+    ok "internet access"
+  fi
   valid_hostname "$MACHINE_NAME" || die "invalid --hostname '$MACHINE_NAME' (lowercase letters, digits, '-')"
   [[ -z "$JOIN_TOKEN" || "$JOIN_TOKEN" == vfyj1.* ]] || die "--join needs an invite (vfyj1.…) from: sudo vercelify mesh invite"
 }
 
 wizard() {
+  if [[ "$CONFIGURE" != 1 ]]; then
+    info "Installing the private server. Optional features can be added later in the app or with sudo vercelify."
+    return 0
+  fi
   has_tty || return 0
   [[ "$ASSUME_YES" == 1 ]] && return 0
   printf '\n%s%s Vercelify %s — self-hosted Vercel on this machine%s\n' "$C_BOLD" "$C_CYAN" "$VERSION" "$C_RESET" >&2
@@ -339,8 +350,26 @@ summary() {
     fi
   fi
 
+  local agent_ready=0 network_ready=0
+  if [[ "$VERCELIFY_DRY_RUN" != 1 ]]; then
+    curl -fsS -m 3 "$AGENT_LOCAL_URL/v1/health" >/dev/null 2>&1 && agent_ready=1
+    if [[ -n "$ip" ]] && systemctl is-active --quiet vercelify-mesh 2>/dev/null &&
+       ip -4 addr show dev vfy0 2>/dev/null | grep -Fq "inet $ip/"; then network_ready=1; fi
+  fi
   {
-    printf '\n%s%s✔ Vercelify is ready%s  (%s, %s)\n\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$ROLE" "$VERSION"
+    if [[ "$VERCELIFY_DRY_RUN" == 1 ]]; then
+      printf '\nVercelify installation plan complete (dry run; nothing installed)\n'
+    elif (( agent_ready && network_ready )); then
+      printf '\n%s%s✔ Vercelify is ready%s  (%s, %s)\n\n' "$C_BOLD" "$C_GREEN" "$C_RESET" "$ROLE" "$VERSION"
+    else
+      printf '\n%sVercelify is installed — connection needs attention%s\n\n' "$C_BOLD" "$C_RESET"
+    fi
+    if (( agent_ready )); then printf '  Agent              Ready\n'
+    else printf '  Agent              Not confirmed — run: sudo vercelify doctor\n'; fi
+    if (( ! network_ready )); then
+      if [[ $ROLE == main ]]; then printf '  Network recovery   sudo vercelify mesh init\n'
+      else printf '  Network recovery   Get a fresh invite on the main server: sudo vercelify mesh invite\n'; fi
+    fi
     if [[ -n "$wildcard" ]]; then
       printf '  %sApps%s               %s\n' "$C_BOLD" "$C_RESET" "${wildcard/:\/\//:\/\/<app>.}"
     fi
@@ -374,6 +403,8 @@ summary() {
 
   if [[ "$VERCELIFY_DRY_RUN" != 1 ]]; then
     {
+      echo "agent_ready=$agent_ready"
+      echo "network_ready=$network_ready"
       echo "role=$ROLE"
       echo "network=$ip"
       echo "domain=$DOMAIN"
@@ -396,8 +427,8 @@ main() {
   parse_args "$@"
   mkdir -p "$(dirname "$VERCELIFY_LOG")" 2>/dev/null || true
   trap on_error ERR
-  preflight "$@"
   load_previous_install
+  preflight "$@"
   wizard
   if [[ -n "$DOMAIN" ]]; then valid_domain "$DOMAIN" || die "'$DOMAIN' is not a valid domain name"; fi
   plan

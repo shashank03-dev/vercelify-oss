@@ -329,7 +329,7 @@ install_display_tools() {
     warn "could not install ffmpeg — retry later: brew install ffmpeg"
     ready=0
   fi
-  if [[ ! -d /Applications/Moonlight.app ]] && ! brew install --cask moonlight >/dev/null; then
+  if [[ ! -d /Applications/Moonlight.app && ! -d "$HOME/Applications/Moonlight.app" ]] && ! brew install --cask moonlight >/dev/null; then
     warn "could not install Moonlight — retry later: brew install --cask moonlight"
     ready=0
   fi

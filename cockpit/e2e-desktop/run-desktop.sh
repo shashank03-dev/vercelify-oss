@@ -28,11 +28,16 @@ pids=()
 cleanup() { kill "${pids[@]}" 2>/dev/null || true; }
 trap cleanup EXIT
 
-# The display receiver streams to the host's private address; a stub stands in
-# for the mesh here.
+# Media uses loopback; the independent mesh contracts exercise real private
+# routing. Supply a complete state fixture so receiver_url is available (a
+# comment alone did not stub the mesh and streaming silently could not start).
+mkdir -p "$STATE/mesh"
+cat >"$STATE/mesh/state.json" <<EOF
+{"node_id":"desktop-test","name":"desktop-test","kind":"server","ipv4":"127.0.0.1","ipv6":"::1","ipv4_prefix_len":8,"certificate":"test","node_token":"test","coordinator_key":"test","coordinator":{"public_key":"test","ipv4":"127.0.0.1","endpoints":[]},"api_url":"http://127.0.0.1:$AGENT_PORT"}
+EOF
 VERCELIFY_CONFIG=/nonexistent VERCELIFY_ENGINE=platform VERCELIFY_LISTEN=127.0.0.1 VERCELIFY_PORT=$AGENT_PORT \
 VERCELIFY_TOKEN=$AGENT_TOKEN VERCELIFY_STATE_DIR=$STATE VERCELIFY_RUN_DIR=$STATE/run \
-VERCELIFY_PLATFORM_DB=$STATE/platform.db VERCELIFY_MASTER_KEY_FILE=$STATE/master.key \
+VERCELIFY_MESH_DIR=$STATE/mesh VERCELIFY_PLATFORM_DB=$STATE/platform.db VERCELIFY_MASTER_KEY_FILE=$STATE/master.key \
 VERCELIFY_TOKENS_FILE=$STATE/tokens.json VERCELIFY_AUDIT_LOG=$STATE/audit.log VERCELIFY_INSTALL_ENV=$STATE/install.env \
 VERCELIFY_PROXY_HTTP_PORT=18580 VERCELIFY_PROXY_HTTPS_PORT=18581 VERCELIFY_PROXY_METRICS_PORT=18582 \
 VERCELIFY_WAKE_LISTEN='' VERCELIFY_AUTODEPLOY_INTERVAL=0 \

@@ -294,6 +294,9 @@ pub struct DisplayStatus {
     pub receiver_url: Option<String>,
     pub mpv_installed: bool,
     pub sunshine: ServiceStatus,
+    #[serde(default)]
+    #[ts(optional)]
+    pub playback_active: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]

@@ -963,3 +963,26 @@ LAN (mDNS); a worker joins with the invite its install command carries
 The proxy's container is recreated when the directory it mounts changes, not
 only its configuration: a proxy that reads another directory never sees our
 routes.
+
+
+### Installation and display readiness (October 2026)
+
+Default host installation defers optional AI, domains, remote access and Sunshine
+questions; `--configure` retains the interactive wizard. Storage defaults to the
+system disk; a second disk is selected explicitly with `--storage-device`. Final readiness reports
+agent health and mesh availability, and supplies recovery commands for incomplete
+connections. A rerun preserves the saved machine role. Only matching release refs
+may use numbered release binaries; local, branch and edge refs build their own.
+Existing Docker installations are checked for both Buildx and Compose v2 before
+setup succeeds; the engine being reachable alone is insufficient.
+
+The optional display receiver resolves an active local, non-root graphical session
+through logind. In auto mode it reads only the user's display/auth/home environment
+from the user service manager, drops to that user with runuser, and shares the X11
+socket directory through the agent's private /tmp boundary. Explicit backend/env
+configuration overrides detection. Receiver lifecycle operations are serialized;
+stop and agent shutdown kill the receiver process group, including a runuser child.
+A private mpv IPC socket supplies playback confirmation (`playback_active`), separate
+from process liveness. The cockpit exposes a refresh/recovery step and establishes
+Moonlight forwards before opening Sunshine's setup page. Extended macOS desktops
+require an existing additional display; no private display-driver API is shipped.

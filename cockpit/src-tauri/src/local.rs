@@ -1,7 +1,7 @@
 //! Things that run on the cockpit's own machine: local disks and the
 //! external tools used for display streaming.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use vercelify_core::avfoundation::{parse_screens, CaptureScreen};
 use vercelify_core::ToolStatus;
@@ -48,6 +48,16 @@ pub fn moonlight() -> Option<PathBuf> {
         .map(PathBuf::from)
         .filter(|p| p.is_file())
         .or_else(|| find(MOONLIGHT))
+        .or_else(|| std::env::var_os("HOME").and_then(|home| user_moonlight(Path::new(&home))))
+}
+
+fn user_moonlight(home: &Path) -> Option<PathBuf> {
+    [
+        home.join("Applications/Moonlight.app/Contents/MacOS/Moonlight"),
+        home.join(".local/share/flatpak/exports/bin/com.moonlight_stream.Moonlight"),
+    ]
+    .into_iter()
+    .find(|path| path.is_file())
 }
 
 pub fn tools() -> Vec<ToolStatus> {
@@ -92,4 +102,29 @@ pub fn capture_screens() -> Result<Vec<CaptureScreen>, String> {
         .output()
         .map_err(|e| e.to_string())?;
     Ok(parse_screens(&String::from_utf8_lossy(&out.stderr)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn detects_per_user_moonlight_installs() {
+        let home = std::env::temp_dir().join(format!(
+            "vfy-tools-{}-{}",
+            std::process::id(),
+            chrono::Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        assert!(user_moonlight(&home).is_none());
+        for relative in [
+            "Applications/Moonlight.app/Contents/MacOS/Moonlight",
+            ".local/share/flatpak/exports/bin/com.moonlight_stream.Moonlight",
+        ] {
+            let executable = home.join(relative);
+            std::fs::create_dir_all(executable.parent().unwrap()).unwrap();
+            std::fs::write(&executable, b"fixture").unwrap();
+            assert_eq!(user_moonlight(&home), Some(executable.clone()));
+            std::fs::remove_file(executable).unwrap();
+        }
+        std::fs::remove_dir_all(home).unwrap();
+    }
 }

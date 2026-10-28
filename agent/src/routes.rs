@@ -452,6 +452,7 @@ async fn build_display_status(s: &AppState) -> DisplayStatus {
         _ => None,
     };
     DisplayStatus {
+        playback_active: Some(s.receiver.playback_active().await),
         receiver,
         receiver_config,
         receiver_url,

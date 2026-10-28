@@ -340,3 +340,122 @@ fake_pgrep() {
   [[ "$output" == *source-build* ]]
   [ ! -e "$T/release-download" ]
 }
+
+@test "default setup defers optional feature questions" {
+  has_tty() { return 0; }
+  ask() { echo unexpected-prompt; return 1; }
+  confirm() { echo unexpected-prompt; return 1; }
+  run wizard
+  [ "$status" -eq 0 ]
+  [[ "$output" != *unexpected-prompt* ]]
+  parse_args --configure
+  [ "$CONFIGURE" = 1 ]
+}
+
+@test "summary never reports ready when the mesh is unavailable" {
+  export VERCELIFY_ETC="$T/etc" AGENT_BIN=/nonexistent
+  mkdir -p "$VERCELIFY_ETC"
+  mesh_ipv4() { return 1; }
+  platform_engine() { return 1; }
+  curl() { return 0; }
+  findmnt() { return 1; }
+  run summary
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"connection needs attention"* ]]
+  [[ "$output" != *"Vercelify is ready"* ]]
+  [[ "$output" == *"sudo vercelify mesh init"* ]]
+  grep -q '^network_ready=0' "$VERCELIFY_ETC/summary.txt"
+}
+
+@test "local and pinned source commits build matching binaries" {
+  export VERCELIFY_INSTALL_CHANNEL=stable
+  curl() { touch "$T/release-download"; return 1; }
+  have() { [[ "$1" == docker ]]; }
+  run_cmd() { echo source-build >&2; }
+  for source_ref in local feature/display 123456789abcdef; do
+    export VERCELIFY_INSTALL_REF=$source_ref
+    run obtain_binary vercelify-agent VERCELIFY_AGENT_BINARY '-p vercelify-agent'
+    [ "$status" -eq 0 ]
+    [[ "$output" == *source-build* ]]
+    [ ! -e "$T/release-download" ]
+  done
+}
+
+@test "dry-run Docker setup never downloads or runs the Docker installer" {
+  export VERCELIFY_DRY_RUN=1 SYSTEMD_DIR="$T/systemd"
+  unset SUDO_USER
+  have() { return 1; }
+  fetch() { echo unexpected-download; return 1; }
+  run install_docker
+  [ "$status" -eq 0 ]
+  [[ "$output" != *unexpected-download* ]]
+  [[ "$output" == *"no installer downloaded"* ]]
+}
+
+@test "the default installation never selects an unrelated data disk" {
+  [ "$STORAGE_DEVICE" = none ]
+  parse_args --storage-device auto
+  [ "$STORAGE_DEVICE" = auto ]
+}
+
+@test "readiness requires the daemon and its actual mesh interface address" {
+  export VERCELIFY_ETC="$T/etc" AGENT_BIN=/nonexistent
+  mkdir -p "$VERCELIFY_ETC"
+  mesh_ipv4() { echo 10.77.0.1; }
+  platform_engine() { return 1; }
+  curl() { return 0; }
+  findmnt() { return 1; }
+  systemctl() { return 0; }
+  ip() { return 1; }
+  run summary
+  [[ "$output" == *"connection needs attention"* ]]
+  ip() { echo 'inet 10.77.0.1/24'; }
+  run summary
+  [[ "$output" == *"Vercelify is ready"* ]]
+}
+
+@test "an existing Docker daemon also gets the Buildx plugin" {
+  docker() { [[ -e "$T/buildx" ]]; }
+  apt_update_once() { return 0; }
+  apt_install() {
+    echo "$1" >>"$T/packages"
+    [[ "$1" == docker-buildx ]] || return 1
+    touch "$T/buildx"
+  }
+  run ensure_buildx
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/packages")" = $'docker-buildx-plugin\ndocker-buildx' ]
+  [[ "$output" == *"Docker Buildx ready"* ]]
+}
+
+@test "a missing build plugin cannot be reported as a ready installation" {
+  docker() { return 1; }
+  apt_update_once() { return 0; }
+  apt_install() { return 1; }
+  run ensure_buildx
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Buildx plugin could not be installed"* ]]
+}
+
+@test "an existing Docker daemon also gets Compose v2" {
+  docker() { [[ -e "$T/compose" ]]; }
+  apt_update_once() { return 0; }
+  apt_install() {
+    echo "$1" >>"$T/packages"
+    [[ "$1" == docker-compose-v2 ]] || return 1
+    touch "$T/compose"
+  }
+  run ensure_compose
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/packages")" = $'docker-compose-plugin\ndocker-compose-v2' ]
+  [[ "$output" == *"Docker Compose ready"* ]]
+}
+
+@test "a missing Compose plugin is reported before application deployment" {
+  docker() { return 1; }
+  apt_update_once() { return 0; }
+  apt_install() { return 1; }
+  run ensure_compose
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Compose v2 plugin could not be installed"* ]]
+}

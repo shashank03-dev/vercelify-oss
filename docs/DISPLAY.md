@@ -7,7 +7,12 @@ Two directions, both over Vercelify's network ([MESH.md](MESH.md)) or your LAN:
 | **The Linux laptop's panel as a second monitor for the Mac** | Mac: `ffmpeg` (AVFoundation capture → VideoToolbox H.264 → MPEG-TS) | Linux: `mpv` fullscreen, low-latency profile | 30–60 ms on a LAN / direct mesh path |
 | **The Linux desktop on the Mac** | Linux: [Sunshine](https://github.com/LizardByte/Sunshine) | Mac: [Moonlight](https://moonlight-stream.org) | 10–20 ms on a LAN |
 
-The cockpit's **Screencast** tab starts and stops both ends for you.
+The cockpit's **Second screen** tab starts and stops both ends for you. Screen
+sharing mirrors an existing screen; extension requires an additional Mac display.
+The page checks missing tools before starting. **Refresh setup** retries discovery
+after installing a tool or changing permissions. **Playing** appears only after
+mpv reports that media has opened through its local IPC socket, rather than merely
+because two processes exist.
 
 ## Linux panel as a second monitor
 
@@ -69,21 +74,22 @@ in the app, or `vercelify-mesh status`); relays add a lot of latency.
 
 ### Desktop running on the host?
 
-DRM output needs the GPU to be free. When a desktop session (GNOME/KDE) is running,
-use it instead, in `/etc/vercelify/agent.toml`:
+With `display_backend = "auto"` (the default), the receiver detects an active local
+X11 or Wayland session through logind and reads that user's display environment.
+It runs mpv as that user, using the actual XAUTHORITY or Wayland runtime directory.
+The service shares the X11 socket directory with its private temporary namespace;
+authorization still belongs to the logged-in user. No desktop means DRM output.
+An unavailable session produces a recovery message instead of silently choosing DRM.
 
-```toml
-display_backend = "x11"            # or "wayland"
-display_env = { DISPLAY = ":0", XAUTHORITY = "/home/you/.Xauthority" }
-```
-
-then `sudo systemctl restart vercelify-agent`.
+Explicit `display_backend` and `display_env` values remain supported for unusual
+setups. They take precedence over automatic detection. Test/null video sinks also
+bypass desktop detection. A real extended Mac desktop still requires a virtual
+screen or display adapter; Vercelify does not install a private macOS display driver.
 
 ## Linux desktop on the Mac (Moonlight + Sunshine)
 
 Sunshine streams the logged-in desktop, so the host needs one (Ubuntu Desktop and the
-like). The installer asks *Set up remote desktop?* when it finds a desktop; later, or
-to turn it on yourself:
+like). Turn it on when needed (or choose it during `--configure` installation):
 
 ```bash
 sudo vercelify desktop on       # install Sunshine and start it on the desktop
@@ -99,7 +105,10 @@ upstream intends, as the desktop user's own service, started at every graphical 
 The agent shows its status in the cockpit and can restart it. On a headless server,
 use the second-monitor mode above instead.
 
-Then press **Launch Moonlight** in the cockpit. When the Mac's `vercelify-mesh` runs in
+In the cockpit, press **Open Sunshine setup**. It establishes private forwards
+before opening the setup page, so no address or SSH tunnel is needed. Create your
+Sunshine login once, then press **Launch Moonlight**. Enter Moonlight's PIN on
+Sunshine's PIN page. When the Mac's `vercelify-mesh` runs in
 app mode (the default), the app first forwards Sunshine's ports (TCP 47984, 47989,
 47990, 48010 and UDP 47998–48000) from `127.0.0.1` to the server and starts Moonlight
 on `127.0.0.1`; with `--mesh-system`, or on the same LAN, Moonlight connects to the
