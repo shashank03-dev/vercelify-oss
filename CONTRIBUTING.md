@@ -38,6 +38,8 @@ Before building a feature, check that it:
 ## Development setup
 
 Prerequisites: Rust stable (`rustup`), Node 22, `jq`, `shellcheck`, `bats`.
+`./dev setup` installs the rest; `./dev help` lists the shortcuts (see
+`docs/DEVELOPMENT.md`).
 On Linux also install the Tauri system libraries:
 
 ```bash
@@ -63,14 +65,15 @@ and installer end-to-end suites.
 
 ## Before you open a pull request
 
-Run the same checks as CI:
+Run the same checks as CI with `./dev check` (`./dev check all --full` for
+everything), or by hand:
 
 ```bash
 cargo fmt --all
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --all-features
 bats host/tests
-shellcheck -x -S warning install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/contract/*.sh
+shellcheck -x -S warning dev install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/contract/*.sh
 
 cd cockpit
 npm run typecheck && npm test && npx vite build

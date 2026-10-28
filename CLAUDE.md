@@ -22,6 +22,7 @@ running several deployments on a weak machine more reliable.
 | `cockpit/src/types/generated` | **Generated** by `cargo test` from Rust models. Never edit by hand. |
 | `host/` | One-line installer (`setup-host.sh`), `vercelify` admin CLI, firewall, power-guard, systemd units, bats tests. |
 | `install.sh` | `curl … \| sudo bash` entry point that fetches `host/`. |
+| `dev` | Local workflow script: setup, run, CI-equivalent checks, production build, ship to a host, release. Bash 3.2 compatible. |
 | `cli/vfy` | Mac/Linux command-line tool (`vfy apps/deploy/logs/env pull…`) using the app's paired servers. Bash 3.2 compatible. |
 | `install-mac.sh` | `curl … \| bash` for the Mac: the cockpit app (release `.dmg` or a source build) and `vercelify-mesh`. Must stay bash 3.2 compatible. |
 | `website/` | Open-source launch site (Vite, React 19, Tailwind v4, same tokens and fonts as the cockpit). `npm run dev` serves it on `:5180`. |
@@ -40,6 +41,10 @@ in the same commit as code that departs from it.
 
 ## Commands
 
+`./dev` wraps the everyday ones (`./dev check`, `./dev ui`, `./dev app`,
+`./dev build`, `./dev host USER@HOST`, `./dev release X.Y.Z`; see
+`docs/DEVELOPMENT.md`). Underneath:
+
 ```bash
 cargo test --workspace --all-features            # also regenerates cockpit/src/types/generated
 cargo test -p vercelify-platform -p vercelify-mesh --features vercelify-mesh/daemon   # the new engine and mesh alone (no Tauri libraries needed)
@@ -48,7 +53,7 @@ cargo build -p vercelify-mesh --features daemon  # the vercelify-mesh daemon bin
 cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 bats host/tests
-shellcheck -x -S warning install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/contract/*.sh
+shellcheck -x -S warning dev install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/contract/*.sh
 sudo AGENT_BIN=$PWD/target/debug/vercelify-agent host/tests/contract/routing.sh   # vercel.json rules on the engine's real proxy
 sudo host/tests/contract/mesh.sh                 # four mesh nodes in network namespaces (debug agent + vercelify-mesh)
 sudo host/tests/contract/mesh-nat.sh             # NAT traversal: hole punching and the relay behind real Linux NAT

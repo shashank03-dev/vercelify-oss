@@ -1,0 +1,494 @@
+#!/usr/bin/env bash
+# dev — develop, check and ship Vercelify from your own machine.
+#
+#   ./dev setup               install everything the commands below need (once)
+#   ./dev ui                  cockpit in the browser with demo data (no host needed)
+#   ./dev app                 desktop app with hot reload (Tauri)
+#   ./dev agent               a local agent on 127.0.0.1:7420 (token: dev-token-0123456789)
+#   ./dev site                the launch website on :5180
+#
+#   ./dev check [PARTS] [--full]
+#                             what CI runs, here, in minutes. PARTS: rust host cockpit
+#                             website (default: the parts your branch changed, or all)
+#                             --full adds Playwright UI flows, the installer dry run
+#                             and the agent binaries
+#   ./dev fix                 cargo fmt + regenerate the TS types
+#
+#   ./dev build [--universal] [--install]
+#                             the production desktop app (.app/.dmg here, .deb/.AppImage
+#                             on Linux); --install copies it to /Applications
+#   ./dev agent-bin [x86_64|aarch64|all]
+#                             static Linux agent binaries (what the release ships)
+#   ./dev host USER@HOST      install this checkout on a real Vercelify host over SSH
+#                             (agent + scripts, rolled back automatically if it fails)
+#
+#   ./dev release X.Y.Z       bump every version, run the full check, commit and tag
+#   ./dev hooks [off]         run `./dev check` before every git push (or stop doing so)
+#
+# Bash 3.2 compatible (macOS /bin/bash).
+
+set -euo pipefail
+
+ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+cd "$ROOT"
+
+DEV_TOKEN=dev-token-0123456789
+LINUX_IMAGE=vercelify-dev-linux
+OS=$(uname -s)
+
+if [[ -t 1 && -z "${NO_COLOR:-}" ]]; then
+  B=$'\033[1m' D=$'\033[2m' R=$'\033[31m' G=$'\033[32m' Y=$'\033[33m' C=$'\033[36m' N=$'\033[0m'
+else
+  B='' D='' R='' G='' Y='' C='' N=''
+fi
+say()  { printf '%s==>%s %s\n' "$C" "$N" "$*"; }
+warn() { printf '%s!!%s  %s\n' "$Y" "$N" "$*" >&2; }
+die()  { printf '%sxx%s  %s\n' "$R" "$N" "$*" >&2; exit 1; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+usage() { sed -n '2,/^# Bash 3.2/p' "$0" | sed '$d; s/^# \{0,1\}//'; }
+
+# ---------------------------------------------------------------- helpers
+
+npm_deps() {
+  local dir=$1
+  # Reinstall only when the lockfile changed since the last install.
+  if [[ ! -d "$dir/node_modules" || "$dir/package-lock.json" -nt "$dir/node_modules/.package-lock.json" ]]; then
+    say "installing $dir dependencies"
+    (cd "$dir" && npm ci --no-audit --no-fund)
+  fi
+}
+
+# tauri::generate_context! needs cockpit/dist to exist.
+dist_placeholder() {
+  [[ -f cockpit/dist/index.html ]] || { mkdir -p cockpit/dist && echo '<!doctype html>' >cockpit/dist/index.html; }
+}
+
+# Docker is only needed for the Linux-only checks; start Colima if it's there.
+docker_ready() {
+  docker info >/dev/null 2>&1 && return 0
+  if have colima; then
+    if ! colima status >/dev/null 2>&1; then
+      say "starting Colima (Docker)"
+      colima start >/dev/null 2>&1 || return 1
+    fi
+    export DOCKER_CONTEXT=colima
+    docker info >/dev/null 2>&1 && return 0
+  fi
+  return 1
+}
+
+# A Debian 12 image with what the host tests need, built once and reused.
+linux_image() {
+  docker image inspect "$LINUX_IMAGE" >/dev/null 2>&1 && return 0
+  say "building the $LINUX_IMAGE image (once)"
+  docker build -q -t "$LINUX_IMAGE" - >/dev/null <<'EOF'
+FROM debian:12
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends \
+      bats jq rsync python3 curl ca-certificates util-linux iproute2 git >/dev/null \
+    && rm -rf /var/lib/apt/lists/*
+EOF
+}
+
+# Copy of the source tree without build output, for Linux containers.
+linux_run() {
+  docker run --rm -v "$ROOT":/src:ro "$LINUX_IMAGE" bash -ec "
+    mkdir /w && tar -C /src --exclude=./target --exclude=./.git --exclude=node_modules -c . | tar -C /w -x && cd /w
+    $1"
+}
+
+rust_target() {
+  case "$1" in
+    x86_64|amd64) echo x86_64-unknown-linux-musl ;;
+    aarch64|arm64) echo aarch64-unknown-linux-musl ;;
+    *) return 1 ;;
+  esac
+}
+
+build_agent() {
+  local target=$1
+  have cargo-zigbuild || die "cargo-zigbuild is missing — run ./dev setup"
+  rustup target list --installed | grep -qx "$target" || rustup target add "$target"
+  say "building the agent for $target"
+  cargo zigbuild --release --locked -p vercelify-agent --target "$target"
+  echo "$ROOT/target/$target/release/vercelify-agent"
+}
+
+# ---------------------------------------------------------------- check
+
+FAILED=''
+SUMMARY=''
+
+step() {
+  local name=$1 start rc=0
+  shift
+  printf '\n%s── %s%s\n' "$B" "$name" "$N"
+  start=$(date +%s)
+  "$@" || rc=$?
+  local secs=$(( $(date +%s) - start ))
+  if (( rc == 0 )); then
+    SUMMARY="$SUMMARY$(printf '  %s✓%s %-46s %s%ss%s' "$G" "$N" "$name" "$D" "$secs" "$N")"$'\n'
+  else
+    SUMMARY="$SUMMARY$(printf '  %s✗%s %-46s %s%ss%s' "$R" "$N" "$name" "$D" "$secs" "$N")"$'\n'
+    FAILED="$FAILED $name;"
+  fi
+}
+
+skip() {
+  SUMMARY="$SUMMARY$(printf '  %s-%s %-46s %s%s%s' "$Y" "$N" "$1" "$D" "$2" "$N")"$'\n'
+}
+
+generated_types_committed() {
+  if ! git diff --quiet -- cockpit/src/types/generated || [[ -n "$(git ls-files --others --exclude-standard cockpit/src/types/generated)" ]]; then
+    git status --short -- cockpit/src/types/generated
+    echo "the Rust models changed the generated TS types — commit cockpit/src/types/generated"
+    return 1
+  fi
+}
+
+host_shellcheck() {
+  have shellcheck || { echo "shellcheck is missing — run ./dev setup"; return 1; }
+  shellcheck -x -S warning dev install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/*.bash host/tests/contract/*.sh
+}
+
+host_bats() {
+  if [[ $OS == Linux ]]; then bats host/tests; return; fi
+  # The host scripts target Debian (GNU stat/sed/touch): test them there.
+  docker_ready || { echo "Docker is not running — start Docker/Colima or run ./dev setup"; return 1; }
+  linux_image && linux_run 'bats host/tests'
+}
+
+installer_dry_run() {
+  docker_ready || { echo "Docker is not running"; return 1; }
+  linux_image && docker run --rm -v "$ROOT":/src:ro "$LINUX_IMAGE" \
+    bash /src/host/setup-host.sh --dry-run -y --hostname dev --storage-device none
+}
+
+# Agent code behind #[cfg(target_os = "linux")] only compiles and runs on Linux.
+# Colima's VM is a real Linux machine (ext4 root, this repo mounted): run there.
+# In a plain container `/` is overlay, which the agent rightly hides from its
+# disk list, so the one test that expects a root disk is left to CI.
+agent_linux_tests() {
+  docker_ready || { echo "Docker is not running"; return 1; }
+  local test='cargo test --locked -p vercelify-core -p vercelify-agent'
+  if [[ "${DOCKER_CONTEXT:-}" == colima* ]] || docker context show 2>/dev/null | grep -q '^colima'; then
+    colima ssh -- bash -lc "
+      set -e
+      command -v cc >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq build-essential pkg-config >/dev/null; }
+      [ -x ~/.cargo/bin/cargo ] || curl -fsSL https://sh.rustup.rs | sh -s -- -y -q --profile minimal >/dev/null
+      cd '$ROOT' && CARGO_TARGET_DIR=~/vercelify-target TS_RS_EXPORT_DIR=/tmp/ts ~/.cargo/bin/$test"
+    return
+  fi
+  docker volume create vercelify-dev-cargo >/dev/null
+  docker volume create vercelify-dev-target >/dev/null
+  echo "(container: skipping agent_end_to_end, which needs a real root disk; CI runs it)"
+  docker run --rm -v "$ROOT":/src -w /src \
+    -v vercelify-dev-cargo:/usr/local/cargo/registry -v vercelify-dev-target:/src/target \
+    -e TS_RS_EXPORT_DIR=/tmp/ts rust:1-bookworm \
+    $test -- --skip agent_end_to_end
+}
+
+# Which parts the branch touches compared with main (committed or not).
+changed_parts() {
+  local base files parts=''
+  base=$(git merge-base HEAD origin/main 2>/dev/null || git merge-base HEAD main 2>/dev/null || true)
+  files=$( { [[ -n "$base" ]] && git diff --name-only "$base" HEAD; git diff --name-only HEAD; git ls-files --others --exclude-standard; } 2>/dev/null | sort -u)
+  [[ -z "$base" ]] && { echo "rust host cockpit website"; return; }
+  echo "$files" | grep -qE '^(crates/|agent/|cockpit/src-tauri/|Cargo\.|\.cargo/|rust-toolchain|rustfmt\.toml)' && parts="$parts rust cockpit"
+  echo "$files" | grep -qE '^(host/|install\.sh|install-mac\.sh|cli/|dev$)' && parts="$parts host"
+  echo "$files" | grep -qE '^cockpit/' && parts="$parts cockpit"
+  echo "$files" | grep -qE '^website/' && parts="$parts website"
+  echo "$files" | grep -qE '^\.github/' && parts="rust host cockpit website"
+  echo "$parts"
+}
+
+cmd_check() {
+  local parts='' full=0 a
+  for a in "$@"; do
+    case "$a" in
+      --full) full=1 ;;
+      rust|host|cockpit|website) parts="$parts $a" ;;
+      all) parts="rust host cockpit website" ;;
+      *) die "unknown option $a (parts: rust host cockpit website all; --full)" ;;
+    esac
+  done
+  if [[ -z "$parts" ]]; then
+    parts=$(changed_parts)
+    [[ -z "${parts// /}" ]] && { say "nothing changed compared with main — checking everything"; parts="rust host cockpit website"; }
+  fi
+  local want=" $parts "
+  say "checking:$parts$( ((full)) && echo ' (full)')"
+  local t0
+  t0=$(date +%s)
+
+  if [[ $want == *" rust "* ]]; then
+    dist_placeholder
+    step "cargo fmt" cargo fmt --all --check
+    step "cargo clippy" cargo clippy --workspace --all-targets -- -D warnings
+    if [[ $OS == Linux ]]; then
+      step "cargo test (+ TS types)" cargo test --workspace --all-features
+    else
+      # The agent's black-box tests watch /proc: they run in the Linux step below.
+      step "cargo test (+ TS types)" cargo test --workspace --all-features --no-fail-fast --lib --bins --test core
+      if docker_ready; then step "agent + core tests on Linux" agent_linux_tests
+      else skip "agent + core tests on Linux" "Docker not running"; fi
+    fi
+    step "generated TS types committed" generated_types_committed
+    if ((full)); then
+      local arch
+      for arch in x86_64 aarch64; do
+        if have cargo-zigbuild; then step "agent binary $arch-linux-musl" build_agent "$(rust_target $arch)"
+        else skip "agent binary $arch-linux-musl" "cargo-zigbuild missing (./dev setup)"; fi
+      done
+    fi
+  fi
+
+  if [[ $want == *" host "* ]]; then
+    step "shellcheck" host_shellcheck
+    step "bats host/tests" host_bats
+    if ((full)); then
+      if docker_ready; then step "installer dry run (Debian 12)" installer_dry_run
+      else skip "installer dry run" "Docker not running"; fi
+    fi
+  fi
+
+  if [[ $want == *" cockpit "* ]]; then
+    npm_deps cockpit
+    step "cockpit typecheck" sh -c 'cd cockpit && npm run -s typecheck'
+    step "cockpit unit tests" sh -c 'cd cockpit && npm test --silent'
+    step "cockpit production build" sh -c 'cd cockpit && npx vite build --logLevel warn'
+    ((full)) && step "cockpit UI flows (Playwright, demo)" sh -c 'cd cockpit && npm run -s e2e:demo'
+  fi
+
+  if [[ $want == *" website "* ]]; then
+    npm_deps website
+    step "website build" sh -c 'cd website && npm run -s build'
+  fi
+
+  printf '\n%sSummary%s %s(%ss)%s\n%s' "$B" "$N" "$D" "$(( $(date +%s) - t0 ))" "$N" "$SUMMARY"
+  if [[ -n "$FAILED" ]]; then
+    printf '%sFailed:%s%s\n' "$R" "$N" "$FAILED"
+    exit 1
+  fi
+  printf '%sAll good.%s\n' "$G" "$N"
+}
+
+# ---------------------------------------------------------------- run
+
+cmd_ui() {
+  npm_deps cockpit
+  say "cockpit with demo data on http://localhost:1420"
+  cd cockpit && VITE_DEMO=1 exec npm run dev -- "$@"
+}
+
+cmd_app() {
+  npm_deps cockpit
+  dist_placeholder
+  cd cockpit && exec npm run tauri dev -- "$@"
+}
+
+cmd_agent() {
+  mkdir -p "${TMPDIR:-/tmp}/vercelify-hdd"
+  say "agent on http://127.0.0.1:7420 — token $DEV_TOKEN"
+  printf '    curl -H "Authorization: Bearer %s" localhost:7420/v1/system\n' "$DEV_TOKEN"
+  printf '    cockpit against it: VERCELIFY_AGENT_URL=http://127.0.0.1:7420 npm --prefix cockpit run dev\n'
+  VERCELIFY_LISTEN=127.0.0.1 VERCELIFY_TOKEN=$DEV_TOKEN \
+  VERCELIFY_REQUIRE_STORAGE_MOUNT=false VERCELIFY_HDD_VOLUME_ROOT="${TMPDIR:-/tmp}/vercelify-hdd" \
+    exec cargo run -p vercelify-agent -- --config /nonexistent "$@"
+}
+
+cmd_site() {
+  npm_deps website
+  cd website && exec npm run dev -- "$@"
+}
+
+cmd_fix() {
+  dist_placeholder
+  cargo fmt --all
+  say "regenerating TS types (cargo test -p vercelify-core)"
+  cargo test -q -p vercelify-core >/dev/null
+  git status --short -- cockpit/src/types/generated
+}
+
+# ---------------------------------------------------------------- build / ship
+
+cmd_build() {
+  local universal=0 install=0 a args=() bundle
+  for a in "$@"; do
+    case "$a" in
+      --universal) universal=1 ;;
+      --install) install=1 ;;
+      *) die "unknown option $a (--universal, --install)" ;;
+    esac
+  done
+  npm_deps cockpit
+  if ((universal)); then
+    [[ $OS == Darwin ]] || die "--universal is for macOS"
+    rustup target add aarch64-apple-darwin x86_64-apple-darwin >/dev/null
+    args=(--target universal-apple-darwin)
+    bundle=target/universal-apple-darwin/release/bundle
+  else
+    bundle=target/release/bundle
+  fi
+  if [[ $OS == Darwin && -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+    warn "unsigned build (set APPLE_SIGNING_IDENTITY to sign) — fine on this Mac"
+  fi
+  say "building the production app"
+  (cd cockpit && npm run tauri build -- ${args[@]+"${args[@]}"})
+  say "built:"
+  find "$bundle" -maxdepth 2 \( -name '*.app' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' \) -print | sed "s#^#    $ROOT/#"
+  if ((install)); then
+    [[ $OS == Darwin ]] || die "--install is for macOS (install the .deb on Linux)"
+    local app="$bundle/macos/Vercelify.app"
+    [[ -d "$app" ]] || die "no $app"
+    osascript -e 'quit app "Vercelify"' >/dev/null 2>&1 || true
+    rm -rf /Applications/Vercelify.app
+    cp -R "$app" /Applications/
+    say "installed /Applications/Vercelify.app"
+  fi
+}
+
+cmd_agent_bin() {
+  local which=${1:-all} arch
+  case "$which" in
+    all) for arch in x86_64 aarch64; do build_agent "$(rust_target $arch)"; done ;;
+    *) rust_target "$which" >/dev/null || die "unknown arch $which (x86_64, aarch64)"
+       build_agent "$(rust_target "$which")" ;;
+  esac
+  ls -lh target/*-unknown-linux-musl/release/vercelify-agent 2>/dev/null || true
+}
+
+cmd_host() {
+  local target=${1:-}
+  [[ -n "$target" ]] || die "usage: ./dev host USER@HOST   (a machine reachable over SSH, e.g. its Tailscale name)"
+  local arch rt bin
+  arch=$(ssh -o ConnectTimeout=10 "$target" uname -m) || die "cannot reach $target over SSH"
+  rt=$(rust_target "$arch") || die "$target is $arch — Vercelify hosts are x86_64 or aarch64"
+  bin=$(build_agent "$rt" | tail -1)
+
+  # Global, so the EXIT trap still sees it after this function returns.
+  stage=$(mktemp -d)
+  trap 'rm -rf "$stage"' EXIT
+  tar -C "$ROOT" -c host install.sh Cargo.toml Cargo.lock | tar -C "$stage" -x
+  mkdir -p "$stage/dist"
+  cp "$bin" "$stage/dist/vercelify-agent-$rt"
+
+  say "copying this checkout ($(git rev-parse --short HEAD)$(git diff --quiet HEAD || echo '+changes')) to $target"
+  tar -C "$stage" -cz . | ssh "$target" 'rm -rf /tmp/vercelify-dev && mkdir -p /tmp/vercelify-dev && tar -xz -C /tmp/vercelify-dev' ||
+    die "copy failed"
+
+  # An installed host updates (keeps the previous version and rolls back if the
+  # agent doesn't come up); a fresh machine gets a normal install.
+  say "installing on $target (you may be asked for the sudo password)"
+  ssh -t "$target" '
+    if command -v vercelify >/dev/null; then
+      sudo env VERCELIFY_INSTALLER=/tmp/vercelify-dev/install.sh vercelify update
+    else
+      sudo bash /tmp/vercelify-dev/install.sh
+    fi'
+  say "done — undo with: ssh -t $target sudo vercelify rollback"
+}
+
+cmd_release() {
+  local v=${1:-}
+  [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "usage: ./dev release X.Y.Z"
+  [[ "$(git rev-parse --abbrev-ref HEAD)" == main ]] || die "release from main (you're on $(git rev-parse --abbrev-ref HEAD))"
+  git diff --quiet HEAD || die "commit or stash your changes first"
+  git rev-parse -q --verify "refs/tags/v$v" >/dev/null && die "tag v$v already exists"
+
+  say "bumping to $v"
+  # The first "version" in each file (awk: same on BSD and GNU).
+  local f
+  awk -v v="$v" '/^\[workspace.package\]/ { w=1 } w && !d && /^version = / { $0 = "version = \"" v "\""; d=1 } 1' \
+    Cargo.toml >Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
+  for f in cockpit/src-tauri/tauri.conf.json cockpit/package.json; do
+    awk -v v="$v" '!d && /"version": "/ { sub(/"version": "[^"]*"/, "\"version\": \"" v "\""); d=1 } 1' "$f" >"$f.tmp" && mv "$f.tmp" "$f"
+  done
+  (cd cockpit && npm install --package-lock-only --no-audit --no-fund >/dev/null)
+  cargo update -w -q
+  git --no-pager diff --stat
+
+  cmd_check all --full
+  git add -A Cargo.toml Cargo.lock cockpit/src-tauri/tauri.conf.json cockpit/package.json cockpit/package-lock.json
+  git commit -q -m "Release v$v"
+  git tag -a "v$v" -m "Vercelify v$v"
+  say "tagged v$v. Publish it (GitHub builds the signed .dmg, .deb and agent binaries):"
+  printf '    git push origin main v%s\n' "$v"
+}
+
+cmd_hooks() {
+  local hook
+  hook="$(git rev-parse --git-path hooks)/pre-push"
+  if [[ "${1:-}" == off ]]; then
+    rm -f "$hook"; say "pre-push check removed"; return
+  fi
+  cat >"$hook" <<'EOF'
+#!/usr/bin/env bash
+# Installed by ./dev hooks — runs the local CI before a push.
+# Skip once with: git push --no-verify
+exec "$(git rev-parse --show-toplevel)/dev" check
+EOF
+  chmod +x "$hook"
+  say "pre-push hook installed: every git push runs ./dev check first (skip once: git push --no-verify)"
+}
+
+# ---------------------------------------------------------------- setup
+
+cmd_setup() {
+  say "checking tools"
+  if [[ $OS == Darwin ]]; then
+    have brew || die "install Homebrew first: https://brew.sh"
+    local pkgs='' p
+    for p in shellcheck jq zig node@22; do
+      case "$p" in
+        node@22) have node || pkgs="$pkgs $p" ;;
+        *) have "$p" || pkgs="$pkgs $p" ;;
+      esac
+    done
+    have bats || pkgs="$pkgs bats-core"
+    have docker || pkgs="$pkgs colima docker"
+    [[ -n "$pkgs" ]] && { say "brew install$pkgs"; brew install $pkgs; }
+  else
+    local miss='' t
+    for t in shellcheck jq bats zig node; do have "$t" || miss="$miss $t"; done
+    [[ -n "$miss" ]] && warn "install with your package manager:$miss (zig: https://ziglang.org/download)"
+    have cargo && ! dpkg -s libwebkit2gtk-4.1-dev >/dev/null 2>&1 &&
+      warn "Tauri needs: sudo apt install libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev"
+  fi
+  have rustup || die "install Rust first: https://rustup.rs"
+  rustup component add rustfmt clippy >/dev/null 2>&1 || true
+  rustup target add x86_64-unknown-linux-musl aarch64-unknown-linux-musl >/dev/null
+  [[ $OS == Darwin ]] && rustup target add x86_64-apple-darwin aarch64-apple-darwin >/dev/null
+  have cargo-zigbuild || { say "cargo install cargo-zigbuild"; cargo install --locked cargo-zigbuild; }
+
+  npm_deps cockpit
+  npm_deps website
+  say "Playwright browser (for the UI flows)"
+  (cd cockpit && npx playwright install chromium >/dev/null)
+  dist_placeholder
+
+  if docker_ready; then linux_image; else warn "Docker isn't running: start Docker/Colima for the host tests (bats run in Debian)"; fi
+  [[ -f "$(git rev-parse --git-path hooks)/pre-push" ]] || cmd_hooks
+  say "ready. Try: ./dev ui   ·   ./dev app   ·   ./dev check"
+}
+
+# ---------------------------------------------------------------- main
+
+cmd=${1:-help}
+[[ $# -gt 0 ]] && shift
+case "$cmd" in
+  setup) cmd_setup "$@" ;;
+  ui|demo) cmd_ui "$@" ;;
+  app) cmd_app "$@" ;;
+  agent) cmd_agent "$@" ;;
+  site|website) cmd_site "$@" ;;
+  check|ci) cmd_check "$@" ;;
+  fix|fmt) cmd_fix ;;
+  build) cmd_build "$@" ;;
+  agent-bin) cmd_agent_bin "$@" ;;
+  host|ship) cmd_host "$@" ;;
+  release) cmd_release "$@" ;;
+  hooks) cmd_hooks "$@" ;;
+  help|-h|--help) usage ;;
+  *) usage; die "unknown command $cmd" ;;
+esac

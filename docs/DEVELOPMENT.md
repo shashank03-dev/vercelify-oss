@@ -6,6 +6,66 @@
 - Linux: `libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev` (for the Tauri crate)
 - For the live and contract tests: Docker (and root, for the network namespace ones)
 
+## The `./dev` script
+
+Everything below is wrapped by `./dev` at the repo root, so you can work,
+check and ship from your own machine instead of waiting for CI:
+
+```bash
+./dev setup                # once: tools, Rust targets, npm deps, Playwright, pre-push hook
+./dev ui                   # cockpit in the browser with demo data (http://localhost:1420)
+./dev app                  # desktop app with hot reload
+./dev agent                # local agent on :7420 (token dev-token-0123456789)
+
+./dev check                # what CI runs, for the parts your branch changed
+./dev check all --full     # + Playwright, installer dry run, agent binaries
+./dev fix                  # cargo fmt + regenerate the TS types
+
+./dev build --install      # production Vercelify.app (+ .dmg) into /Applications
+./dev host me@old-laptop   # this checkout on a real host, rolled back if the agent fails
+./dev release 0.3.0        # bump versions, full check, commit and tag v0.3.0
+```
+
+A typical loop:
+
+1. `git switch -c my-change`, then `./dev ui` (or `./dev app`) while you work.
+2. `./dev check` until it's green. The pre-push hook runs it again on every
+   `git push` (`git push --no-verify` skips it once; `./dev hooks off` removes it).
+3. Try it for real: `./dev build --install` for the app, `./dev host USER@HOST`
+   for the agent and host scripts on a test machine (`sudo vercelify rollback`
+   there undoes it).
+4. Push the branch and open a PR. CI runs the same checks again, on Linux.
+5. To release: `./dev release X.Y.Z` on `main`, then `git push origin main vX.Y.Z`.
+   GitHub builds the signed `.dmg`, `.deb`/`.AppImage` and agent binaries.
+
+On macOS the host tests (bats) run in a Debian 12 container, so Docker (or
+Colima, started automatically) must be installed. The agent's tests need a real
+Linux machine: with Colima they run inside its VM (Rust is installed there on
+the first run, ~15 min once); with another Docker they run in a container and
+skip the one test that needs a real root disk. `./dev setup` installs `zig`
+for the static agent binaries, a large one-time Homebrew download.
+
+### A real host to test against
+
+Any spare machine (or a VM) works. To try the whole path on the Mac itself,
+create a Debian 12 VM with Lima and install this checkout on it:
+
+```bash
+limactl start --name vfy-host --cpus 4 --memory 6 template://debian-12
+# so ./dev host and ssh can reach it as lima-vfy-host:
+echo "Include $HOME/.lima/vfy-host/ssh.config" >> ~/.ssh/config
+./dev host lima-vfy-host
+cockpit/e2e/run-host.sh lima-vfy-host http://127.0.0.1:7420 http://127.0.0.1:8000
+```
+
+`e2e/run-host.sh` pairs the production UI with the host using a fresh code,
+opens every page, deploys a small static site from Git, serves it, redeploys,
+rolls back and creates a database. Lima forwards the VM's ports to the Mac,
+which is why the agent and Coolify URLs are `127.0.0.1`. App URLs need a
+wildcard domain: on a VM without Tailscale, `sudo vercelify domain` has no
+address to use, so set one by hand (see the e2e notes in that script's
+header).
+
 ## Everyday commands
 
 ```bash

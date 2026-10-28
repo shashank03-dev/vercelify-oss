@@ -42,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: sudo apt-get update && sudo apt-get install -y shellcheck bats jq rsync
-      - run: shellcheck -x -S warning install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/*.bash host/tests/contract/*.sh .github/scripts/*.sh
+      - run: shellcheck -x -S warning dev install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/*.bash host/tests/contract/*.sh .github/scripts/*.sh
       - run: bats host/tests
       - name: Installer dry run on Debian 12
         run: |

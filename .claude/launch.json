@@ -6,6 +6,12 @@
       "runtimeExecutable": "npm",
       "runtimeArgs": ["--prefix", "website", "run", "dev"],
       "port": 5180
+    },
+    {
+      "name": "cockpit-demo",
+      "runtimeExecutable": "./dev",
+      "runtimeArgs": ["ui"],
+      "port": 1420
     }
   ]
 }
