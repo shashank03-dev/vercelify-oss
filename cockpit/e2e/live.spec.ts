@@ -204,9 +204,10 @@ test("screencast: host receiver starts; desktop-only sender is reported clearly"
   await expect(page.getByTestId("extend-card")).toContainText("mpv on the host");
   await page.getByTestId("source-test").click();
   await page.getByTestId("start-extend").click();
-  // In the browser preview there is no local ffmpeg: the UI must say so and
-  // roll back the receiver it started on the host.
-  await expect(page.getByText("Available in the desktop app only")).toBeVisible();
+  // In the browser preview there is no local ffmpeg (and a host off the mesh has
+  // no address to stream to): the UI must say so and roll back the receiver it
+  // started on the host.
+  await expect(page.getByText(/Available in the desktop app only|has no private address yet/)).toBeVisible();
   await expect(page.getByTestId("start-extend")).toBeVisible();
   await shot(page, "08-screencast");
 });
