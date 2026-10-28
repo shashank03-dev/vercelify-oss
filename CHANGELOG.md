@@ -6,8 +6,24 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- The app says when a newer release is out: "Update the app" at the bottom of the
+  sidebar opens the release with the `.dmg`, and server cards show `0.2.5 → 0.3.0`
+  against the newest release, not only against each other.
+
 ### Fixed
 
+- Git deployments failed on every installed server ("could not create the BuildKit
+  builder: … read-only file system"): the agent's sandbox kept `/root` read-only, where
+  `docker buildx` keeps its builder. The agent's unit now lets it write `/root/.docker`.
+- An update from a server installed before 0.2.0 left the agent stopped: its
+  `agent.toml` still listed the `tailscale` listen address, which the agent refused.
+  It is now skipped with a warning.
+- A rolled-back update also puts back `agent.toml`, so the previous agent can read its
+  configuration again.
+- `vercelify doctor` reported the proxy as running when another program held port 80
+  (an old Coolify proxy, say) and it served nothing; it now says so.
 - Remote desktop from the Mac (app mode) showed "No video received from host": Sunshine's
   ~1.4 kB video packets arrive in IP fragments over the mesh's 1280-byte MTU, and the Mac's
   userspace network stack dropped fragments. It now reassembles them, and its UDP sockets

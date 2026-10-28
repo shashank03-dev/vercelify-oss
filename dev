@@ -382,8 +382,13 @@ cmd_agent_bin() {
 cmd_host() {
   local target=${1:-}
   [[ -n "$target" ]] || die "usage: ./dev host USER@HOST   (a machine reachable over SSH)"
-  local arch rt bin
-  arch=$(ssh -o ConnectTimeout=10 "$target" uname -m) || die "cannot reach $target over SSH"
+  local arch rt bin ssh=(ssh)
+  # A Lima VM (lima-NAME) is reachable through its own ssh config, so it works
+  # without an Include in ~/.ssh/config.
+  if [[ $target == lima-* && -f "$HOME/.lima/${target#lima-}/ssh.config" ]]; then
+    ssh=(ssh -F "$HOME/.lima/${target#lima-}/ssh.config")
+  fi
+  arch=$("${ssh[@]}" -o ConnectTimeout=10 "$target" uname -m) || die "cannot reach $target over SSH"
   rt=$(rust_target "$arch") || die "$target is $arch — Vercelify hosts are x86_64 or aarch64"
   bin=$(build_agent "$rt")
 
@@ -397,19 +402,19 @@ cmd_host() {
   cp "$(dirname "$bin")/vercelify-mesh" "$stage/dist/vercelify-mesh-$rt"
 
   say "copying this checkout ($(git rev-parse --short HEAD)$(git diff --quiet HEAD || echo '+changes')) to $target"
-  tar -C "$stage" -cz . | ssh "$target" 'rm -rf /tmp/vercelify-dev && mkdir -p /tmp/vercelify-dev && tar -xz -C /tmp/vercelify-dev' ||
+  tar -C "$stage" -cz . | "${ssh[@]}" "$target" 'rm -rf /tmp/vercelify-dev && mkdir -p /tmp/vercelify-dev && tar -xz -C /tmp/vercelify-dev' ||
     die "copy failed"
 
   # An installed host updates (keeps the previous version and rolls back if the
   # agent doesn't come up); a fresh machine gets a normal install.
   say "installing on $target (you may be asked for the sudo password)"
-  ssh -t "$target" '
+  "${ssh[@]}" -t "$target" '
     if command -v vercelify >/dev/null; then
       sudo env VERCELIFY_INSTALLER=/tmp/vercelify-dev/install.sh vercelify update
     else
       sudo bash /tmp/vercelify-dev/install.sh
     fi'
-  say "done — undo with: ssh -t $target sudo vercelify rollback"
+  say "done — undo with: ${ssh[*]} -t $target sudo vercelify rollback"
 }
 
 cmd_release() {

@@ -53,9 +53,7 @@ create a Debian 12 VM with Lima and install this checkout on it:
 
 ```bash
 limactl start --name vfy-host --cpus 4 --memory 6 template://debian-12
-# so ./dev host and ssh can reach it as lima-vfy-host:
-echo "Include $HOME/.lima/vfy-host/ssh.config" >> ~/.ssh/config
-./dev host lima-vfy-host
+./dev host lima-vfy-host     # lima-NAME uses the VM's own ssh config
 ```
 
 `./dev host` builds the agent and mesh for the machine's architecture, copies
@@ -214,6 +212,12 @@ CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_RUNNER=qemu-aarch64-static \
   cargo test -p vercelify-core -p vercelify-agent --target aarch64-unknown-linux-musl
 ```
 
+The C code in the build (`ring`, the bundled SQLite) needs a C compiler for
+arm64 musl: CI uses `zig cc` through a small wrapper (see the arm64 job in
+`.github/workflows/ci.yml`; it drops cc-rs's `--target=` flag, which zig can't
+read, and turns UBSan off). On an Apple Silicon Mac `./dev check` already runs
+these tests on arm64 Linux, in Colima's VM.
+
 CI also runs the bats suite and a Raspberry Pi 5 installer dry run in an
 arm64 Debian 12 container (`DEVICE_TREE_MODEL` points the board detection at a
 fake `/proc/device-tree/model`).
@@ -249,3 +253,15 @@ password in `MACOS_SELF_SIGNED_PASSWORD`), so macOS keeps Screen Recording
 allowed across updates; without that secret it is signed ad hoc and the
 permission must be given again after each update. Keep using the same
 certificate: a new one means everyone allows Screen Recording once more.
+
+### How a release reaches people
+
+- **Servers:** "Update all" on the Servers page (or `sudo vercelify update` on
+  the server) installs the newest release. The previous agent, scripts and
+  `agent.toml` are kept: if the new agent doesn't answer within a minute the
+  update undoes itself, and `sudo vercelify rollback` undoes it later. Server
+  cards show `0.2.5 → 0.3.0` when a newer release is out.
+- **The desktop app:** it asks GitHub for the newest release every few hours;
+  when one is out, "Update the app" appears at the bottom of the sidebar and
+  opens the release with the `.dmg`. Running the `install-mac.sh` one-liner
+  again does the same from a terminal.
