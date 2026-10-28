@@ -22,6 +22,11 @@ and this project follows [Semantic Versioning](https://semver.org/).
   It is now skipped with a warning.
 - A rolled-back update also puts back `agent.toml`, so the previous agent can read its
   configuration again.
+- A fresh install right after the machine booted stopped at "apt-get update failed": Debian's
+  own daily apt run holds apt's locks for the first minutes. The installer now waits for it.
+- While a new database's image was still downloading (minutes on home internet), the
+  reconciler waited for it, so crashed apps and databases didn't come back meanwhile. The
+  download now runs on its own; everything else recovers within 30 seconds.
 - `vercelify doctor` reported the proxy as running when another program held port 80
   (an old Coolify proxy, say) and it served nothing; it now says so.
 - Remote desktop from the Mac (app mode) showed "No video received from host": Sunshine's

@@ -16,9 +16,10 @@ use crate::volumes;
 use crate::{now, Error, Result};
 use rusqlite::params;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Mutex;
 use std::time::Duration;
 use tokio::process::Command;
 use vercelify_core::platform::{Database, DatabaseBackup, DatabaseKind, Desired, VolumeOwner};
@@ -187,6 +188,12 @@ impl Engine {
                 (None, _) => false,
             };
             if !ok {
+                // A first pull can take many minutes on home internet: it runs on
+                // its own, so this pass still brings every other app and database back.
+                if d.desired == Desired::Running && !self.deployer.docker.image_exists(&d.image).await.unwrap_or(true) {
+                    pull_in_background(&self.deployer.docker, &d.image);
+                    continue;
+                }
                 if let Err(e) = self.ensure_database(&d.id).await {
                     errors.push(format!("{}: {e}", d.name));
                 }
@@ -543,6 +550,29 @@ async fn pipe(
     Ok(String::from_utf8_lossy(&b_out.stdout).into_owned())
 }
 
+/// Images the reconciler is pulling for databases (one pull each).
+static PULLING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+
+/// Pull `image` unless a pull of it is already running; the next reconcile
+/// pass after it lands starts the database. Whether a pull was started.
+fn pull_in_background(docker: &Docker, image: &str) -> bool {
+    if !PULLING
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(image.to_string())
+    {
+        return false;
+    }
+    let (docker, image) = (docker.clone(), image.to_string());
+    tokio::spawn(async move {
+        if let Err(e) = docker.pull(&image).await {
+            tracing::warn!("pulling {image}: {e}");
+        }
+        PULLING.lock().unwrap_or_else(|e| e.into_inner()).remove(&image);
+    });
+    true
+}
+
 /// Copy a directory tree keeping owners, permissions and links (`cp -a`),
 /// replacing what is at `to`.
 pub(crate) async fn copy_tree(from: &Path, to: &Path) -> Result<()> {
@@ -598,6 +628,37 @@ mod tests {
         assert!(!to.exists());
         let missing = copy_tree(&temp.path().join("nope"), &to).await.unwrap_err();
         assert!(matches!(missing, Error::NotFound(_)), "{missing:?}");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_database_image_is_pulled_once_in_the_background() {
+        use std::os::unix::fs::PermissionsExt;
+        let temp = tempfile::tempdir().unwrap();
+        let calls = temp.path().join("calls");
+        let bin = temp.path().join("docker");
+        std::fs::write(&bin, format!("#!/bin/sh\necho \"$*\" >>{}\nsleep 1\n", calls.display())).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let docker = Docker {
+            bin: bin.to_string_lossy().into_owned(),
+        };
+        let started = std::time::Instant::now();
+        assert!(pull_in_background(&docker, "postgres:test-only"));
+        // Already pulling: no second pull, and neither call waits for it.
+        assert!(!pull_in_background(&docker, "postgres:test-only"));
+        assert!(started.elapsed() < Duration::from_millis(500));
+        for _ in 0..50 {
+            if !PULLING.lock().unwrap().contains("postgres:test-only") {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let log = std::fs::read_to_string(&calls).unwrap();
+        assert_eq!(log.matches("pull --quiet postgres:test-only").count(), 1, "{log}");
+        assert!(
+            pull_in_background(&docker, "postgres:test-only"),
+            "pulls again once done"
+        );
     }
 
     #[test]

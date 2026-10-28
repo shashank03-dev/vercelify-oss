@@ -283,7 +283,10 @@ regenerate route files for the node; write only files whose content changed
 Stopped and sleeping apps lose their base route, so visitors get the wake page
 (sleeping) or a 404 instead of a 502 from a dead upstream; routes of apps with a
 deployment in flight are left to the engine. The reconciler never builds and never
-changes `current_deployment_id` itself. Sleeping apps
+changes `current_deployment_id` itself, and never waits on a download: a database
+whose image isn't on the machine yet gets its pull started in the background (once
+per image), and a later pass starts it, so a first pull over slow home internet
+doesn't hold up bringing other apps back. Sleeping apps
 (`sleep.rs`) are "desired asleep" while the sleep module says so; the wake listener starts
 them, and the reconciler leaves them alone.
 
