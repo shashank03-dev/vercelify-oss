@@ -46,10 +46,10 @@ storage_candidates() {
 storage_target() {
   local disk=$1
   lsblk_json | jq -r --arg d "$disk" "$_JQ_LIB"'
-    .blockdevices[] | select((.path // ("/dev/" + .name)) == $d)
+    .blockdevices[] | recurse(.children[]?) | select((.path // ("/dev/" + .name)) == $d)
     | if ((.children // []) | length) > 0
       then (.children | max_by(.size | tonumber)) + {kind: "part"}
-      else . + {kind: "disk"} end
+      else . + {kind: (if .type == "part" then "part" else "disk" end)} end
     | [.path // ("/dev/" + .name), (.fstype // ""), (.uuid // ""), (mounts | join(",")), .kind]
     | join("\u001f")'
 }

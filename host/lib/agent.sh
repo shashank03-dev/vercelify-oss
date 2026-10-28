@@ -46,7 +46,7 @@ obtain_binary() {
   tmp=$(mktemp -d)
   local tag="v${VERSION:-0}"
   url="https://github.com/$VERCELIFY_REPO/releases/download/$tag/$name-$target"
-  if [[ "${VERSION:-dev}" != dev ]] &&
+  if [[ "${VERSION:-dev}" != dev && "${VERCELIFY_INSTALL_REF:-}" != main && "${VERCELIFY_INSTALL_CHANNEL:-stable}" != edge ]] &&
      curl -fsSL --connect-timeout 15 -o "$tmp/bin" "$url" 2>/dev/null &&
      curl -fsSL --connect-timeout 15 -o "$tmp/bin.sha256" "$url.sha256" 2>/dev/null; then
     if (cd "$tmp" && echo "$(awk '{print $1}' bin.sha256)  bin" | sha256sum -c --quiet -); then

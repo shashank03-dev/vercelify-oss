@@ -71,7 +71,7 @@ export function DisplayCaster() {
         encoder,
         show_cursor: true,
       });
-      toast.ok("Streaming — the Linux screen is now your second monitor");
+      toast.ok("Streaming to the Linux screen");
       void display.refresh();
       void sender.refresh();
     } catch (e) {
@@ -112,8 +112,8 @@ export function DisplayCaster() {
   return (
     <div className="space-y-6">
       <Card
-        title="Linux screen as a second monitor"
-        description="Stream this Mac's screen to the laptop's panel over your private network"
+        title="Share your Mac screen"
+        description="Mirror an existing screen. To extend your desktop, first create a virtual display or connect a display adapter."
         icon={<MonitorUp />}
         testId="extend-card"
         actions={
@@ -238,8 +238,8 @@ export function DisplayCaster() {
               Moonlight on this Mac: <span className="text-fg-muted">{moonlight ? (moonlight.installed ? "installed" : moonlight.install_hint) : "desktop app only"}</span>
             </div>
             <p className="max-w-xl pt-1 text-xs leading-relaxed text-fg-dim">
-              Game-streaming tech: hardware-encoded, about 10 ms on a LAN. Pair once in Moonlight with the PIN Sunshine shows (its web UI is
-              on port <InlineCode>47990</InlineCode> of the host), then launch from here.
+              Game-streaming tech: hardware-encoded, about 10 ms on a LAN. Launch Moonlight and select the server to see a PIN. Enter that PIN in Sunshine’s web page
+              (HTTPS port <InlineCode>47990</InlineCode>; in app network mode, use 127.0.0.1 while Moonlight runs). Pair once, then launch from here.
             </p>
           </div>
           <div className="flex items-center gap-2">

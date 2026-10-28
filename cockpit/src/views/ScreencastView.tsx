@@ -6,7 +6,7 @@ export function ScreencastView() {
     <>
       <PageHeader
         title="Second screen"
-        subtitle="Use the Linux laptop's panel as a low-latency second monitor for your Mac, or pull the Linux desktop onto the Mac."
+        subtitle="Share a Mac screen on Linux, or control the Linux desktop from your Mac."
       />
       <DisplayCaster />
     </>

@@ -136,3 +136,11 @@ teardown() { rm -rf "$T"; }
   grep -qx 'tccutil reset ScreenCapture dev.vercelify.cockpit' "$T/calls"
   [[ "$output" == *"Screen Recording will be asked for once more"* ]]
 }
+
+@test "optional display tool failures do not abort installation or claim success" {
+  have() { [[ "$1" == brew ]]; }
+  brew() { return 1; }
+  run install_display_tools
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"ffmpeg and Moonlight ready"* ]]
+}
