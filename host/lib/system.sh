@@ -6,10 +6,17 @@
 APT_LOCK_WAIT=${APT_LOCK_WAIT:-600}
 APT_LOCK_POLL=${APT_LOCK_POLL:-5}
 
+# Another apt or dpkg is running. Not unattended-upgrade-shutdown, which waits
+# for shutdown all the time (the kernel names it `unattended-upgr` too).
+apt_busy() {
+  pgrep -x 'apt|apt-get|aptitude|dpkg' >/dev/null 2>&1 ||
+    pgrep -f '/unattended-upgrade( |$)' >/dev/null 2>&1
+}
+
 apt_wait_idle() {
   [[ "$VERCELIFY_DRY_RUN" == 1 ]] && return 0
   local waited=0
-  while pgrep -x 'apt|apt-get|aptitude|dpkg|unattended-upgr' >/dev/null 2>&1; do
+  while apt_busy; do
     (( waited == 0 )) && info "waiting for another package install (system updates) to finish…"
     (( waited >= APT_LOCK_WAIT )) && { warn "still running after ${APT_LOCK_WAIT}s — trying anyway"; return 0; }
     sleep "$APT_LOCK_POLL"

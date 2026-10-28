@@ -282,15 +282,35 @@ stub_destructive_tools() {
   [[ "$output" == *"on the network as 10.77.0.4"* && "$output" != *mesh_join* ]]
 }
 
-@test "right after boot: waits for the system's own apt run instead of failing" {
+# A pgrep that sees the processes in $T/comm (names) and $T/cmdline (command lines).
+fake_pgrep() {
   mkdir -p "$T/bin"
-  # Another apt is busy for two checks, then done.
-  printf '#!/usr/bin/env bash\nn=$(cat "%s/n" 2>/dev/null || echo 0); echo $((n+1)) >"%s/n"; [ "$n" -lt 2 ]\n' "$T" "$T" >"$T/bin/pgrep"
+  printf '#!/usr/bin/env bash\ncase "$1" in\n  -x) grep -qxE "$2" "%s/comm" 2>/dev/null ;;\n  -f) grep -qE "$2" "%s/cmdline" 2>/dev/null ;;\nesac\n' "$T" "$T" >"$T/bin/pgrep"
   printf '#!/usr/bin/env bash\necho "apt-get $*" >>"%s/apt"\n' "$T" >"$T/bin/apt-get"
   chmod +x "$T/bin/pgrep" "$T/bin/apt-get"
-  APT_LOCK_POLL=0 run strict apt_update_once
+}
+
+@test "right after boot: waits for the system's own apt run instead of failing" {
+  fake_pgrep
+  echo apt-get >"$T/comm"
+  # The other apt run finishes while the installer waits.
+  (sleep 1; : >"$T/comm") &
+  APT_LOCK_POLL=1 run strict apt_update_once
   [ "$status" -eq 0 ]
   [[ "$output" == *"waiting for another package install"* ]]
-  [ "$(cat "$T/n")" = 3 ]
+  [[ "$output" != *"trying anyway"* ]]
   grep -q 'apt-get -o DPkg::Lock::Timeout=600 update -qq' "$T/apt"
+}
+
+@test "the updater's shutdown helper, always running, is not an apt run" {
+  fake_pgrep
+  echo unattended-upgr >"$T/comm"
+  echo '/usr/bin/python3 /usr/share/unattended-upgrades/unattended-upgrade-shutdown --wait-for-signal' >"$T/cmdline"
+  APT_LOCK_POLL=1 APT_LOCK_WAIT=1 run strict apt_update_once
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"waiting for another"* ]]
+  # The updater itself is.
+  echo '/usr/bin/python3 /usr/bin/unattended-upgrade' >>"$T/cmdline"
+  APT_LOCK_POLL=1 APT_LOCK_WAIT=1 run strict apt_update_once
+  [[ "$output" == *"waiting for another"* ]]
 }
