@@ -74,6 +74,9 @@ async fn dispatch(
             let tail = query_value(&q, "tail").and_then(|t| t.parse().ok()).unwrap_or(200);
             crate::platform_api::docker_logs(&d.docker.bin, name, tail, query_value(&q, "follow") == Some("true"))?
         }
+        ["containers", name, "exec"] if post => {
+            json(vercelify_platform::runtime::exec_local(d, name, &body(&b)?).await?)
+        }
         ["apply"] if post => json(apply_local(d, &body::<Apply>(&b)?).await),
         ["routes"] if get => json(vercelify_platform::proxy::route_keys(&d.proxy)),
         ["instances" | "instances-v2"] if post => start_instance(w.clone(), body(&b)?),

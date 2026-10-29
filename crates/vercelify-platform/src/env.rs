@@ -311,7 +311,24 @@ fn unescape(s: &str) -> String {
             Some('n') => out.push('\n'),
             Some('r') => out.push('\r'),
             Some('t') => out.push('\t'),
-            Some(e @ ('"' | '\\' | '$')) => out.push(e),
+            Some('b') => out.push('\u{8}'),
+            Some('f') => out.push('\u{c}'),
+            Some(e @ ('"' | '\\' | '$' | '/')) => out.push(e),
+            // `vfy env pull` writes values as JSON strings.
+            Some('u') => {
+                let hex: String = chars.clone().take(4).collect();
+                match u32::from_str_radix(&hex, 16)
+                    .ok()
+                    .filter(|_| hex.len() == 4)
+                    .and_then(char::from_u32)
+                {
+                    Some(c) => {
+                        out.push(c);
+                        chars.nth(3);
+                    }
+                    None => out.push_str("\\u"),
+                }
+            }
             Some(other) => {
                 out.push('\\');
                 out.push(other);
@@ -515,6 +532,11 @@ mod tests {
             .to_string()
             .contains("line 1"));
         assert!(parse_dotenv("A=\"v\" junk").is_err());
+        // What `vfy env pull` writes (jq's @json) reads back as it was.
+        assert_eq!(
+            parse_dotenv("J=\"a\\u0001b\\tc\\/d\\u00e9\"").unwrap(),
+            [("J".into(), "a\u{1}b\tc/d\u{e9}".into())]
+        );
         // A variable called `exporter` is not an `export` line.
         assert_eq!(parse_dotenv("exporter=1").unwrap(), [("exporter".into(), "1".into())]);
         assert!(parse_dotenv("1X=y").is_err());

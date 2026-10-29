@@ -44,6 +44,10 @@ describe("readDotenv", () => {
     ]);
   });
 
+  it("reads back what `vfy env pull` writes (JSON strings)", () => {
+    expect(readDotenv('J="a\\u0001b\\tc\\/d\\u00e9"').vars).toEqual([{ key: "J", value: "a\u0001b\tc/d\u00e9" }]);
+  });
+
   it("names the line the agent would refuse", () => {
     expect(readDotenv("A=1\nnot a variable").error).toBe("line 2: expected KEY=value");
     expect(readDotenv("1BAD=x").error).toMatch(/^line 1: /);
