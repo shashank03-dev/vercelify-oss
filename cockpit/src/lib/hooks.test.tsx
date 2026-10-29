@@ -25,6 +25,18 @@ describe("usePoll request ownership", () => {
     expect(result.current.loading).toBe(false);
   });
 
+  it("fetches again when a refresh is asked for during a request", async () => {
+    const first = deferred<string>();
+    const answers = [first.promise, Promise.resolve("after the save")];
+    let calls = 0;
+    const { result } = renderHook(() => usePoll(() => answers[calls++]!, 0));
+    // A save happens while the first load is still out: its refresh must not be lost.
+    void result.current.refresh();
+    await act(async () => first.resolve("before the save"));
+    await waitFor(() => expect(result.current.data).toBe("after the save"));
+    expect(calls).toBe(2);
+  });
+
   it("clears previous data when the requested resource changes", async () => {
     const pending = deferred<string>();
     const { result, rerender } = renderHook(({ key }) => usePoll(

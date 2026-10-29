@@ -20,19 +20,30 @@ export function usePoll<T>(fn: () => Promise<T>, intervalMs: number, deps: unkno
   fnRef.current = fn;
   const resource = useMemo(() => ({}), deps);
   const previousResource = useRef(resource);
-  const generation = useRef({ active: false, inflight: false });
+  const generation = useRef({ active: false, inflight: false, again: false });
 
   const refresh = useCallback(async () => {
     const request = generation.current;
-    if (!request.active || request.inflight) return;
+    if (!request.active) return;
+    // A refresh asked for during a request (after a save, say) may need
+    // data newer than that request saw: run once more when it ends.
+    if (request.inflight) {
+      request.again = true;
+      return;
+    }
     request.inflight = true;
     try {
-      const v = await fnRef.current();
-      if (!request.active) return;
-      setData(v);
-      setError(undefined);
-    } catch (e) {
-      if (request.active) setError(toCockpitError(e));
+      do {
+        request.again = false;
+        try {
+          const v = await fnRef.current();
+          if (!request.active) return;
+          setData(v);
+          setError(undefined);
+        } catch (e) {
+          if (request.active) setError(toCockpitError(e));
+        }
+      } while (request.again && request.active);
     } finally {
       request.inflight = false;
       if (request.active) setLoading(false);
@@ -40,7 +51,7 @@ export function usePoll<T>(fn: () => Promise<T>, intervalMs: number, deps: unkno
   }, []);
 
   useEffect(() => {
-    const current = { active: true, inflight: false };
+    const current = { active: true, inflight: false, again: false };
     generation.current = current;
     if (previousResource.current !== resource) {
       previousResource.current = resource;

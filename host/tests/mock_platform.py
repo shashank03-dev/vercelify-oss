@@ -5,6 +5,7 @@ Usage: mock_platform.py PORT_FILE LOG_FILE
 Each request is logged as `METHOD PATH auth=… BODY`.
 """
 import json
+import os
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -125,6 +126,19 @@ class H(BaseHTTPRequestHandler):
                  "dpl_2": FAILED}.get(seg[1])
             if not d:
                 return self.reply(404, {"error": "no deployment"})
+            # With a `flaky` file next to the port file, dpl_5's log stream
+            # drops after two lines while it still builds, once.
+            flaky = os.path.join(os.path.dirname(sys.argv[1]), "flaky")
+            if seg[1] == "dpl_5" and os.path.exists(flaky):
+                dropped = os.path.exists(flaky + ".dropped")
+                if len(seg) > 2 and seg[2] == "logs":
+                    if not dropped:
+                        open(flaky + ".dropped", "w").close()
+                        return self.lines(BUILD[:2])
+                    return self.lines(BUILD)
+                if not dropped or not os.path.exists(flaky + ".asked"):
+                    open(flaky + ".asked", "w").close()
+                    return self.reply(200, dict(d, status="building"))
             if len(seg) > 2 and seg[2] == "logs":
                 return self.lines(FAILED_BUILD if d["status"] == "failed" else BUILD)
             return self.reply(200, d)
