@@ -10,9 +10,16 @@ Two directions, both over Vercelify's network ([MESH.md](MESH.md)) or your LAN:
 The cockpit's **Second screen** tab starts and stops both ends for you. Screen
 sharing mirrors an existing screen; extension requires an additional Mac display.
 The page checks missing tools before starting. **Refresh setup** retries discovery
-after installing a tool or changing permissions. **Playing** appears only after
-mpv reports that media has opened through its local IPC socket, rather than merely
-because two processes exist.
+after installing a tool or changing permissions. **Playing** appears only while
+mpv reports, through its local IPC socket, that the picture is moving, rather than
+merely because two processes exist: if the Mac stops sending or the network drops,
+it changes back within a few seconds.
+
+Both ends recover on their own. If the Mac's sender exits (an SRT connection that
+failed, a long outage), the app starts it again until you press **Stop**, and gives up
+with its error after repeated quick failures. The receiver listens again whenever mpv
+gives up on a stream. If another program holds the receiver's UDP port, **Start**
+says so instead of waiting for a picture.
 
 ## Linux panel as a second monitor
 
@@ -67,6 +74,7 @@ UDP port 5600–5610 is only accepted from the mesh (`vfy0`, firewall rules).
 | Home Wi-Fi / same LAN | UDP, *Smooth* (1080p60, 12 Mbps) |
 | Text-heavy work (code, docs) | *Sharp* (1440p30, 16 Mbps) |
 | Phone hotspot / far away | SRT (retransmits lost packets, +120 ms), *Light* (720p30, 4 Mbps) |
+| Lossy Wi-Fi on UDP | a lost packet can hold the picture until the next keyframe (up to 2 s); use SRT |
 | Laptop CPU is old | keep *Hardware* encoder on the Mac; decoding uses VA-API on the i5's iGPU via `--hwdec=auto-safe` |
 
 Check that the server's path is **lan** or **direct**, not **relay** (Servers → network

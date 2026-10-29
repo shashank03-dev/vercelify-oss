@@ -206,6 +206,24 @@ AGENT_BIN=$PWD/target/debug/vercelify-agent STREAM_FIXTURE=/tmp/pattern.ts pytho
 sudo env AGENT_BIN=$PWD/target/debug/vercelify-agent STREAM_FIXTURE=/tmp/pattern.ts DISPLAY_TEST_USER="$USER" python3 host/tests/contract/display.py
 ```
 
+The screencast contract runs the whole path the way it runs for real: the agent and
+its mpv in one network namespace, this script as the Mac in another, streaming with
+ffmpeg and the cockpit's exact arguments, over a link that `tc netem` turns into
+Wi-Fi, a lossy link, a cellular uplink or an outage. It checks playback smoothness
+(speed and the longest freeze, read from mpv), UDP and SRT, reconnects, outages,
+restarts, races, a taken port, junk packets, resolution switches and failure reports.
+`./dev screencast` builds and runs it: with sudo on Linux (`sudo apt install mpv
+ffmpeg` once), in Colima's VM on a Mac (it installs mpv and ffmpeg there the first
+time). Name scenarios to run only those; `./dev check --full` runs it too.
+
+```bash
+./dev screencast                     # all scenarios, about three minutes
+./dev screencast srt_reconnects outage
+# by hand on Linux (KEEP=1 keeps the work directory, VERBOSE=1 prints tracebacks):
+cargo build -p vercelify-agent && cargo build -p vercelify-core --example sender_args
+sudo env ONLY=srt,outage python3 host/tests/contract/screencast.py
+```
+
 The default uses mpv's null sink. The X11 variant uses real Xvfb and Xauthority,
 with isolated logind responses, and needs `xvfb` and `xauth`. Neither requires a
 physical panel. The agent has its own temporary state and no platform engine.

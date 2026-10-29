@@ -74,8 +74,9 @@ pub fn sender_args(cfg: &SenderConfig) -> Result<Vec<String>, StreamError> {
     if !(500..=100_000).contains(&cfg.bitrate_kbps) {
         return Err(StreamError::BadParams("bitrate must be 500-100000 kbps"));
     }
-    if cfg.width.is_some_and(|w| !(320..=7680).contains(&w)) {
-        return Err(StreamError::BadParams("width must be 320-7680"));
+    // H.264 in 4:2:0 needs even dimensions; libx264 refuses an odd width.
+    if cfg.width.is_some_and(|w| !(320..=7680).contains(&w) || w % 2 == 1) {
+        return Err(StreamError::BadParams("width must be an even number from 320 to 7680"));
     }
     let fps = cfg.fps.to_string();
     let mut a: Vec<String> = ["-hide_banner", "-loglevel", "warning", "-nostats"]
@@ -288,6 +289,14 @@ mod tests {
         let mut c = cfg();
         c.fps = 0;
         assert!(sender_args(&c).is_err());
+        for width in [318, 1365, 7682] {
+            let mut c = cfg();
+            c.width = Some(width);
+            assert!(sender_args(&c).is_err(), "width {width}");
+        }
+        let mut c = cfg();
+        c.width = Some(7680);
+        assert!(sender_args(&c).is_ok());
     }
 
     #[test]

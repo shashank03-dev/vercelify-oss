@@ -7,7 +7,7 @@ import { ExplainFailure } from "./ExplainFailure";
 import { ToastProvider } from "./Toast";
 
 const wire = vi.hoisted(() => ({
-  stopFails: false, startResponseLost: false, mpv: true, playback: null as boolean | null, opens: [] as string[],
+  stopFails: false, startResponseLost: false, senderDies: false, noAddress: false, mpv: true, playback: null as boolean | null, opens: [] as string[],
   discoveryFinished: false, streams: 0, selected: "server-a", blocked: "", release: () => {},
   requests: [] as { host: string; path: string; method?: string }[],
 }));
@@ -28,6 +28,9 @@ vi.mock("../lib/transport", async (original) => ({
     wire.requests.push({ host: args.server ?? wire.selected, path, method: args.request?.method });
     if (path === "sender_stop" && wire.stopFails) throw new Error("could not stop screen capture");
     if (path === "/v1/display/receiver/start" && wire.startResponseLost) throw new Error("connection lost");
+    if (path === "sender_start" && wire.senderDies) {
+      return { running: false, pid: null, command: "ffmpeg", started_at: null, exit_code: 1, last_output: ["[AVFoundation indev] Failed to create input: Screen Recording not permitted"] };
+    }
     if (path === wire.blocked) {
       await new Promise<void>((resolve) => { wire.release = resolve; });
       if (path === "sender_start") throw new Error("screen capture denied");
@@ -35,7 +38,7 @@ vi.mock("../lib/transport", async (original) => ({
     const { demoCall } = await import("../lib/demo");
     if (path === "/v1/display/receiver/start") {
       const display = await demoCall("agent_request", { request: { path: "/v1/display", method: "GET" } }) as DisplayStatus;
-      return { ...display, receiver: { ...display.receiver, running: true, pid: 123 }, receiver_url: "udp://100.64.0.1:5600" };
+      return { ...display, receiver: { ...display.receiver, running: true, pid: 123 }, receiver_url: wire.noAddress ? null : "udp://100.64.0.1:5600" };
     }
     const response = await demoCall(cmd, { ...args, server: undefined });
     if (path === "/v1/display") {
@@ -53,7 +56,7 @@ function Page({ children }: { children: ReactNode }) {
   const session = { settings, servers: [settings], unpair: async () => {}, update: async () => {}, select: async () => {}, remove: async () => {}, addServer: () => {}, revision: 0 };
   return <ToastProvider><SessionProvider value={session}>{children}</SessionProvider></ToastProvider>;
 }
-beforeEach(() => { wire.stopFails = false; wire.startResponseLost = false; wire.mpv = true; wire.playback = null; wire.opens = []; wire.blocked = ""; wire.discoveryFinished = false; wire.streams = 0; wire.selected = "server-a"; wire.requests = []; });
+beforeEach(() => { wire.stopFails = false; wire.startResponseLost = false; wire.senderDies = false; wire.noAddress = false; wire.mpv = true; wire.playback = null; wire.opens = []; wire.blocked = ""; wire.discoveryFinished = false; wire.streams = 0; wire.selected = "server-a"; wire.requests = []; });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView"); });
 
 it("cleans up the original display receiver if local capture fails after switching servers", async () => {
@@ -120,4 +123,22 @@ it("attempts receiver cleanup when the start response is lost", async () => {
   render(<Page><DisplayCaster /></Page>);
   fireEvent.click(await screen.findByTestId("start-extend"));
   await waitFor(() => expect(wire.requests.some((r) => r.path === "/v1/display/receiver/stop")).toBe(true));
+});
+
+it("shows why capture died at once and stops the receiver it started", async () => {
+  wire.senderDies = true;
+  render(<Page><DisplayCaster /></Page>);
+  fireEvent.click(await screen.findByTestId("start-extend"));
+  await waitFor(() => expect(screen.getByText(/Screen Recording not permitted/)).toBeInTheDocument());
+  await waitFor(() => expect(wire.requests.some((r) => r.path === "/v1/display/receiver/stop")).toBe(true));
+  expect(screen.queryByText(/Stream started/)).not.toBeInTheDocument();
+});
+
+it("explains a server without a private address and never starts capture", async () => {
+  wire.noAddress = true;
+  render(<Page><DisplayCaster /></Page>);
+  fireEvent.click(await screen.findByTestId("start-extend"));
+  await waitFor(() => expect(screen.getByText(/no private address yet/)).toBeInTheDocument());
+  await waitFor(() => expect(wire.requests.some((r) => r.path === "/v1/display/receiver/stop")).toBe(true));
+  expect(wire.requests.some((r) => r.path === "sender_start")).toBe(false);
 });

@@ -206,7 +206,10 @@ pub fn router(state: AppState) -> Router {
 
     // Mesh nodes authenticate with their own tokens; the map is a stream.
     let public = public.merge(crate::mesh::node_router());
-    let mut app = public.nest("/v1", api).layer(TraceLayer::new_for_http());
+    let mut app = public
+        .nest("/v1", api)
+        .layer(middleware::from_fn(read_small_body))
+        .layer(TraceLayer::new_for_http());
 
     if !state.config.cors_origins.is_empty() {
         let origins: Vec<HeaderValue> = state
@@ -223,6 +226,27 @@ pub fn router(state: AppState) -> Router {
         );
     }
     app.with_state(state)
+}
+
+/// Read a small request body before the handler runs. A handler that ignores
+/// its body (the cockpit's `{}` on Stop) otherwise answers and closes the
+/// connection while the body is still on its way; the kernel then resets the
+/// connection under the response (seen on a jittery link). Uploads stream.
+async fn read_small_body(req: axum::extract::Request, next: middleware::Next) -> Response {
+    const SMALL: usize = 64 * 1024;
+    let small = req
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok()?.parse::<usize>().ok())
+        .is_some_and(|n| (1..=SMALL).contains(&n));
+    if !small {
+        return next.run(req).await;
+    }
+    let (parts, body) = req.into_parts();
+    match axum::body::to_bytes(body, SMALL).await {
+        Ok(bytes) => next.run(axum::extract::Request::from_parts(parts, bytes.into())).await,
+        Err(_) => AppError::bad_request("could not read the request body").into_response(),
+    }
 }
 
 fn timeout(d: Duration) -> TimeoutLayer {
@@ -796,4 +820,35 @@ async fn domain_info(State(s): State<AppState>) -> Json<DomainInfo> {
         wildcard,
         tunnel_active,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    /// A body that arrives after the headers (a jittery link) must be read
+    /// before an answer that ignores it, or the connection is reset.
+    #[tokio::test]
+    async fn a_late_body_does_not_reset_the_connection() {
+        let app = Router::new()
+            .route("/stop", post(|| async { "stopped" }))
+            .layer(middleware::from_fn(read_small_body));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });
+        let mut conn = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let headers = b"POST /stop HTTP/1.1\r\nHost: x\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n";
+        let mut answers = String::new();
+        for _ in 0..2 {
+            conn.write_all(headers).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            conn.write_all(b"{}").await.unwrap();
+            let mut buf = [0; 1024];
+            let n = conn.read(&mut buf).await.unwrap();
+            answers.push_str(&String::from_utf8_lossy(&buf[..n]).to_lowercase());
+        }
+        assert_eq!(answers.matches("200 ok").count(), 2, "{answers}");
+        assert!(!answers.contains("connection: close"), "{answers}");
+    }
 }

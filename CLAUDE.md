@@ -42,7 +42,7 @@ in the same commit as code that departs from it.
 ## Commands
 
 `./dev` wraps the everyday ones (`./dev check`, `./dev ui`, `./dev app`,
-`./dev build`, `./dev host USER@HOST`, `./dev release X.Y.Z`; see
+`./dev build`, `./dev host USER@HOST`, `./dev release X.Y.Z`, `./dev screencast`; see
 `docs/DEVELOPMENT.md`). Underneath:
 
 ```bash
@@ -59,6 +59,7 @@ sudo host/tests/contract/mesh.sh                 # four mesh nodes in network na
 sudo host/tests/contract/mesh-nat.sh             # NAT traversal: hole punching and the relay behind real Linux NAT
 sudo host/tests/contract/multinode.sh            # a worker with its own Docker: placement, mesh registry, replicas, logs/terminal
 sudo host/tests/contract/promote.sh              # the warm standby promoted after the main server dies
+./dev screencast                                 # screen sharing for real: agent, mpv, ffmpeg over netem (Colima VM on a Mac)
 
 cd cockpit
 npm ci && npm run typecheck && npm test && npx vite build
