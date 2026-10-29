@@ -149,19 +149,32 @@ fn error_of(code: u16, body: &str) -> String {
     }
 }
 
-pub async fn open_pulls(cfg: &Config, slug: &str, token: Option<&str>) -> Result<Vec<PullRequest>, String> {
-    let (code, body) = api(
-        cfg,
-        "GET",
-        &format!("/repos/{slug}/pulls?state=open&per_page=50&sort=updated&direction=desc"),
-        token,
-        None,
-    )
-    .await?;
-    if code != 200 {
-        return Err(error_of(code, &body));
+/// Open pull requests, newest first, and whether that is all of them.
+/// Pages of 100, at most 10 (a busy repository's 1000 newest): when the
+/// list may go on, callers must not take a missing pull request as closed.
+pub async fn open_pulls(cfg: &Config, slug: &str, token: Option<&str>) -> Result<(Vec<PullRequest>, bool), String> {
+    const PER_PAGE: usize = 100;
+    let mut out = vec![];
+    for page in 1..=10 {
+        let (code, body) = api(
+            cfg,
+            "GET",
+            &format!("/repos/{slug}/pulls?state=open&per_page={PER_PAGE}&sort=updated&direction=desc&page={page}"),
+            token,
+            None,
+        )
+        .await?;
+        if code != 200 {
+            return Err(error_of(code, &body));
+        }
+        let got = parse_pulls(&body)?;
+        let last = got.len() < PER_PAGE;
+        out.extend(got);
+        if last {
+            return Ok((out, true));
+        }
     }
-    parse_pulls(&body)
+    Ok((out, false))
 }
 
 /// A commit status as GitHub shows it next to a commit or pull request.
@@ -385,6 +398,46 @@ pub async fn compare(cfg: &Config, slug: &str, base: &str, head: &str, token: Op
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn open_pulls_reads_every_page() {
+        use axum::extract::RawQuery;
+        // 130 open pull requests: a full page of 100, then 30.
+        let app = axum::Router::new().fallback(|RawQuery(q): RawQuery| async move {
+            let page: u64 = q
+                .unwrap_or_default()
+                .split('&')
+                .find_map(|kv| kv.strip_prefix("page="))
+                .and_then(|p| p.parse().ok())
+                .unwrap_or(1);
+            let (from, n) = if page == 1 {
+                (1, 100)
+            } else if page == 2 {
+                (101, 30)
+            } else {
+                (0, 0)
+            };
+            let prs: Vec<serde_json::Value> = (from..from + n)
+                .map(|i| {
+                    serde_json::json!({"number": i, "title": "t", "head": {"sha": "abc", "repo": {"full_name": "o/r"}},
+                                       "base": {"sha": "def", "repo": {"full_name": "o/r"}}})
+                })
+                .collect();
+            serde_json::Value::Array(prs).to_string()
+        });
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", l.local_addr().unwrap());
+        tokio::spawn(async move { axum::serve(l, app).await });
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config {
+            github_api: url,
+            run_dir: dir.path().to_path_buf(),
+            ..Config::default()
+        };
+        let (prs, complete) = open_pulls(&cfg, "o/r", None).await.unwrap();
+        assert_eq!(prs.len(), 130, "the 30 past the first page too");
+        assert!(complete);
+    }
 
     #[test]
     fn slugs() {

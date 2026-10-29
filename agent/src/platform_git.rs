@@ -248,7 +248,7 @@ impl PlatformGit {
     }
 
     async fn sync_previews(&self, app: &App, slug: &str, token: Option<&str>) {
-        let open = match github::open_pulls(&self.cfg, slug, token).await {
+        let (open, complete) = match github::open_pulls(&self.cfg, slug, token).await {
             Ok(o) => o,
             Err(e) => {
                 tracing::info!("previews: {}: {e}", app.name);
@@ -263,7 +263,11 @@ impl PlatformGit {
             .into_iter()
             .map(|p| (u64::from(p.pr_number), p.head_sha))
             .collect();
-        let plan = plan_previews(&open, &live, usize::from(app.previews.max));
+        let mut plan = plan_previews(&open, &live, usize::from(app.previews.max));
+        if !complete {
+            // Past the pages read, a live preview's pull request may well be open.
+            plan.remove.retain(|n| open.iter().any(|p| p.number == *n));
+        }
         for n in plan.remove {
             if let Err(e) = self.engine.remove_preview(&app.id, n as u32).await {
                 tracing::warn!("previews: {} #{n}: {e}", app.name);
