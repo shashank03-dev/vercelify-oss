@@ -281,8 +281,12 @@ impl Deployer {
                 if i < 5 || keep.contains(&full) {
                     continue;
                 }
-                self.docker.remove_image(&full).await?;
-                removed += 1;
+                // One image still used by a container must not keep the
+                // older ones on disk.
+                match self.docker.remove_image(&full).await {
+                    Ok(()) => removed += 1,
+                    Err(e) => tracing::warn!("pruning {full}: {e}"),
+                }
             }
         }
         Ok(removed)

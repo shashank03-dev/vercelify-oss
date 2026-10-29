@@ -61,12 +61,9 @@ impl Plan {
     }
 }
 
-/// `2026-10-25 05:00:00 +0000 UTC` (docker ps) → age. Docker writes the
-/// server's own zone (`+0530 IST`), so its name after the offset is ignored.
+/// `2026-10-25 05:00:00 +0000 UTC` (docker ps) → age.
 fn age(created: &str, now: chrono::DateTime<chrono::Utc>) -> Option<Duration> {
-    let stamp = created.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
-    let t = chrono::DateTime::parse_from_str(&stamp, "%Y-%m-%d %H:%M:%S %z").ok()?;
-    (now - t.with_timezone(&chrono::Utc)).to_std().ok()
+    (now - crate::docker::created_at(created)?).to_std().ok()
 }
 
 /// Decide what to do on one server. `wants` = its desired containers;

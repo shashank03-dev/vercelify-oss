@@ -355,31 +355,32 @@ export function slug(s: string): string {
     .replace(/-+$/, "");
 }
 
+/** A domain as the agent stores it (`validate::host`): scheme, trailing
+ * slash and dot dropped, lowercase. */
+export const normalizeDomain = (raw: string) =>
+  raw
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "")
+    .replace(/\.+$/, "");
+
+/** Why the agent would refuse a domain (null: it accepts it). */
+export function domainProblem(raw: string): string | null {
+  const h = normalizeDomain(raw);
+  if (!h) return null;
+  if (h.startsWith("*.")) return "Wildcards are a server setting (Settings → Domain), not an app domain.";
+  const labels = h.split(".");
+  if (h.length > 253 || labels.length < 2) return "Use a full name such as app.example.com.";
+  if (labels.some((l) => l.length > 63)) return "Each part between dots is at most 63 characters.";
+  if (!labels.every((l) => /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(l))) return "Use letters, digits and dashes between the dots.";
+  if (/^\d+$/.test(labels[labels.length - 1]!)) return "That's an IP address; use a name (sslip.io names work).";
+  return null;
+}
+
 export const validName = (s: string) => /^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/.test(s);
 
 /** https or scp-style ssh git URLs (what the agent accepts). */
 export const validRepo = (s: string) =>
   /^https:\/\/[^\s/]+\/\S+$/.test(s.trim()) || /^[\w.-]+@[\w.-]+:[\w./-]+$/.test(s.trim()) || /^ssh:\/\/\S+\/\S+$/.test(s.trim());
 
-/** `.env` text → key/value pairs (same rules as the agent's import). */
-export function parseDotenv(text: string): { key: string; value: string }[] {
-  const out: { key: string; value: string }[] = [];
-  for (const raw of text.split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith("#")) continue;
-    const l = line.startsWith("export ") ? line.slice(7) : line;
-    const i = l.indexOf("=");
-    if (i < 1) continue;
-    const key = l.slice(0, i).trim();
-    let value = l.slice(i + 1).trim();
-    if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
-      value = value.slice(1, -1).replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\\\/g, "\\");
-    } else if (value.length >= 2 && value.startsWith("'") && value.endsWith("'")) {
-      value = value.slice(1, -1);
-    } else {
-      value = value.split(" #")[0]!.trim();
-    }
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) out.push({ key, value });
-  }
-  return out;
-}

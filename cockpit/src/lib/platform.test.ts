@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { App } from "../types";
 import { isWorker } from "./api";
-import { appState, fromBase64, isPlatform, listedApp, parseDotenv, parseLines, parseLogLines, slug, toBase64, validName, validRepo } from "./platform";
+import { appState, domainProblem, fromBase64, isPlatform, listedApp, normalizeDomain, parseLines, parseLogLines, slug, toBase64, validName, validRepo } from "./platform";
 
 const app = (over: Partial<App> = {}): App => ({
   id: "app_1",
@@ -63,13 +63,15 @@ describe("platform helpers", () => {
     expect(validRepo("github.com/me/app")).toBe(false);
   });
 
-  it("parses .env files and log lines", () => {
-    expect(parseDotenv('# c\nexport A=1\nB="x\\ny"\nC=\'q\'\nD=v # note\nbad line\n1X=2')).toEqual([
-      { key: "A", value: "1" },
-      { key: "B", value: "x\ny" },
-      { key: "C", value: "q" },
-      { key: "D", value: "v" },
-    ]);
+  it("accepts the domains the agent accepts", () => {
+    expect(normalizeDomain(" https://Blog.Example.com./ ")).toBe("blog.example.com");
+    for (const ok of ["app.example.com", "a.xn--p1ai", "app.10.77.0.1.sslip.io"]) expect(domainProblem(ok)).toBeNull();
+    for (const bad of ["*.example.com", "localhost", "10.0.0.1", "a_b.example.com", "-a.example.com", `${"a".repeat(64)}.example.com`]) {
+      expect(domainProblem(bad)).not.toBeNull();
+    }
+  });
+
+  it("parses log lines", () => {
     const line = { seq: 1, at: "t", stream: "info", text: "hi" };
     expect(parseLogLines(`${JSON.stringify(line)}\n{broken\n`)).toEqual([line]);
     expect(parseLogLines([line])).toEqual([line]);

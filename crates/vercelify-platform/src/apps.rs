@@ -263,7 +263,7 @@ fn check_runtime(r: &AppRuntime) -> Result<()> {
     if r.memory_mb.is_some_and(|m| !(16..=262_144).contains(&m)) {
         return Err(Error::Invalid("memory must be between 16 MB and 256 GB".into()));
     }
-    if r.cpus.is_some_and(|c| !(c > 0.0 && c <= 64.0)) {
+    if r.cpus.is_some_and(|c| !(0.01..=64.0).contains(&c)) {
         return Err(Error::Invalid("cpus must be between 0.01 and 64".into()));
     }
     if let Some(h) = &r.health {
@@ -290,7 +290,11 @@ fn check_runtime(r: &AppRuntime) -> Result<()> {
         }
     }
     if let Some(s) = &r.service {
-        if !valid_name(s) && !s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+        let compose_name = !s.is_empty()
+            && s.len() <= 63
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-' || c == '.');
+        if !valid_name(s) && !compose_name {
             return Err(Error::Invalid(format!("`{s}` is not a compose service name")));
         }
     }
@@ -410,8 +414,8 @@ pub fn patch(c: &Connection, id: &str, p: &AppPatch) -> Result<App> {
         let node = check_node(c, Some(n))?;
         // Volumes live on the server the app runs on (design §8.3).
         let before = get(c, id)?;
+        // Unpinning ("any server") counts: the next deploy could land elsewhere.
         if before.node_id.is_some()
-            && node.is_some()
             && node != before.node_id
             && before.current_deployment_id.is_some()
             && !crate::volumes::list(c, vercelify_core::platform::VolumeOwner::App, id)?.is_empty()
@@ -511,14 +515,20 @@ pub fn add_domain(c: &Connection, app_id: &str, req: &DomainRequest) -> Result<A
 }
 
 pub fn remove_domain(c: &Connection, app_id: &str, host_or_id: &str) -> Result<()> {
-    let host = host_or_id.trim().to_ascii_lowercase();
-    let n = c.execute(
-        "DELETE FROM app_domains WHERE app_id = ?1 AND (id = ?2 OR host = ?2)",
+    let key = host_or_id.trim();
+    // Removed by id, the redirects below still need the host.
+    let host: String = c
+        .query_row(
+            "SELECT host FROM app_domains WHERE app_id = ?1 AND (id = ?2 OR host = ?3)",
+            params![app_id, key, key.to_ascii_lowercase()],
+            |r| r.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| Error::not_found(format!("domain {host_or_id}")))?;
+    c.execute(
+        "DELETE FROM app_domains WHERE app_id = ?1 AND host = ?2",
         params![app_id, host],
     )?;
-    if n == 0 {
-        return Err(Error::not_found(format!("domain {host_or_id}")));
-    }
     // Keep one primary while there are domains left.
     c.execute(
         "UPDATE app_domains SET is_primary = 1 WHERE id = (
@@ -801,6 +811,47 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn an_app_with_volumes_stays_on_its_server() {
+        use vercelify_core::platform::AppVolumeRequest;
+        let s = Store::open_in_memory().unwrap();
+        let main = s
+            .tx(|c| crate::nodes::ensure_main(c, "main", "http://127.0.0.1:7420", "x86_64"))
+            .unwrap();
+        let a = s.tx(|c| create(c, &git_app("blog"))).unwrap();
+        s.tx(|c| {
+            crate::volumes::create(
+                c,
+                vercelify_core::platform::VolumeOwner::App,
+                &a.id,
+                &AppVolumeRequest {
+                    name: "data".into(),
+                    mount_path: "/data".into(),
+                    tier: None,
+                },
+            )?;
+            // Deployed and pinned, as the engine leaves it.
+            c.execute(
+                "UPDATE apps SET node_id = ?2, current_deployment_id = 'dep_x' WHERE id = ?1",
+                params![a.id, main.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let unpin = AppPatch {
+            node_id: Some(String::new()),
+            ..AppPatch::default()
+        };
+        assert!(matches!(s.tx(|c| patch(c, &a.id, &unpin)), Err(Error::Conflict(_))));
+        assert_eq!(s.with(|c| get(c, &a.id)).unwrap().node_id, Some(main.id.clone()));
+        // Choosing the server it is already on is fine.
+        let same = AppPatch {
+            node_id: Some(main.id.clone()),
+            ..AppPatch::default()
+        };
+        assert!(s.tx(|c| patch(c, &a.id, &same)).is_ok());
+    }
+
+    #[test]
     fn domains_keep_one_primary() {
         let s = Store::open_in_memory().unwrap();
         let a = s.tx(|c| create(c, &git_app("blog"))).unwrap();
@@ -844,6 +895,13 @@ pub(crate) mod tests {
         s.tx(|c| remove_domain(c, &a.id, "blog.example.com")).unwrap();
         let app = s.with(|c| get(c, &a.id)).unwrap();
         assert!(app.domains.is_empty(), "the redirect to the removed host went with it");
+
+        // By id, too.
+        let target = add("site.example.com", None, None).unwrap();
+        add("www.example.com", None, Some("site.example.com")).unwrap();
+        s.tx(|c| remove_domain(c, &a.id, &target.id)).unwrap();
+        let app = s.with(|c| get(c, &a.id)).unwrap();
+        assert!(app.domains.is_empty(), "the redirect went with a domain removed by id");
         assert!(matches!(
             s.tx(|c| remove_domain(c, &a.id, "gone.example.com")),
             Err(Error::NotFound(_))

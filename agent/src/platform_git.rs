@@ -23,6 +23,10 @@ pub struct PlatformGit {
     engine: Arc<Engine>,
     projects: Arc<crate::projects::Projects>,
     git: Git,
+    /// One check per app at a time: a webhook landing during a poll (or
+    /// GitHub's push and pull_request events together) must not deploy the
+    /// same commit twice.
+    checking: std::sync::Mutex<std::collections::HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
 }
 
 /// `owner/repo` of a GitHub repository URL (https or scp-style ssh).
@@ -49,6 +53,7 @@ impl PlatformGit {
             engine,
             projects,
             git,
+            checking: Default::default(),
         })
     }
 
@@ -104,6 +109,24 @@ impl PlatformGit {
 
     /// Check one app now: deploy a new head, sync previews.
     pub async fn check(&self, app: &App) -> Result<GitWatchStatus, String> {
+        let lock = self
+            .checking
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .entry(app.id.clone())
+            .or_default()
+            .clone();
+        let _held = lock.lock().await;
+        // The app may have changed (or gone) while another check ran.
+        let app = self
+            .engine
+            .store
+            .with(|c| apps::get(c, &app.id))
+            .map_err(|e| e.to_string())?;
+        self.check_now(&app).await
+    }
+
+    async fn check_now(&self, app: &App) -> Result<GitWatchStatus, String> {
         let w = self
             .engine
             .store

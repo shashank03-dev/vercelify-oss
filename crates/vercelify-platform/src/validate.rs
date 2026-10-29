@@ -9,12 +9,13 @@ fn invalid<T>(msg: impl Into<String>) -> Result<T> {
 /// A hostname for a domain: lowercase labels, at least two of them, no
 /// wildcards (wildcards are a server setting, not an app domain).
 pub fn host(raw: &str) -> Result<String> {
-    let h = raw.trim().trim_end_matches('.').to_ascii_lowercase();
+    let h = raw.trim().to_ascii_lowercase();
     let h = h
         .strip_prefix("https://")
         .or_else(|| h.strip_prefix("http://"))
         .unwrap_or(&h)
         .trim_end_matches('/')
+        .trim_end_matches('.')
         .to_string();
     let labels: Vec<&str> = h.split('.').collect();
     let label_ok = |l: &str| {
@@ -73,13 +74,19 @@ pub fn repository(r: &str) -> Result<String> {
         s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"-._~/:@%+".contains(&b))
     };
+    // The host part (after any user@) must not read as an ssh option.
+    let host_ok = |rest: &str| {
+        let authority = rest.split('/').next().unwrap_or("");
+        let host = authority.rsplit('@').next().unwrap_or("");
+        !host.is_empty() && !host.starts_with('-') && !authority.starts_with('-')
+    };
     let valid = if let Some(rest) = r.strip_prefix("https://") {
-        rest.contains('/') && !rest.starts_with('/') && ok_chars(rest)
+        rest.contains('/') && host_ok(rest) && ok_chars(rest)
     } else if let Some(rest) = r.strip_prefix("ssh://") {
-        rest.contains('/') && ok_chars(rest)
+        rest.contains('/') && host_ok(rest) && ok_chars(rest)
     } else if let Some((user_host, path)) = r.split_once(':') {
         user_host.contains('@')
-            && !user_host.starts_with('-')
+            && host_ok(user_host)
             && !path.is_empty()
             && !path.starts_with('/')
             && ok_chars(user_host)
@@ -104,8 +111,12 @@ pub fn branch(b: &str) -> Result<()> {
         && !b.starts_with('/')
         && !b.ends_with('/')
         && !b.ends_with(".lock")
+        && !b.ends_with('.')
         && !b.contains("..")
+        && !b.contains("//")
         && !b.contains("@{")
+        // git check-ref-format: no component starts with a dot.
+        && !b.split('/').any(|c| c.starts_with('.'))
         && b.bytes().all(|c| c.is_ascii_alphanumeric() || b"-._/".contains(&c));
     if ok {
         Ok(())
@@ -156,18 +167,21 @@ pub fn repo_path(what: &str, p: &str) -> Result<()> {
 
 /// Where a volume is mounted in a container.
 pub fn mount_path(p: &str) -> Result<()> {
+    // Docker cleans `//proc/./x` to `/proc/x`: judge the path it will use.
+    let segs: Vec<&str> = p.split('/').filter(|s| !s.is_empty() && *s != ".").collect();
+    let clean = format!("/{}", segs.join("/"));
     let ok = p.starts_with('/')
-        && p.len() > 1
+        && !segs.is_empty()
         && p.len() <= 400
-        && !p.split('/').any(|seg| seg == "..")
+        && !segs.contains(&"..")
         && !p.contains([':', ',', '\0', '\n'])
         && !matches!(
-            p.trim_end_matches('/'),
+            clean.as_str(),
             "/proc" | "/sys" | "/dev" | "/etc" | "/usr" | "/bin" | "/lib"
         )
         // The kernel's own trees: runc refuses a mount inside /proc at deploy
         // time, and sysfs is no place for app data.
-        && !["/proc/", "/sys/"].iter().any(|t| p.starts_with(t));
+        && !["/proc/", "/sys/"].iter().any(|t| clean.starts_with(t));
     if ok {
         Ok(())
     } else {
@@ -191,6 +205,7 @@ mod tests {
     fn hosts() {
         assert_eq!(host("Blog.Example.com.").unwrap(), "blog.example.com");
         assert_eq!(host("https://blog.example.com/").unwrap(), "blog.example.com");
+        assert_eq!(host("https://blog.example.com./").unwrap(), "blog.example.com");
         assert_eq!(host("app.10.77.0.1.sslip.io").unwrap(), "app.10.77.0.1.sslip.io");
         for bad in [
             "localhost",
@@ -235,6 +250,9 @@ mod tests {
             "github.com:me/blog",
             "git@github.com:/etc",
             "https://github.com/me/blog; rm -rf /",
+            "ssh://-oProxyCommand/x",
+            "ssh://git@-oProxyCommand/x",
+            "https://-x/me/blog",
         ] {
             assert!(repository(bad).is_err(), "{bad}");
         }
@@ -244,7 +262,9 @@ mod tests {
     fn refs_images_paths() {
         branch("main").unwrap();
         branch("feature/x-1").unwrap();
-        for bad in ["-x", "a..b", "a b", "x.lock", "a@{1}", "/a"] {
+        for bad in [
+            "-x", "a..b", "a b", "x.lock", "a@{1}", "/a", "a//b", "feat/.x", ".x", "x.",
+        ] {
             assert!(branch(bad).is_err(), "{bad}");
         }
         commit_sha("abc1234").unwrap();
@@ -257,7 +277,21 @@ mod tests {
         assert!(repo_path("context", "/abs").is_err());
         mount_path("/data").unwrap();
         mount_path("/etc/nginx/conf.d").unwrap();
-        for bad in ["data", "/", "/etc", "/a:/b", "/x/../etc", "/proc/x", "/sys/fs/cgroup"] {
+        mount_path("/var/lib/data/").unwrap();
+        for bad in [
+            "data",
+            "/",
+            "//",
+            "/./",
+            "/etc",
+            "/a:/b",
+            "/x/../etc",
+            "/proc/x",
+            "//proc/x",
+            "/./sys/fs",
+            "/etc/",
+            "/sys/fs/cgroup",
+        ] {
             assert!(mount_path(bad).is_err(), "{bad}");
         }
     }

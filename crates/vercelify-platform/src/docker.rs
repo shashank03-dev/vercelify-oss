@@ -417,12 +417,18 @@ impl Docker {
             })
             .filter(|(t, _, _)| t != "<none>")
             .collect();
-        rows.sort_by(|a, b| b.2.cmp(&a.2));
+        // Docker prints local time; around a daylight-saving change the
+        // strings sort wrongly, so compare instants (text as a fallback).
+        rows.sort_by(|a, b| match (created_at(&a.2), created_at(&b.2)) {
+            (Some(x), Some(y)) => y.cmp(&x),
+            _ => b.2.cmp(&a.2),
+        });
         Ok(rows.into_iter().map(|(t, id, _)| (t, id)).collect())
     }
 
     pub async fn remove_image(&self, image: &str) -> Result<()> {
-        let _ = self.run(&proc::args(&["image", "rm", image]), quick()).await?;
+        self.ok(&proc::args(&["image", "rm", image]), quick(), "docker image rm")
+            .await?;
         Ok(())
     }
 
@@ -479,6 +485,15 @@ fn by_time(stdout: &str, stderr: &str) -> String {
         out.push('\n');
     }
     out
+}
+
+/// `2026-10-25 05:00:00 +0530 IST` (docker ps / image ls) → the instant.
+/// Docker writes the server's own zone, so the name after the offset is
+/// ignored.
+pub fn created_at(created: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let stamp = created.split_whitespace().take(3).collect::<Vec<_>>().join(" ");
+    let t = chrono::DateTime::parse_from_str(&stamp, "%Y-%m-%d %H:%M:%S %z").ok()?;
+    Some(t.with_timezone(&chrono::Utc))
 }
 
 #[cfg(test)]
