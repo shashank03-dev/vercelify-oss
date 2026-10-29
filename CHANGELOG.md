@@ -16,6 +16,22 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Scheduled tasks of apps that run on a worker ran on the main server and always
+  failed; they run where the app runs now (update workers too). A task or backup still
+  running is not started again under itself.
+- `.env` import reads multi-line values (PEM keys), comments after quoted values and the
+  file `vfy env pull` writes; the app names the line it would refuse before importing.
+- Domains say "HTTPS" once their certificate is issued, instead of "Getting a
+  certificate" for good.
+- Previews of pull requests past GitHub's first 50 were removed as if closed; turning
+  previews off now removes the running ones.
+- A webhook arriving during a check no longer deploys the same commit twice.
+- A build log past 16 MiB kept the failure reason; `vfy deploy` follows a dropped log
+  stream again instead of quitting mid-build.
+- Repositories that declare pnpm, Yarn or Bun without a lockfile build again;
+  `engines.node` upper bounds are honoured.
+- An app with volumes can't be set to "any server" (its data would stay behind).
+- `install.sh` runs nothing if the download is cut short, and cleans up after itself.
 - On a Linux machine that is also a Vercelify server, `./dev agent` and the test suites
   that run an engine of their own (live e2e, routing, multinode, promote, the Docker
   Rust tests) replaced the server's proxy and removed its apps' containers. They now
