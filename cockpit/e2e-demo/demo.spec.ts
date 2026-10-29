@@ -362,12 +362,19 @@ test("platform engine: deploy with a live log, roll back, variables, domains, da
   await page.getByTestId("env-add").click();
   await expect(page.getByTestId("env-API_URL")).toBeVisible();
   await page.getByTestId("env-import").click();
+  // a line the agent would refuse is named before anything is sent
+  await page.getByTestId("env-import-text").fill("A=1\nnot a variable");
+  await expect(page.getByTestId("env-import-error")).toContainText("line 2: expected KEY=value");
+  await expect(page.getByTestId("env-import-run")).toBeDisabled();
   await page.getByTestId("env-import-text").fill("NODE_ENV=production\nexport FLAG=1\n");
   await page.getByTestId("env-import-run").click();
   await expect(page.getByTestId("env-FLAG")).toBeVisible();
 
   // a custom domain gets its certificate
   await page.getByTestId("tab-domains").click();
+  await page.getByTestId("domain-input").fill("*.example.com");
+  await expect(page.getByTestId("domain-problem")).toContainText("Wildcards");
+  await expect(page.getByTestId("domain-add")).toBeDisabled();
   await page.getByTestId("domain-input").fill("notes.example.com");
   await page.getByTestId("domain-add").click();
   await expect(page.getByTestId("domain-notes.example.com")).toContainText("HTTPS", { timeout: 15_000 });
