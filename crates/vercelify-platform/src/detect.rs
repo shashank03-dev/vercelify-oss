@@ -294,10 +294,15 @@ impl Pm {
         match self {
             Pm::Npm if exists(dir, "package-lock.json") || exists(dir, "npm-shrinkwrap.json") => "npm ci".into(),
             Pm::Npm => "npm install".into(),
-            Pm::Pnpm => "pnpm install --frozen-lockfile".into(),
+            // Frozen installs fail outright without a lockfile (a repo that
+            // only declares `packageManager`): install from package.json.
+            Pm::Pnpm if exists(dir, "pnpm-lock.yaml") => "pnpm install --frozen-lockfile".into(),
+            Pm::Pnpm => "pnpm install".into(),
+            Pm::Yarn if !exists(dir, "yarn.lock") => "yarn install".into(),
             Pm::Yarn if exists(dir, ".yarnrc.yml") => "yarn install --immutable".into(),
             Pm::Yarn => "yarn install --frozen-lockfile".into(),
-            Pm::Bun => "bun install --frozen-lockfile".into(),
+            Pm::Bun if exists(dir, "bun.lockb") || exists(dir, "bun.lock") => "bun install --frozen-lockfile".into(),
+            Pm::Bun => "bun install".into(),
         }
     }
 
@@ -352,11 +357,23 @@ fn node_major(dir: &Path, pkg: &Value) -> u32 {
         .split(|c: char| !c.is_ascii_digit())
         .find(|s| !s.is_empty())
         .and_then(|s| s.parse().ok());
+    // An upper bound (">=18 <21", ">=18 <=20"): stay under it.
+    let below = |m: u32| match w.split_once('<') {
+        Some((_, rest)) => {
+            let inclusive = rest.starts_with('=');
+            let n: Option<u32> = rest
+                .split(|c: char| !c.is_ascii_digit())
+                .find(|s| !s.is_empty())
+                .and_then(|s| s.parse().ok());
+            n.is_none_or(|n| if inclusive { m <= n } else { m < n })
+        }
+        None => true,
+    };
     match first {
         Some(n) if w.contains(">=") || w.starts_with('>') => NODE_MAJORS
             .iter()
             .copied()
-            .filter(|m| *m >= n)
+            .filter(|m| *m >= n && below(*m))
             .max()
             .unwrap_or(DEFAULT_NODE),
         Some(n) => NODE_MAJORS.iter().copied().find(|m| *m == n).unwrap_or_else(|| {
@@ -493,7 +510,8 @@ fn node(dir: &Path, b: &AppBuild, vercel_framework: Option<&str>) -> Result<Buil
     df.push_str(&format!("FROM node:{major}-slim AS build\nWORKDIR /app\n"));
     df.push_str("ENV NEXT_TELEMETRY_DISABLED=1 ASTRO_TELEMETRY_DISABLED=1 NUXT_TELEMETRY_DISABLED=1 CI=1\n");
     if matches!(pm, Pm::Pnpm | Pm::Yarn) {
-        df.push_str("RUN corepack enable\n");
+        // No "download pnpm? [Y/n]" question can stop a build.
+        df.push_str("ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0\nRUN corepack enable\n");
     }
     if pm == Pm::Bun {
         df.push_str("RUN npm install -g bun@1\n");
@@ -1142,6 +1160,8 @@ mod tests {
         assert_eq!(v("20.x", None), 20);
         assert_eq!(v("^18.17", None), 18);
         assert_eq!(v(">=18", None), 24);
+        assert_eq!(v(">=18 <21", None), 20, "under the upper bound");
+        assert_eq!(v(">=18 <=22", None), 22);
         assert_eq!(v("", Some("v20.11.0\n")), 20);
         assert_eq!(v("", Some("lts/*")), 22);
         assert_eq!(v("16", None), 18, "older than supported: the oldest supported");
@@ -1195,6 +1215,28 @@ mod tests {
         let d = repo(&[("README.md", "")]);
         let e = plan(d.path(), AppKind::Git, &AppSource::default(), &AppBuild::default()).unwrap_err();
         assert!(e.message().contains("couldn't tell how to build"), "{e}");
+    }
+
+    #[test]
+    fn a_declared_package_manager_without_a_lockfile_still_installs() {
+        let pkg = |pm: &str| format!(r#"{{"packageManager":"{pm}","scripts":{{"start":"node s.js"}}}}"#);
+        for (pm, want) in [
+            ("pnpm@9.1.0", "pnpm install'"),
+            ("yarn@4.1.0", "yarn install'"),
+            ("bun@1.1.0", "bun install'"),
+        ] {
+            let pkg = pkg(pm);
+            let d = repo(&[("package.json", pkg.as_str())]);
+            let df = dockerfile(&auto(&d)).to_string();
+            assert!(df.contains(want), "{pm}: {df}");
+            assert!(!df.contains("frozen") && !df.contains("immutable"), "{pm}: {df}");
+        }
+        let d = repo(&[
+            ("package.json", r#"{"packageManager":"pnpm@9","scripts":{"start":"x"}}"#),
+            ("pnpm-lock.yaml", ""),
+        ]);
+        let df = dockerfile(&auto(&d)).to_string();
+        assert!(df.contains("pnpm install --frozen-lockfile") && df.contains("COREPACK_ENABLE_DOWNLOAD_PROMPT=0"));
     }
 
     #[test]

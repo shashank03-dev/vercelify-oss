@@ -65,6 +65,18 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   [[ "$output" == *"restarted blog (2 container(s))"* ]]
 }
 
+@test "deploy follows the log again when the stream drops mid-build" {
+  touch "$T/flaky"
+  run "$VFY" deploy blog
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"dropped; following it again"* ]]
+  [[ "$output" == *"✓ blog is live"* ]]
+  # Each line once, though the log was read twice.
+  [ "$(grep -c 'Detected Next.js 15' <<<"$output")" -eq 1 ]
+  [[ "$output" == *"Deployment is live"* ]]
+  [ "$(grep -c 'deployments/dpl_5/logs' "$T/requests.log")" -eq 2 ]
+}
+
 @test "rollback by commit or deployment number" {
   run "$VFY" rollback blog 1234
   [ "$status" -eq 0 ]

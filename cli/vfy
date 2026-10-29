@@ -328,11 +328,11 @@ why_answer() {
 papi() { api agent "$1" "/v1/platform$2" "${3:-}"; }
 
 # Follow a JSON-lines stream of the platform API (token on stdin).
-pstream() {
+pstream_try() {
   printf 'header = "Authorization: Bearer %s"\n' "$(field agent_token)" |
-    xcurl -sS -N -K - --max-time 86400 "$(field agent_url)/v1/platform$1" ||
-    die "the stream from $(field hostname) ended early"
+    xcurl -sS -N -K - --max-time 86400 "$(field agent_url)/v1/platform$1"
 }
+pstream() { pstream_try "$1" || die "the stream from $(field hostname) ended early"; }
 
 # App → "health<TAB>label" (same rules as the app's list).
 pstate_jq='
@@ -366,12 +366,31 @@ platform_cmd() {
         printf '%s`vfy apps` shows when it is live%s\n' "$D" "$N"
         return
       fi
-      pstream "/deployments/$id/logs?follow=true" | jq --unbuffered -r "$log_text"
-      d=$(papi GET "/deployments/$id")
-      st=$(jq -r .status <<<"$d")
+      # A dropped connection (Wi-Fi, the mesh) doesn't end the deployment:
+      # follow it again, skipping the lines already shown.
+      local seen=-1 tries=0 seqf sq text
+      seqf=$(mktemp "${TMPDIR:-/tmp}/vfy-seq.XXXXXX")
+      while :; do
+        { pstream_try "/deployments/$id/logs?follow=true" || true; } |
+          jq --unbuffered -r --argjson s "$seen" 'select(.seq > $s) | "\(.seq)\t" + ('"$log_text"' | gsub("\n"; " "))' |
+          while IFS=$'\t' read -r sq text; do
+            printf '%s\n' "$text"
+            printf '%s' "$sq" >"$seqf"
+          done
+        seen=$(cat "$seqf" 2>/dev/null || true)
+        [[ "$seen" =~ ^[0-9]+$ ]] || seen=-1
+        d=$(papi GET "/deployments/$id")
+        st=$(jq -r .status <<<"$d")
+        case "$st" in queued|building|deploying) ;; *) break ;; esac
+        (( ++tries <= 5 )) || break
+        printf '%sthe log stream from %s dropped; following it again…%s\n' "$D" "$(field hostname)" "$N" >&2
+        sleep 2
+      done
+      rm -f -- "$seqf"
       case "$st" in
         healthy) printf '%s✓%s %s is live%s\n' "$G" "$N" "$app" "$(papi GET "/apps/$app" | jq -r 'if .url then " at \(.url)" else "" end')" ;;
         failed) die "the deployment failed: $(jq -r .error <<<"$d") (vfy why $app)" ;;
+        queued|building|deploying) die "lost the log stream; the deployment is still $st (vfy apps shows when it is live)" ;;
         *) die "the deployment ended $st" ;;
       esac
       ;;
