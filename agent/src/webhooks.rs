@@ -134,6 +134,23 @@ fn allow(source: &str) -> bool {
     e.1 <= 60
 }
 
+/// Unsigned or wrongly signed requests: at most 120 a minute in all. Each
+/// one opens every webhook secret and hashes the body once per source, and
+/// the tunnel puts this endpoint on the internet.
+fn allow_failure(record: bool) -> bool {
+    static FAILED: Mutex<Option<(Instant, u32)>> = Mutex::new(None);
+    let mut f = FAILED.lock().unwrap_or_else(|e| e.into_inner());
+    let now = Instant::now();
+    let (start, n) = f.get_or_insert((now, 0));
+    if now.duration_since(*start) >= Duration::from_secs(60) {
+        (*start, *n) = (now, 0);
+    }
+    if record {
+        *n += 1;
+    }
+    *n < 120
+}
+
 fn reply(status: StatusCode, msg: &str) -> Response {
     (status, crate::json::Json(serde_json::json!({ "message": msg }))).into_response()
 }
@@ -160,6 +177,9 @@ async fn webhook(
     let wanted = parts.next().filter(|s| !s.is_empty()).map(String::from);
     if body.len() > 2 * 1024 * 1024 {
         return reply(StatusCode::PAYLOAD_TOO_LARGE, "payload too large");
+    }
+    if !allow_failure(false) {
+        return reply(StatusCode::TOO_MANY_REQUESTS, "too many bad signatures; slow down");
     }
     // The sources this could be from: the one named, or every source of
     // that provider with a webhook secret (a GitHub App's URL names none).
@@ -188,6 +208,7 @@ async fn webhook(
         .find(|(_, secret)| verify(provider, &headers, &body, secret))
         .map(|(id, _)| id.clone())
     else {
+        allow_failure(true);
         return reply(
             StatusCode::UNAUTHORIZED,
             "bad signature (or no git source has this webhook)",

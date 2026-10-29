@@ -73,15 +73,29 @@ impl MasterKey {
                     fs::create_dir_all(dir)?;
                 }
                 let key = Zeroizing::new(random::<KEY_LEN>());
-                // create_new: two processes starting at once can't both win
+                // Written in full to a temporary file, then linked into place:
+                // a power cut can't leave an empty key, and two processes
+                // starting at once can't both win (link fails if it exists)
                 // and leave values sealed with a key that was overwritten.
-                let mut f = match OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
-                    Ok(f) => f,
+                let tmp = path.with_extension(format!("tmp.{}", std::process::id()));
+                let _ = fs::remove_file(&tmp);
+                let written = (|| -> std::io::Result<()> {
+                    let mut f = OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+                    f.write_all(&*key)?;
+                    f.sync_all()
+                })();
+                let linked = written.and_then(|()| fs::hard_link(&tmp, path));
+                let _ = fs::remove_file(&tmp);
+                match linked {
+                    Ok(()) => {}
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => return Self::load_or_create(path),
                     Err(e) => return Err(e.into()),
-                };
-                f.write_all(&*key)?;
-                f.sync_all()?;
+                }
+                if let Some(dir) = path.parent() {
+                    if let Ok(d) = fs::File::open(dir) {
+                        let _ = d.sync_all();
+                    }
+                }
                 tracing::info!("created the master key {}", path.display());
                 Self::from_bytes(&*key)
             }

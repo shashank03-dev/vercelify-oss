@@ -223,30 +223,103 @@ pub fn resolve_for_deploy(
 
 /// Parse a `.env` file: `KEY=value`, `export KEY=value`, quotes, comments.
 pub fn parse_dotenv(raw: &str) -> Result<Vec<(String, String)>> {
+    let raw = raw.strip_prefix('\u{feff}').unwrap_or(raw);
+    let lines: Vec<&str> = raw.lines().collect();
     let mut out = vec![];
-    for (n, line) in raw.lines().enumerate() {
-        let line = line.trim();
+    let mut i = 0;
+    while i < lines.len() {
+        let n = i + 1;
+        let line = lines[i].trim();
+        i += 1;
         if line.is_empty() || line.starts_with('#') {
             continue;
         }
-        let line = line.strip_prefix("export ").unwrap_or(line);
-        let (k, v) = line
-            .split_once('=')
-            .ok_or_else(|| Error::Invalid(format!("line {}: expected KEY=value", n + 1)))?;
+        let bad = |what: &str| Error::Invalid(format!("line {n}: {what}"));
+        let line = line
+            .strip_prefix("export")
+            .filter(|l| l.starts_with([' ', '\t']))
+            .unwrap_or(line);
+        let (k, v) = line.split_once('=').ok_or_else(|| bad("expected KEY=value"))?;
         let k = k.trim();
-        validate::env_key(k).map_err(|e| Error::Invalid(format!("line {}: {e}", n + 1)))?;
-        let v = v.trim();
-        let v = if let Some(q) = v.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
-            q.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\")
-        } else if let Some(q) = v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
-            q.to_string()
-        } else {
-            // Unquoted: a ` #` starts a comment.
-            v.split(" #").next().unwrap_or("").trim().to_string()
+        validate::env_key(k).map_err(|e| bad(&e.to_string()))?;
+        let v = v.trim_start();
+        let value = match v.chars().next() {
+            Some(q @ ('"' | '\'' | '`')) => {
+                // A quoted value may span lines (PEM keys) and be followed
+                // by a comment.
+                let mut body = v[1..].to_string();
+                let close = loop {
+                    if let Some(at) = closing_quote(&body, q) {
+                        break at;
+                    }
+                    let next = lines
+                        .get(i)
+                        .ok_or_else(|| bad(&format!("the {q} quote is never closed")))?;
+                    body.push('\n');
+                    body.push_str(next);
+                    i += 1;
+                };
+                let rest = body[close + 1..].trim();
+                if !rest.is_empty() && !rest.starts_with('#') {
+                    return Err(bad(&format!("unexpected `{rest}` after the closing quote")));
+                }
+                let inner = &body[..close];
+                if q == '"' {
+                    unescape(inner)
+                } else {
+                    inner.to_string()
+                }
+            }
+            // Unquoted: a whitespace-preceded `#` starts a comment.
+            _ => {
+                let end = v
+                    .char_indices()
+                    .find(|&(at, c)| c == '#' && (at == 0 || v[..at].ends_with([' ', '\t'])))
+                    .map_or(v.len(), |(at, _)| at);
+                v[..end].trim().to_string()
+            }
         };
-        out.push((k.to_string(), v));
+        out.push((k.to_string(), value));
     }
     Ok(out)
+}
+
+/// Where the closing quote is (a backslash escapes it inside "…").
+fn closing_quote(s: &str, q: char) -> Option<usize> {
+    let mut escaped = false;
+    for (at, c) in s.char_indices() {
+        match c {
+            _ if escaped => escaped = false,
+            '\\' if q == '"' => escaped = true,
+            c if c == q => return Some(at),
+            _ => {}
+        }
+    }
+    None
+}
+
+/// The escapes dotenv files use inside double quotes.
+fn unescape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some(e @ ('"' | '\\' | '$')) => out.push(e),
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -421,6 +494,29 @@ mod tests {
             ]
         );
         assert!(parse_dotenv("NOEQUALS").is_err());
+        // What real files hold: a BOM, a multi-line key, a comment after a
+        // quoted value, an escaped backslash, a # inside a value.
+        let parsed = parse_dotenv(
+            "\u{feff}KEY=\"-----BEGIN KEY-----\nabc\n-----END KEY-----\"\nQ=\"v\" # note\nS=\"a\\\\nb \\\"q\\\"\"\nURL=http://x/#frag\nexport\tT='x y'\r\n",
+        )
+        .unwrap();
+        assert_eq!(
+            parsed,
+            [
+                ("KEY".into(), "-----BEGIN KEY-----\nabc\n-----END KEY-----".into()),
+                ("Q".into(), "v".into()),
+                ("S".into(), "a\\nb \"q\"".into()),
+                ("URL".into(), "http://x/#frag".into()),
+                ("T".into(), "x y".into()),
+            ]
+        );
+        assert!(parse_dotenv("A=\"never closed\nB=1")
+            .unwrap_err()
+            .to_string()
+            .contains("line 1"));
+        assert!(parse_dotenv("A=\"v\" junk").is_err());
+        // A variable called `exporter` is not an `export` line.
+        assert_eq!(parse_dotenv("exporter=1").unwrap(), [("exporter".into(), "1".into())]);
         assert!(parse_dotenv("1X=y").is_err());
     }
 }

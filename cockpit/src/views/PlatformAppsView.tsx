@@ -71,10 +71,12 @@ import { hasCap } from "../lib/caps";
 import { useLive, useLiveTopic } from "../lib/live";
 import { useNav } from "../lib/nav";
 import { openExternal } from "../lib/open";
+import { ENV_KEY, readDotenv } from "../lib/env";
 import {
   appState,
   deploymentHealth,
-  parseDotenv,
+  domainProblem,
+  normalizeDomain,
   platformOn,
   slug,
   STATUS_LABEL,
@@ -933,8 +935,8 @@ function EnvTab({ app, client }: { app: App; client: PlatformClient }) {
   const [build, setBuild] = useState(false);
   const [importing, setImporting] = useState(false);
   const [dotenv, setDotenv] = useState("");
-  const keyOk = /^[A-Za-z_][A-Za-z0-9_]*$/.test(key);
-  const parsed = parseDotenv(dotenv);
+  const keyOk = ENV_KEY.test(key);
+  const { vars: parsed, error: parseError } = readDotenv(dotenv);
 
   async function add() {
     if (await act("add", () => client.putEnv(app.id, { vars: [{ key, value, secret, build }], replace: false }), `Saved ${key}. Deploy to use it.`)) {
@@ -1025,7 +1027,15 @@ function EnvTab({ app, client }: { app: App; client: PlatformClient }) {
             className="w-full rounded-lg border border-line-strong bg-bg p-2.5 font-mono text-[12px] text-fg outline-none focus:border-accent/60"
             data-testid="env-import-text"
           />
-          <p className="text-xs text-fg-dim">{parsed.length} variable{parsed.length === 1 ? "" : "s"} found</p>
+          {parseError ? (
+            <p className="text-xs text-bad" data-testid="env-import-error">
+              {parseError}
+            </p>
+          ) : (
+            <p className="text-xs text-fg-dim">
+              {parsed.length} variable{parsed.length === 1 ? "" : "s"} found
+            </p>
+          )}
         </div>
         <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
           <Button variant="ghost" onClick={() => setImporting(false)}>
@@ -1033,7 +1043,7 @@ function EnvTab({ app, client }: { app: App; client: PlatformClient }) {
           </Button>
           <Button
             variant="primary"
-            disabled={!parsed.length}
+            disabled={!parsed.length || !!parseError}
             busy={busy === "import"}
             data-testid="env-import-run"
             onClick={() =>
@@ -1072,7 +1082,8 @@ function DomainsTab({ app, client, onChanged }: { app: App; client: PlatformClie
   const { busy, act } = useAct();
   const [host, setHost] = useState("");
   const setting = usePoll(() => client.domain(), 0, [client]);
-  const hostOk = /^(\*\.)?([a-z0-9]([a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(host.trim().toLowerCase());
+  const hostProblem = domainProblem(host);
+  const hostOk = !!normalizeDomain(host) && !hostProblem;
   // Pending certificates turn into issued ones within a minute or so.
   const pending = app.domains.some((d) => d.cert_status === "pending");
   useEffect(() => {
@@ -1117,7 +1128,7 @@ function DomainsTab({ app, client, onChanged }: { app: App; client: PlatformClie
           onSubmit={(e) => {
             e.preventDefault();
             if (!hostOk || busy) return;
-            void act("add", () => client.addDomain(app.id, { host: host.trim().toLowerCase(), https: setting.data?.https ?? true }), `Added ${host.trim()}`).then((ok) => {
+            void act("add", () => client.addDomain(app.id, { host: normalizeDomain(host), https: setting.data?.https ?? true }), `Added ${normalizeDomain(host)}`).then((ok) => {
               if (ok) {
                 setHost("");
                 onChanged();
@@ -1126,7 +1137,10 @@ function DomainsTab({ app, client, onChanged }: { app: App; client: PlatformClie
           }}
         >
           <div className="flex-1">
-            <Field label="Add a domain" hint={setting.data?.wildcard ? `Apps also get <name>.${setting.data.wildcard} automatically.` : undefined}>
+            <Field
+              label="Add a domain"
+              hint={hostProblem ?? (setting.data?.wildcard ? `Apps also get <name>.${setting.data.wildcard} automatically.` : undefined)}
+            >
               <TextInput value={host} onChange={(e) => setHost(e.target.value)} placeholder="www.example.com" spellCheck={false} data-testid="domain-input" />
             </Field>
           </div>
