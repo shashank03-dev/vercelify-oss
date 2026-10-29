@@ -60,8 +60,10 @@ function closingQuote(s: string, q: string): number {
   return -1;
 }
 
-const ESCAPES: Record<string, string> = { n: "\n", r: "\r", t: "\t", '"': '"', "\\": "\\", $: "$" };
+const ESCAPES: Record<string, string> = { n: "\n", r: "\r", t: "\t", b: "\b", f: "\f", '"': '"', "\\": "\\", $: "$", "/": "/" };
 
 function unescape(s: string): string {
-  return s.replace(/\\([\s\S]?)/g, (m, c: string) => ESCAPES[c] ?? m);
+  return s.replace(/\\(u[0-9a-fA-F]{4}|[\s\S]?)/g, (m, c: string) =>
+    c.length === 5 ? String.fromCharCode(parseInt(c.slice(1), 16)) : (ESCAPES[c] ?? m),
+  );
 }

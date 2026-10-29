@@ -382,11 +382,24 @@ impl Sleep {
                 "waking is turned off on this server (wake_listen in agent.toml)",
             ));
         }
-        if self.engine.get().is_none() {
+        let Some(engine) = self.engine.get() else {
             return Err(AppError::unavailable(
                 "apps sleep on the platform engine, which isn't running here",
             ));
-        }
+        };
+        // Settings are kept by app id: a name would be saved and never apply.
+        let wanted = app_uuid.to_string();
+        let found = engine
+            .store
+            .with(|c| vercelify_platform::apps::find(c, &wanted))
+            .map(|a| a.id);
+        let resolved = match found {
+            Ok(id) => id,
+            // Turning off a deleted app's setting still clears it.
+            Err(_) if !req.enabled => wanted,
+            Err(e) => return Err(AppError::not_found(e.to_string())),
+        };
+        let app_uuid = resolved.as_str();
         let idle = req.idle_minutes.unwrap_or(DEFAULT_IDLE_MINUTES);
         if !(5..=24 * 60).contains(&idle) {
             return Err(AppError::bad_request("idle time must be 5 minutes to 24 hours"));

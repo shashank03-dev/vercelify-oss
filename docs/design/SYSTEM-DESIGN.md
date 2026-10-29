@@ -314,6 +314,7 @@ server's invite prints). It keeps no platform state:
 | `GET /v1/runtime/containers` | our containers (`docker ps`, label `vercelify.managed=platform`) |
 | `GET /v1/runtime/containers/{name}` | `docker inspect` (404: gone) |
 | `GET /v1/runtime/containers/{name}/logs?tail&follow` | `{at, stream, text}` lines |
+| `POST /v1/runtime/containers/{name}/exec` | run a command in it (`{cmd, timeout_secs}` → `{code, tail}`): scheduled tasks of apps placed there |
 | `POST /v1/runtime/instances` | start one instance (`StartSpec`: app, deployment, image, variables, volumes, port, replica) and wait for health; progress as `{"log"}` lines, then `{"container"}` or `{"error", "status"}` |
 | `POST /v1/runtime/apply` | idempotent batch: start, stop, restart, remove, write/remove routes, remove volumes, prune images; failures listed per item |
 | `GET /v1/runtime/routes` | route keys on its proxy |

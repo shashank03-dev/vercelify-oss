@@ -331,6 +331,35 @@ impl Remote {
     }
 }
 
+/// A command run in a container (scheduled tasks), here or on a worker.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecRequest {
+    pub cmd: Vec<String>,
+    pub timeout_secs: u64,
+}
+
+/// How it ended: the exit code (None: killed or timed out) and its last lines.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExecResult {
+    pub code: Option<i32>,
+    pub tail: String,
+}
+
+pub async fn exec_local(d: &Deployer, container: &str, r: &ExecRequest) -> Result<ExecResult> {
+    let o = d
+        .docker
+        .exec(
+            segment(container)?,
+            &r.cmd,
+            Duration::from_secs(r.timeout_secs.clamp(1, 3600)),
+        )
+        .await?;
+    Ok(ExecResult {
+        code: o.code,
+        tail: o.tail(2),
+    })
+}
+
 /// Container names are DNS labels with dashes; nothing else reaches a URL.
 fn segment(name: &str) -> Result<&str> {
     if name.starts_with(|c: char| c.is_ascii_alphanumeric())
@@ -472,6 +501,23 @@ impl NodeRuntime {
                     return Err(e);
                 }
                 container.ok_or_else(|| Error::Unavailable(format!("{}: the start ended without an answer", r.node)))
+            }
+        }
+    }
+
+    pub async fn exec(&self, container: &str, r: &ExecRequest) -> Result<ExecResult> {
+        match self {
+            NodeRuntime::Local(d) => exec_local(d, container, r).await,
+            NodeRuntime::Remote(rem) => {
+                let path = format!("/v1/runtime/containers/{}/exec", segment(container)?);
+                rem.json(Method::POST, &path, Some(r), Duration::from_secs(r.timeout_secs + 30))
+                    .await
+                    .map_err(|e| match e {
+                        Error::NotFound(_) => {
+                            Error::Unavailable(format!("update the agent on {} to run tasks there", rem.node))
+                        }
+                        e => e,
+                    })
             }
         }
     }

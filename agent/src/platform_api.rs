@@ -1070,32 +1070,46 @@ async fn app_task_run(State(s): State<AppState>, Path((app, id)): Path<(String, 
     Ok(Json(json!({ "status": status })))
 }
 
-/// Run a scheduled task in the app's running container; records the result.
+/// Run a scheduled task in the app's running container, on whichever
+/// server it runs; records the result. A run still going is not started
+/// again (a slow `* * * * *` job would pile up on a small machine).
 pub async fn run_task(p: &crate::platform::Platform, t: &ScheduledTask) -> String {
-    let container = p
+    static RUNNING: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+    struct Running(String);
+    impl Drop for Running {
+        fn drop(&mut self) {
+            RUNNING
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .retain(|id| *id != self.0);
+        }
+    }
+    let _running = {
+        let mut r = RUNNING.lock().unwrap_or_else(|e| e.into_inner());
+        if r.contains(&t.id) {
+            return "skipped: the last run is still going".into();
+        }
+        r.push(t.id.clone());
+        Running(t.id.clone())
+    };
+    let deployed = p
         .store
-        .with(|c| {
-            let a = apps::get(c, &t.app_id)?;
-            match a.current_deployment_id {
-                Some(d) => deployments::container(c, &d),
-                None => Ok(String::new()),
+        .with(|c| Ok(apps::get(c, &t.app_id)?.current_deployment_id.is_some()))
+        .unwrap_or(false);
+    let status = match p.engine.live_instance(&t.app_id) {
+        _ if !deployed => "skipped: the app isn't deployed".to_string(),
+        Err(vercelify_platform::Error::Conflict(m)) => format!("skipped: {m}"),
+        Err(e) => format!("failed: {e}"),
+        Ok((rt, container)) => {
+            let req = vercelify_platform::runtime::ExecRequest {
+                cmd: vec!["sh".to_string(), "-c".to_string(), t.command.clone()],
+                timeout_secs: 15 * 60,
+            };
+            match rt.exec(&container, &req).await {
+                Ok(o) if o.code == Some(0) => "ok".to_string(),
+                Ok(o) => format!("exit {}: {}", o.code.unwrap_or(-1), o.tail),
+                Err(e) => format!("failed: {e}"),
             }
-        })
-        .unwrap_or_default();
-    let status = if container.is_empty() {
-        "skipped: the app isn't deployed".to_string()
-    } else {
-        let cmd = vec!["sh".to_string(), "-c".to_string(), t.command.clone()];
-        match p
-            .engine
-            .deployer
-            .docker
-            .exec(&container, &cmd, std::time::Duration::from_secs(15 * 60))
-            .await
-        {
-            Ok(o) if o.success() => "ok".to_string(),
-            Ok(o) => format!("exit {}: {}", o.code.unwrap_or(-1), o.tail(2)),
-            Err(e) => format!("failed: {e}"),
         }
     };
     let (store, id, st) = (p.store.clone(), t.id.clone(), status.clone());
@@ -1508,6 +1522,19 @@ pub async fn run_database_backups(
     if due.is_empty() {
         return;
     }
+    // A backup longer than a minute must not be started again under itself.
+    static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if RUNNING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        tracing::info!("scheduled backups: the last round is still running");
+        return;
+    }
+    struct Done;
+    impl Drop for Done {
+        fn drop(&mut self) {
+            RUNNING.store(false, std::sync::atomic::Ordering::Release);
+        }
+    }
+    let _done = Done;
     let restic = restic(cfg);
     for d in due {
         if let Err(e) = p.engine.backup_database(&d.id, &restic).await {
