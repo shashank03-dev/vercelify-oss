@@ -70,6 +70,14 @@ out=$(curl -s -m 10 -H "Authorization: Bearer $token" "http://127.0.0.1:$PORT_AG
 decoded=$(jq -r 'select(.data) | .data' <<<"$out" | base64 -d 2>/dev/null || true)
 [[ "$decoded" == *mesh-42* ]] || fail "terminal output: $out"
 ok "a terminal in the worker's container, relayed by the main server"
+task=$(api POST /v1/platform/apps/web/tasks '{"name": "stamp", "schedule": "0 3 * * *", "command": "echo ran-on-pi >/tmp/vfy-task"}' | jq -r .id)
+run=$(api POST "/v1/platform/apps/web/tasks/$task/run" '{}' | jq -r .status)
+[[ "$run" == ok ]] || fail "a scheduled task on the worker: $run"
+[[ $(wdocker exec "$container" cat /tmp/vfy-task) == ran-on-pi ]] || fail "the task didn't run in the worker's container"
+task=$(api POST /v1/platform/apps/web/tasks '{"name": "broken", "schedule": "0 3 * * *", "command": "echo nope >&2; exit 3"}' | jq -r .id)
+run=$(api POST "/v1/platform/apps/web/tasks/$task/run" '{}' | jq -r .status)
+[[ "$run" == "exit 3: "*nope* ]] || fail "a failing task on the worker: $run"
+ok "scheduled tasks run in the worker's container, and say how they failed"
 
 echo "replicas on both servers"
 api PATCH /v1/platform/apps/web '{"node_id": null, "runtime": {"port": 80, "replicas": 2, "health_timeout_secs": 90, "drain_secs": 5}}' >/dev/null ||

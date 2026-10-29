@@ -53,6 +53,9 @@ function Page({ children }: { children: ReactNode }) {
   const session = { settings, servers: [settings], unpair: async () => {}, update: async () => {}, select: async () => {}, remove: async () => {}, addServer: () => {}, revision: 0 };
   return <ToastProvider><SessionProvider value={session}>{children}</SessionProvider></ToastProvider>;
 }
+// The first transform of the demo backend takes over a second on a busy machine,
+// longer than waitFor allows the first test.
+beforeAll(async () => { await import("../lib/demo"); });
 beforeEach(() => { wire.stopFails = false; wire.startResponseLost = false; wire.mpv = true; wire.playback = null; wire.opens = []; wire.blocked = ""; wire.discoveryFinished = false; wire.streams = 0; wire.selected = "server-a"; wire.requests = []; });
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); Reflect.deleteProperty(HTMLElement.prototype, "scrollIntoView"); });
 
