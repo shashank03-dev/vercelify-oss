@@ -155,6 +155,9 @@ impl PlatformGit {
             if let Some(slug) = &slug {
                 self.sync_previews(app, slug, token.as_deref()).await;
             }
+        } else {
+            // Turned off: the previews still running go (their memory too).
+            self.remove_previews(app).await;
         }
         // Compare with the head seen last, or on the first look with the
         // last production deployment. Never deployed: nothing to follow yet
@@ -245,6 +248,24 @@ impl PlatformGit {
             .store
             .with(|c| git_watch::get(c, &app.id))
             .map_err(|e| e.to_string())
+    }
+
+    async fn remove_previews(&self, app: &App) {
+        let live = self
+            .engine
+            .store
+            .with(|c| previews::list(c, &app.id, true))
+            .unwrap_or_default();
+        for p in live {
+            match self.engine.remove_preview(&app.id, p.pr_number).await {
+                Ok(()) => {
+                    self.projects
+                        .remove(&crate::projects::key_for(&app.id, u64::from(p.pr_number)))
+                        .await;
+                }
+                Err(e) => tracing::warn!("previews: {} #{}: {e}", app.name, p.pr_number),
+            }
+        }
     }
 
     async fn sync_previews(&self, app: &App, slug: &str, token: Option<&str>) {
