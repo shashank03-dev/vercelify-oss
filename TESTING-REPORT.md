@@ -90,7 +90,7 @@ The final full rerun at `2d41a14` passed every suite, in the VM and on macOS (fm
 ## Bugs and observations
 
 1. **Low — malformed app-mode forward silently binds a port. Fixed in `c10aac2`.** Put `127.0.0.1:17420=:7420` in the forwards file alongside a valid line. Before the fix the parser accepted both: it checked only that the suffix after the last colon was a numeric port, and never checked the host was nonempty. The bad entry could bind locally but `resolve_target` could not resolve it. The new regression failed before the fix (two valid entries instead of one) and passes afterwards; valid lines remain usable and the malformed entry is reported separately.
-2. **Low — Docker-gated tests report success without executing. Unfixed.** Run `cargo test -p vercelify-platform` without `VERCELIFY_DOCKER_TESTS=1`; the four Docker-dependent unit cases and two integration cases return immediately, yet the Rust harness labels them `ok`. This can mislead readers about real Docker coverage. Root cause: early returns in the test bodies. Proposed patch: mark these tests ignored by default and provide a documented explicit command such as `VERCELIFY_DOCKER_TESTS=1 cargo test -p vercelify-platform -- --ignored`; adjust CI so the real Docker suite is an explicit gate. This changes suite selection and needs verification on Linux before adopting.
+2. **Low — Docker-gated tests report success without executing. Fixed in the second sweep (see `docs/BUG-SWEEP-2026-10-29.md`): the seven tests are `#[ignore]`d by default and run with `--include-ignored`.** Run `cargo test -p vercelify-platform` without `VERCELIFY_DOCKER_TESTS=1`; the four Docker-dependent unit cases and two integration cases return immediately, yet the Rust harness labels them `ok`. This can mislead readers about real Docker coverage. Root cause: early returns in the test bodies. Proposed patch: mark these tests ignored by default and provide a documented explicit command such as `VERCELIFY_DOCKER_TESTS=1 cargo test -p vercelify-platform -- --ignored`; adjust CI so the real Docker suite is an explicit gate. This changes suite selection and needs verification on Linux before adopting.
 
 3. **Low — app-mode forward does not recover from a transient bind failure. Fixed in `9ae0306`.** Hold a local port, add that port to the forwards file, then release it. Before the fix the failed task was retained and the unchanged file was never reconsidered. A new test reproduced the timeout; the watcher now retries failed tasks, and the mesh suite passes. The design document was updated in that commit.
 4. **Low — workspace did not compile on macOS. Fixed in `db27e01`.** Apple libc declares mutable `openpty` pointer arguments; the original code used const pointers. The original workspace test failed to compile on macOS, while the portable call and a PTY size regression now pass.
@@ -126,10 +126,10 @@ The installer test's first uninstall check failed on `vercelify.slice`, which un
 
 Observations, not fixed:
 
-- `Docker::images` orders an app's images by their creation time as Docker prints it, in local time; around a daylight-saving change, two images from the repeated hour could be ordered wrongly when old ones are pruned.
+- Fixed in the second sweep: `Docker::images` ordered an app's images by their creation time as Docker prints it, in local time; around a daylight-saving change, two images from the repeated hour could be ordered wrongly when old ones are pruned. It now compares instants.
 
 - On a server with no engine, the Apps page polls `/v1/platform/apps` every 15 s. One cheap request; fine on low-end hardware.
-- The domain form accepts what the server then refuses (64-character label, wildcard), so the error arrives only after submit. The server's message is clear.
+- Fixed in the second sweep: the domain form accepted what the server then refuses (64-character label, wildcard). It now applies the agent's rules and says why.
 - Demo fixture: `hp-elitebook` pairs as "main" but its health says "worker", and its AI endpoint shows the mesh address `10.77.0.1`. Demo data only.
 - CLAUDE.md and PLAN-NATIVE-PLATFORM.md say the agent is "~3 MB"; the release build is 7.0 MB (see the installer row).
 
