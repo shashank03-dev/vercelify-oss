@@ -538,6 +538,7 @@ mod tests {
     /// `VERCELIFY_DOCKER_TESTS=1` (needs a running Docker daemon). Fixtures
     /// need no network inside the build except the base image pull.
     #[tokio::test]
+    #[ignore = "needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored"]
     async fn builds_fixture_apps_with_docker() {
         if std::env::var("VERCELIFY_DOCKER_TESTS").as_deref() != Ok("1") {
             return;

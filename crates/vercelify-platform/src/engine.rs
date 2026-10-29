@@ -201,6 +201,12 @@ impl Engine {
             let trigger = req.trigger.unwrap_or(DeploymentTrigger::Manual);
             if let Some(sha) = &req.commit_sha {
                 crate::validate::commit_sha(sha)?;
+                // A git server fetches a commit by its full id only.
+                if sha.len() != 40 {
+                    return Err(Error::Invalid(format!(
+                        "`{sha}`: give the full 40-character commit hash (git rev-parse {sha})"
+                    )));
+                }
             }
             let mut image = String::new();
             let mut commit = req.commit_sha.clone().unwrap_or_default();
