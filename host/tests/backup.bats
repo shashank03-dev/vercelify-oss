@@ -134,7 +134,9 @@ teardown() { rm -rf "$T"; }
   mkdir -p "$T/old" && touch "$T/old/config"
   VERCELIFY_BACKUP_PASSWORD=kept-secret run "$CLI" backup setup --to "$T/old"
   [ "$status" -eq 0 ]
-  grep -q '^RESTIC_PASSWORD=kept-secret$' "$T/etc/backup.env"
+  run bash -c '. "$1"; printf %s "$RESTIC_PASSWORD"' check "$T/etc/backup.env"
+  [ "$status" -eq 0 ]
+  [ "$output" = kept-secret ]
   run ! grep -q 'restic init' "$CALLS"
 }
 
