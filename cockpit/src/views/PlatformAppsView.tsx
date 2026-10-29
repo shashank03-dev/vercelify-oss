@@ -1056,7 +1056,7 @@ function EnvTab({ app, client }: { app: App; client: PlatformClient }) {
               })
             }
           >
-            Import {parsed.length || ""}
+            Import {parseError ? "" : parsed.length || ""}
           </Button>
         </div>
       </Modal>
@@ -1139,7 +1139,15 @@ function DomainsTab({ app, client, onChanged }: { app: App; client: PlatformClie
           <div className="flex-1">
             <Field
               label="Add a domain"
-              hint={hostProblem ?? (setting.data?.wildcard ? `Apps also get <name>.${setting.data.wildcard} automatically.` : undefined)}
+              hint={
+                hostProblem ? (
+                  <span className="text-bad" data-testid="domain-problem">
+                    {hostProblem}
+                  </span>
+                ) : setting.data?.wildcard ? (
+                  `Apps also get <name>.${setting.data.wildcard} automatically.`
+                ) : undefined
+              }
             >
               <TextInput value={host} onChange={(e) => setHost(e.target.value)} placeholder="www.example.com" spellCheck={false} data-testid="domain-input" />
             </Field>
