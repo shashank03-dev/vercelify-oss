@@ -318,6 +318,7 @@ mod tests {
 
     /// Real Compose (VERCELIFY_DOCKER_TESTS=1).
     #[tokio::test]
+    #[ignore = "needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored"]
     async fn compose_up_and_down() {
         if std::env::var("VERCELIFY_DOCKER_TESTS").as_deref() != Ok("1") {
             return;

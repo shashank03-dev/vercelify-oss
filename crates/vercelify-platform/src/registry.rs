@@ -320,6 +320,7 @@ mod tests {
 
     /// A real registry (opt in with VERCELIFY_DOCKER_TESTS=1).
     #[tokio::test]
+    #[ignore = "needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored"]
     async fn push_list_delete() {
         if std::env::var("VERCELIFY_DOCKER_TESTS").as_deref() != Ok("1") {
             return;

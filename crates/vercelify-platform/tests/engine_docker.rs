@@ -89,6 +89,7 @@ async fn body_of(host: &str, want: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored"]
 async fn deploy_redeploy_rollback_recover() {
     if std::env::var("VERCELIFY_DOCKER_TESTS").as_deref() != Ok("1") {
         return;

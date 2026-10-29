@@ -146,21 +146,32 @@ impl LogWriter {
             stream: stream.to_string(),
             text,
         };
-        if self.written < MAX_LOG_BYTES {
-            self.seq += 1;
-            if let Some(f) = self.file.as_mut() {
-                let s = format!("{} {} {}\n", line.at, line.stream, line.text);
-                self.written += s.len() as u64;
-                let _ = f.write_all(s.as_bytes());
+        // Past the cap only the build's own output goes: the engine's lines
+        // (why it failed, that it is live) are what the log is read for.
+        let output = matches!(line.stream.as_str(), "stdout" | "stderr");
+        if self.written >= MAX_LOG_BYTES && output {
+            if !self.truncated {
+                self.truncated = true;
+                self.emit(LogLine {
+                    stream: "info".into(),
+                    text: "(build output truncated at 16 MiB)".into(),
+                    ..line
+                });
             }
-            let _ = self.tx.send(line);
-        } else if !self.truncated {
-            self.truncated = true;
-            self.seq += 1;
-            if let Some(f) = self.file.as_mut() {
-                let _ = writeln!(f, "{} info (log truncated at 16 MiB)", line.at);
-            }
+            return;
         }
+        self.emit(line);
+    }
+
+    fn emit(&mut self, mut line: LogLine) {
+        line.seq = self.seq;
+        self.seq += 1;
+        if let Some(f) = self.file.as_mut() {
+            let s = format!("{} {} {}\n", line.at, line.stream, line.text);
+            self.written += s.len() as u64;
+            let _ = f.write_all(s.as_bytes());
+        }
+        let _ = self.tx.send(line);
     }
 
     pub fn info(&mut self, text: &str) {
@@ -241,5 +252,29 @@ mod tests {
         let left: Vec<_> = std::fs::read_dir(dir.path().join("blog")).unwrap().flatten().collect();
         assert_eq!(left.len(), 2);
         assert!(hub.path("blog", "dpl_5").exists());
+    }
+
+    #[test]
+    fn past_the_cap_the_engines_lines_still_go() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub = LogHub::new(dir.path());
+        let mut w = hub.writer("blog", "dpl_1");
+        let chunk = "x".repeat(64 * 1024);
+        for _ in 0..(MAX_LOG_BYTES / chunk.len() as u64 + 2) {
+            w.line("stdout", &chunk);
+        }
+        w.line("stderr", "dropped");
+        w.error("build failed: exit status 1");
+        drop(w);
+        let lines = hub.read("blog", "dpl_1", Some(3));
+        let texts: Vec<&str> = lines.iter().map(|l| l.text.as_str()).collect();
+        assert_eq!(
+            texts[1..],
+            ["(build output truncated at 16 MiB)", "build failed: exit status 1"]
+        );
+        assert!(
+            lines.windows(2).all(|p| p[1].seq == p[0].seq + 1),
+            "numbering has no gaps"
+        );
     }
 }

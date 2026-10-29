@@ -43,6 +43,7 @@ fn image(name: &str) {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored"]
 async fn databases_end_to_end() {
     if std::env::var("VERCELIFY_DOCKER_TESTS").as_deref() != Ok("1") {
         return;

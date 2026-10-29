@@ -39,32 +39,42 @@ resolve_ref() {
   fi
 }
 
-here=''
-if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
-  here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-fi
+# Everything runs from main, called on the last line: a download cut short
+# by the network runs nothing instead of half the steps.
+main() {
+  local here src ref
+  here=''
+  if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
+    here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  fi
 
-if [[ -n "$here" && -x "$here/host/setup-host.sh" ]]; then
-  src=$here
-  ref=${REF:-local}
-else
-  command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null; }
-  command -v tar >/dev/null || apt-get install -y -qq tar >/dev/null
-  ref=$(resolve_ref)
-  [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid ref '$ref'" >&2; exit 1; }
-  tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' EXIT
-  echo "==> Downloading Vercelify ($REPO@$ref)…" >&2
-  curl -fsSL --retry 3 "https://codeload.github.com/$REPO/tar.gz/$ref" | tar -xz -C "$tmp" --strip-components=1
-  rm -rf "$DEST.new"
-  mkdir -p "$DEST.new"
-  cp -a "$tmp/." "$DEST.new/"
-  rm -rf "$DEST.old"
-  [[ -d "$DEST" ]] && mv "$DEST" "$DEST.old"
-  mv "$DEST.new" "$DEST"
-  rm -rf "$DEST.old"
-  src=$DEST
-fi
+  if [[ -n "$here" && -x "$here/host/setup-host.sh" ]]; then
+    src=$here
+    ref=${REF:-local}
+  else
+    command -v curl >/dev/null || { apt-get update -qq && apt-get install -y -qq curl ca-certificates >/dev/null; }
+    command -v tar >/dev/null || apt-get install -y -qq tar >/dev/null
+    ref=$(resolve_ref)
+    [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid ref '$ref'" >&2; exit 1; }
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    echo "==> Downloading Vercelify ($REPO@$ref)…" >&2
+    curl -fsSL --retry 3 "https://codeload.github.com/$REPO/tar.gz/$ref" | tar -xz -C "$tmp" --strip-components=1
+    rm -rf "$DEST.new"
+    mkdir -p "$DEST.new"
+    cp -a "$tmp/." "$DEST.new/"
+    rm -rf "$DEST.old"
+    [[ -d "$DEST" ]] && mv "$DEST" "$DEST.old"
+    mv "$DEST.new" "$DEST"
+    rm -rf "$DEST.old"
+    # exec below skips the EXIT trap: don't leave the download behind.
+    rm -rf "$tmp"
+    trap - EXIT
+    src=$DEST
+  fi
 
-export VERCELIFY_INSTALL_REF=$ref VERCELIFY_INSTALL_CHANNEL=$CHANNEL
-exec bash "$src/host/setup-host.sh" "$@"
+  export VERCELIFY_INSTALL_REF=$ref VERCELIFY_INSTALL_CHANNEL=$CHANNEL
+  exec bash "$src/host/setup-host.sh" "$@"
+}
+
+main "$@"

@@ -60,6 +60,11 @@ their own (the live e2e, `routing.sh`, `multinode.sh`, `promote.sh` and the
 strays. Use `./dev host USER@HOST` to try your changes on a server, or set
 `VERCELIFY_TESTS_ON_SERVER=1` on a server you don't mind breaking.
 
+The Rust tests that drive a real Docker daemon are ignored by default, so a
+plain `cargo test` reports them as ignored rather than passed. Run them with
+`sudo env VERCELIFY_DOCKER_TESTS=1 cargo test -p vercelify-platform -p vercelify-agent -- --include-ignored`
+(root, because the storage moves read Docker's volume directories).
+
 On macOS the host tests (bats) run in a Debian 12 container, so Docker (or
 Colima, started automatically) must be installed. The agent, platform and mesh
 tests need a real Linux machine: with Colima they run inside its VM (Rust is
