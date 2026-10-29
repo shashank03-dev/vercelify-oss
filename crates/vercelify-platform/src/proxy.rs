@@ -272,6 +272,38 @@ fn config_hash(c: &ProxyConfig) -> String {
     h.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
 
+/// Hosts the proxy holds a certificate for, from Traefik's ACME storage
+/// (`acme/acme.json`, `acme/acme-dns.json`); None while neither exists or
+/// can be read. Wildcard certificates come back as `*.example.com`.
+pub fn certified_hosts(c: &ProxyConfig) -> Option<std::collections::HashSet<String>> {
+    let mut out = std::collections::HashSet::new();
+    let mut read_any = false;
+    for f in ["acme.json", "acme-dns.json"] {
+        let Ok(raw) = std::fs::read(c.dir.join("acme").join(f)) else {
+            continue;
+        };
+        read_any = true;
+        // An empty file is what Traefik starts with.
+        let v: serde_json::Value = serde_json::from_slice(&raw).unwrap_or_default();
+        for resolver in v.as_object().into_iter().flat_map(|o| o.values()) {
+            for cert in resolver["Certificates"].as_array().into_iter().flatten() {
+                let d = &cert["domain"];
+                let names = std::iter::once(&d["main"]).chain(d["sans"].as_array().into_iter().flatten());
+                out.extend(names.filter_map(|n| n.as_str()).map(str::to_ascii_lowercase));
+            }
+        }
+    }
+    read_any.then_some(out)
+}
+
+/// Whether one of `certs` covers `host` (exactly, or a wildcard one label up).
+pub fn covers(certs: &std::collections::HashSet<String>, host: &str) -> bool {
+    certs.contains(host)
+        || host
+            .split_once('.')
+            .is_some_and(|(_, parent)| certs.contains(&format!("*.{parent}")))
+}
+
 /// Make sure the proxy runs with the current configuration: write the static
 /// and common files, (re)create the container when its configuration
 /// changed, start it when stopped. `env` carries e.g. `CF_DNS_API_TOKEN`.
@@ -487,6 +519,42 @@ mod tests {
             .next()
             .unwrap();
         assert!(secure0.contains("vfy-blog-auth"));
+    }
+
+    #[test]
+    fn certificates_come_from_traefiks_acme_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = ProxyConfig {
+            dir: dir.path().into(),
+            http_port: 80,
+            https_port: 443,
+            metrics_port: 8082,
+            acme_email: None,
+            dns_challenge: true,
+            image: TRAEFIK_IMAGE.into(),
+        };
+        assert_eq!(certified_hosts(&c), None, "no storage yet");
+        std::fs::create_dir_all(dir.path().join("acme")).unwrap();
+        // What Traefik starts with, then what it writes after issuing.
+        std::fs::write(dir.path().join("acme/acme.json"), "").unwrap();
+        assert_eq!(certified_hosts(&c).map(|h| h.len()), Some(0));
+        std::fs::write(
+            dir.path().join("acme/acme.json"),
+            r#"{"le": {"Account": {}, "Certificates": [
+                {"domain": {"main": "Blog.example.com"}, "certificate": "x", "key": "y", "Store": "default"}]}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("acme/acme-dns.json"),
+            r#"{"le-dns": {"Certificates": [{"domain": {"main": "example.org", "sans": ["*.example.org"]}}]}}"#,
+        )
+        .unwrap();
+        let certs = certified_hosts(&c).unwrap();
+        assert!(covers(&certs, "blog.example.com"));
+        assert!(covers(&certs, "example.org"));
+        assert!(covers(&certs, "app.example.org"), "the wildcard");
+        assert!(!covers(&certs, "a.b.example.org"), "a wildcard covers one label");
+        assert!(!covers(&certs, "shop.example.com"));
     }
 
     #[test]

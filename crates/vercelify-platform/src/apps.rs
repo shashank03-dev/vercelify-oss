@@ -577,6 +577,31 @@ pub fn basic_auth(c: &Connection, id: &str) -> Result<Vec<String>> {
     Ok(if line.is_empty() { vec![] } else { vec![line] })
 }
 
+/// Match HTTPS domains to the certificates the proxy holds: pending ones
+/// that have one are issued; issued ones that lost theirs are pending again.
+/// Returns how many changed.
+pub fn sync_cert_status(c: &Connection, has_cert: &dyn Fn(&str) -> bool) -> Result<usize> {
+    let mut st = c.prepare(
+        "SELECT host, cert_status FROM app_domains WHERE https = 1 AND cert_status IN ('pending', 'issued')",
+    )?;
+    let rows: Vec<(String, String)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut changed = 0;
+    for (host, status) in rows {
+        let want = if has_cert(&host) {
+            CertStatus::Issued
+        } else {
+            CertStatus::Pending
+        };
+        if cert_status(&status) != want {
+            set_cert_status(c, &host, want)?;
+            changed += 1;
+        }
+    }
+    Ok(changed)
+}
+
 pub fn set_cert_status(c: &Connection, host: &str, status: CertStatus) -> Result<()> {
     let s = match status {
         CertStatus::Pending => "pending",
@@ -925,6 +950,49 @@ pub(crate) mod tests {
             .is_err());
         s.tx(|c| set_basic_auth(c, &a.id, None)).unwrap();
         assert!(s.with(|c| basic_auth(c, &a.id)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn cert_status_follows_the_proxys_certificates() {
+        let s = Store::open_in_memory().unwrap();
+        let a = s.tx(|c| create(c, &git_app("blog"))).unwrap();
+        for host in ["blog.example.com", "www.example.com"] {
+            s.tx(|c| {
+                add_domain(
+                    c,
+                    &a.id,
+                    &DomainRequest {
+                        host: host.into(),
+                        https: None,
+                        primary: None,
+                        redirect_to: None,
+                    },
+                )
+            })
+            .unwrap();
+        }
+        let status = |h: &str| {
+            s.with(|c| get(c, &a.id))
+                .unwrap()
+                .domains
+                .into_iter()
+                .find(|d| d.host == h)
+                .unwrap()
+                .cert_status
+        };
+        assert_eq!(status("blog.example.com"), CertStatus::Pending);
+        let n = s.with(|c| sync_cert_status(c, &|h| h == "blog.example.com")).unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(status("blog.example.com"), CertStatus::Issued);
+        assert_eq!(status("www.example.com"), CertStatus::Pending);
+        assert_eq!(
+            s.with(|c| sync_cert_status(c, &|h| h == "blog.example.com")).unwrap(),
+            0,
+            "nothing new"
+        );
+        // The certificate went (storage reset): pending again.
+        s.with(|c| sync_cert_status(c, &|_| false)).unwrap();
+        assert_eq!(status("blog.example.com"), CertStatus::Pending);
     }
 
     #[test]

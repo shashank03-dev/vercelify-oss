@@ -113,7 +113,7 @@ The authoritative copy is `crates/vercelify-platform/migrations/0001_init.sql`. 
 | `mesh_nodes` | `id`, `name` UNIQUE, `kind` server/device, `public_key` UNIQUE, `ip_index` UNIQUE, `role`, `token_hash` UNIQUE, `endpoints` JSON, `cert_expires_at`, `revoked_at` | Everything on the mesh |
 | `projects` / `environments` | `name` UNIQUE (per project) | `production` created with every project |
 | `apps` | `environment_id`, `name` UNIQUE, `kind` git/image/compose, `source` JSON, `build` JSON, `runtime` JSON, `node_id`, `desired` running/stopped/sleeping, `current_deployment_id`, `previews` JSON | |
-| `app_domains` | `host` UNIQUE, `app_id`, `https`, `is_primary`, `redirect_to`, `cert_status` | |
+| `app_domains` | `host` UNIQUE, `app_id`, `https`, `is_primary`, `redirect_to`, `cert_status` | `cert_status` pending ↔ issued follows the certificates in the proxy's ACME storage, read at each reconcile (TLS ends on the main server) |
 | `env_vars` | `scope` project/environment/app, `scope_id`, `key`, `value` BLOB (sealed), `build`, `preview_only`, `secret` | UNIQUE(`scope`,`scope_id`,`key`,`preview_only`) |
 | `deployments` | `app_id`, `number` (per app), `kind` production/preview, `pr_number`, `commit_sha`, `trigger`, `rollback_of`, `image`, `node_id`, `status`, `error`, `container`, timestamps | UNIQUE(`app_id`,`number`) |
 | `previews` | UNIQUE(`app_id`,`pr_number`), `head_sha`, `deployment_id`, `status` | |

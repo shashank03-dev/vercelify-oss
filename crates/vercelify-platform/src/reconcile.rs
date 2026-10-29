@@ -339,6 +339,19 @@ impl Reconciler {
             }
         }
         drop(_operation);
+        // What the domains say about HTTPS follows the certificates the
+        // proxy really holds (TLS ends on the main server for every app).
+        if let Some(certs) = crate::proxy::certified_hosts(&self.engine.deployer.proxy) {
+            match self
+                .engine
+                .store
+                .with(|c| apps::sync_cert_status(c, &|h| crate::proxy::covers(&certs, h)))
+            {
+                Ok(0) => {}
+                Ok(_) => self.engine.emit(crate::engine::EngineEvent::Changed),
+                Err(e) => r.errors.push(format!("certificates: {e}")),
+            }
+        }
         r.errors.extend(self.engine.reconcile_databases().await);
         for (app_id, dep) in &recover {
             if desire.busy_apps.contains(app_id) {
