@@ -428,7 +428,7 @@ async fn app_delete(
 ) -> ApiResult<Value> {
     let (a, vols) = tx(&s, move |c, _| {
         let id = apps::find(c, &app)?.id;
-        let vols = volumes::list(c, VolumeOwner::App, &id)?;
+        let vols = volumes::checked_list(c, VolumeOwner::App, &id)?;
         Ok((apps::delete(c, &id)?, vols))
     })
     .await?;
@@ -1252,7 +1252,7 @@ async fn domain_set(State(s): State<AppState>, Json(req): Json<PlatformDomain>) 
 pub fn restic(cfg: &crate::config::Config) -> dbengine::Restic {
     dbengine::Restic {
         bin: "restic".into(),
-        env: crate::config::env_file_values(&cfg.backup_env).into_iter().collect(),
+        env: crate::config::backup_env_values(&cfg.backup_env).into_iter().collect(),
     }
 }
 
@@ -1342,19 +1342,28 @@ struct PurgeQuery {
 }
 
 async fn db_delete(State(s): State<AppState>, Path(db): Path<String>, Query(q): Query<PurgeQuery>) -> ApiResult<Value> {
-    let (d, hdd) = tx(&s, move |c, k| {
+    let (d, vol) = tx(&s, move |c, k| {
         let d = databases::get(c, k, &db, false)?;
-        let hdd = volumes::list(c, VolumeOwner::Database, &d.id)?
+        let vol = volumes::checked_list(c, VolumeOwner::Database, &d.id)?
             .into_iter()
             .next()
-            .and_then(|v| v.host_path);
-        Ok((databases::delete(c, k, &d.id)?, hdd))
+            .ok_or_else(|| vercelify_platform::Error::Internal(format!("{} has no volume", d.name)))?;
+        Ok((databases::delete(c, k, &d.id)?, vol))
     })
     .await?;
     let p = platform(&s)?;
     let name = d.name.clone();
     tokio::spawn(async move {
-        if let Err(e) = p.engine.remove_database(&d, q.purge, hdd).await {
+        if let Err(e) = p
+            .engine
+            .remove_database(
+                &d,
+                q.purge,
+                vol.host_path.clone(),
+                &volumes::physical_name(&vol, &format!("db-{}", d.name), None),
+            )
+            .await
+        {
             tracing::warn!("removing the database {}: {e}", d.name);
         }
     });

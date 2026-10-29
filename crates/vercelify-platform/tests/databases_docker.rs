@@ -127,7 +127,16 @@ async fn databases_end_to_end() {
 
     // PostgreSQL.
     let pg = create("pgtest", DatabaseKind::Postgresql);
-    engine.ensure_database(&pg.id).await.expect("postgres starts");
+    // Emulate an existing pre-v5 database: its data must keep the old name.
+    store
+        .tx(|c| {
+            c.execute("UPDATE volumes SET storage_name = NULL WHERE owner_id = ?1", [&pg.id])?;
+            Ok(())
+        })
+        .unwrap();
+    let (first, second) = tokio::join!(engine.ensure_database(&pg.id), engine.ensure_database(&pg.id));
+    first.expect("postgres starts");
+    second.expect("concurrent ensure is idempotent");
     let sql_file = dir.path().join("q.sql");
     let psql = |sql: &str| {
         std::fs::write(&sql_file, sql).unwrap();
@@ -209,10 +218,20 @@ async fn databases_end_to_end() {
     let unauth = sh("docker exec vfy-db-cachetest valkey-cli GET greeting 2>&1 || true");
     assert!(unauth.contains("NOAUTH"), "a password is required: {unauth}");
 
+    // A missing snapshot must fail before the live data is touched.
+    assert!(engine.restore_database(&cache.id, "00000000", &restic).await.is_err());
+    assert_eq!(cli("GET greeting"), "hello", "failed restore must preserve live data");
+
     // Removal (with the data).
     for d in [&pg, &cache] {
+        let vol = store
+            .with(|c| vercelify_platform::volumes::list(c, vercelify_core::platform::VolumeOwner::Database, &d.id))
+            .unwrap()
+            .remove(0);
+        let name = vercelify_platform::volumes::physical_name(&vol, &format!("db-{}", d.name), None);
         let d = store.tx(|c| databases::delete(c, &key, &d.id)).unwrap();
-        engine.remove_database(&d, true, None).await.unwrap();
+        engine.remove_database(&d, true, None, &name).await.unwrap();
+        assert!(!docker_root.join(&name).exists(), "purge removes the actual volume");
         assert!(docker.inspect(&d.container).await.unwrap().is_none());
     }
 }

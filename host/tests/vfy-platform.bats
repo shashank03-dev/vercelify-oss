@@ -155,3 +155,19 @@ JSON
   [ "$status" -eq 0 ]
   [ ! -s "$T/socks.log" ]
 }
+
+@test "forced env pull makes an existing public file private" {
+  echo old > .env
+  chmod 0644 .env
+  VFY_FORCE=1 run "$VFY" env pull blog .env
+  [ "$status" -eq 0 ]
+  [ "$(stat -c %a .env)" = 600 ]
+}
+
+@test "forced env export refuses symbolic links and preserves their targets" {
+  echo original > target.env
+  ln -s target.env .env
+  VFY_FORCE=1 run "$VFY" env pull blog .env
+  [ "$status" -ne 0 ]
+  [ "$(cat target.env)" = original ]
+}

@@ -431,10 +431,11 @@ fn insert(
         StorageTier::Hdd => "hdd",
         StorageTier::Ssd => "ssd",
     };
+    let volume_id = new_id("vol");
     c.execute(
-        "INSERT INTO volumes (id, owner_kind, owner_id, name, mount_path, tier, created_at)
-         VALUES (?1, 'database', ?2, 'data', ?3, ?4, ?5)",
-        params![new_id("vol"), id, t.data_path, tier, ts],
+        "INSERT INTO volumes (id, owner_kind, owner_id, name, mount_path, tier, created_at, storage_name)
+         VALUES (?1, 'database', ?2, 'data', ?3, ?4, ?5, ?6)",
+        params![volume_id, id, t.data_path, tier, ts, format!("vfyv2-{volume_id}")],
     )?;
     if let Some(app) = req.link_app.as_deref().filter(|a| !a.is_empty()) {
         link(c, key, app, name, t.url_var)?;

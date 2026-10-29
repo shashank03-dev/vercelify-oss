@@ -17,6 +17,14 @@
 BACKUP_LOG="$VERCELIFY_STATE/backup.log"
 BACKUP_STATUS="$VERCELIFY_STATE/backup.json"
 
+# POSIX single-quoted literals: the shell and the agent decode the same bytes,
+# including quotes, backslashes and newlines, without expanding credentials.
+backup_env_assignment() {
+  local value=$2
+  value=${value//\'/\'\\\'\'}
+  printf "%s='%s'\n" "$1" "$value"
+}
+
 backup_load_env() {
   [[ -r "$BACKUP_ENV_FILE" ]] || die "backups are not set up — run: sudo vercelify backup setup"
   set -a
@@ -64,13 +72,13 @@ backup_setup() {
   {
     echo "# Vercelify backups (sudo vercelify backup). Keep RESTIC_PASSWORD somewhere safe:"
     echo "# without it, nobody (you included) can restore these backups."
-    echo "RESTIC_PASSWORD=$pw"
+    backup_env_assignment RESTIC_PASSWORD "$pw"
     echo "BACKUP_REPOS=\"${repos[*]}\""
     echo "BACKUP_KEEP_DAILY=7"
     echo "BACKUP_KEEP_WEEKLY=4"
     echo "BACKUP_KEEP_MONTHLY=3"
-    [[ -n "$key" ]] && echo "AWS_ACCESS_KEY_ID=$key"
-    [[ -n "$secret" ]] && echo "AWS_SECRET_ACCESS_KEY=$secret"
+    [[ -n "$key" ]] && backup_env_assignment AWS_ACCESS_KEY_ID "$key"
+    [[ -n "$secret" ]] && backup_env_assignment AWS_SECRET_ACCESS_KEY "$secret"
   } | write_file "$BACKUP_ENV_FILE" 0600 || true
   backup_load_env
   for r in "${repos[@]}"; do

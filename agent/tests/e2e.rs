@@ -2244,3 +2244,34 @@ fn sunshine_on_the_desktop_users_systemd() {
         "{calls}"
     );
 }
+
+#[test]
+fn concurrent_cli_pairings_preserve_every_device_token() {
+    let dir = tempfile::tempdir().unwrap();
+    let tokens = dir.path().join("tokens.json");
+    let mut children: Vec<_> = (0..16)
+        .map(|n| {
+            Command::new(env!("CARGO_BIN_EXE_vercelify-agent"))
+                .args([
+                    "--config",
+                    "/nonexistent",
+                    "pair",
+                    "--host",
+                    "127.0.0.1",
+                    "--name",
+                    &format!("audit-device-{n}"),
+                ])
+                .env("VERCELIFY_TOKENS_FILE", &tokens)
+                .env("TOKIO_WORKER_THREADS", "1")
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap()
+        })
+        .collect();
+    for child in &mut children {
+        assert!(child.wait().unwrap().success());
+    }
+    let registry: Value = serde_json::from_slice(&std::fs::read(tokens).unwrap()).unwrap();
+    assert_eq!(registry["tokens"].as_array().unwrap().len(), 16);
+}

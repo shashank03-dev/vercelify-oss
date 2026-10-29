@@ -156,3 +156,11 @@ STUB
   [[ "$(jq -r .error "$T/state/backup.json")" == *"pg-main"* ]]
   [ "$(jq -r .snapshot "$T/state/backup.json")" = 1a2b3c4d ]
 }
+
+@test "a restored backup password keeps spaces and shell metacharacters literally" {
+  export VERCELIFY_BACKUP_PASSWORD='a password with spaces $dollars and "quotes"'
+  run "$CLI" backup setup --to "$T/repo"
+  [ "$status" -eq 0 ]
+  saved=$(bash -c '. "$1"; printf "%s" "$RESTIC_PASSWORD"' _ "$T/etc/backup.env")
+  [ "$saved" = "$VERCELIFY_BACKUP_PASSWORD" ]
+}

@@ -47,7 +47,15 @@ impl Processes {
         args: &[String],
         tie_to_app: bool,
     ) -> Result<ProcessStatus, String> {
-        self.stop(name);
+        // Stop, spawn and publish under one lock. Child's Drop does not kill
+        // it: replacing a slot after concurrent spawns otherwise leaks one.
+        let mut slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(slot) = slots.get_mut(name) {
+            if let Some(mut child) = slot.child.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
         let mut child = Command::new(bin)
             .args(args)
             .stdin(Stdio::null())
@@ -73,7 +81,6 @@ impl Processes {
                 }
             });
         }
-        let mut slots = self.slots.lock().unwrap_or_else(|e| e.into_inner());
         slots.insert(
             name,
             Slot {
@@ -168,6 +175,44 @@ mod tests {
             .status()
             .map(|s| s.success())
             .unwrap_or(false)
+    }
+
+    #[test]
+    fn simultaneous_starts_cannot_leave_untracked_processes() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("pids");
+        let script = format!("echo $$ >> '{}'; exec sleep 30", pidfile.display());
+        let processes = Arc::new(Processes::default());
+        let barrier = Arc::new(std::sync::Barrier::new(24));
+        let threads: Vec<_> = (0..24)
+            .map(|_| {
+                let processes = processes.clone();
+                let barrier = barrier.clone();
+                let script = script.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    processes
+                        .start("capture", "/bin/sh", &["-c".into(), script], false)
+                        .unwrap();
+                })
+            })
+            .collect();
+        for thread in threads {
+            thread.join().unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(200));
+        processes.stop_all();
+        let leaked: Vec<u32> = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .lines()
+            .filter_map(|s| s.parse().ok())
+            .filter(|pid| alive(*pid))
+            .collect();
+        // Clean the reproduction up even when the assertion fails.
+        for pid in &leaked {
+            let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+        }
+        assert!(leaked.is_empty(), "untracked live processes: {leaked:?}");
     }
 
     #[test]

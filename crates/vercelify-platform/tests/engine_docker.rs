@@ -444,6 +444,10 @@ async fn deploy_redeploy_rollback_recover() {
                 c,
                 &app.id,
                 &AppPatch {
+                    runtime: Some(AppRuntime {
+                        replicas: 2,
+                        ..AppRuntime::default()
+                    }),
                     source: Some(AppSource {
                         image: Some(built.image.clone()),
                         ..AppSource::default()
@@ -477,7 +481,7 @@ async fn deploy_redeploy_rollback_recover() {
     sh(&live, "echo kept > /data/f");
     let owner = sh(&live, "stat -c %u /data/f");
     assert_ne!(owner, "0", "the app's own (non-root) user wrote to its volume");
-    assert_eq!(engine.restart_app(&app.id).await.unwrap(), 1);
+    assert_eq!(engine.restart_app(&app.id).await.unwrap(), 2);
     body_of("web.test.localhost", "version two").await;
     let vol = store_
         .with(|c| vercelify_platform::volumes::list(c, VolumeOwner::App, &app.id))
@@ -496,7 +500,26 @@ async fn deploy_redeploy_rollback_recover() {
     )
     .join("volumes");
     for tier in [vercelify_core::StorageTier::Hdd, vercelify_core::StorageTier::Ssd] {
+        let before = docker
+            .list_managed()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|c| {
+                c.labels.get(vercelify_platform::deploy::LABEL_APP) == Some(&app.id)
+                    && !c.labels.contains_key(vercelify_platform::deploy::LABEL_PR)
+                    && c.state == "running"
+            })
+            .map(|c| c.name)
+            .collect::<Vec<_>>();
+        assert!(before.len() >= 2, "both replicas are running before the move");
         let moved = engine.move_app_volume(&vol.id, tier, &docker_root).await.expect("move");
+        for container in before {
+            assert!(
+                !docker.inspect(&container).await.unwrap().is_some_and(|c| c.running),
+                "every writer must stop before copying: {container}"
+            );
+        }
         assert_eq!(moved.tier, tier);
         let rec_d = store_.with(|c| deployments::list(c, &app.id, 1)).unwrap().remove(0);
         assert_eq!(rec_d.trigger, DeploymentTrigger::Recover);
@@ -505,7 +528,12 @@ async fn deploy_redeploy_rollback_recover() {
         assert_eq!(sh(&now_live, "cat /data/f"), "kept");
         assert_eq!(sh(&now_live, "stat -c %u /data/f"), owner, "owner kept");
         if tier == vercelify_core::StorageTier::Hdd {
-            assert!(dir.path().join("hdd/vfy-web-data/f").exists());
+            assert!(dir
+                .path()
+                .join("hdd")
+                .join(vercelify_platform::volumes::physical_name(&vol, &app.name, None))
+                .join("f")
+                .exists());
         }
         body_of("web.test.localhost", "version two").await;
     }

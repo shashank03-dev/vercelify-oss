@@ -425,8 +425,17 @@ platform_cmd() {
           local file=${1:-.env} vars
           [[ ! -e "$file" ]] || [[ "${VFY_FORCE:-0}" == 1 ]] || die "$file exists — remove it or set VFY_FORCE=1"
           vars=$(papi GET "/apps/$app/env?reveal=true")
-          ( umask 077
-            jq -r '[.[] | select(.preview_only | not)] | sort_by(.key) | .[] | "\(.key)=\(.value // "" | @json)"' <<<"$vars" >"$file" )
+          [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || die "$file must be a regular file, not a directory or symbolic link"
+          local env_tmp
+          env_tmp=$(umask 077; mktemp "$(dirname "$file")/.vercelify-env.XXXXXX") || die "cannot create a private export file"
+          if ! jq -r '[.[] | select(.preview_only | not)] | sort_by(.key) | .[] | "\(.key)=\(.value // "" | @json)"' <<<"$vars" >"$env_tmp"; then
+            rm -f -- "$env_tmp"
+            die "could not export variables; the existing file was preserved"
+          fi
+          if ! chmod 0600 "$env_tmp" || ! mv -f -- "$env_tmp" "$file"; then
+            rm -f -- "$env_tmp"
+            die "could not save private variables to $file"
+          fi
           printf '%s✓%s %s variables written to %s (mode 600)\n' "$G" "$N" "$(wc -l <"$file" | tr -d ' ')" "$file"
           ;;
         set)

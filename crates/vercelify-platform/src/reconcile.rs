@@ -260,6 +260,7 @@ impl Reconciler {
     }
 
     pub async fn once(&self) -> Result<Report> {
+        let _operation = self.engine.app_runtime.lock().await;
         let desire = self.desire()?;
         let servers: Vec<PlatformNode> = self.engine.store.with(nodes::list)?;
         let mut r = Report::default();
@@ -340,6 +341,7 @@ impl Reconciler {
                 Err(e) => r.errors.push(e.to_string()),
             }
         }
+        drop(_operation);
         r.errors.extend(self.engine.reconcile_databases().await);
         for (app_id, dep) in &recover {
             if desire.busy_apps.contains(app_id) {

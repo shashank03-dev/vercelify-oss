@@ -36,11 +36,14 @@ impl Engine {
     /// Restart every container of the live deployment (every replica, a
     /// compose app's sidecars too). Returns how many were restarted.
     pub async fn restart_app(&self, app_id: &str) -> Result<usize> {
+        let _runtime = self.app_runtime.lock().await;
         let (dep, name) = self.store.with(|c| {
             let a = apps::get(c, app_id)?;
             Ok((a.current_deployment_id, a.name))
         })?;
         let dep = dep.ok_or_else(|| Error::Conflict(format!("{name} isn't deployed yet")))?;
+        let app = self.store.with(|c| apps::find(c, app_id))?;
+        let _operation = self.app_operation(&app.id)?;
         let placed = self.placed(&dep)?;
         let mut n = 0;
         let mut local: Vec<String> = self
@@ -82,6 +85,7 @@ impl Engine {
     /// container from the same image (a `recover` deployment) so it mounts
     /// the data from there. The app is down while the data is copied.
     pub async fn move_app_volume(&self, volume_id: &str, tier: StorageTier, docker_root: &Path) -> Result<AppVolume> {
+        let _runtime = self.app_runtime.lock().await;
         let vol = self.store.with(|c| volumes::get(c, volume_id))?;
         if vol.owner_kind != VolumeOwner::App {
             return Err(Error::Invalid("database volumes move with their database".into()));
@@ -90,6 +94,7 @@ impl Engine {
             return Ok(vol);
         }
         let app = self.store.with(|c| apps::get(c, &vol.owner_id))?;
+        let _operation = self.app_operation(&app.id)?;
         if self.store.with(deployments::active)?.iter().any(|d| d.app_id == app.id) {
             return Err(Error::Conflict(format!(
                 "{} is deploying; move its volume when that's done",
@@ -106,7 +111,7 @@ impl Engine {
             }
         }
         let docker = &self.deployer.docker;
-        let name = volumes::docker_name(&app.name, &vol.name);
+        let name = volumes::physical_name(&vol, &app.name, None);
         let named = docker_root.join(&name).join("_data");
         let hdd = self.deployer.hdd_root.join(&name);
         let (from, to) = match tier {
@@ -124,26 +129,62 @@ impl Engine {
             .await?;
         }
         let live = app.current_deployment_id.clone();
-        let container = match &live {
-            Some(d) => self.store.with(|c| deployments::container(c, d))?,
-            None => String::new(),
+        // Placement, rather than only a pin, tells us where the data actually is.
+        if let Some(dep) = &live {
+            for placed in self.placed(dep)? {
+                if !self.node_runtime(&placed.node)?.is_local() {
+                    return Err(Error::Invalid(
+                        "this app runs on another server; move its volumes on that server".into(),
+                    ));
+                }
+            }
+        }
+        // Every replica and compose sidecar can write to this volume.
+        let containers: Vec<String> = match &live {
+            Some(_) => docker
+                .list_managed()
+                .await?
+                .into_iter()
+                .filter(|c| {
+                    matches!(c.state.as_str(), "running" | "restarting" | "paused")
+                        && c.labels.get(crate::deploy::LABEL_APP) == Some(&app.id)
+                        && !c.labels.contains_key(crate::deploy::LABEL_PR)
+                })
+                .map(|c| c.name)
+                .collect(),
+            None => vec![],
         };
-        if !container.is_empty() {
-            docker.stop(&container, 30).await?;
+        let mut stopped: Vec<&str> = vec![];
+        for container in &containers {
+            if let Err(e) = docker.stop(container, 30).await {
+                for c in &stopped {
+                    let _ = docker.start(c).await;
+                }
+                return Err(e);
+            }
+            stopped.push(container.as_str());
         }
         if let Err(e) = copy_or_init_volume(&from, &to).await {
-            // As it was: same container, same data.
-            if !container.is_empty() {
-                let _ = docker.start(&container).await;
+            for c in &stopped {
+                let _ = docker.start(c).await;
             }
             return Err(e);
         }
         let host_path = (tier == StorageTier::Hdd).then(|| to.to_string_lossy().into_owned());
-        self.store
-            .with(|c| volumes::set_tier(c, &vol.id, tier, host_path.as_deref()))?;
+        if let Err(e) = self
+            .store
+            .with(|c| volumes::set_tier(c, &vol.id, tier, host_path.as_deref()))
+        {
+            for c in &stopped {
+                let _ = docker.start(c).await;
+            }
+            return Err(e);
+        }
         if let Some(dep) = live {
-            if !container.is_empty() {
-                docker.remove(&container).await?;
+            for c in &containers {
+                if let Err(e) = docker.remove(c).await {
+                    tracing::warn!("removing stopped container {c}: {e}");
+                }
             }
             self.enqueue(
                 &app.id,

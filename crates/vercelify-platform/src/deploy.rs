@@ -6,7 +6,7 @@
 use crate::docker::{ContainerSpec, Docker, Mount, MANAGED, MANAGED_LABEL, PROXY_NETWORK};
 use crate::health::{self, Probe};
 use crate::proxy::{self, ProxyConfig, Route, RouteHost};
-use crate::volumes::docker_name;
+use crate::volumes::physical_name;
 use crate::{Error, Result};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -100,10 +100,7 @@ impl Deployer {
         let mut out = vec![];
         for v in volumes {
             // Previews never touch production data: they get volumes of their own.
-            let name = match pr {
-                Some(n) => docker_name(&format!("{}-pr{n}", app.name), &v.name),
-                None => docker_name(&app.name, &v.name),
-            };
+            let name = physical_name(v, &app.name, pr);
             let source = match (v.tier, &v.host_path, pr) {
                 (StorageTier::Hdd, Some(p), None) => p.clone(),
                 (StorageTier::Hdd, _, _) => {

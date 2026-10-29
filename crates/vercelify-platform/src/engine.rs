@@ -60,6 +60,8 @@ pub struct Engine {
     wake: Notify,
     running: Mutex<HashMap<String, CancelHandle>>,
     busy: Mutex<HashSet<String>>,
+    pub(crate) app_runtime: tokio::sync::Mutex<()>,
+    database_ops: Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
     listener: Mutex<Option<Listener>>,
     /// This server's private address (mesh): where databases'
     /// public ports listen unless opened to everyone.
@@ -68,6 +70,18 @@ pub struct Engine {
     /// published on (the mesh one): set once there are other servers.
     registry: Mutex<Option<(PathBuf, Vec<String>)>>,
     minter: Mutex<Option<TokenMinter>>,
+}
+
+pub(crate) struct AppOperation<'a> {
+    engine: &'a Engine,
+    id: String,
+}
+
+impl Drop for AppOperation<'_> {
+    fn drop(&mut self) {
+        lock(&self.engine.busy).remove(&self.id);
+        self.engine.wake.notify_one();
+    }
 }
 
 /// Makes a GitHub App's installation token for (git source, repository).
@@ -112,11 +126,41 @@ impl Engine {
             wake: Notify::new(),
             running: Mutex::default(),
             busy: Mutex::default(),
+            database_ops: Mutex::default(),
+            app_runtime: tokio::sync::Mutex::new(()),
             listener: Mutex::default(),
             private_ip: Mutex::default(),
             registry: Mutex::default(),
             minter: Mutex::default(),
         })
+    }
+
+    pub(crate) fn app_operation(&self, id: &str) -> Result<AppOperation<'_>> {
+        if !lock(&self.busy).insert(id.to_string()) {
+            return Err(Error::Conflict(
+                "this app already has an operation running; try again when it finishes".into(),
+            ));
+        }
+        Ok(AppOperation {
+            engine: self,
+            id: id.to_string(),
+        })
+    }
+
+    /// Serialize database starts, moves, backup/restore and removal. Weak
+    /// entries keep this bounded after operations and database deletion.
+    pub(crate) async fn database_operation(&self, id: &str) -> tokio::sync::OwnedMutexGuard<()> {
+        let operation = {
+            let mut operations = lock(&self.database_ops);
+            operations.retain(|_, v| v.strong_count() > 0);
+            let operation = operations
+                .get(id)
+                .and_then(std::sync::Weak::upgrade)
+                .unwrap_or_else(|| Arc::new(tokio::sync::Mutex::new(())));
+            operations.insert(id.to_string(), Arc::downgrade(&operation));
+            operation
+        };
+        operation.lock_owned().await
     }
 
     pub fn set_private_ip(&self, ip: Option<String>) {
@@ -404,7 +448,7 @@ impl Engine {
                 .find(|n| n.role == "main")
                 .cloned()
                 .ok_or_else(|| Error::Unavailable("the main server isn't registered yet".into()))?;
-            let vols = volumes::list(c, VolumeOwner::App, &app.id)?;
+            let vols = volumes::checked_list(c, VolumeOwner::App, &app.id)?;
             let need = placement::Need {
                 pinned: app.node_id.clone(),
                 replicas: if d.pr_number.is_some() { 1 } else { app.runtime.replicas },
@@ -615,7 +659,10 @@ impl Engine {
                 runtime_env.push((k.to_string(), v));
             }
         }
-        let vols = self.store.with(|c| volumes::list(c, VolumeOwner::App, &app.id))?;
+        let vols = self.store.with(|c| match d.pr_number {
+            Some(pr) => volumes::list_for_preview(c, &app.id, pr),
+            None => volumes::checked_list(c, VolumeOwner::App, &app.id),
+        })?;
         let previous = if preview {
             self.store
                 .with(|c| previews::get(c, &app.id, d.pr_number.unwrap_or(0)))?
@@ -1122,14 +1169,14 @@ impl Engine {
             Ok((
                 apps::get(c, app_id)?,
                 previews::get(c, app_id, pr)?,
-                volumes::list(c, VolumeOwner::App, app_id)?,
+                volumes::list_for_preview(c, app_id, pr)?,
             ))
         })?;
         let docker = &self.deployer.docker;
         let key = deploy::route_key(&app.name, Some(pr));
         let vol_names: Vec<String> = vols
             .iter()
-            .map(|v| volumes::docker_name(&format!("{}-pr{pr}", app.name), &v.name))
+            .map(|v| volumes::physical_name(v, &app.name, Some(pr)))
             .collect();
         if let Some(dep) = preview.as_ref().and_then(|p| p.deployment_id.clone()) {
             for p in self.placed(&dep)? {
@@ -1199,7 +1246,10 @@ impl Engine {
                     .collect();
             }
             if purge_volumes {
-                a.remove_volumes = vols.iter().map(|v| volumes::docker_name(&app.name, &v.name)).collect();
+                a.remove_volumes = vols
+                    .iter()
+                    .map(|v| volumes::physical_name(v, &app.name, None))
+                    .collect();
             }
             if let Err(e) = rt.apply(&a).await {
                 tracing::warn!("cleaning {} up on {}: {e}", app.name, n.name);
@@ -1233,7 +1283,7 @@ impl Engine {
         }
         if purge_volumes {
             for v in vols {
-                let name = volumes::docker_name(&app.name, &v.name);
+                let name = volumes::physical_name(v, &app.name, None);
                 let _ = docker.volume_remove(&name).await;
                 if let Some(p) = &v.host_path {
                     let _ = std::fs::remove_dir_all(p);

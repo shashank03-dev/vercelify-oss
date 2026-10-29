@@ -10,4 +10,4 @@ mount_path: string, tier: StorageTier,
 /**
  * Host directory for HDD volumes; None = a Docker named volume.
  */
-host_path: string | null, created_at: string, };
+host_path: string | null, storage_name?: string, created_at: string, };

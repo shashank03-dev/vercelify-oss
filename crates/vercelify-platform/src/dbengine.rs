@@ -71,16 +71,19 @@ fn spec_hash(d: &Database, mesh_ip: Option<&str>, hdd: Option<&str>) -> String {
 
 /// (spec, hash) of a database's container.
 fn container_spec(engine: &Engine, d: &Database, cred: &Credentials) -> Result<(crate::docker::ContainerSpec, String)> {
-    let vols = engine.store.with(|c| volumes::list(c, VolumeOwner::Database, &d.id))?;
+    let vols = engine
+        .store
+        .with(|c| volumes::checked_list(c, VolumeOwner::Database, &d.id))?;
+    let vol = vols
+        .first()
+        .ok_or_else(|| Error::Internal(format!("{} has no volume", d.name)))?;
+    let storage_name = volumes::physical_name(vol, &format!("db-{}", d.name), None);
     let hdd = vols.first().and_then(|v| match v.tier {
-        StorageTier::Hdd => Some(v.host_path.clone().unwrap_or_else(|| {
-            engine
-                .deployer
-                .hdd_root
-                .join(databases::volume_name(&d.name))
-                .to_string_lossy()
-                .into()
-        })),
+        StorageTier::Hdd => Some(
+            v.host_path
+                .clone()
+                .unwrap_or_else(|| engine.deployer.hdd_root.join(&storage_name).to_string_lossy().into()),
+        ),
         StorageTier::Ssd => None,
     });
     if let Some(p) = &hdd {
@@ -88,8 +91,13 @@ fn container_spec(engine: &Engine, d: &Database, cred: &Credentials) -> Result<(
             .map_err(|e| Error::Unavailable(format!("can't create {p} on the storage disk: {e}")))?;
     }
     let ip = engine.private_ip();
-    let hash = spec_hash(d, ip.as_deref(), hdd.as_deref());
+    let hash = spec_hash(d, ip.as_deref(), Some(hdd.as_deref().unwrap_or(&storage_name)));
     let mut spec = databases::spec(d, cred, ip.as_deref(), hdd);
+    if let Some(mount) = spec.mounts.first_mut() {
+        if vol.tier == StorageTier::Ssd {
+            mount.source = storage_name;
+        }
+    }
     spec.labels.insert("vercelify.spec".into(), hash.clone());
     Ok((spec, hash))
 }
@@ -126,6 +134,12 @@ impl Engine {
     /// Make the database's container match its record: create (or recreate
     /// after a change), start, wait until it accepts connections.
     pub async fn ensure_database(&self, id: &str) -> Result<Database> {
+        let (d, _) = self.database(id)?;
+        let _operation = self.database_operation(&d.id).await;
+        self.ensure_database_inner(&d.id).await
+    }
+
+    async fn ensure_database_inner(&self, id: &str) -> Result<Database> {
         let (d, cred) = self.database(id)?;
         let docker = &self.deployer.docker;
         if d.desired == Desired::Stopped {
@@ -203,19 +217,20 @@ impl Engine {
     }
 
     /// Remove a database's container (and with `purge`, its data).
-    pub async fn remove_database(&self, d: &Database, purge: bool, hdd_path: Option<String>) -> Result<()> {
+    pub async fn remove_database(
+        &self,
+        d: &Database,
+        purge: bool,
+        hdd_path: Option<String>,
+        storage_name: &str,
+    ) -> Result<()> {
+        let _operation = self.database_operation(&d.id).await;
         let docker = &self.deployer.docker;
         docker.stop(&d.container, 30).await?;
         docker.remove(&d.container).await?;
         if purge {
-            docker.volume_remove(&databases::volume_name(&d.name)).await?;
-            let p = hdd_path.unwrap_or_else(|| {
-                self.deployer
-                    .hdd_root
-                    .join(databases::volume_name(&d.name))
-                    .to_string_lossy()
-                    .into()
-            });
+            docker.volume_remove(storage_name).await?;
+            let p = hdd_path.unwrap_or_else(|| self.deployer.hdd_root.join(storage_name).to_string_lossy().into());
             let _ = std::fs::remove_dir_all(p);
         }
         self.emit(EngineEvent::Changed);
@@ -226,17 +241,20 @@ impl Engine {
     /// owners and permissions kept, switch the volume record, start it again.
     pub async fn move_database(&self, id: &str, tier: StorageTier, docker_root: &Path) -> Result<Database> {
         let (d, _) = self.database(id)?;
+        let _operation = self.database_operation(&d.id).await;
+        let (d, _) = self.database(&d.id)?;
         let vol = self
             .store
-            .with(|c| volumes::list(c, VolumeOwner::Database, &d.id))?
+            .with(|c| volumes::checked_list(c, VolumeOwner::Database, &d.id))?
             .into_iter()
             .next()
             .ok_or_else(|| Error::Internal(format!("{} has no volume", d.name)))?;
         if vol.tier == tier {
             return Ok(d);
         }
-        let named = docker_root.join(databases::volume_name(&d.name)).join("_data");
-        let hdd = self.deployer.hdd_root.join(databases::volume_name(&d.name));
+        let storage_name = volumes::physical_name(&vol, &format!("db-{}", d.name), None);
+        let named = docker_root.join(&storage_name).join("_data");
+        let hdd = self.deployer.hdd_root.join(&storage_name);
         let (from, to) = match tier {
             StorageTier::Hdd => (named.clone(), hdd.clone()),
             StorageTier::Ssd => (
@@ -248,7 +266,7 @@ impl Engine {
             // The named volume must exist to receive the data.
             let _ = proc::run(Spec {
                 bin: &self.deployer.docker.bin,
-                args: &proc::args(&["volume", "create", &databases::volume_name(&d.name)]),
+                args: &proc::args(&["volume", "create", &storage_name]),
                 env: &[],
                 cwd: None,
                 timeout: Duration::from_secs(30),
@@ -259,13 +277,13 @@ impl Engine {
         let copied = copy_tree(&from, &to).await;
         if let Err(e) = copied {
             // Back as it was.
-            let _ = self.ensure_database(&d.id).await;
+            let _ = self.ensure_database_inner(&d.id).await;
             return Err(e);
         }
         let host_path = (tier == StorageTier::Hdd).then(|| to.to_string_lossy().into_owned());
         self.store
             .with(|c| volumes::set_tier(c, &vol.id, tier, host_path.as_deref()))?;
-        self.ensure_database(&d.id).await
+        self.ensure_database_inner(&d.id).await
     }
 
     /// Back up one database into the restic repository.
@@ -276,6 +294,8 @@ impl Engine {
             ));
         }
         let (d, _) = self.database(id)?;
+        let _operation = self.database_operation(&d.id).await;
+        let (d, _) = self.database(&d.id)?;
         let bid = new_id("bak");
         let t = now();
         self.store.with(|c| {
@@ -403,6 +423,8 @@ impl Engine {
             return Err(Error::Invalid(format!("`{snapshot}` is not a snapshot id")));
         }
         let (d, _) = self.database(id)?;
+        let _operation = self.database_operation(&d.id).await;
+        let (d, _) = self.database(&d.id)?;
         let docker = &self.deployer.docker;
         let style = databases::template(d.kind).backup;
         let file = match style {
@@ -410,17 +432,60 @@ impl Engine {
             _ => format!("{}.tar", d.name),
         };
         let dump = proc::args(&["dump", snapshot, &format!("/{file}")]);
+        // A missing/incomplete snapshot must never reach a consumer that
+        // deletes live files. Stage on disk (bounded memory), check the entire
+        // producer result, and validate file archives before stopping anything.
+        std::fs::create_dir_all(&self.builder.work_dir)?;
+        let staged = tempfile::Builder::new()
+            .prefix("restore-")
+            .tempdir_in(&self.builder.work_dir)?;
+        let archive = staged.path().join("backup");
+        pipe(
+            &restic.bin,
+            &dump,
+            "sh",
+            &proc::args(&[
+                "-c",
+                "umask 077; cat > \"$1\"",
+                "stage-restore",
+                &archive.to_string_lossy(),
+            ]),
+            &restic.command_env(),
+            Duration::from_secs(3 * 3600),
+        )
+        .await?;
+        if style != BackupStyle::Dump {
+            let checked = proc::run(Spec {
+                bin: "sh",
+                args: &proc::args(&[
+                    "-c",
+                    "tar -tf \"$1\" >/dev/null",
+                    "check-restore",
+                    &archive.to_string_lossy(),
+                ]),
+                env: &[],
+                cwd: None,
+                timeout: Duration::from_secs(180),
+            })
+            .await?;
+            if !checked.success() {
+                return Err(Error::Invalid(
+                    "the backup archive is damaged; the database was not changed".into(),
+                ));
+            }
+        }
+        let staged_args = proc::args(&[&archive.to_string_lossy()]);
         match style {
             BackupStyle::Dump => {
-                self.ensure_database(&d.id).await?;
+                self.ensure_database_inner(&d.id).await?;
                 let mut consumer = proc::args(&["exec", "-i", &d.container]);
                 consumer.extend(databases::restore_command(d.kind).unwrap_or_default());
                 pipe(
-                    &restic.bin,
-                    &dump,
+                    "cat",
+                    &staged_args,
                     &docker.bin,
                     &consumer,
-                    &restic.command_env(),
+                    &[],
                     Duration::from_secs(3 * 3600),
                 )
                 .await?;
@@ -442,15 +507,15 @@ impl Engine {
                     &format!("cd {data} && find . -mindepth 1 -delete && tar -xf -"),
                 ]);
                 let res = pipe(
-                    &restic.bin,
-                    &dump,
+                    "cat",
+                    &staged_args,
                     &docker.bin,
                     &consumer,
-                    &restic.command_env(),
+                    &[],
                     Duration::from_secs(3 * 3600),
                 )
                 .await;
-                self.ensure_database(&d.id).await?;
+                self.ensure_database_inner(&d.id).await?;
                 res?;
             }
         }
@@ -586,6 +651,13 @@ pub(crate) async fn copy_tree(from: &Path, to: &Path) -> Result<()> {
         Err(e) => return Err(Error::Internal(format!("can't read {}: {e}", from.display()))),
     }
     std::fs::create_dir_all(to)?;
+    let source = std::fs::canonicalize(from)?;
+    let destination = std::fs::canonicalize(to)?;
+    if source.starts_with(&destination) || destination.starts_with(&source) {
+        return Err(Error::Invalid(
+            "source and destination volume directories overlap; refusing to delete or copy data".into(),
+        ));
+    }
     let script = "set -e; find \"$2\" -mindepth 1 -delete; cp -a \"$1\"/. \"$2\"/";
     let out = proc::run(Spec {
         bin: "sh",
@@ -603,6 +675,26 @@ pub(crate) async fn copy_tree(from: &Path, to: &Path) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn overlapping_copy_paths_never_delete_volume_data() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("volume");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::write(source.join("database"), b"valuable data").unwrap();
+        assert!(super::copy_tree(&source, &source).await.is_err());
+        assert_eq!(std::fs::read(source.join("database")).unwrap(), b"valuable data");
+        assert!(super::copy_tree(&source, dir.path()).await.is_err());
+        assert_eq!(std::fs::read(source.join("database")).unwrap(), b"valuable data");
+        assert!(super::copy_tree(dir.path(), &source).await.is_err());
+        #[cfg(unix)]
+        {
+            let alias = dir.path().join("alias");
+            std::os::unix::fs::symlink(&source, &alias).unwrap();
+            assert!(super::copy_tree(&source, &alias).await.is_err());
+            assert_eq!(std::fs::read(source.join("database")).unwrap(), b"valuable data");
+        }
+    }
+
     use super::*;
 
     #[cfg(unix)]

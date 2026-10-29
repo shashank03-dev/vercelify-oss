@@ -648,6 +648,10 @@ pub struct AppVolume {
     pub tier: StorageTier,
     /// Host directory for HDD volumes; None = a Docker named volume.
     pub host_path: Option<String>,
+    // Immutable physical identity. Absent on volumes created before schema 5.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub storage_name: Option<String>,
     pub created_at: String,
 }
 

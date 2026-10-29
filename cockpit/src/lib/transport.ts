@@ -168,6 +168,7 @@ async function webHttp(base: string, token: string | null, req: HttpRequest): Pr
   const secs = req.timeout ?? 30;
   const timer = setTimeout(() => controller.abort(), secs * 1000);
   let resp: Response;
+  let text: string;
   try {
     resp = await fetch(base + req.path, {
       method: req.method,
@@ -179,12 +180,12 @@ async function webHttp(base: string, token: string | null, req: HttpRequest): Pr
       body: req.body !== undefined ? JSON.stringify(req.body) : undefined,
       signal: controller.signal,
     });
+    text = await resp.text();
   } catch (e) {
     throw new CockpitError(controller.signal.aborted ? `the server didn't answer within ${secs}s` : `cannot reach the server (${(e as Error).message})`, 0);
   } finally {
     clearTimeout(timer);
   }
-  const text = await resp.text();
   let value: unknown = null;
   if (text.trim()) {
     try {

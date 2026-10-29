@@ -70,11 +70,38 @@ fn random_hex(n: usize) -> String {
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-fn read_file(cfg: &Config) -> TokenFile {
-    std::fs::read_to_string(&cfg.tokens_file)
-        .ok()
-        .and_then(|r| serde_json::from_str(&r).ok())
-        .unwrap_or_default()
+// CLI pair/revoke and HTTP requests are separate processes/threads. Hold a
+// shared advisory lock across the whole read-modify-write transaction.
+fn lock_file(cfg: &Config) -> std::io::Result<std::fs::File> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
+    if let Some(parent) = cfg.tokens_file.parent() {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(parent)?;
+    }
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o600)
+        .open(cfg.tokens_file.with_extension("lock"))?;
+    loop {
+        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX) } == 0 {
+            return Ok(file);
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
+fn read_file(cfg: &Config) -> std::io::Result<TokenFile> {
+    match std::fs::read(&cfg.tokens_file) {
+        Ok(data) => serde_json::from_slice(&data).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(TokenFile::default()),
+        Err(e) => Err(e),
+    }
 }
 
 fn write_file(cfg: &Config, f: &TokenFile) -> std::io::Result<()> {
@@ -98,7 +125,8 @@ pub fn create_with_role(cfg: &Config, name: &str, role: Role) -> std::io::Result
         last_used_at: None,
         role,
     };
-    let mut f = read_file(cfg);
+    let _lock = lock_file(cfg)?;
+    let mut f = read_file(cfg)?;
     f.tokens.push(t.clone());
     write_file(cfg, &f)?;
     Ok((public(&t, None), secret))
@@ -116,7 +144,12 @@ fn public(t: &StoredToken, current: Option<&str>) -> DeviceToken {
 }
 
 pub fn list(cfg: &Config) -> Vec<StoredTokenView> {
-    read_file(cfg).tokens.into_iter().map(StoredTokenView).collect()
+    read_file(cfg)
+        .unwrap_or_default()
+        .tokens
+        .into_iter()
+        .map(StoredTokenView)
+        .collect()
 }
 
 /// Opaque view for the CLI.
@@ -135,7 +168,8 @@ impl StoredTokenView {
 }
 
 pub fn revoke(cfg: &Config, id: &str) -> std::io::Result<bool> {
-    let mut f = read_file(cfg);
+    let _lock = lock_file(cfg)?;
+    let mut f = read_file(cfg)?;
     let before = f.tokens.len();
     f.tokens.retain(|t| t.id != id);
     if f.tokens.len() == before {
@@ -185,7 +219,7 @@ impl Tokens {
         };
         let mtime = stamp(cfg);
         if mtime != c.mtime {
-            c.tokens = read_file(cfg).tokens;
+            c.tokens = read_file(cfg).unwrap_or_default().tokens;
             c.mtime = mtime;
         }
         let (id, role) = c
@@ -196,15 +230,18 @@ impl Tokens {
         c.used.insert(id.clone(), now());
         // Note last use on disk at most every 10 minutes.
         if c.flushed.is_none_or(|t| t.elapsed().as_secs() > 600) {
-            let mut f = read_file(cfg);
-            for t in &mut f.tokens {
-                if let Some(u) = c.used.get(&t.id) {
-                    t.last_used_at = Some(u.clone());
+            if let Ok(_lock) = lock_file(cfg) {
+                if let Ok(mut f) = read_file(cfg) {
+                    for t in &mut f.tokens {
+                        if let Some(u) = c.used.get(&t.id) {
+                            t.last_used_at = Some(u.clone());
+                        }
+                    }
+                    if write_file(cfg, &f).is_ok() {
+                        c.mtime = stamp(cfg);
+                        c.tokens = f.tokens;
+                    }
                 }
-            }
-            if write_file(cfg, &f).is_ok() {
-                c.mtime = stamp(cfg);
-                c.tokens = f.tokens;
             }
             c.flushed = Some(Instant::now());
         }
@@ -214,6 +251,7 @@ impl Tokens {
     pub fn list(&self, cfg: &Config, current: &Actor) -> Vec<DeviceToken> {
         let c = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         read_file(cfg)
+            .unwrap_or_default()
             .tokens
             .iter()
             .map(|t| {
@@ -275,6 +313,40 @@ mod tests {
             audit_log: dir.join("audit.log"),
             ..Config::default()
         }
+    }
+
+    #[test]
+    fn concurrent_pairings_preserve_every_device() {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = std::sync::Arc::new(cfg(d.path()));
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(24));
+        let handles: Vec<_> = (0..24)
+            .map(|n| {
+                let cfg = cfg.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    create(&cfg, &format!("device-{n}"))
+                })
+            })
+            .collect();
+        let results: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        assert!(results.iter().all(Result::is_ok), "concurrent writes failed");
+        assert_eq!(
+            list(&cfg).len(),
+            24,
+            "a successful pairing must not discard another device"
+        );
+    }
+
+    #[test]
+    fn corrupt_registry_is_not_overwritten_by_pairing_or_revocation() {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = cfg(d.path());
+        std::fs::write(&cfg.tokens_file, b"{ damaged registry").unwrap();
+        assert!(create(&cfg, "new device").is_err());
+        assert!(revoke(&cfg, "old-device").is_err());
+        assert_eq!(std::fs::read(&cfg.tokens_file).unwrap(), b"{ damaged registry");
     }
 
     #[test]

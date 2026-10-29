@@ -40,6 +40,8 @@ sha2 = "0.10"
 zeroize = "1"
 # Validates rule regexes as RE2 (what Traefik/Go accepts).
 regex-syntax = "0.8"
+# Read the installer's shell-quoted backup credentials without evaluating them.
+shlex = "2"
 
 [dev-dependencies]
 vercelify-mesh = { workspace = true, features = ["daemon"] }

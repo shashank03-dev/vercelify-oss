@@ -271,6 +271,23 @@ pub fn env_file_values(path: &Path) -> BTreeMap<String, String> {
         .collect()
 }
 
+/// Backup configuration is sourced by the host shell. Decode its POSIX literal
+/// assignments with the same quoting rules, without running shell expansions.
+pub fn backup_env_values(path: &Path) -> BTreeMap<String, String> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    shlex::split(&text)
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|word| {
+            let (key, value) = word.split_once('=')?;
+            if key.is_empty() || !key.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+                return None;
+            }
+            Some((key.to_string(), value.to_string()))
+        })
+        .collect()
+}
+
 impl Config {
     pub fn load(path: Option<&Path>) -> anyhow_lite::Result<Self> {
         let mut cfg: Config = match path {
@@ -608,6 +625,53 @@ pub mod anyhow_lite {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn backup_credentials_round_trip_shell_literals_without_expansion() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backup.env");
+        std::fs::write(&path, "RESTIC_PASSWORD='space $dollar '\\''quote\\slash\nsecond line'\nAWS_SECRET_ACCESS_KEY='literal $(echo no)'\nBACKUP_REPOS=\"/mnt/backup sftp:host:/data\"\n").unwrap();
+        let values = backup_env_values(&path);
+        assert_eq!(
+            values.get("RESTIC_PASSWORD").unwrap(),
+            "space $dollar 'quote\\slash\nsecond line"
+        );
+        assert_eq!(values.get("AWS_SECRET_ACCESS_KEY").unwrap(), "literal $(echo no)");
+        assert_eq!(values.get("BACKUP_REPOS").unwrap(), "/mnt/backup sftp:host:/data");
+    }
+
+    #[test]
+    fn shell_and_agent_read_the_installers_actual_credential_writer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("backup.env");
+        let expected = "spaces $dollars 'quotes' \\slashes\nnewlines\tand tabs";
+        let script = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .unwrap()
+            .join("host/lib/backup.sh");
+        let output = std::process::Command::new("bash")
+            .args([
+                "-c",
+                ". \"$1\"; backup_env_assignment RESTIC_PASSWORD \"$2\"",
+                "writer-test",
+            ])
+            .arg(script)
+            .arg(expected)
+            .env("VERCELIFY_ETC", dir.path())
+            .env("VERCELIFY_STATE", dir.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        std::fs::write(&path, &output.stdout).unwrap();
+        assert_eq!(backup_env_values(&path).get("RESTIC_PASSWORD").unwrap(), expected);
+        let shell = std::process::Command::new("bash")
+            .args(["-c", ". \"$1\"; printf %s \"$RESTIC_PASSWORD\"", "reader-test"])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(shell.status.success());
+        assert_eq!(shell.stdout, expected.as_bytes());
+    }
 
     #[test]
     fn parses_full_config() {

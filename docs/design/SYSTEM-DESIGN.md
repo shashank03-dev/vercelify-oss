@@ -119,7 +119,7 @@ The authoritative copy is `crates/vercelify-platform/migrations/0001_init.sql`. 
 | `previews` | UNIQUE(`app_id`,`pr_number`), `head_sha`, `deployment_id`, `status` | |
 | `databases` | `name` UNIQUE, `kind`, `version`, `image`, `node_id`, `credentials` BLOB (sealed), `public_port`, `public_bind`, `desired`, `backup_schedule` | |
 | `database_backups` | `database_id`, `status`, `bytes`, `snapshot` | |
-| `volumes` | `owner_kind` app/database, `owner_id`, `name`, `mount_path`, `tier` ssd/hdd, `host_path` | UNIQUE(`owner_kind`,`owner_id`,`name`) |
+| `volumes` | `owner_kind` app/database, `owner_id`, `name`, `mount_path`, `tier` ssd/hdd, `host_path`, `storage_name` | UNIQUE(`owner_kind`,`owner_id`,`name`) |
 | `git_sources` | `provider`, `base_url`, `auth` none/token/deploy_key/github_app, `secret` BLOB (sealed), `public_key` | |
 | `deploy_hooks` | `app_id`, `secret_hash` UNIQUE | |
 | `scheduled_tasks` | `app_id`, `schedule`, `command`, `enabled`, `last_*` | |
@@ -474,9 +474,23 @@ Templates in `crates/vercelify-platform/templates/databases.toml` (versioned wit
   interfaces and the firewall opens it.
 - Backups: `docker exec` dump (`pg_dump -Fc`, `mysqldump --single-transaction`,
   `mongodump --archive`, `BGSAVE` + copy of the RDB) streamed into `restic backup --stdin`,
-  tagged `db:<name>`. Restore stops dependants, restores, starts them.
+  tagged `db:<name>`. Restore first stages the complete backup in a private
+  temporary directory under the build work directory and validates file archives;
+  missing/corrupt snapshots fail before touching live data. Staging uses disk
+  space proportional to the backup and is removed afterward. Database runtime
+  operations serialize per database so reconciliation cannot restart one mid-copy.
+  Restore stops dependants, restores, starts them.
+- Storage identities: schema 5 gives new app/database volumes an immutable
+  `vfyv2-<volume ID>` name, with `-pr-<number>` for previews. Existing volumes keep
+  their legacy names and HDD paths; the migration does not move data. Before
+  mounting, moving or purging, legacy bindings are checked against other apps,
+  databases and known previews. Aliases return a conflict and preserve the data.
+  Runtime starts carrying new identities use `/v1/runtime/instances-v2`; older
+  workers fail safely and need upgrading before mounting those volumes.
 - Volume tier moves (`POST /v1/platform/volumes/{id}/move`, a job): stop, `cp -a` to the
-  other tier (owners and modes kept), record the new place, start. A database restarts on
+  other tier (owners and modes kept), record the new place, start. Every production
+  replica/sidecar (including rollout leftovers) is stopped; the move serializes
+  with app reconciliation/restart and excludes concurrent deployment of that app. A database restarts on
   the new path; an app volume is mounted by a fresh container, created by a `recover`
   deployment from the same image. The app is down while the data is copied. A missing
   volume source can be initialised empty, but an inaccessible or non-directory source

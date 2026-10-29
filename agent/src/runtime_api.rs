@@ -76,7 +76,7 @@ async fn dispatch(
         }
         ["apply"] if post => json(apply_local(d, &body::<Apply>(&b)?).await),
         ["routes"] if get => json(vercelify_platform::proxy::route_keys(&d.proxy)),
-        ["instances"] if post => start_instance(w.clone(), body(&b)?),
+        ["instances" | "instances-v2"] if post => start_instance(w.clone(), body(&b)?),
         ["health"] if post => {
             d.wait(&body::<HealthWait>(&b)?).await?;
             json(json!({ "healthy": true }))

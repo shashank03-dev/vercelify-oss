@@ -432,7 +432,13 @@ impl NodeRuntime {
                 let node = r.node.clone();
                 r.lines(
                     Method::POST,
-                    "/v1/runtime/instances",
+                    // Old workers ignore unknown volume fields. A distinct route makes
+                    // them fail safely instead of mounting the legacy storage name.
+                    if s.volumes.iter().any(|v| v.storage_name.is_some()) {
+                        "/v1/runtime/instances-v2"
+                    } else {
+                        "/v1/runtime/instances"
+                    },
                     Some(serde_json::to_vec(s)?),
                     timeout,
                     &mut |v| {
@@ -451,7 +457,17 @@ impl NodeRuntime {
                         }
                     },
                 )
-                .await?;
+                .await
+                .map_err(|e| {
+                    if matches!(e, Error::NotFound(_)) && s.volumes.iter().any(|v| v.storage_name.is_some()) {
+                        Error::Unavailable(format!(
+                            "upgrade {} before deploying volumes with storage identities",
+                            r.node
+                        ))
+                    } else {
+                        e
+                    }
+                })?;
                 if let Some(e) = failure {
                     return Err(e);
                 }
@@ -542,6 +558,108 @@ mod tests {
         assert!(
             segment("../etc").is_err() && segment("..").is_err() && segment("a b").is_err() && segment("").is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn older_workers_refuse_new_storage_without_breaking_legacy_starts() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use vercelify_core::platform::{AppVolumeRequest, DeploymentTrigger, VolumeOwner};
+        let store = crate::Store::open_in_memory().unwrap();
+        let app = store
+            .tx(|c| crate::apps::create(c, &crate::apps::tests::git_app("blog")))
+            .unwrap();
+        let volume = store
+            .tx(|c| {
+                crate::volumes::create(
+                    c,
+                    VolumeOwner::App,
+                    &app.id,
+                    &AppVolumeRequest {
+                        name: "data".into(),
+                        mount_path: "/data".into(),
+                        tier: None,
+                    },
+                )
+            })
+            .unwrap();
+        let deployment = store
+            .tx(|c| {
+                crate::deployments::create(
+                    c,
+                    &crate::deployments::NewDeployment {
+                        app_id: &app.id,
+                        pr_number: None,
+                        branch: "main",
+                        commit_sha: "",
+                        commit_message: "",
+                        trigger: DeploymentTrigger::Manual,
+                        rollback_of: None,
+                        image: "test:latest",
+                        node_id: None,
+                    },
+                )
+            })
+            .unwrap();
+        for legacy in [false, true] {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let peer = tokio::spawn(async move {
+                let (mut socket, _) = listener.accept().await.unwrap();
+                let mut request = vec![];
+                let mut chunk = [0; 4096];
+                while !request.windows(4).any(|w| w == b"\r\n\r\n") {
+                    let n = socket.read(&mut chunk).await.unwrap();
+                    assert!(n > 0);
+                    request.extend_from_slice(&chunk[..n]);
+                }
+                let request = String::from_utf8_lossy(&request);
+                assert!(request.starts_with(if legacy {
+                    "POST /v1/runtime/instances "
+                } else {
+                    "POST /v1/runtime/instances-v2 "
+                }));
+                let (status, body) = if legacy {
+                    ("200 OK", "{\"container\":\"legacy\"}\n")
+                } else {
+                    ("404 Not Found", "{}")
+                };
+                socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            });
+            let mut v = volume.clone();
+            if legacy {
+                v.storage_name = None;
+            }
+            let spec = StartSpec {
+                app: app.clone(),
+                deployment: deployment.clone(),
+                image: "test:latest".into(),
+                env: vec![],
+                volumes: vec![v],
+                port: 3000,
+                replica: 0,
+            };
+            let remote = NodeRuntime::Remote(Remote {
+                node: "old-worker".into(),
+                base,
+                token: Zeroizing::new("test".into()),
+            });
+            let result = remote.start_instance(&spec, &mut |_| {}).await;
+            if legacy {
+                assert_eq!(result.unwrap(), "legacy");
+            } else {
+                assert!(result.unwrap_err().to_string().contains("upgrade old-worker"));
+            }
+            peer.await.unwrap();
+        }
     }
 
     #[test]
