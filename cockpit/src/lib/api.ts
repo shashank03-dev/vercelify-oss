@@ -40,6 +40,8 @@ import type {
   SleepRequest,
   SleepStatus,
   StorageTier,
+  SunshinePairRequest,
+  SunshinePairResult,
   SystemSnapshot,
   ToolStatus,
   UpdateStatus,
@@ -110,6 +112,8 @@ function makeAgent(server?: string) {
     display: () => req<DisplayStatus>("GET", "/v1/display"),
     receiverStart: (cfg: ReceiverConfig) => req<DisplayStatus>("POST", "/v1/display/receiver/start", cfg),
     receiverStop: () => req<DisplayStatus>("POST", "/v1/display/receiver/stop", {}),
+    /** Hands Sunshine the PIN Moonlight was started with; waits up to 25 s for Moonlight to ask. */
+    sunshinePair: (pair: SunshinePairRequest) => req<SunshinePairResult>("POST", "/v1/display/sunshine/pair", pair, 60),
     services: () => req<ServiceStatus[]>("GET", "/v1/services"),
     serviceAction: (name: string, action: "start" | "stop" | "restart") =>
       req<{ ok: boolean }>("POST", `/v1/services/${q(name)}/${action}`, {}, 90),
@@ -199,6 +203,7 @@ export const local = {
   senderStatus: () => call<ProcessStatus>("sender_status"),
   moonlightSetup: (host: string) => call<string>("moonlight_setup", { host }),
   moonlightStart: (launch: MoonlightLaunch) => call<ProcessStatus>("moonlight_start", { launch }),
+  moonlightPair: (host: string, pin: string) => call<ProcessStatus>("moonlight_pair", { host, pin }),
   moonlightStop: () => call<ProcessStatus>("moonlight_stop"),
   moonlightStatus: () => call<ProcessStatus>("moonlight_status"),
 };

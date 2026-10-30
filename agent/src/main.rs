@@ -34,6 +34,7 @@ mod runtime_api;
 mod services;
 mod sleep;
 mod standby;
+mod sunshine;
 mod terminal;
 mod tokens;
 mod update;

@@ -225,7 +225,7 @@ After connecting, add those features when you need them:
 | Your domain | `sudo vercelify domain` |
 | Access from other networks | `sudo vercelify remote on` |
 | Local AI | See [Step 5](#step-5-optional-turn-on-ai-on-the-server) |
-| Control the Linux desktop | `sudo vercelify desktop on`, then open Sunshine setup in the app |
+| Control the Linux desktop | `sudo vercelify desktop on`, then **Launch Moonlight** in the app (it pairs by itself) |
 
 For the original guided questions, add `--configure` to the server installer.
 

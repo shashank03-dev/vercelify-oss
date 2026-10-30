@@ -55,7 +55,7 @@ STUB
   chmod +x "$T/bin/"*
   unset SUDO_USER
   export CALLS="$T/calls" PATH="$T/bin:$PATH" NO_COLOR=1 VERCELIFY_TEST=1 T DIGEST
-  export VERCELIFY_ETC="$T/etc" VERCELIFY_LOG="$T/log" OS_RELEASE="$T/os-release"
+  export VERCELIFY_ETC="$T/etc" VERCELIFY_LOG="$T/log" OS_RELEASE="$T/os-release" VERCELIFY_STATE="$T/state"
   export SUNSHINE_RELEASE_API=https://api.test/latest
   : >"$CALLS"
   # shellcheck source=/dev/null
@@ -152,4 +152,28 @@ teardown() { rm -rf "$T"; }
   run bash -euo pipefail -c '. "$1/lib/common.sh"; . "$1/lib/mesh.sh"; . "$1/lib/desktop.sh"; desktop_on' _ "$BATS_TEST_DIRNAME/.."
   [ "$status" -eq 0 ]
   grep -qx 'desktop_user = "ana"' "$T/etc/agent.toml"
+}
+
+@test "reset-login: Sunshine's login forgotten, paired devices kept" {
+  printf 'desktop_user = "ana"\n' >>"$T/etc/agent.toml"
+  mkdir -p "$T/home/ana/.config/sunshine" "$T/state"
+  printf '{"username":"me","salt":"s","password":"h","root":{"uniqueid":"u","named_devices":[{"name":"Mac"}]}}\n' \
+    >"$T/home/ana/.config/sunshine/sunshine_state.json"
+  printf '{"user":"vercelify","password":"x"}\n' >"$T/state/sunshine-login.json"
+  run desktop_reset_login
+  [ "$status" -eq 0 ]
+  run jq -c . "$T/home/ana/.config/sunshine/sunshine_state.json"
+  [ "$output" = '{"root":{"uniqueid":"u","named_devices":[{"name":"Mac"}]}}' ]
+  [ ! -e "$T/state/sunshine-login.json" ]
+  grep -q 'runuser ana' "$CALLS"
+  # Stopped before the edit, started after it.
+  run grep -n 'Sunshine.service' "$CALLS"
+  [[ "${lines[0]}" == *"stop app-dev.lizardbyte.app.Sunshine.service" ]]
+  [[ "${lines[1]}" == *"start app-dev.lizardbyte.app.Sunshine.service" ]]
+}
+
+@test "reset-login: refused while remote desktop is off" {
+  run desktop_reset_login
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"desktop on"* ]]
 }

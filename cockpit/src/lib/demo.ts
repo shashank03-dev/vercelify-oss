@@ -421,7 +421,7 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
       api_version: 2,
       capabilities: [
         "doctor", "update", "rollback", "hardware", "alerts", "metrics", "uptime", "tokens", "audit", "backup", "previews",
-        "auto-rollback", "events", "jobs", "sleep", "power-guard", "domain", "projects", "roles",
+        "auto-rollback", "events", "jobs", "sleep", "power-guard", "domain", "projects", "roles", "sunshine-pair",
         ...(h.hostname === ENGINE_DOWN_HOST || isWorkerHost(h) ? [] : ["platform"]),
       ],
     };
@@ -558,6 +558,7 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
   if (p === "/v1/services") return services;
   if (p === "/v1/volumes" && req.method === "GET") return hostVolumes;
   if (p === "/v1/volumes") return { host_path: "/mnt/storage/volumes/demo/data", created: true };
+  if (p === "/v1/display/sunshine/pair") return { outcome: "paired" };
   if (p === "/v1/display")
     return { receiver: idle, receiver_config: null, receiver_url: null, mpv_installed: true, sunshine: services[5] };
   return { ok: true };
@@ -614,6 +615,7 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
     case "capture_screens":
       return [{ index: 1, name: "Built-in Retina Display" }];
     case "sender_status":
+    case "moonlight_pair":
     case "moonlight_status":
       return idle;
     default:

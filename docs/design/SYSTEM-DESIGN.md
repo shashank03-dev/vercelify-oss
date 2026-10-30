@@ -1001,3 +1001,20 @@ A private mpv IPC socket supplies playback confirmation (`playback_active`), sep
 from process liveness. The cockpit exposes a refresh/recovery step and establishes
 Moonlight forwards before opening Sunshine's setup page. Extended macOS desktops
 require an existing additional display; no private display-driver API is shipped.
+
+Pairing Moonlight with Sunshine needs no Sunshine login or PIN from the user. While
+Sunshine has no login it accepts a first one without authentication: on the first
+`POST /v1/display/sunshine/pair` the agent sets one (user `vercelify`, a random
+password in `<state_dir>/sunshine-login.json`, 0600) and keeps it. The cockpit
+chooses a four-digit PIN, starts `moonlight pair HOST --pin PIN` and sends the same
+PIN to the agent, which waits up to 25 s for the request in Sunshine's pending list
+(`GET /api/pin`) and submits it with its pairing id (`POST /api/pin`; Sunshine
+without pairing ids takes the PIN alone). The agent reaches Sunshine's HTTPS
+interface through curl, as for GitHub, so it links no TLS stack; Sunshine's
+certificate names no host, so curl skips name checks but pins the public key read
+from `~/.config/sunshine/credentials/cacert.pem`, and the login never reaches another
+listener on that port. A login made by hand is never overwritten: pairing reports it,
+and `vercelify desktop reset-login` (Sunshine stopped, its `username`/`salt`/`password`
+removed from `sunshine_state.json`, paired devices kept) lets the agent set its own.
+Agents advertise `sunshine-pair`; the cockpit keeps the manual steps for older ones
+and remembers per server that Moonlight is paired.

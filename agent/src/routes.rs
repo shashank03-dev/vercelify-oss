@@ -147,6 +147,7 @@ pub fn router(state: AppState) -> Router {
         .route("/display", get(display_status))
         .route("/display/receiver/start", post(receiver_start))
         .route("/display/receiver/stop", post(receiver_stop))
+        .route("/display/sunshine/pair", post(sunshine_pair))
         .route("/services", get(list_services))
         .route("/services/{name}/{action}", post(service_action))
         .route("/llm", get(llm_status))
@@ -278,6 +279,7 @@ pub const CAPABILITIES: &[&str] = &[
     "domain",
     "projects",
     "roles",
+    "sunshine-pair",
 ];
 
 async fn tokens_list(State(s): State<AppState>, Extension(actor): Extension<Actor>) -> Json<Vec<DeviceToken>> {
@@ -475,6 +477,14 @@ async fn receiver_start(State(s): State<AppState>, Json(cfg): Json<ReceiverConfi
 async fn receiver_stop(State(s): State<AppState>) -> Json<DisplayStatus> {
     s.receiver.stop().await;
     Json(build_display_status(&s).await)
+}
+
+async fn sunshine_pair(
+    State(s): State<AppState>,
+    Json(req): Json<SunshinePairRequest>,
+) -> ApiResult<SunshinePairResult> {
+    let outcome = crate::sunshine::pair(&s.config, &req.pin, req.name.as_deref()).await?;
+    Ok(Json(SunshinePairResult { outcome }))
 }
 
 async fn list_services(State(s): State<AppState>) -> Json<Vec<ServiceStatus>> {

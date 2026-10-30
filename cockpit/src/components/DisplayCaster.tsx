@@ -1,6 +1,8 @@
-import { AlertTriangle, ExternalLink, Laptop, MonitorPlay, MonitorUp, Play, ScreenShare, Square, TerminalSquare } from "lucide-react";
+import { AlertTriangle, ExternalLink, Laptop, Link2, MonitorPlay, MonitorUp, Play, ScreenShare, Square, TerminalSquare } from "lucide-react";
 import { useEffect, useState } from "react";
 import { agentOn, local } from "../lib/api";
+import { hasCap } from "../lib/caps";
+import { useLive } from "../lib/live";
 import { usePoll } from "../lib/hooks";
 import { agentHost, useSession } from "../lib/session";
 import { openExternal } from "../lib/open";
@@ -24,11 +26,38 @@ export const QUALITIES: Quality[] = [
   { id: "light", label: "Light — 720p · 30 fps · 4 Mbps (cellular)", width: 1280, fps: 30, kbps: 4000 },
 ];
 
+/** Servers whose Sunshine this computer's Moonlight is paired with, by agent URL. */
+const PAIRED_KEY = "vercelify.moonlight.paired";
+
+function pairedWith(url: string): boolean {
+  try {
+    return (JSON.parse(localStorage.getItem(PAIRED_KEY) ?? "[]") as string[]).includes(url);
+  } catch {
+    return false;
+  }
+}
+
+function rememberPaired(url: string) {
+  try {
+    const list = (JSON.parse(localStorage.getItem(PAIRED_KEY) ?? "[]") as string[]).filter((u) => u !== url);
+    localStorage.setItem(PAIRED_KEY, JSON.stringify([...list, url]));
+  } catch {
+    // Storage unavailable: the next launch pairs again, which is harmless.
+  }
+}
+
+/** Four random digits for `moonlight pair --pin`. */
+export function randomPin(): string {
+  return String(crypto.getRandomValues(new Uint32Array(1))[0]! % 10000).padStart(4, "0");
+}
+
 export function DisplayCaster() {
   const isMac = navigator.userAgent.includes("Mac");
   const { settings } = useSession();
   const agent = agentOn(settings.agent_url);
   const toast = useToast();
+  const { health } = useLive();
+  const canPair = hasCap(health.data, "sunshine-pair");
   const display = usePoll(() => agent.display(), 3000);
   const sender = usePoll(() => local.senderStatus(), 2000);
   const moon = usePoll(() => local.moonlightStatus(), 2000);
@@ -124,11 +153,44 @@ export function DisplayCaster() {
     finally { setMoonBusy(false); }
   }
 
+  /**
+   * Pairs Moonlight with the server's Sunshine: Moonlight starts pairing with
+   * a PIN chosen here and the agent hands Sunshine the same PIN, so nobody
+   * makes a Sunshine login or types a PIN.
+   */
+  async function pairMoonlight() {
+    const pin = randomPin();
+    await local.moonlightPair(agentHost(settings), pin);
+    try {
+      const { outcome } = await agent.sunshinePair({ pin, name: "Vercelify" });
+      if (outcome === "paired") {
+        // Moonlight finishes its side of the exchange, then its window can go.
+        for (let i = 0; i < 16 && (await local.moonlightStatus()).running; i++) await new Promise((r) => setTimeout(r, 500));
+        toast.ok("Moonlight is paired with this server");
+      } else {
+        toast.info("Moonlight didn't ask to pair: it's probably paired with this server already");
+      }
+      rememberPaired(settings.agent_url);
+    } finally {
+      await local.moonlightStop().catch(() => undefined);
+    }
+  }
+
+  async function repairMoonlight() {
+    setMoonBusy(true);
+    try { await pairMoonlight(); }
+    catch (e) { toast.bad((e as Error).message); }
+    finally { setMoonBusy(false); void moon.refresh(); }
+  }
+
   async function toggleMoonlight() {
     setMoonBusy(true);
     try {
       if (moon.data?.running) await local.moonlightStop();
-      else await local.moonlightStart({ host: agentHost(settings), app: moonApp, resolution: null, fps: null, bitrate_kbps: null });
+      else {
+        if (canPair && !pairedWith(settings.agent_url)) await pairMoonlight();
+        await local.moonlightStart({ host: agentHost(settings), app: moonApp, resolution: null, fps: null, bitrate_kbps: null });
+      }
       void moon.refresh();
     } catch (e) {
       toast.bad((e as Error).message);
@@ -277,12 +339,23 @@ export function DisplayCaster() {
               <StatusDot health={moonlight?.installed ? "ok" : "idle"} />
               Moonlight on this computer: <span className="text-fg-muted">{moonlight ? (moonlight.installed ? "installed" : moonlight.install_hint) : "desktop app only"}</span>
             </div>
-            <p className="max-w-xl pt-1 text-xs leading-relaxed text-fg-dim">
-              Game-streaming tech: hardware-encoded, about 10 ms on a LAN. Launch Moonlight and select the server to see a PIN. Enter that PIN in Sunshine’s web page
-              (HTTPS port <InlineCode>47990</InlineCode>; in app network mode, use 127.0.0.1 while Moonlight runs). Pair once, then launch from here.
-            </p>
+            {canPair ? (
+              <p className="max-w-xl pt-1 text-xs leading-relaxed text-fg-dim" data-testid="moonlight-auto-pair">
+                Game-streaming tech: hardware-encoded, about 10 ms on a LAN. The first launch pairs Moonlight with the server by itself: there’s no Sunshine
+                login to make and no PIN to type.
+              </p>
+            ) : (
+              <p className="max-w-xl pt-1 text-xs leading-relaxed text-fg-dim">
+                Game-streaming tech: hardware-encoded, about 10 ms on a LAN. Launch Moonlight and select the server to see a PIN. Enter that PIN in Sunshine’s web page
+                (HTTPS port <InlineCode>47990</InlineCode>; in app network mode, use 127.0.0.1 while Moonlight runs). Pair once, then launch from here. Update the
+                server to have this done for you.
+              </p>
+            )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            {canPair && (
+              <Button variant="ghost" icon={<Link2 />} disabled={!moonlight?.installed} busy={moonBusy} onClick={() => void repairMoonlight()} data-testid="moonlight-pair">Pair again</Button>
+            )}
             <Button variant="ghost" icon={<ExternalLink />} busy={moonBusy} onClick={() => void openSunshine()} data-testid="sunshine-setup">Open Sunshine setup</Button>
             <Select value={moonApp} onChange={(e) => setMoonApp(e.target.value)} className="w-36">
               <option>Desktop</option>

@@ -7,11 +7,14 @@
 # against the SHA-256 GitHub records for the file. It runs as upstream
 # intends: its user unit, in the desktop session (display, audio, input),
 # enabled for graphical logins. The agent learns whose it is
-# (`desktop_user`) to show its status and restart it.
+# (`desktop_user`) to show its status and restart it, and pairs Moonlight
+# with it: it sets Sunshine's first login itself and hands over the PIN the
+# Mac started Moonlight with, so the user never types either.
 
 : "${SUNSHINE_RELEASE_API:=https://api.github.com/repos/LizardByte/Sunshine/releases/latest}"
 : "${OS_RELEASE:=/etc/os-release}"
 : "${AGENT_CONFIG:=$VERCELIFY_ETC/agent.toml}"
+: "${VERCELIFY_STATE:=/var/lib/vercelify}"
 SUNSHINE_UNIT=app-dev.lizardbyte.app.Sunshine.service
 
 # The user of the logged-in desktop (a graphical session), else the one
@@ -123,7 +126,7 @@ desktop_on() {
     toml_set desktop_user "\"$user\"" "$AGENT_CONFIG"
     run_cmd systemctl restart vercelify-agent 2>/dev/null || true
   fi
-  ok "remote desktop on ($user's desktop). On the Mac: Screencast → Launch Moonlight; the first time, enter the PIN it shows at https://127.0.0.1:47990"
+  ok "remote desktop on ($user's desktop). On the Mac: Second screen → Launch Moonlight (it pairs by itself)"
 }
 
 desktop_off() {
@@ -145,6 +148,27 @@ desktop_status() {
   printf '  Sunshine on %s'"'"'s desktop: %s\n' "$user" "${state:-not running (starts at login)}"
 }
 
+# Forget Sunshine's login so the agent sets its own at the next pairing:
+# for a login made by hand on Sunshine's page, or a forgotten one. Paired
+# devices stay paired.
+desktop_reset_login() {
+  local user home state
+  user=$(_desktop_toml desktop_user)
+  [[ -n "$user" ]] || { err "remote desktop is off: sudo vercelify desktop on"; return 1; }
+  home=$(getent passwd "$user" | cut -d: -f6)
+  [[ -n "$home" && -d "$home" ]] || { err "no home directory for $user"; return 1; }
+  state="$home/.config/sunshine/sunshine_state.json"
+  # Sunshine reads its login only when it starts.
+  run_cmd systemctl --user -M "$user@" stop "$SUNSHINE_UNIT" >/dev/null 2>&1 || true
+  if [[ -f "$state" ]]; then
+    run_cmd runuser -u "$user" -- sh -c 'umask 077 && jq "del(.username, .salt, .password)" "$1" >"$1.tmp" && mv "$1.tmp" "$1"' _ "$state" ||
+      { err "couldn't edit $state"; return 1; }
+  fi
+  run_cmd rm -f "$VERCELIFY_STATE/sunshine-login.json"
+  run_cmd systemctl --user -M "$user@" start "$SUNSHINE_UNIT" >/dev/null 2>&1 || warn "Sunshine didn't start: it starts with $user's next login"
+  ok "Sunshine's login is reset: Launch Moonlight on the Mac pairs it again"
+}
+
 _desktop_toml() { { grep -E "^[[:space:]]*$1[[:space:]]*=" "$AGENT_CONFIG" 2>/dev/null || true; } | head -1 | sed -E 's/^[^=]*=[[:space:]]*//; s/^"//; s/"$//'; }
 
 desktop_cli() {
@@ -152,6 +176,7 @@ desktop_cli() {
     on) desktop_on ;;
     off) desktop_off ;;
     status) desktop_status ;;
-    *) die "usage: vercelify desktop [status|on|off]" ;;
+    reset-login) desktop_reset_login ;;
+    *) die "usage: vercelify desktop [status|on|off|reset-login]" ;;
   esac
 }

@@ -8,6 +8,10 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Remote desktop pairs by itself: **Launch Moonlight** sets Sunshine's login and hands
+  it Moonlight's PIN, so there's no Sunshine login to create and no PIN to type. A login
+  made by hand is left alone; `sudo vercelify desktop reset-login` hands it back to
+  Vercelify. Update the server for this; older servers keep the manual steps.
 - The app says when a newer release is out: "Update the app" at the bottom of the
   sidebar opens the release with the `.dmg`, and server cards show `0.2.5 → 0.3.0`
   against the newest release, not only against each other.

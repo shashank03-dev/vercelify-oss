@@ -105,15 +105,27 @@ upstream intends, as the desktop user's own service, started at every graphical 
 The agent shows its status in the cockpit and can restart it. On a headless server,
 use the second-monitor mode above instead.
 
-In the cockpit, press **Open Sunshine setup**. It establishes private forwards
-before opening the setup page, so no address or SSH tunnel is needed. Create your
-Sunshine login once, then press **Launch Moonlight**. Enter Moonlight's PIN on
-Sunshine's PIN page. When the Mac's `vercelify-mesh` runs in
-app mode (the default), the app first forwards Sunshine's ports (TCP 47984, 47989,
-47990, 48010 and UDP 47998–48000) from `127.0.0.1` to the server and starts Moonlight
-on `127.0.0.1`; with `--mesh-system`, or on the same LAN, Moonlight connects to the
-server's address directly. The first time, Moonlight shows a PIN: open Sunshine's web
-page (`https://127.0.0.1:47990` while Moonlight runs, or the server's LAN address),
-create the Sunshine admin user and enter the PIN on its **PIN** page. After that,
-**Launch Moonlight** connects at once. Your devices may reach these ports on the mesh;
-Sunshine's own login and PIN pairing protect them.
+In the cockpit, press **Launch Moonlight**. The first time, the app pairs Moonlight with
+the server by itself: there is no Sunshine login to create and no PIN to type.
+
+1. The app picks a four-digit PIN and starts `moonlight pair` with it.
+2. The agent gives Sunshine its first login (a random password the agent keeps in
+   `/var/lib/vercelify/sunshine-login.json`, readable by root only), waits for
+   Moonlight's request and hands Sunshine the same PIN.
+3. Moonlight's pairing window closes and the desktop opens. Later launches connect at once;
+   **Pair again** repeats the pairing (after resetting Moonlight, say).
+
+When the Mac's `vercelify-mesh` runs in app mode (the default), the app first forwards
+Sunshine's ports (TCP 47984, 47989, 47990, 48010 and UDP 47998–48000) from `127.0.0.1`
+to the server and starts Moonlight on `127.0.0.1`; with `--mesh-system`, or on the same
+LAN, Moonlight connects to the server's address directly. Your devices may reach these
+ports on the mesh; Sunshine's login and its pairing protect them.
+
+The agent talks to Sunshine's HTTPS page through curl, pinned to the public key of
+Sunshine's own certificate, so nothing else listening on that port gets the login.
+
+**Already made a Sunshine login by hand?** The agent leaves it alone and the app says
+so. Either run `sudo vercelify desktop reset-login` on the server (Sunshine forgets its
+login, paired devices stay paired; the next pairing sets the agent's), or pair by hand:
+**Open Sunshine setup**, sign in, launch Moonlight and enter the PIN it shows on
+Sunshine's **PIN** page. Servers from before this change show the manual steps too.

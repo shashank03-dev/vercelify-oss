@@ -197,16 +197,21 @@ pub struct MoonlightLaunch {
     pub bitrate_kbps: Option<u32>,
 }
 
-/// moonlight-qt CLI arguments.
-pub fn moonlight_args(m: &MoonlightLaunch) -> Result<Vec<String>, StreamError> {
-    let host_ok = !m.host.is_empty()
-        && m.host.len() <= 253
-        && m.host
+fn check_moonlight_host(host: &str) -> Result<(), StreamError> {
+    let host_ok = !host.is_empty()
+        && host.len() <= 253
+        && host
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':' | '[' | ']'));
-    if !host_ok || m.host.starts_with('-') {
+    if !host_ok || host.starts_with('-') {
         return Err(StreamError::BadParams("invalid host"));
     }
+    Ok(())
+}
+
+/// moonlight-qt CLI arguments.
+pub fn moonlight_args(m: &MoonlightLaunch) -> Result<Vec<String>, StreamError> {
+    check_moonlight_host(&m.host)?;
     if m.app.is_empty() || m.app.starts_with('-') || m.app.len() > 100 {
         return Err(StreamError::BadParams("invalid app name"));
     }
@@ -229,9 +234,36 @@ pub fn moonlight_args(m: &MoonlightLaunch) -> Result<Vec<String>, StreamError> {
     Ok(a)
 }
 
+/// `moonlight pair HOST --pin NNNN`: pairs with the PIN the agent hands to
+/// Sunshine, so nobody types it.
+pub fn moonlight_pair_args(host: &str, pin: &str) -> Result<Vec<String>, StreamError> {
+    check_moonlight_host(host)?;
+    if pin.len() != 4 || !pin.bytes().all(|b| b.is_ascii_digit()) {
+        return Err(StreamError::BadParams("the PIN is four digits"));
+    }
+    Ok(vec!["pair".into(), host.into(), "--pin".into(), pin.into()])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn moonlight_pairs_with_a_given_pin() {
+        assert_eq!(
+            moonlight_pair_args("127.0.0.1", "0412").unwrap(),
+            ["pair", "127.0.0.1", "--pin", "0412"]
+        );
+        for (host, pin) in [
+            ("-x", "1234"),
+            ("a b", "1234"),
+            ("h", "123"),
+            ("h", "12345"),
+            ("h", "12a4"),
+        ] {
+            assert!(moonlight_pair_args(host, pin).is_err(), "{host} {pin}");
+        }
+    }
 
     fn cfg() -> SenderConfig {
         SenderConfig {

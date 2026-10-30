@@ -156,6 +156,11 @@ pub struct Config {
     /// The desktop's user, whose own systemd units run Sunshine (`vercelify
     /// desktop on` sets it): the `sunshine` service is theirs.
     pub desktop_user: Option<String>,
+    /// Sunshine's web interface, where the agent hands it Moonlight's PIN.
+    pub sunshine_url: String,
+    /// Sunshine's configuration directory (its certificate). Unset: the
+    /// desktop user's `~/.config/sunshine`.
+    pub sunshine_dir: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -248,6 +253,8 @@ impl Default for Config {
             mesh_public_endpoints: vec![],
             mesh_public_url: None,
             desktop_user: None,
+            sunshine_url: "https://127.0.0.1:47990".into(),
+            sunshine_dir: None,
         }
     }
 }
@@ -340,6 +347,12 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_DESKTOP_USER") {
             self.desktop_user = Some(v).filter(|v| !v.is_empty());
+        }
+        if let Some(v) = var("VERCELIFY_SUNSHINE_URL") {
+            self.sunshine_url = v;
+        }
+        if let Some(v) = var("VERCELIFY_SUNSHINE_DIR") {
+            self.sunshine_dir = Some(v.into());
         }
         if let Some(v) = var("VERCELIFY_BUILD_DRIVER") {
             self.build_driver = v;

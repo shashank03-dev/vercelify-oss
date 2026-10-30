@@ -19,7 +19,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, Manager, RunEvent, State};
 use vercelify_core::collect::{Collector, SysPaths};
 use vercelify_core::pairing::{self, Pairing};
-use vercelify_core::stream::{moonlight_args, sender_args, MoonlightLaunch, SenderConfig};
+use vercelify_core::stream::{moonlight_args, moonlight_pair_args, sender_args, MoonlightLaunch, SenderConfig};
 use vercelify_core::{
     avfoundation::CaptureScreen, CockpitConfig, CockpitSettings, DiscoveredServer, LanServer, MeshLocal, ProcessStatus,
     SystemSnapshot, ToolStatus,
@@ -469,23 +469,42 @@ fn sender_status(state: State<'_, AppState>) -> ProcessStatus {
     state.procs.status(SENDER)
 }
 
-#[tauri::command]
-async fn moonlight_start(state: State<'_, AppState>, mut launch: MoonlightLaunch) -> CmdResult<ProcessStatus> {
-    moonlight_args(&launch).map_err(|e| e.to_string())?;
-    let bin = local::moonlight().ok_or("Moonlight is not installed — get it from moonlight-stream.org")?;
-    // Moonlight reaches Sunshine on fixed ports: forward each one, same number.
-    let host = launch.host.clone();
-    let forwarded = tauri::async_runtime::spawn_blocking(move || {
+/// Moonlight reaches Sunshine on fixed ports: forward each one, same number.
+/// True when they are forwarded (Moonlight then connects to 127.0.0.1).
+async fn forward_sunshine(host: &str) -> CmdResult<bool> {
+    let host = host.to_string();
+    tauri::async_runtime::spawn_blocking(move || {
         let ports: Vec<(bool, u16, u16)> = mesh::SUNSHINE_PORTS.iter().map(|&(udp, p)| (udp, p, p)).collect();
         forward_to("moonlight", &host, &ports)
     })
     .await
-    .map_err(|e| e.to_string())??;
-    if forwarded {
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn moonlight_start(state: State<'_, AppState>, mut launch: MoonlightLaunch) -> CmdResult<ProcessStatus> {
+    moonlight_args(&launch).map_err(|e| e.to_string())?;
+    let bin = local::moonlight().ok_or("Moonlight is not installed — get it from moonlight-stream.org")?;
+    if forward_sunshine(&launch.host).await? {
         launch.host = "127.0.0.1".into();
     }
     let args = moonlight_args(&launch).map_err(|e| e.to_string())?;
     // Moonlight is a visible window the user can close; let it outlive us.
+    state.procs.start(MOONLIGHT, &bin.to_string_lossy(), &args, false)
+}
+
+/// `moonlight pair` with a PIN the cockpit chose; the agent hands the same
+/// PIN to Sunshine.
+#[tauri::command]
+async fn moonlight_pair(state: State<'_, AppState>, host: String, pin: String) -> CmdResult<ProcessStatus> {
+    moonlight_pair_args(&host, &pin).map_err(|e| e.to_string())?;
+    let bin = local::moonlight().ok_or("Moonlight is not installed — get it from moonlight-stream.org")?;
+    let target = if forward_sunshine(&host).await? {
+        "127.0.0.1".to_string()
+    } else {
+        host
+    };
+    let args = moonlight_pair_args(&target, &pin).map_err(|e| e.to_string())?;
     state.procs.start(MOONLIGHT, &bin.to_string_lossy(), &args, false)
 }
 
@@ -500,13 +519,7 @@ async fn moonlight_setup(host: String) -> CmdResult<String> {
         bitrate_kbps: None,
     })
     .map_err(|e| e.to_string())?;
-    let target = host.clone();
-    let forwarded = tauri::async_runtime::spawn_blocking(move || {
-        let ports: Vec<(bool, u16, u16)> = mesh::SUNSHINE_PORTS.iter().map(|&(udp, p)| (udp, p, p)).collect();
-        forward_to("moonlight", &target, &ports)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    let forwarded = forward_sunshine(&host).await?;
     let address = if forwarded {
         "127.0.0.1".into()
     } else if host.contains(':') && !host.starts_with('[') {
@@ -589,6 +602,7 @@ pub fn run() {
             sender_stop,
             sender_status,
             moonlight_start,
+            moonlight_pair,
             moonlight_setup,
             moonlight_stop,
             moonlight_status,

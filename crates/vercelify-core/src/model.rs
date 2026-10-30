@@ -299,6 +299,36 @@ pub struct DisplayStatus {
     pub playback_active: Option<bool>,
 }
 
+/// Moonlight's PIN for the desktop's Sunshine (`POST /v1/display/sunshine/pair`):
+/// the agent hands it over, so nobody types it into Sunshine's page.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct SunshinePairRequest {
+    /// The four digits `moonlight pair HOST --pin` was started with.
+    pub pin: String,
+    /// The name Sunshine lists the device under (default `Vercelify`).
+    #[serde(default)]
+    #[ts(optional)]
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum SunshinePairOutcome {
+    /// Sunshine took the PIN: Moonlight is paired.
+    Paired,
+    /// No Moonlight asked to pair in time (already paired, or it never
+    /// reached the server).
+    NoRequest,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct SunshinePairResult {
+    pub outcome: SunshinePairOutcome,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct ApiError {
