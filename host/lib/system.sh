@@ -100,6 +100,12 @@ EOF
     run_cmd systemctl kill -s HUP systemd-logind 2>/dev/null || true
   fi
   # Uninstall unmasks them again, unless they were masked before Vercelify.
+  # A dry run leaves no markers, or a later real install would misread them.
+  if [[ "$VERCELIFY_DRY_RUN" == 1 ]]; then
+    run_cmd systemctl mask --quiet sleep.target suspend.target hibernate.target hybrid-sleep.target
+    ok "lid close / suspend disabled"
+    return 0
+  fi
   if [[ "$(systemctl is-enabled suspend.target 2>/dev/null || true)" == masked && ! -e "$VERCELIFY_ETC/sleep.vercelify" ]]; then
     mkdir -p "$VERCELIFY_ETC" && : >"$VERCELIFY_ETC/sleep-masked-before"
   fi

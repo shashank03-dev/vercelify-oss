@@ -185,13 +185,28 @@ install_from_release() {
   MOUNTED=''
 }
 
+# The checkout this script was run from (./install-mac.sh), or nothing when it
+# came through `curl … | bash`.
+local_checkout() {
+  local here
+  [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]] || return 1
+  here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  [[ -f "$here/cockpit/package.json" && -d "$here/crates/vercelify-mesh" ]] || return 1
+  echo "$here"
+}
+
 install_from_source() {
-  local dest=$1 src="${XDG_CACHE_HOME:-$HOME/Library/Caches}/vercelify-src"
+  local dest=$1 src="${XDG_CACHE_HOME:-$HOME/Library/Caches}/vercelify-src" here
   step "Building $APP_NAME from source (one time, 5–15 minutes)"
   xcode-select -p >/dev/null 2>&1 || die "install the Xcode Command Line Tools first: xcode-select --install"
   have node || die "Node.js 20+ is needed: brew install node"
   have cargo || die "Rust is needed: curl https://sh.rustup.rs -sSf | sh"
-  if [[ -d "$src/.git" ]]; then
+  # Run from a checkout: build exactly that (and its daemon, which matches
+  # this script's launchd job), not GitHub's main.
+  if here=$(local_checkout); then
+    src=$here
+    info "building this checkout: $src"
+  elif [[ -d "$src/.git" ]]; then
     git -C "$src" fetch --depth 1 origin main -q && git -C "$src" reset --hard -q origin/main
   else
     rm -rf "$src"
@@ -218,6 +233,8 @@ install_cli() {
   fi
   mkdir -p "$bin"
   if [[ -n "${VFY_SOURCE:-}" ]]; then cp "$VFY_SOURCE" "$bin/vfy"
+  # Built from source: the tool from the same commit as the app.
+  elif [[ -n "${SOURCE_DIR:-}" && -f "$SOURCE_DIR/cli/vfy" ]]; then cp "$SOURCE_DIR/cli/vfy" "$bin/vfy"
   elif ! curl -fsSL --retry 2 -o "$bin/vfy" "$url"; then
     warn "could not download the vfy command-line tool (optional)"
     return 0
@@ -314,9 +331,15 @@ mesh_job_restart() {
     (( i < 3 )) || return 1
     sleep 1
   done
+  # Running, and still the same process a moment later: a daemon that exits
+  # at once (a bad argument, a missing file) is "running" for an instant
+  # before launchd respawns it.
+  local pid='' now
   for i in $(seq 1 "${MESH_JOB_WAIT:-20}"); do
-    $sudo "$LAUNCHCTL" print "$domain/$MESH_LABEL" 2>/dev/null | grep -q 'state = running' && return 0
-    sleep 0.5
+    now=$($sudo "$LAUNCHCTL" print "$domain/$MESH_LABEL" 2>/dev/null | awk '/state = running/ { r=1 } /^[[:space:]]*pid = / { p=$3 } END { if (r) print p }')
+    if [[ -n "$now" && "$now" == "$pid" ]]; then return 0; fi
+    pid=$now
+    sleep 1
   done
   return 1
 }

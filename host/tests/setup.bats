@@ -555,3 +555,13 @@ fake_pgrep() {
   VERCELIFY_INSTALL_REF=feature/display VERCELIFY_INSTALL_CHANNEL=stable run build_version
   [ "$output" = 0.2.5+feature-display ]
 }
+
+@test "laptop server mode: a dry run writes nothing" {
+  mkdir -p "$T/bin"
+  printf '#!/bin/sh\necho masked\n' >"$T/bin/systemctl"
+  chmod +x "$T/bin/systemctl"
+  VERCELIFY_DRY_RUN=1 VERCELIFY_ETC="$T/etc" LOGIND_DROPIN="$T/logind/90-vercelify.conf" run strict laptop_server_mode
+  [ "$status" -eq 0 ]
+  [ ! -e "$T/etc" ]
+  [ ! -e "$T/logind" ]
+}

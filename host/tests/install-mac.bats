@@ -157,7 +157,12 @@ case "\$1" in
   print)
     n=\$(cat "$T/linger" 2>/dev/null || echo 0)
     if (( n > 0 )); then echo \$(( n - 1 )) >"$T/linger"; echo "state = running"; exit 0; fi
-    [ -e "$T/loaded" ] && { [ -e "$T/never-runs" ] && echo "state = spawn scheduled" || echo "state = running"; exit 0; }
+    if [ -e "$T/loaded" ] && [ -e "$T/crashes" ]; then
+      # runs for a moment, then exits and launchd keeps respawning it
+      if [ ! -e "$T/ran" ]; then touch "$T/ran"; printf 'state = running\npid = 4242\n'; else printf 'state = spawn scheduled\nlast exit code = 2\n'; fi
+      exit 0
+    fi
+    [ -e "$T/loaded" ] && { [ -e "$T/never-runs" ] && echo "state = spawn scheduled" || printf 'state = running\npid = 4242\n'; exit 0; }
     exit 113 ;;
   bootstrap)
     if [ ! -e "$T/failed-once" ]; then touch "$T/failed-once"; echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; fi
@@ -188,6 +193,35 @@ STUB
   [ "$status" -ne 0 ]
   [[ "$output" == *"vercelify-mesh isn't running"* ]]
   [[ "$output" != *"runs in your session"* ]]
+}
+
+@test "a network job that starts and then crashes is not reported as running" {
+  fake_launchctl
+  touch "$T/crashes"
+  run mesh_job_restart "gui/501" "$T/job.plist"
+  [ "$status" -ne 0 ]
+}
+
+@test "--from-source run from a checkout builds that checkout, not GitHub's main" {
+  for c in xcode-select node cargo npm npx codesign; do printf '#!/bin/sh\nexit 0\n' >"$T/$c"; done
+  printf '#!/bin/sh\necho "git $*" >>"%s/git.log"; exit 1\n' "$T" >"$T/git"
+  chmod +x "$T"/*
+  install_bundle() { echo "installed $1"; }
+  repo=$(cd "$BATS_TEST_DIRNAME/../.." && pwd)
+  PATH="$T:$PATH" XDG_CACHE_HOME="$T/cache" run install_from_source "$T/Applications"
+  [ ! -e "$T/git.log" ]          # no clone, no fetch/reset of a cached copy
+  [ ! -e "$T/cache/vercelify-src" ]
+  [[ "$output" == *"$repo"* ]]
+}
+
+@test "an app built from source gets vfy from the same source" {
+  mkdir -p "$T/src/cli" "$T/bin"
+  printf '#!/bin/sh\necho from-source\n' >"$T/src/cli/vfy"
+  printf '#!/bin/sh\necho "curl $*" >>"%s/curl.log"; exit 22\n' "$T" >"$T/curl"; chmod +x "$T/curl"
+  SOURCE_DIR="$T/src" VFY_BIN_DIR="$T/bin" PATH="$T:$PATH" run install_cli
+  [ "$status" -eq 0 ]
+  [ ! -e "$T/curl.log" ]
+  [ "$("$T/bin/vfy")" = from-source ]
 }
 
 @test "an app built from source gets its network daemon from the same checkout" {
