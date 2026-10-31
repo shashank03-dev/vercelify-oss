@@ -565,3 +565,21 @@ fake_pgrep() {
   [ ! -e "$T/etc" ]
   [ ! -e "$T/logind" ]
 }
+
+@test "the admin CLI's scripts are root's and nobody else can write them, whoever owned the source" {
+  mkdir -p "$T/src/host/lib" "$T/bin"
+  printf '#!/bin/sh\n' >"$T/src/host/vercelify"
+  : >"$T/src/host/lib/common.sh" >"$T/src/install.sh" >"$T/src/host/._vercelify"
+  chmod 0777 "$T/src/host/vercelify" "$T/src/host/lib" "$T/src/host/lib/common.sh"
+  if (( EUID == 0 )); then chown -R 1234:1234 "$T/src"; fi
+  mkdir -p "$T/lib/host" && : >"$T/lib/host/._left-by-an-earlier-copy"
+  VERCELIFY_LIB="$T/lib" CLI_LINK="$T/bin/vercelify" run strict eval "VERCELIFY_SRC='$T/src' install_cli"
+  [ "$status" -eq 0 ]
+  mode() { stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1"; }
+  [ "$(mode "$T/lib/host/vercelify")" = 755 ]
+  [ "$(mode "$T/lib/host/lib")" = 755 ]
+  [ "$(mode "$T/lib/host/lib/common.sh")" = 755 ]
+  [ ! -e "$T/lib/host/._vercelify" ] && [ ! -e "$T/lib/host/._left-by-an-earlier-copy" ]
+  [ -L "$T/bin/vercelify" ]
+  if (( EUID == 0 )); then [ -z "$(find "$T/lib" ! -user root)" ]; fi
+}

@@ -407,14 +407,14 @@ cmd_host() {
   # Global, so the EXIT trap still sees it after this function returns.
   stage=$(mktemp -d)
   trap 'rm -rf "$stage"' EXIT
-  tar -C "$ROOT" -c host install.sh Cargo.toml Cargo.lock | tar -C "$stage" -x
+  COPYFILE_DISABLE=1 tar -C "$ROOT" -c host install.sh Cargo.toml Cargo.lock | tar -C "$stage" -x
   mkdir -p "$stage/dist"
   # host/lib/agent.sh picks these up instead of downloading or building them.
   cp "$bin" "$stage/dist/vercelify-agent-$rt"
   cp "$(dirname "$bin")/vercelify-mesh" "$stage/dist/vercelify-mesh-$rt"
 
   say "copying this checkout ($(git rev-parse --short HEAD)$(git diff --quiet HEAD || echo '+changes')) to $target"
-  tar -C "$stage" -cz . | "${ssh[@]}" "$target" 'rm -rf /tmp/vercelify-dev && mkdir -p /tmp/vercelify-dev && tar -xz -C /tmp/vercelify-dev' ||
+  COPYFILE_DISABLE=1 tar -C "$stage" -cz . | "${ssh[@]}" "$target" 'rm -rf /tmp/vercelify-dev && mkdir -p /tmp/vercelify-dev && tar -xz -C /tmp/vercelify-dev' ||
     die "copy failed"
 
   # An installed host updates (keeps the previous version and rolls back if the

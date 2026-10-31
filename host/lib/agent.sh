@@ -183,10 +183,14 @@ install_firewall() {
 install_cli() {
   run_cmd mkdir -p "$VERCELIFY_LIB"
   # Keep a copy of the scripts so `vercelify update/domain` work offline.
-  run_cmd rsync -a --delete --exclude target --exclude node_modules --exclude .git \
+  # Root runs them, so they're root's and nobody else can write them, even
+  # when the source is a user's checkout (sudo ./install.sh, ./dev host).
+  run_cmd rsync -a --delete --delete-excluded --exclude target --exclude node_modules --exclude .git --exclude '._*' \
     "$VERCELIFY_SRC/host/" "$VERCELIFY_LIB/host/"
+  if (( EUID == 0 )); then run_cmd chown -R 0:0 "$VERCELIFY_LIB/host"; fi
+  run_cmd chmod -R go-w "$VERCELIFY_LIB/host"
   run_cmd install -m 0644 "$VERCELIFY_SRC/install.sh" "$VERCELIFY_LIB/install.sh" 2>/dev/null || true
-  run_cmd ln -sf "$VERCELIFY_LIB/host/vercelify" /usr/local/bin/vercelify
+  run_cmd ln -sf "$VERCELIFY_LIB/host/vercelify" "${CLI_LINK:-/usr/local/bin/vercelify}"
 }
 
 # install_ai [MODEL] — Ollama through the agent (same code path as
