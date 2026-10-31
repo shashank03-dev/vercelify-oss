@@ -935,16 +935,36 @@ export function Modal({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const titleId = useId();
+  const wasOpen = useRef(false);
+  const returnFocus = useRef<HTMLElement | null>(null);
+  if (open && !wasOpen.current) returnFocus.current = document.activeElement as HTMLElement | null;
+  wasOpen.current = open;
+  useEffect(() => {
+    if (!open) return;
+    const previous = returnFocus.current;
+    const dialog = ref.current;
+    if (dialog && !dialog.contains(document.activeElement)) dialog.focus();
+    return () => { if (previous?.isConnected) previous.focus(); };
+  }, [open]);
   useEffect(() => {
     if (!open) return;
     // Only the innermost open modal reacts to Escape (log viewers open on
     // top of detail dialogs). It consumes the key: a closed inner modal can
     // be gone from the DOM before the outer one's listener runs.
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented || !ref.current) return;
+      if (!["Escape", "Tab"].includes(e.key) || e.defaultPrevented || !ref.current) return;
       const dialogs = Array.from(document.querySelectorAll<HTMLElement>("[data-modal]"));
       const innermost = dialogs.filter((d) => !dialogs.some((o) => o !== d && d.contains(o)));
       if (innermost[innermost.length - 1] !== ref.current) return;
+      if (e.key === "Tab") {
+        const focusable = Array.from(ref.current.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), a[href], [tabindex="0"]')).filter((el) => !el.closest('[hidden], [inert]'));
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (!first || !last) { e.preventDefault(); ref.current.focus(); }
+        else if (e.shiftKey && (document.activeElement === first || !ref.current.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && (document.activeElement === last || document.activeElement === ref.current || !ref.current.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+        return;
+      }
       e.preventDefault();
       e.stopImmediatePropagation();
       onClose();
@@ -969,6 +989,7 @@ export function Modal({
           <motion.div
             ref={ref}
             data-modal
+            tabIndex={-1}
             role="dialog"
             aria-modal="true"
             aria-labelledby={titleId}

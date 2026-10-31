@@ -94,7 +94,7 @@ fn check_bindings(c: &Connection, targets: &[AppVolume], pr: Option<u32>) -> Res
         return Ok(());
     }
     let mut st = c.prepare(
-        "SELECT v.*, COALESCE(a.name, 'db-' || d.name) AS owner_name
+        "SELECT v.*, COALESCE(a.name, 'db-' || d.name, v.owner_id) AS owner_name
         FROM volumes v LEFT JOIN apps a ON v.owner_kind = 'app' AND a.id = v.owner_id
         LEFT JOIN databases d ON v.owner_kind = 'database' AND d.id = v.owner_id",
     )?;
@@ -233,6 +233,33 @@ mod tests {
             mount_path: path.into(),
             tier: None,
         }
+    }
+
+    #[test]
+    fn deleting_an_app_keeps_discoverable_volume_identities() {
+        let s = crate::Store::open_in_memory().unwrap();
+        let a = s
+            .tx(|c| crate::apps::create(c, &crate::apps::tests::git_app("blog")))
+            .unwrap();
+        let v = s
+            .tx(|c| {
+                create(
+                    c,
+                    VolumeOwner::App,
+                    &a.id,
+                    &AppVolumeRequest {
+                        name: "data".into(),
+                        mount_path: "/data".into(),
+                        tier: Some(StorageTier::Ssd),
+                    },
+                )
+            })
+            .unwrap();
+        s.tx(|c| crate::apps::delete(c, &a.id)).unwrap();
+        let retained = s.with(all).unwrap();
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained[0].id, v.id);
+        assert_eq!(retained[0].storage_name, v.storage_name);
     }
 
     #[test]
@@ -403,10 +430,10 @@ mod tests {
         assert_eq!(docker_name("blog", "data"), "vfy-blog-data");
         s.tx(|c| delete(c, VolumeOwner::App, &a.id, "data")).unwrap();
         assert!(s.with(|c| list(c, VolumeOwner::App, &a.id)).unwrap().is_empty());
-        // Deleting the app removes its volume records.
+        // Deleting the app retains its data and volume identity.
         s.tx(|c| create(c, VolumeOwner::App, &a.id, &req("data", "/data")))
             .unwrap();
         s.tx(|c| apps::delete(c, &a.id)).unwrap();
-        assert!(s.with(all).unwrap().is_empty());
+        assert_eq!(s.with(all).unwrap().len(), 1);
     }
 }

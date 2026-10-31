@@ -156,6 +156,14 @@ async fn databases_end_to_end() {
         .await
         .expect("restore");
     assert_eq!(psql("SELECT t FROM notes;"), "kept");
+    assert_eq!(
+        store
+            .with(|c| vercelify_platform::dbengine::backups(c, &pg.id))
+            .unwrap()
+            .len(),
+        2,
+        "restore saves current data before replacement"
+    );
 
     // To the HDD and back, with the data.
     engine

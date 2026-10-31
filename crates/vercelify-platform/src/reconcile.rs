@@ -229,6 +229,10 @@ impl Reconciler {
             busy_apps: active.iter().map(|d| d.app_id.clone()).collect(),
             ..Desire::default()
         };
+        for d in &active {
+            let app = e.store.with(|c| apps::get(c, &d.app_id))?;
+            out.busy_keys.insert(deploy::route_key(&app.name, d.pr_number));
+        }
         for (dep, desired, preview, base, failover) in deps {
             let placed: Vec<Placed> = e.placed(&dep)?;
             let d = e.store.with(|c| deployments::get(c, &dep))?;
@@ -451,6 +455,85 @@ pub fn containers_by_app(actual: &[ContainerState]) -> BTreeMap<String, Vec<Cont
 mod tests {
     use super::*;
     use crate::proxy::RouteHost;
+
+    fn engine(dir: &std::path::Path) -> Arc<Engine> {
+        use crate::{
+            build::{Builder, Driver},
+            deploy::Deployer,
+            docker::Docker,
+            gate::BuildGate,
+            logs::LogHub,
+            secrets::MasterKey,
+            Store,
+        };
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        store
+            .with(|c| nodes::ensure_main(c, "main", "http://127.0.0.1:7420", "x86_64"))
+            .unwrap();
+        Engine::new(
+            store,
+            Arc::new(MasterKey::from_bytes(&[4; 32]).unwrap()),
+            Builder {
+                docker: "docker".into(),
+                git: "git".into(),
+                work_dir: dir.join("work"),
+                driver: Driver::Docker,
+                memory: None,
+                timeout: Duration::from_secs(10),
+            },
+            Deployer {
+                docker: Docker::default(),
+                proxy: crate::proxy::ProxyConfig {
+                    dir: dir.join("proxy"),
+                    http_port: 18080,
+                    https_port: 18443,
+                    metrics_port: 18082,
+                    acme_email: None,
+                    dns_challenge: false,
+                    image: crate::proxy::TRAEFIK_IMAGE.into(),
+                },
+                hdd_root: dir.join("hdd"),
+                cgroup_parent: None,
+                health_interval: Duration::from_millis(10),
+            },
+            BuildGate::new(1, dir.join("power")),
+            LogHub::new(dir.join("logs")),
+        )
+    }
+
+    #[tokio::test]
+    async fn route_publication_waits_for_the_reconcilers_snapshot_and_apply() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path());
+        let reconciliation = e.app_runtime.lock().await;
+        let base = crate::fleet::RouteBase {
+            key: "blog".into(),
+            hosts: vec![],
+            port: 80,
+            basic_auth: vec![],
+            dns_challenge: false,
+        };
+        assert!(
+            tokio::time::timeout(Duration::from_millis(30), e.switch_routes(&base, &[], &[], "main"))
+                .await
+                .is_err()
+        );
+        drop(reconciliation);
+        e.switch_routes(&base, &[], &[], "main").await.unwrap();
+    }
+
+    #[test]
+    fn a_first_deploy_preserves_its_route_while_it_is_being_published() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path());
+        let app = e
+            .store
+            .tx(|c| crate::apps::create(c, &crate::apps::tests::git_app("blog")))
+            .unwrap();
+        e.enqueue(&app.id, crate::engine::Enqueue::default()).unwrap();
+        let desired = Reconciler::new(e).desire().unwrap();
+        assert!(desired.busy_keys.contains("blog"));
+    }
 
     fn want(name: &str, desired: Desired) -> Want {
         Want {

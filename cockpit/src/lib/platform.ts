@@ -201,6 +201,7 @@ export function platformOn(server?: string) {
 
     templates: () => req<ServiceTemplate[]>("GET", "/templates"),
     createFromTemplate: (id: string, r: TemplateCreate = {}) => req<App>("POST", `/templates/${q(id)}`, r, 60),
+    deleteRetainedVolume: (id: string) => req<unknown>("DELETE", `/volumes/${q(id)}`),
     allVolumes: () => req<VolumeInfo[]>("GET", "/volumes"),
     moveVolume: (id: string, tier: StorageTier) => req<Job>("POST", `/volumes/${q(id)}/move`, { tier }),
 

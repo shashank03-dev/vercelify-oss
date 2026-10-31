@@ -20,7 +20,7 @@ export function StorageToggle({ disks }: { disks?: DiskInfo[] }) {
   const [service, setService] = useState(preset.id);
   const [name, setName] = useState(preset.name);
   const [containerPath, setContainerPath] = useState(preset.containerPath);
-  const [tier, setTier] = useState<StorageTier>(preset.recommended);
+  const [tier, setTier] = useState<StorageTier>("ssd");
   const [style, setStyle] = useState<ComposeStyle>("bind");
   const [uid, setUid] = useState("");
   const [creating, setCreating] = useState(false);
@@ -32,7 +32,7 @@ export function StorageToggle({ disks }: { disks?: DiskInfo[] }) {
     setService(p.id);
     setName(p.name);
     setContainerPath(p.containerPath);
-    setTier(p.recommended);
+    setTier(p.recommended === "hdd" && !disks?.some((d) => d.role === "storage") ? "ssd" : p.recommended);
   }
 
   const result = useMemo(() => {
@@ -50,7 +50,7 @@ export function StorageToggle({ disks }: { disks?: DiskInfo[] }) {
   const target = tier === "ssd" ? ssd : hdd;
 
   async function createOnHost() {
-    if (!result.resolved) return;
+    if (!result.resolved || (tier === "hdd" && !hdd)) return;
     setCreating(true);
     try {
       const owner = uid.trim() ? Number(uid) : null;
@@ -73,6 +73,7 @@ export function StorageToggle({ disks }: { disks?: DiskInfo[] }) {
         onClick={() => setTier(t)}
         data-testid={`tier-${t}`}
         aria-pressed={active}
+        disabled={t === "hdd" && !hdd}
         className={cx(
           "relative flex-1 overflow-hidden rounded-lg border p-3.5 text-left transition",
           active ? "border-fg/25 bg-fg/[0.05]" : "border-line bg-surface-2 hover:border-line-strong",

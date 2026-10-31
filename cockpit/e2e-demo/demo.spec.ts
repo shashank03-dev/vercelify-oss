@@ -398,6 +398,13 @@ test("platform engine: deploy with a live log, roll back, variables, domains, da
   await expect(page.getByTestId("db-url")).toContainText("postgres://notes-db:••••@vfy-db-notes-db:5432/notes-db");
   await page.getByTestId("db-backup").click();
   await expect(page.getByTestId("db-backups")).toContainText("just now", { timeout: 10_000 });
+  await page.getByTestId("db-backups").getByRole("button", { name: "Restore", exact: true }).first().click();
+  await expect(page.getByTestId("db-restore-confirm")).toBeVisible();
+  await expect(page.getByTestId("db-restore-run")).toBeDisabled();
+  await page.getByTestId("db-restore-confirm").fill("notes-db");
+  await page.getByTestId("db-restore-run").click();
+  await expect(page.getByText(/Restoring notes-db from/).first()).toBeVisible();
+  await expect(page.getByTestId("db-restore-confirm")).toBeHidden();
   await page.keyboard.press("Escape");
 
   // the Storage page lists the platform's volumes and moves them
@@ -583,4 +590,31 @@ test("private app domains open through the app-mode browser gateway", async ({ p
   await expect(domain).toContainText("private.main.vfy.localhost:7481");
   await domain.getByRole("button", { name: "Open private.main.vfy", exact: true }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { openedUrl: string }).openedUrl)).toBe("http://private.main.vfy.localhost:7481/");
+});
+
+test("new apps save variables before their first deploy", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "dell-e7450");
+  await page.getByTestId("new-app").click();
+  await page.getByTestId("kind-image").click();
+  await page.getByTestId("new-image").fill("nginx:alpine");
+  await page.getByTestId("new-name").fill("configured");
+  await expect(page.getByTestId("new-env")).toBeVisible({ timeout: 2000 });
+  await page.getByTestId("new-env").fill("GREETING=hello\nAPI_KEY=before-build");
+  await page.getByTestId("create-app").click();
+  await page.getByTestId("tab-env").click();
+  await expect(page.getByTestId("env-GREETING")).toBeVisible();
+  await expect(page.getByTestId("env-API_KEY")).toBeVisible();
+});
+
+test("new apps accept Compose content", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "dell-e7450");
+  await page.getByTestId("new-app").click();
+  await expect(page.getByRole("radio", { name: "Compose", exact: true })).toBeVisible({ timeout: 2000 });
+  await page.getByRole("radio", { name: "Compose", exact: true }).click();
+  await page.getByTestId("new-name").fill("compose-web");
+  await page.getByTestId("new-compose").fill("services:\n  web:\n    image: nginx:alpine\n    ports:\n      - '80'\n");
+  await page.getByTestId("create-app").click();
+  await expect(page.getByTestId("app-detail")).toContainText("compose-web");
 });

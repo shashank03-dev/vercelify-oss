@@ -936,6 +936,7 @@ impl Engine {
         previous: &[Placed],
         main_id: &str,
     ) -> Result<()> {
+        let _route_update = self.app_runtime.lock().await;
         let routes = fleet::routes(base, placed, main_id);
         if routes.is_empty() {
             let mut seen: HashSet<String> = HashSet::new();

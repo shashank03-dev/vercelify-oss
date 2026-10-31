@@ -295,7 +295,11 @@ impl Engine {
         }
         let (d, _) = self.database(id)?;
         let _operation = self.database_operation(&d.id).await;
-        let (d, _) = self.database(&d.id)?;
+        self.backup_database_inner(&d.id, restic).await
+    }
+
+    async fn backup_database_inner(&self, id: &str, restic: &Restic) -> Result<DatabaseBackup> {
+        let (d, _) = self.database(id)?;
         let bid = new_id("bak");
         let t = now();
         self.store.with(|c| {
@@ -474,6 +478,7 @@ impl Engine {
                 ));
             }
         }
+        self.backup_database_inner(&d.id, restic).await?;
         let staged_args = proc::args(&[&archive.to_string_lossy()]);
         match style {
             BackupStyle::Dump => {

@@ -1,5 +1,7 @@
 import { ExternalLink, GitBranch, Webhook } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { usePoll } from "../lib/hooks";
+import { useLiveTopic } from "../lib/live";
 import { openExternal } from "../lib/open";
 import type { PlatformClient } from "../lib/platform";
 import type { GithubAppStart, GitSource, WebhookSetup } from "../types";
@@ -30,10 +32,24 @@ export function GithubAppModal({ client, onClose, onCreated }: { client: Platfor
   const [address, setAddress] = useState("");
   const [busy, setBusy] = useState(false);
   const parsed = parseCallback(address);
+  const known = useRef<Set<string>>(new Set());
+  const completed = useRef(false);
+  const sources = usePoll(() => start && !completed.current ? client.gitSources() : Promise.resolve([]), start ? 2000 : 0, [start, client]);
+  useLiveTopic("git-sources", () => { if (start) void sources.refresh(); });
+  useEffect(() => {
+    if (!start || completed.current) return;
+    const source = sources.data?.find((g) => g.auth === "github_app" && !known.current.has(g.id));
+    if (!source) return;
+    completed.current = true;
+    onCreated(source);
+    onClose();
+  }, [sources.data, start, onCreated, onClose]);
 
   async function begin() {
     setBusy(true);
     try {
+      known.current = new Set((await client.gitSources()).map((g) => g.id));
+      completed.current = false;
       const s = await client.startGithubApp(org.trim() || undefined);
       setStart(s);
       await openExternal(s.start_url);
@@ -45,15 +61,17 @@ export function GithubAppModal({ client, onClose, onCreated }: { client: Platfor
   }
 
   async function finish() {
-    if (!parsed) return;
+    if (!parsed || completed.current) return;
     setBusy(true);
     try {
+      completed.current = true;
       const g = await client.convertGithubApp(parsed.code, parsed.state);
       toast.ok(`${g.name} is ready: install it on your repositories`);
       onCreated(g);
       if (g.app_url) void openExternal(`${g.app_url}/installations/new`).catch((e: unknown) => toast.bad(`Could not open browser: ${String(e)}`));
       onClose();
     } catch (e) {
+      completed.current = false;
       toast.bad((e as Error).message);
     } finally {
       setBusy(false);

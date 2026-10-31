@@ -447,6 +447,17 @@ fn insert(
 /// every deploy (a new password needs only a redeploy).
 pub fn link(c: &Connection, key: &MasterKey, app: &str, db_name: &str, var: &str) -> Result<()> {
     let a = crate::apps::find(c, app)?;
+    let reference = format!("${{{{db.{db_name}.url}}}}");
+    let vars = crate::env::list(c, key, vercelify_core::platform::VarScope::App, &a.id, true)?;
+    if vars
+        .iter()
+        .any(|v| v.key == var && v.value.as_deref().is_some_and(|value| value != reference))
+    {
+        return Err(Error::Conflict(format!(
+            "{var} is already set on {}; choose another variable name or remove it first",
+            a.name
+        )));
+    }
     crate::env::put(
         c,
         key,
@@ -532,10 +543,13 @@ pub fn delete(c: &Connection, key: &MasterKey, id: &str) -> Result<Database> {
             )));
         }
     }
-    c.execute(
-        "DELETE FROM volumes WHERE owner_kind = 'database' AND owner_id = ?1",
-        [&d.id],
-    )?;
+    for v in crate::volumes::list(c, vercelify_core::platform::VolumeOwner::Database, &d.id)? {
+        let name = crate::volumes::physical_name(&v, &format!("db-{}", d.name), None);
+        c.execute(
+            "UPDATE volumes SET storage_name = ?2 WHERE id = ?1",
+            params![v.id, name],
+        )?;
+    }
     c.execute("DELETE FROM databases WHERE id = ?1", [&d.id])?;
     c.execute("DELETE FROM resource_names WHERE owner_id = ?1", [&d.id])?;
     Ok(d)
@@ -671,6 +685,18 @@ mod tests {
         }
         assert!(!valid_version("latest; rm"));
         assert!(!valid_version("-1"));
+    }
+
+    #[test]
+    fn linking_a_second_database_never_overwrites_an_existing_connection() {
+        let s = Store::open_in_memory().unwrap();
+        let k = key();
+        let app = s.tx(|c| apps::create(c, &apps::tests::git_app("blog"))).unwrap();
+        s.tx(|c| link(c, &k, &app.id, "first", "DATABASE_URL")).unwrap();
+        assert!(s.tx(|c| link(c, &k, &app.id, "second", "DATABASE_URL")).is_err());
+        let vars = s.with(|c| vars::resolve(c, &k, &app.id, false)).unwrap();
+        assert_eq!(vars["DATABASE_URL"].value.as_str(), "${{db.first.url}}");
+        s.tx(|c| link(c, &k, &app.id, "second", "MYSQL_URL")).unwrap();
     }
 
     #[test]

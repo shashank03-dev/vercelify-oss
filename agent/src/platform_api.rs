@@ -109,6 +109,7 @@ pub fn router() -> Router<AppState> {
         .route("/platform/templates", get(template_list))
         .route("/platform/templates/{id}", post(template_create))
         .route("/platform/volumes", get(volume_list))
+        .route("/platform/volumes/{id}", delete(volume_delete_retained))
         .route("/platform/volumes/{id}/move", post(volume_move))
 }
 
@@ -1324,6 +1325,15 @@ fn ensure_in_background(s: &AppState, id: String, title: String) {
 }
 
 async fn db_create(State(s): State<AppState>, Json(req): Json<DatabaseCreate>) -> ApiResult<Database> {
+    if req.tier == Some(vercelify_core::StorageTier::Hdd)
+        && s.config.require_storage_mount
+        && !crate::volumes::is_mount_point(std::path::Path::new(&s.config.storage_mount))
+    {
+        return Err(AppError::conflict(format!(
+            "{} is not mounted — attach the storage disk first",
+            s.config.storage_mount
+        )));
+    }
     let d = tx(&s, move |c, k| databases::create(c, k, &req)).await?;
     ensure_in_background(&s, d.id.clone(), format!("Start {}", d.name));
     changed(&s, "databases");
@@ -1928,6 +1938,48 @@ async fn template_create(
     )?;
     changed(&s, "apps");
     Ok(Json(app))
+}
+
+async fn volume_delete_retained(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
+    let v = tx(&s, move |c, _| {
+        let v = volumes::get(c, &id)?;
+        let table = if v.owner_kind == VolumeOwner::App {
+            "apps"
+        } else {
+            "databases"
+        };
+        let exists: bool = c.query_row(
+            &format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE id = ?1)"),
+            [&v.owner_id],
+            |r| r.get(0),
+        )?;
+        if exists {
+            return Err(vercelify_platform::Error::Conflict(
+                "this volume still belongs to an app or database".into(),
+            ));
+        }
+        Ok(v)
+    })
+    .await?;
+    if v.tier != vercelify_core::StorageTier::Ssd {
+        return Err(AppError::conflict(
+            "Retained storage-disk folders require manual removal on the server after checking their mounts",
+        ));
+    }
+    let p = platform(&s)?;
+    p.engine
+        .deployer
+        .docker
+        .volume_remove(
+            v.storage_name
+                .as_deref()
+                .ok_or_else(|| AppError::conflict("the retained volume has no physical identity"))?,
+        )
+        .await
+        .map_err(AppError::from)?;
+    tx(&s, move |c, _| volumes::delete(c, v.owner_kind, &v.owner_id, &v.id)).await?;
+    changed(&s, "volumes");
+    Ok(Json(json!({"ok": true})))
 }
 
 async fn volume_list(State(s): State<AppState>) -> ApiResult<Vec<VolumeInfo>> {

@@ -14,7 +14,7 @@
 #   vfy status                  the server's health checks
 #   vfy alerts                  what the server reported lately
 #   vfy backup                  start a backup now
-#   vfy sleep APP [MINUTES|off] stop APP after MINUTES without visits (default 30)
+#   vfy sleep APP [MINUTES|off] stop APP after 5–1440 minutes without visits (default 30)
 #   vfy config check [DIR]      what DIR's vercel.json (+ vercelify.json) would do
 #   vfy config push APP [DIR]   apply DIR's vercel.json to APP (any Git host)
 #   vfy config sync APP         read APP's vercel.json from its GitHub repository now
@@ -404,10 +404,18 @@ platform_cmd() {
           *) lines=$a ;;
         esac
       done
+      local current latest log_path
+      current=$(papi GET "/apps/$app" | jq -r '.current_deployment_id // empty') || exit 1
+      log_path="/apps/$app/logs"
+      if [[ -z "$current" ]]; then
+        latest=$(papi GET "/apps/$app/deployments?limit=1" | jq -r '.[0].id // empty') || exit 1
+        [[ -n "$latest" ]] || die "this app has no deployment logs yet"
+        log_path="/deployments/$latest/logs"
+      fi
       if (( follow )); then
-        pstream "/apps/$app/logs?follow=true&tail=$lines" | jq --unbuffered -r "$log_text"
+        pstream "$log_path?follow=true&tail=$lines" | jq --unbuffered -r "$log_text"
       else
-        papi GET "/apps/$app/logs?tail=$lines" | jq -r "$log_text"
+        papi GET "$log_path?tail=$lines" | jq -r "$log_text"
       fi
       ;;
     rollback)
@@ -472,10 +480,10 @@ platform_cmd() {
           printf '%s✓%s %s saved — deploy %s to use them\n' "$G" "$N" "$(papi PUT "/apps/$app/env" "$body" | jq -r '"\(.saved) variable\(if .saved == 1 then "" else "s" end)"')" "$app"
           ;;
         push)
-          local file=${1:-.env}
+          local file=${1:-.env} imported
           [[ -r "$file" ]] || die "no $file to import"
-          printf '%s✓%s %s imported from %s — deploy %s to use them\n' "$G" "$N" \
-            "$(papi POST "/apps/$app/env/import" "$(jq -nc --rawfile c "$file" '{content: $c, replace: false}')" | jq -r '"\(.saved) variable\(if .saved == 1 then "" else "s" end)"')" "$file" "$app"
+          imported=$(papi POST "/apps/$app/env/import" "$(jq -nc --rawfile c "$file" '{content: $c, replace: false}')" | jq -r '"\(.saved) variable\(if .saved == 1 then "" else "s" end)"') || exit 1
+          printf '%s✓%s %s imported from %s — deploy %s to use them\n' "$G" "$N" "$imported" "$file" "$app"
           ;;
         *) die "usage: vfy env pull APP [FILE] | set APP KEY=VALUE… | push APP [FILE]" ;;
       esac
@@ -503,7 +511,7 @@ platform_cmd() {
       log=$(papi GET "/deployments/$(jq -r .id <<<"$dep")/logs" | jq -r "$log_text")
       [[ -n "$log" ]] || die "that deployment has no build log"
       head=$(jq -r --arg app "$app" '"App: \($app)\nCommit: \(.commit_sha[:7]) \"\(.commit_message | split("\n")[0])\""' <<<"$dep")
-      printf '%s%s failed at %s (%s)%s\n' "$B" "$app" "$(jq -r '.commit_sha[:7]' <<<"$dep")" "$(jq -r .created_at <<<"$dep")" "$N" >&2
+      printf '%s%s failed at %s (%s)%s\n' "$B" "$app" "$(jq -r 'if (.commit_sha // "") == "" then "deployment #\(.number)" else .commit_sha[:7] end' <<<"$dep")" "$(jq -r .created_at <<<"$dep")" "$N" >&2
       msgs=$(why_messages "$log" "$WHY_VJ" "$head")
       why_answer "$msgs"
       ;;

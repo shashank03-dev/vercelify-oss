@@ -130,6 +130,7 @@ pub fn allowed(from: DeploymentStatus, to: DeploymentStatus) -> bool {
 /// the state machine doesn't allow, so a late callback can't resurrect a
 /// cancelled deployment.
 pub fn transition(c: &Connection, id: &str, to: DeploymentStatus, error: Option<&str>) -> Result<Deployment> {
+    let error = error.map(crate::logs::strip_ansi);
     let cur = get(c, id)?;
     if !allowed(cur.status, to) {
         return Err(Error::Conflict(format!(
@@ -303,6 +304,17 @@ mod tests {
         );
         assert_eq!(s.with(|c| list(c, &a.id, 10)).unwrap()[0].id, d2.id);
         assert_eq!(s.with(active).unwrap().len(), 2);
+    }
+
+    #[test]
+    fn failure_reasons_do_not_store_terminal_escape_sequences() {
+        let s = Store::open_in_memory().unwrap();
+        let a = s.tx(|c| apps::create(c, &apps::tests::git_app("blog"))).unwrap();
+        let d = s.tx(|c| create(c, &new(&a.id, None))).unwrap();
+        let d = s
+            .tx(|c| transition(c, &d.id, Failed, Some("\x1b[31mbuild failed\x1b[0m")))
+            .unwrap();
+        assert_eq!(d.error, "build failed");
     }
 
     #[test]

@@ -183,3 +183,17 @@ JSON
   [ "$status" -ne 0 ]
   [ "$(cat target.env)" = original ]
 }
+
+@test "a rejected env import reports failure without claiming success" {
+  printf 'INVALID\n' >bad.env
+  run "$VFY" env push blog bad.env
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"expected KEY=value"* ]]
+  [[ "$output" != *"imported from"* ]]
+}
+
+@test "logs of an app that never ran show its latest build failure" {
+  run "$VFY" logs api
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Module not found"* ]]
+}

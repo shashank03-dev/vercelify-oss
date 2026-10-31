@@ -2,7 +2,7 @@ import { ArrowRightLeft, Boxes, HardDrive, RefreshCw, Wand2, Zap } from "lucide-
 import { useMemo, useState } from "react";
 import { StorageToggle } from "../components/StorageToggle";
 import { useToast } from "../components/Toast";
-import { Button, Callout, Card, cx, EmptyState, ErrorNote, IconButton, Loading, Meter, Modal, PageHeader, Skeleton } from "../components/ui";
+import { Button, Callout, Card, cx, EmptyState, ErrorNote, IconButton, Loading, Meter, Modal, PageHeader, Skeleton, TextInput } from "../components/ui";
 import { agent, waitForJob } from "../lib/api";
 import { useLiveTopic } from "../lib/live";
 import { bytes, mediaLabel, pct } from "../lib/format";
@@ -173,6 +173,8 @@ function PlatformVolumes({ hdd }: { hdd: boolean }) {
   const vols = usePoll(() => client.allVolumes(), 15_000, [client]);
   useLiveTopic("volumes", () => void vols.refresh());
   const toast = useToast();
+  const [deleting, setDeleting] = useState<VolumeInfo>();
+  const [confirmation, setConfirmation] = useState("");
   const [moving, setMoving] = useState<{ v: VolumeInfo; to: StorageTier } | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -228,7 +230,7 @@ function PlatformVolumes({ hdd }: { hdd: boolean }) {
                 return (
                   <div role="row" key={v.id} data-testid={`pvolume-${owner_name}-${v.name}`} className={cx(VOLUME_GRID, "py-2.5 transition-colors hover:bg-fg/[0.025]")}>
                     <div className="min-w-0 leading-tight">
-                      <div className="truncate font-medium">{owner_name || "—"}</div>
+                      <div className="truncate font-medium">{owner_name || "Retained data"}</div>
                       <div className="mt-1 text-[11px] text-fg-dim">{v.owner_kind === "app" ? "App" : "Database"}</div>
                     </div>
                     <span className="truncate font-mono text-xs text-fg-muted" title={v.host_path ?? undefined}>
@@ -237,7 +239,7 @@ function PlatformVolumes({ hdd }: { hdd: boolean }) {
                     <span className="truncate font-mono text-xs text-fg-muted">{v.mount_path}</span>
                     <span className="text-[12px] text-fg-muted">{v.tier === "ssd" ? "SSD" : "HDD"}</span>
                     <span className="flex justify-end">
-                      <Button
+                      {!owner_name ? <Button size="sm" variant="danger" disabled={v.tier !== "ssd"} onClick={() => { setConfirmation(""); setDeleting({ volume: v, owner_name }); }}>Delete retained data</Button> : <Button
                         size="sm"
                         icon={<ArrowRightLeft />}
                         disabled={to === "hdd" && !hdd}
@@ -246,7 +248,7 @@ function PlatformVolumes({ hdd }: { hdd: boolean }) {
                         data-testid={`pmove-${owner_name}-${v.name}`}
                       >
                         Move to {to.toUpperCase()}
-                      </Button>
+                      </Button>}
                     </span>
                   </div>
                 );
@@ -255,6 +257,15 @@ function PlatformVolumes({ hdd }: { hdd: boolean }) {
           </div>
         )}
       </Card>
+      <Modal open={!!deleting} onClose={() => !busy && setDeleting(undefined)} title="Delete retained data" description="Permanently deletes this volume. This cannot be undone.">
+        <p className="mb-2 text-sm">Type {deleting?.volume.name} to delete its data.</p>
+        <TextInput value={confirmation} onChange={(e) => setConfirmation(e.target.value)} />
+        <Button variant="danger" disabled={confirmation !== deleting?.volume.name} busy={busy} onClick={() => {
+          if (!deleting) return;
+          setBusy(true);
+          void client.deleteRetainedVolume(deleting.volume.id).then(() => { setDeleting(undefined); void vols.refresh(); }, (e: Error) => toast.bad(e.message)).finally(() => setBusy(false));
+        }}>Delete permanently</Button>
+      </Modal>
       <Modal open={!!moving} onClose={() => !busy && setMoving(null)} title={moving ? `Move ${moving.v.owner_name}/${moving.v.volume.name} to the ${moving.to.toUpperCase()}` : ""}>
         <div className="space-y-3 p-5 text-[13px] text-fg-muted">
           <p>

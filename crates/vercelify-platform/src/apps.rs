@@ -345,7 +345,10 @@ pub fn create(c: &Connection, req: &AppCreate) -> Result<App> {
     check_build(&build)?;
     let runtime = req.runtime.clone().unwrap_or_default();
     check_runtime(&runtime)?;
-    let previews = req.previews.clone().unwrap_or_default();
+    let previews = req.previews.clone().unwrap_or(PreviewSettings {
+        enabled: req.kind == AppKind::Git,
+        max: 3,
+    });
     check_previews(&previews)?;
     let node = check_node(c, req.node_id.as_deref())?;
     let name = req.name.trim();
@@ -438,7 +441,13 @@ pub fn patch(c: &Connection, id: &str, p: &AppPatch) -> Result<App> {
 pub fn delete(c: &Connection, id: &str) -> Result<App> {
     let app = get(c, id)?;
     c.execute("DELETE FROM env_vars WHERE scope = 'app' AND scope_id = ?1", [id])?;
-    c.execute("DELETE FROM volumes WHERE owner_kind = 'app' AND owner_id = ?1", [id])?;
+    for v in crate::volumes::list(c, vercelify_core::platform::VolumeOwner::App, id)? {
+        let name = crate::volumes::physical_name(&v, &app.name, None);
+        c.execute(
+            "UPDATE volumes SET storage_name = ?2 WHERE id = ?1",
+            params![v.id, name],
+        )?;
+    }
     c.execute("DELETE FROM apps WHERE id = ?1", [id])?;
     c.execute("DELETE FROM resource_names WHERE owner_id = ?1", [id])?;
     Ok(app)
@@ -641,6 +650,13 @@ pub(crate) mod tests {
             node_id: None,
             domains: vec![],
         }
+    }
+
+    #[test]
+    fn git_apps_enable_previews_by_default() {
+        let s = Store::open_in_memory().unwrap();
+        let a = s.tx(|c| create(c, &git_app("blog"))).unwrap();
+        assert!(a.previews.enabled);
     }
 
     #[test]

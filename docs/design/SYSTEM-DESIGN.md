@@ -284,7 +284,10 @@ regenerate route files for the node; write only files whose content changed
 Stopped and sleeping apps lose their base route, so visitors get the wake page
 (sleeping) or a 404 instead of a 502 from a dead upstream; routes of apps with a
 deployment in flight are left to the engine. The reconciler never builds and never
-changes `current_deployment_id` itself, and never waits on a download: a database
+changes `current_deployment_id` itself. Snapshot-and-apply serializes with deployment
+route publication through the app-runtime lock. Every active deployment protects
+its route key, including a first deployment without a serving predecessor. It
+never waits on a download: a database
 whose image isn't on the machine yet gets its pull started in the background (once
 per image), and a later pass starts it, so a first pull over slow home internet
 doesn't hold up bringing other apps back. Sleeping apps
@@ -481,7 +484,10 @@ Templates in `crates/vercelify-platform/templates/databases.toml` (versioned wit
   missing/corrupt snapshots fail before touching live data. Staging uses disk
   space proportional to the backup and is removed afterward. Database runtime
   operations serialize per database so reconciliation cannot restart one mid-copy.
-  Restore stops dependants, restores, starts them.
+  Restore takes a fresh backup of current data after staging succeeds, under the
+  same database-operation lock; a backup failure aborts replacement. Restore stops
+  dependants, restores, starts them. The cockpit requires the database name and
+  shows the snapshot date before requesting restoration.
 - Storage identities: schema 5 gives new app/database volumes an immutable
   `vfyv2-<volume ID>` name, with `-pr-<number>` for previews. Existing volumes keep
   their legacy names and HDD paths; the migration does not move data. Before
@@ -1043,3 +1049,22 @@ and shows the Screen Recording repair steps beside the stream controls. A watchd
 checks the process identity so it cannot stop a replacement capture. `desktop on`
 refuses to restart the agent while its jobs API reports running work, naming the
 jobs to finish first; otherwise it announces the restart.
+
+### Workflow safeguards (October 2026)
+
+New Git apps enable previews by default. New app accepts Compose YAML and optional
+secret environment variables, saved for build and runtime before requesting the
+first deployment. GitHub manifest completion refreshes on `git-sources` events
+and polls while waiting, closing the setup dialog when a new source appears.
+Dialogs contain Tab navigation and restore focus when closed. Public-domain
+instructions distinguish Cloudflare edge TLS from direct public DNS access.
+
+Database creation refuses an unmounted storage tier before recording desired
+state. Linking a database refuses to replace an existing connection variable;
+callers can choose a different variable name. Retained volume metadata survives
+owner deletion, including its physical storage identity; the Storage page lists
+it as retained data. `DELETE /v1/platform/volumes/{id}` refuses volumes whose owner
+still exists and removes retained SSD data through Docker (which refuses in-use
+volumes). HDD folder deletion requires manual mount checks and is not offered by
+the UI. Volumes orphaned by earlier releases remain visible in the raw host list;
+recovering their removed ownership metadata is not implemented.

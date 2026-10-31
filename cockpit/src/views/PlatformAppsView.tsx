@@ -365,8 +365,11 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
   const templates = usePoll(() => (open && kind === "service" ? client.templates() : Promise.resolve(null)), 0, [open, kind, client]);
   const [template, setTemplate] = useState<string>();
   const [repo, setRepo] = useState("");
-  const [branch, setBranch] = useState("main");
+  const [branch, setBranch] = useState("");
   const [image, setImage] = useState("");
+  const [compose, setCompose] = useState("");
+  const [initialEnv, setInitialEnv] = useState("");
+  const parsedEnv = readDotenv(initialEnv);
   const [name, setName] = useState("");
   const [named, setNamed] = useState(false);
   const [pack, setPack] = useState<BuildPack>("auto");
@@ -390,10 +393,12 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
     setName(slug(from ?? ""));
   }, [repo, image, kind, named, template]);
 
-  const sourceOk = kind === "service" ? !!template : kind === "image" ? image.trim().length > 0 : validRepo(repo);
+  useLiveTopic("git-sources", () => void sources.refresh());
+
+  const sourceOk = kind === "compose" ? !!compose.trim() : kind === "service" ? !!template : kind === "image" ? image.trim().length > 0 : validRepo(repo);
   const portNum = port ? Number(port) : null;
   const portOk = portNum === null || (Number.isInteger(portNum) && portNum > 0 && portNum < 65536);
-  const ok = sourceOk && validName(name) && portOk;
+  const ok = sourceOk && validName(name) && portOk && !parsedEnv.error;
 
   async function create() {
     setBusy(true);
@@ -415,7 +420,7 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
           git_source_id: kind === "git" && gitSource ? gitSource : null,
           image: kind === "image" ? image.trim() : null,
           compose_file: null,
-          compose_content: null,
+          compose_content: kind === "compose" ? compose : null,
           pinned_sha: null,
         },
         build:
@@ -427,6 +432,11 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
           : undefined,
         domains: [],
       });
+      if (parsedEnv.vars.length) {
+        await client.putEnv(a.id, { vars: parsedEnv.vars.map((v) => ({ ...v, secret: true, build: true })), replace: false });
+      }
+      setInitialEnv("");
+      setCompose("");
       // The agent only creates the app: its first deployment is asked here.
       await client.deploy(a.id).catch((e: Error) => toast.bad(`Created ${a.name}, but its deployment didn't start: ${e.message}`));
       setRepo("");
@@ -450,6 +460,7 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
           options={[
             { value: "git", label: <><GitBranch /> Git repository</>, testId: "kind-git" },
             { value: "image", label: <><Box /> Docker image</>, testId: "kind-image" },
+            { value: "compose", label: "Compose", testId: "kind-compose" },
             { value: "service", label: <><LayoutGrid /> Service</>, testId: "kind-service" },
           ]}
         />
@@ -527,6 +538,10 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
               />
             )}
           </>
+        ) : kind === "compose" ? (
+          <Field label="Compose YAML" hint="Services, networks and volumes from your compose file">
+            <textarea className="w-full rounded-md border border-line bg-bg p-2 font-mono text-xs" rows={8} value={compose} onChange={(e) => setCompose(e.target.value)} data-testid="new-compose" />
+          </Field>
         ) : (
           <Field label="Image" hint="Pulled from Docker Hub, GHCR or any registry">
             <TextInput value={image} onChange={(e) => setImage(e.target.value)} placeholder="ghcr.io/umami-software/umami:postgresql-latest" spellCheck={false} data-testid="new-image" autoFocus />
@@ -548,6 +563,10 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
             <TextInput disabled={kind === "service"} value={port} onChange={(e) => setPort(e.target.value.replace(/\D/g, ""))} placeholder="3000" inputMode="numeric" data-testid="new-port" />
           </Field>
         </div>
+        {kind !== "service" && <Field label="Environment variables" hint="Optional KEY=value lines; secret values are available to the first build and runtime.">
+          <textarea className="w-full rounded-md border border-line bg-bg p-2 font-mono text-xs" rows={4} value={initialEnv} onChange={(e) => setInitialEnv(e.target.value)} data-testid="new-env" spellCheck={false} />
+          {parsedEnv.error && <p className="text-xs text-bad">{parsedEnv.error}</p>}
+        </Field>}
         {error && <Callout tone="bad">{error}</Callout>}
       </div>
       <div className="flex justify-end gap-2 border-t border-line px-5 py-3">
@@ -822,7 +841,7 @@ function DeploymentLog({ client, d, app }: { client: PlatformClient; d: Deployme
       >
         <LogView testId="deploy-log" className="max-h-none!">
           {lines.map((l) => (
-            <div key={l.seq} className={l.stream === "error" || l.stream === "stderr" ? "text-bad" : l.stream === "info" ? "text-fg" : undefined}>
+            <div key={l.seq} className={l.stream === "error" ? "text-bad" : l.stream === "info" ? "text-fg" : undefined}>
               {l.text}
             </div>
           ))}
@@ -1097,7 +1116,8 @@ function DomainsTab({ app, client, onChanged }: { app: App; client: PlatformClie
 
   return (
     <div className="space-y-4">
-      <Card flush title="Domains" description="Point a DNS A record at this server, add the name here, and HTTPS follows." testId="domains-card">
+      {setting.data?.edge_tls ? <Callout tone="idle">Cloudflare Tunnel: route the public hostname to this server in Cloudflare. TLS is handled at the edge.</Callout> : <Callout tone="idle">For public access, point DNS at a reachable public address and forward ports 80/443. A private mesh address keeps this domain private.</Callout>}
+      <Card flush title="Domains" description="Domains route to this app. Public access depends on your server’s connection mode." testId="domains-card">
         {app.domains.length === 0 ? (
           <p className="px-4 py-6 text-center text-[13px] text-fg-muted">No domains. Add one below, or set a wildcard domain in Settings for automatic ones.</p>
         ) : (
@@ -1808,6 +1828,8 @@ function DatabasesCard({
 }
 
 function NewDatabaseModal({ open, client, apps, onClose, onCreated }: { open: boolean; client: PlatformClient; apps: App[]; onClose: () => void; onCreated: (d: Database) => void }) {
+  const { system } = useLive();
+  const hasStorage = system.data?.disks.some((d) => d.role === "storage") ?? false;
   const [name, setName] = useState("");
   const [kind, setKind] = useState<DatabaseKind>("postgresql");
   const [link, setLink] = useState("");
@@ -1857,7 +1879,7 @@ function NewDatabaseModal({ open, client, apps, onClose, onCreated }: { open: bo
             </Select>
           </Field>
           <Field label="Storage">
-            <Segmented label="database storage" value={tier} onChange={setTier} options={[{ value: "ssd", label: "SSD" }, { value: "hdd", label: "HDD" }]} />
+            <Segmented label="database storage" value={tier} onChange={setTier} options={hasStorage ? [{ value: "ssd", label: "Main disk" }, { value: "hdd", label: "Storage disk" }] : [{ value: "ssd", label: "Main disk" }]} />
           </Field>
         </div>
         {error && <Callout tone="bad">{error}</Callout>}
@@ -1883,6 +1905,8 @@ function DatabaseDetail({ db, apps, client, onChanged, onClose }: { db: Database
   const [link, setLink] = useState("");
   const [confirm, setConfirm] = useState("");
   const [console_, setConsole] = useState(false);
+  const [restoring, setRestoring] = useState<{ snapshot: string; created_at: string }>();
+  const [restoreConfirm, setRestoreConfirm] = useState("");
   const url = (reveal ? full.data?.internal_url : db.internal_url) ?? "";
   const reference = `\${{db.${db.name}.url}}`;
 
@@ -1975,7 +1999,7 @@ function DatabaseDetail({ db, apps, client, onChanged, onClose }: { db: Database
                   <span className="flex-1 font-mono text-[12px] text-fg-muted">{b.snapshot || "—"}</span>
                   <span className="w-20 text-right text-[12px] text-fg-dim tabular-nums">{b.bytes ? bytes(b.bytes) : ""}</span>
                   {b.status === "succeeded" && (
-                    <Button size="sm" variant="ghost" icon={<RotateCcw />} busy={busy === `restore-${b.id}`} onClick={() => void act(`restore-${b.id}`, () => client.restore(db.id, b.snapshot), `Restoring ${db.name} from ${b.snapshot}`)}>
+                    <Button size="sm" variant="ghost" icon={<RotateCcw />} busy={busy === `restore-${b.id}`} onClick={() => { setRestoreConfirm(""); setRestoring(b); }}>
                       Restore
                     </Button>
                   )}
@@ -1985,6 +2009,17 @@ function DatabaseDetail({ db, apps, client, onChanged, onClose }: { db: Database
           )}
         </Card>
 
+        <Modal open={!!restoring} onClose={() => setRestoring(undefined)} title={`Restore ${db.name}`} description="Replaces current data and interrupts connected apps. A backup of current data is taken first; restore stops if that backup fails.">
+          <p className="mb-3 text-sm">Snapshot {restoring?.snapshot} from {restoring && new Date(restoring.created_at).toLocaleString()}.</p>
+          <Field label={`Type ${db.name} to restore`}><TextInput value={restoreConfirm} onChange={(e) => setRestoreConfirm(e.target.value)} data-testid="db-restore-confirm" /></Field>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="ghost" onClick={() => setRestoring(undefined)}>Cancel</Button>
+            <Button variant="danger" disabled={restoreConfirm !== db.name} busy={busy === "restore"} data-testid="db-restore-run" onClick={() => {
+              if (!restoring) return;
+              void act("restore", () => client.restore(db.id, restoring.snapshot), `Restoring ${db.name} from ${restoring.snapshot}`).then((ok) => { if (ok) setRestoring(undefined); });
+            }}>Restore database</Button>
+          </div>
+        </Modal>
         <Card title="Danger zone">
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="w-72">

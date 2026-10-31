@@ -112,6 +112,8 @@ class H(BaseHTTPRequestHandler):
                     out.append({"at": "2026-10-22T08:00:02Z", "stream": "stdout", "text": "GET / 200"})
                 return self.lines(out)
             if sub == "env" and len(seg) > 3 and seg[3] == "import":
+                if body.get("content", "").startswith("INVALID"):
+                    return self.reply(400, {"error": "line 1: expected KEY=value"})
                 n = len([l for l in body.get("content", "").splitlines() if "=" in l and not l.startswith("#")])
                 return self.reply(200, {"saved": n})
             if sub == "env" and method == "PUT":

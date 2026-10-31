@@ -1635,6 +1635,9 @@ fn platform_api() {
     let (s, _) = send(&a, "DELETE", "/v1/platform/apps/blog/previews/9", TOKEN, None);
     assert_eq!(s, 200, "removing a preview that isn't there is fine");
 
+    // An existing connection variable must be removed deliberately before linking.
+    let (status, _) = send(&a, "DELETE", "/v1/platform/apps/blog/env/DATABASE_URL", TOKEN, None);
+    assert_eq!(status, 200);
     // Databases: created (started in the background), passwords masked
     // unless revealed, linked to an app, protected while linked.
     let (s, d) = post(
@@ -2274,4 +2277,53 @@ fn concurrent_cli_pairings_preserve_every_device_token() {
     }
     let registry: Value = serde_json::from_slice(&std::fs::read(tokens).unwrap()).unwrap();
     assert_eq!(registry["tokens"].as_array().unwrap().len(), 16);
+}
+
+#[test]
+fn database_creation_refuses_an_unmounted_storage_tier() {
+    let a = start_with(&[
+        ("VERCELIFY_ENGINE", "platform".into()),
+        ("VERCELIFY_REQUIRE_STORAGE_MOUNT", "true".into()),
+    ]);
+    let (status, body) = post(
+        &a,
+        "/v1/platform/databases",
+        json!({ "name": "on-missing-disk", "kind": "postgresql", "tier": "hdd" }),
+    );
+    assert_eq!(status, 409, "{body}");
+    assert!(body["error"].as_str().unwrap().contains("not mounted"));
+    let (_, list) = get(&a, "/v1/platform/databases");
+    assert!(list.as_array().unwrap().is_empty());
+}
+
+#[test]
+fn retained_volumes_can_be_deleted_only_after_their_owner_is_removed() {
+    let a = start_with(&[("VERCELIFY_ENGINE", "platform".into())]);
+    let (status, app) = post(
+        &a,
+        "/v1/platform/apps",
+        json!({"name":"retained", "kind":"image", "source":{"image":"nginx:alpine"}}),
+    );
+    assert_eq!(status, 200, "{app}");
+    let (status, volume) = post(
+        &a,
+        "/v1/platform/apps/retained/volumes",
+        json!({"name":"data","mount_path":"/data"}),
+    );
+    assert_eq!(status, 200, "{volume}");
+    let path = format!("/v1/platform/volumes/{}", volume["id"].as_str().unwrap());
+    assert_eq!(req(&a, "DELETE", &path, Some(TOKEN), None).0, 409);
+    assert_eq!(
+        req(&a, "DELETE", "/v1/platform/apps/retained", Some(TOKEN), None).0,
+        200
+    );
+    let (_, volumes) = get(&a, "/v1/platform/volumes");
+    assert!(volumes
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v["volume"]["id"] == volume["id"] && v["owner_name"] == ""));
+    assert_eq!(req(&a, "DELETE", &path, Some(TOKEN), None).0, 200);
+    let (_, volumes) = get(&a, "/v1/platform/volumes");
+    assert!(volumes.as_array().unwrap().is_empty());
 }
