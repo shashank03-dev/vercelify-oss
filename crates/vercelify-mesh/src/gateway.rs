@@ -10,6 +10,11 @@
 //! Plain HTTP only, one request per connection (`Connection: close`, so
 //! each request's Host is rewritten); a WebSocket upgrade keeps its
 //! connection. Only mesh destinations are served, as with SOCKS.
+//!
+//! The app sees its own name, so whatever it builds from it is put back on
+//! the way out: a redirect to its own absolute URL (Next.js middleware does
+//! this) stays on the gateway, and a cookie set for its domain is kept by the
+//! browser. Origin and Referer go in with the app's name, for CSRF checks.
 
 use crate::netstack::Stack;
 use crate::socks::{bridge, Resolver};
@@ -77,10 +82,18 @@ pub fn rewrite_head(head: &str, host: &str) -> String {
         }
         headers.push((name, l));
     }
+    let gateway = host_of(head).unwrap_or_default().to_ascii_lowercase();
     out.push(format!("Host: {host}"));
     for (name, l) in headers {
         match name.as_str() {
             "host" => {}
+            "origin" | "referer" => {
+                let value = l.split_once(':').map(|(_, v)| v.trim()).unwrap_or_default();
+                match same_site_rest(value, &gateway) {
+                    Some(rest) => out.push(format!("{}: http://{host}{rest}", header_name(l))),
+                    None => out.push(l.to_string()),
+                }
+            }
             "connection" | "keep-alive" | "proxy-connection" if !upgrade => {}
             _ => out.push(l.to_string()),
         }
@@ -89,6 +102,106 @@ pub fn rewrite_head(head: &str, host: &str) -> String {
         out.push("Connection: close".into());
     }
     out.join("\r\n") + "\r\n\r\n"
+}
+
+/// The header's name as it was sent.
+fn header_name(line: &str) -> &str {
+    line.split(':').next().unwrap_or_default().trim()
+}
+
+/// `http(s)://NAME[:port]REST` → `REST` when NAME is `host` (any case, with
+/// or without its port), else nothing.
+fn same_site_rest<'a>(url: &'a str, host: &str) -> Option<&'a str> {
+    let after = url
+        .strip_prefix("http://")
+        .or_else(|| url.strip_prefix("https://"))
+        .or_else(|| url.strip_prefix("HTTP://"))
+        .or_else(|| url.strip_prefix("HTTPS://"))?;
+    let end = after.find(['/', '?', '#']).unwrap_or(after.len());
+    let (authority, rest) = after.split_at(end);
+    let bare = |h: &str| h.split(':').next().unwrap_or_default().to_ascii_lowercase();
+    (!host.is_empty() && bare(authority) == bare(host)).then_some(rest)
+}
+
+/// A response head with the app's own name swapped for the gateway's
+/// (`gateway` = the Host the browser used): absolute redirects to the app,
+/// and `Domain=` on cookies for it (the browser keeps them for the
+/// gateway's name instead).
+pub fn rewrite_response_head(head: &str, host: &str, gateway: &str) -> String {
+    let host = host.to_ascii_lowercase();
+    let mut out = vec![];
+    for l in head.split("\r\n").filter(|l| !l.is_empty()) {
+        let name = header_name(l).to_ascii_lowercase();
+        let value = l.split_once(':').map(|(_, v)| v.trim()).unwrap_or_default();
+        match name.as_str() {
+            "location" if !out.is_empty() => match same_site_rest(value, &host) {
+                Some(rest) => out.push(format!("{}: http://{gateway}{rest}", header_name(l))),
+                None => out.push(l.to_string()),
+            },
+            "set-cookie" if !out.is_empty() => {
+                let kept: Vec<&str> = value
+                    .split(';')
+                    .filter(|attr| {
+                        let (k, v) = attr.split_once('=').unwrap_or((attr, ""));
+                        let d = v.trim().trim_start_matches('.').to_ascii_lowercase();
+                        // Its own name or a parent of it (10.77.0.1.sslip.io).
+                        !(k.trim().eq_ignore_ascii_case("domain") && (host == d || host.ends_with(&format!(".{d}"))))
+                    })
+                    .collect();
+                out.push(format!("{}: {}", header_name(l), kept.join(";")));
+            }
+            _ => out.push(l.to_string()),
+        }
+    }
+    out.join("\r\n") + "\r\n\r\n"
+}
+
+/// The upstream's bytes with each response head rewritten (interim 1xx heads
+/// and the final one; after a 101 or the final head, the rest as it comes).
+/// A head that doesn't fit in `MAX_HEAD` passes through unchanged.
+pub fn rewrite_responses(
+    mut rx: tokio::sync::mpsc::Receiver<Vec<u8>>,
+    host: String,
+    gateway: String,
+) -> tokio::sync::mpsc::Receiver<Vec<u8>> {
+    let (tx, out) = tokio::sync::mpsc::channel(8);
+    tokio::spawn(async move {
+        let mut buf: Vec<u8> = vec![];
+        let mut heads_done = false;
+        while let Some(chunk) = rx.recv().await {
+            if heads_done {
+                if tx.send(chunk).await.is_err() {
+                    return;
+                }
+                continue;
+            }
+            buf.extend(chunk);
+            let mut ready = vec![];
+            while !heads_done {
+                let Some(end) = buf.windows(4).position(|w| w == b"\r\n\r\n").map(|i| i + 4) else {
+                    if buf.len() > MAX_HEAD {
+                        heads_done = true;
+                    }
+                    break;
+                };
+                let head = String::from_utf8_lossy(&buf[..end - 4]).into_owned();
+                let status = head.split(' ').nth(1).unwrap_or_default();
+                heads_done = !(status.starts_with('1') && status != "101");
+                ready.extend(rewrite_response_head(&head, &host, &gateway).into_bytes());
+                buf.drain(..end);
+            }
+            if heads_done {
+                ready.append(&mut buf);
+            }
+            if !ready.is_empty() && tx.send(ready).await.is_err() {
+                return;
+            }
+        }
+        if !buf.is_empty() {
+            let _ = tx.send(buf).await;
+        }
+    });
+    out
 }
 
 /// The value of the Host header in a request head.
@@ -174,13 +287,16 @@ where
             .await
         }
     };
+    let gateway = host_of(head).unwrap_or_default().to_string();
     let mut first = rewrite_head(head, &host).into_bytes();
     first.extend_from_slice(&buf[end..]);
     if conn.tx.send(first).await.is_err() {
         return;
     }
     conn.wake.notify_one();
-    bridge(s, conn).await;
+    let crate::netstack::TcpConn { tx, rx, wake } = conn;
+    let rx = rewrite_responses(rx, host, gateway);
+    bridge(s, crate::netstack::TcpConn { tx, rx, wake }).await;
 }
 
 /// Serve the gateway on `listener` (loopback) until the daemon stops.
@@ -351,6 +467,93 @@ mod tests {
         let out = rewrite_head(head, "x");
         assert!(out.contains("Connection: Upgrade") && out.contains("Upgrade: websocket"));
         assert!(!out.contains("Connection: close"));
+    }
+
+    #[test]
+    fn redirects_to_the_app_itself_stay_on_the_gateway() {
+        let head = "HTTP/1.1 302 Found\r\nLocation: http://gw.10.77.0.1.sslip.io/me?x=1\r\nContent-Length: 0";
+        let out = rewrite_response_head(head, "gw.10.77.0.1.sslip.io", "gw.10.77.0.1.sslip.io.localhost:7481");
+        assert!(
+            out.contains("Location: http://gw.10.77.0.1.sslip.io.localhost:7481/me?x=1\r\n"),
+            "{out}"
+        );
+        // https and an explicit port name the same app; other hosts and relative paths are left alone.
+        let out = rewrite_response_head(
+            "HTTP/1.1 301 Moved\r\nlocation: https://GW.10.77.0.1.sslip.io:443/a",
+            "gw.10.77.0.1.sslip.io",
+            "gw.10.77.0.1.sslip.io.localhost:7481",
+        );
+        assert!(
+            out.contains("location: http://gw.10.77.0.1.sslip.io.localhost:7481/a\r\n"),
+            "{out}"
+        );
+        for loc in [
+            "https://github.com/login",
+            "/me",
+            "http://gw.10.77.0.1.sslip.io.evil.com/",
+        ] {
+            let out = rewrite_response_head(
+                &format!("HTTP/1.1 302 Found\r\nLocation: {loc}"),
+                "gw.10.77.0.1.sslip.io",
+                "gw.10.77.0.1.sslip.io.localhost:7481",
+            );
+            assert!(out.contains(&format!("Location: {loc}\r\n")), "{out}");
+        }
+        assert!(out.ends_with("\r\n\r\n"));
+    }
+
+    #[test]
+    fn cookies_for_the_app_s_own_domain_are_kept_by_the_browser() {
+        let head = "HTTP/1.1 200 OK\r\nSet-Cookie: sid=1; Domain=.gw.10.77.0.1.sslip.io; Path=/; HttpOnly\r\nSet-Cookie: t=2; domain=10.77.0.1.sslip.io\r\nSet-Cookie: o=3; Domain=example.com";
+        let out = rewrite_response_head(head, "gw.10.77.0.1.sslip.io", "gw.10.77.0.1.sslip.io.localhost:7481");
+        assert!(out.contains("Set-Cookie: sid=1; Path=/; HttpOnly\r\n"), "{out}");
+        assert!(out.contains("Set-Cookie: t=2\r\n"), "{out}");
+        // Not this app's: the browser would refuse it anyway, so it's left as sent.
+        assert!(out.contains("Set-Cookie: o=3; Domain=example.com\r\n"), "{out}");
+    }
+
+    #[test]
+    fn origin_and_referer_name_the_app_not_the_gateway() {
+        let head = "POST /login HTTP/1.1\r\nHost: gw.10.77.0.1.sslip.io.localhost:7481\r\nOrigin: http://gw.10.77.0.1.sslip.io.localhost:7481\r\nReferer: http://gw.10.77.0.1.sslip.io.localhost:7481/form?a=1";
+        let out = rewrite_head(head, "gw.10.77.0.1.sslip.io");
+        assert!(out.contains("Origin: http://gw.10.77.0.1.sslip.io\r\n"), "{out}");
+        assert!(
+            out.contains("Referer: http://gw.10.77.0.1.sslip.io/form?a=1\r\n"),
+            "{out}"
+        );
+        let out = rewrite_head(
+            "GET / HTTP/1.1\r\nHost: gw.10.77.0.1.sslip.io.localhost:7481\r\nReferer: https://github.com/x",
+            "gw.10.77.0.1.sslip.io",
+        );
+        assert!(out.contains("Referer: https://github.com/x\r\n"), "{out}");
+    }
+
+    #[tokio::test]
+    async fn the_response_head_is_rewritten_even_when_it_arrives_in_pieces() {
+        use tokio::sync::mpsc;
+        let (tx, rx) = mpsc::channel(8);
+        let mut out = rewrite_responses(
+            rx,
+            "gw.10.77.0.1.sslip.io".into(),
+            "gw.10.77.0.1.sslip.io.localhost:7481".into(),
+        );
+        for piece in [
+            &b"HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 302 Found\r\nLocation: http://gw.10.7"[..],
+            b"7.0.1.sslip.io/me\r\nContent-Length: 4\r\n\r\nbo",
+            b"dy",
+        ] {
+            tx.send(piece.to_vec()).await.unwrap();
+        }
+        drop(tx);
+        let mut all = vec![];
+        while let Some(c) = out.recv().await {
+            all.extend(c);
+        }
+        let all = String::from_utf8(all).unwrap();
+        assert_eq!(
+            all,
+            "HTTP/1.1 100 Continue\r\n\r\nHTTP/1.1 302 Found\r\nLocation: http://gw.10.77.0.1.sslip.io.localhost:7481/me\r\nContent-Length: 4\r\n\r\nbody"
+        );
     }
 
     #[test]

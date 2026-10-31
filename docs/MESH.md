@@ -111,6 +111,8 @@ on `127.0.0.1:7481`. The cockpit opens
 `http://blog.10.77.0.1.sslip.io/`, preserving the path and query. Previews and
 private HTTP domains use the same mapping. The gateway restores the original
 Host for Traefik, supports WebSockets, and only connects to mesh destinations.
+Redirects and cookies an app makes for its own name are turned back into the
+gateway's, so logins and absolute redirects (Next.js middleware) keep working.
 Public HTTPS domains retain their public URL. Chrome and Firefox handle
 `*.localhost` locally; Safari resolution has not been verified. If Safari cannot
 open it, use Chrome/Firefox pending the Mac field check, or use system mode.

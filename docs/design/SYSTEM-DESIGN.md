@@ -747,7 +747,13 @@ depends on re-serialising JSON (`vercelify-mesh::cert`).
   through the same stack. It removes `.localhost` from Host, resolves embedded
   sslip.io/nip.io IPv4 addresses before mesh-zone and system DNS, and refuses
   destinations outside the mesh prefixes. Plain HTTP connections close after
-  each request; WebSocket upgrades bridge bytes in both directions. The Mac
+  each request; WebSocket upgrades bridge bytes in both directions. The app sees
+  its own name, so the gateway puts it back on the way out: a `Location` to the
+  app's own host (any scheme or port) becomes the gateway URL, and a cookie's
+  `Domain=` for that host or a parent of it is dropped (the browser keeps it for
+  the `.localhost` name); `Origin`/`Referer` naming the gateway go in with the
+  app's name. Response heads are rewritten as they stream (1xx interim heads
+  too); bodies and upgraded connections are untouched. The Mac
   installer enables it alongside SOCKS. The cockpit maps private app, preview
   and HTTP domain links; public HTTPS links keep their public route. Browser
   opener errors appear as a toast. Chrome/Firefox resolve `*.localhost` locally;
