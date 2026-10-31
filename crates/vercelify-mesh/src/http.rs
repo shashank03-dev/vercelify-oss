@@ -174,9 +174,22 @@ pub async fn request(
     body: Option<&serde_json::Value>,
     timeout: Duration,
 ) -> Result<Vec<u8>, HttpError> {
+    request_within(method, url, token, body, timeout, timeout).await
+}
+
+/// `request`, giving up after `connect` when the address doesn't answer
+/// (one of several to try), and after `timeout` in all.
+pub async fn request_within(
+    method: &str,
+    url: &str,
+    token: Option<&str>,
+    body: Option<&serde_json::Value>,
+    connect_timeout: Duration,
+    timeout: Duration,
+) -> Result<Vec<u8>, HttpError> {
     let u = parse_url(url)?;
     let fut = async {
-        let mut send = connect(&u, timeout).await?;
+        let mut send = connect(&u, connect_timeout).await?;
         let mut b = Request::builder()
             .method(method)
             .uri(&u.path)

@@ -160,8 +160,11 @@ fn run(args: &[&str], timeout: Duration) -> Result<String, String> {
     // A hung child (no network) must not hang the app: stop it after
     // `timeout`, unless it ended (then `done` arrives first).
     let (done, finished) = std::sync::mpsc::channel::<()>();
+    let stopped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = stopped.clone();
     std::thread::spawn(move || {
         if finished.recv_timeout(timeout) == Err(std::sync::mpsc::RecvTimeoutError::Timeout) {
+            flag.store(true, std::sync::atomic::Ordering::SeqCst);
             stop(id);
         }
     });
@@ -171,10 +174,25 @@ fn run(args: &[&str], timeout: Duration) -> Result<String, String> {
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
     } else {
-        let err = String::from_utf8_lossy(&out.stderr);
-        let line = err.lines().rfind(|l| !l.trim().is_empty()).unwrap_or("failed");
-        Err(line.trim_start_matches("vercelify-mesh: ").to_string())
+        let timed_out = stopped.load(std::sync::atomic::Ordering::SeqCst).then_some(timeout);
+        Err(failure(&String::from_utf8_lossy(&out.stderr), timed_out))
     }
+}
+
+/// What a failed `vercelify-mesh` run says: its last error line, or that it
+/// was stopped for taking too long (it prints nothing then).
+fn failure(stderr: &str, timed_out: Option<Duration>) -> String {
+    if let Some(t) = timed_out {
+        return format!(
+            "no answer from the server within {}s — check this computer's internet connection and that remote access is on (sudo vercelify remote status), then try again",
+            t.as_secs()
+        );
+    }
+    let line = stderr
+        .lines()
+        .rfind(|l| !l.trim().is_empty())
+        .unwrap_or("vercelify-mesh stopped without saying why");
+    line.trim_start_matches("vercelify-mesh: ").to_string()
 }
 
 #[cfg(unix)]
@@ -239,7 +257,9 @@ pub fn join(token: &str) -> Result<(), String> {
     let name = device_name();
     run(
         &["join", token, "--name", &name, "--port", "0"],
-        Duration::from_secs(30),
+        // Room for each address the code lists: the LAN ones give up after
+        // a few seconds, the tunnel's TLS takes longer on a slow network.
+        Duration::from_secs(60),
     )
     .map(|_| ())
 }
@@ -362,6 +382,20 @@ pub const SUNSHINE_PORTS: &[(bool, u16)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_failed_run_says_what_happened() {
+        let t = Some(Duration::from_secs(60));
+        assert!(
+            failure("", t).starts_with("no answer from the server within 60s"),
+            "a stopped run"
+        );
+        assert_eq!(
+            failure("vercelify-mesh: this code was already used\n\n", None),
+            "this code was already used"
+        );
+        assert_ne!(failure("", None), "failed");
+    }
 
     #[test]
     fn forwards_file_lines_per_owner() {

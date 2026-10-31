@@ -70,7 +70,10 @@ pub async fn join(dir: &Path, token: &str, name: &str, endpoints: Vec<String>) -
     let mut last = None;
     for control in &t.control {
         let url = control_url(control, "/v1/mesh/enroll");
-        match http::request("POST", &url, None, Some(&body), Duration::from_secs(20)).await {
+        // An address that doesn't answer (the LAN, seen from elsewhere) is
+        // given up on quickly; a tunnel gets longer for its TLS handshake.
+        let connect = Duration::from_secs(if url.starts_with("https://") { 10 } else { 4 });
+        match http::request_within("POST", &url, None, Some(&body), connect, Duration::from_secs(20)).await {
             Ok(raw) => {
                 let answer: Sealed = serde_json::from_slice(&raw).map_err(|e| msg(format!("enroll answer: {e}")))?;
                 let plain = session.open_response(&answer)?;
@@ -972,6 +975,42 @@ mod tests {
         assert_eq!(
             control_url("https://mesh.example.com/", "/x"),
             "https://mesh.example.com/x"
+        );
+    }
+
+    // A full pairing code lists the server's LAN addresses before its
+    // tunnel. From another network a LAN address never answers: it must
+    // cost seconds, not the whole time the app gives a join (field test F96).
+    #[tokio::test]
+    async fn an_unreachable_address_doesnt_hold_up_the_next() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = server.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let (mut c, _) = server.accept().await.unwrap();
+            let mut buf = [0u8; 4096];
+            let _ = c.read(&mut buf).await;
+            let body = r#"{"error":"this code was already used"}"#;
+            let head = format!("HTTP/1.1 403 Forbidden\r\ncontent-length: {}\r\n\r\n", body.len());
+            let _ = c.write_all(format!("{head}{body}").as_bytes()).await;
+        });
+        let token = JoinToken {
+            v: 1,
+            // TEST-NET-2: routed to the default gateway and never answered.
+            control: vec!["198.51.100.1:7443".into(), format!("127.0.0.1:{port}")],
+            coordinator_wg: NodeKey::generate().public().to_base64(),
+            claim: "c".into(),
+            kind: NodeKind::Device,
+        }
+        .encode();
+        let dir = tempfile::tempdir().unwrap();
+        let started = std::time::Instant::now();
+        let err = join(dir.path(), &token, "mac", vec![]).await.unwrap_err();
+        assert!(err.to_string().contains("already used"), "{err}");
+        assert!(
+            started.elapsed() < Duration::from_secs(10),
+            "took {:?}",
+            started.elapsed()
         );
     }
 
