@@ -211,7 +211,8 @@ llm_wait() { # llm_wait KIND TARGET — follow a background task until it ends
     IFS=$'\x1f' read -r status finished err completed total < <(jq -r '[.status, .done, (.error // ""), (.completed // 0), (.total // 0)] | map(tostring) | join("\u001f")' <<<"$t")
     local line="$status"
     (( total > 0 )) && line="$status  $(( completed * 100 / total ))% of $(human_bytes "$total")"
-    [[ "$line" != "$last" ]] && { info "$line"; last=$line; }
+    # The end is said once below, with its reason.
+    [[ "$finished" != true && "$line" != "$last" ]] && { info "$line"; last=$line; }
     if [[ "$finished" == true ]]; then
       [[ -z "$err" ]] || die "$target: $err"
       return 0
@@ -239,7 +240,12 @@ cmd_llm() {
       local st
       st=$(agent_api GET /v1/llm)
       if [[ "$(jq -r .installed <<<"$st")" != true ]]; then
-        info "Ollama is not installed — run: sudo vercelify llm install"
+        if jq -e '[.tasks[] | select(.done | not)] | length > 0' <<<"$st" >/dev/null; then
+          jq -r '.tasks[] | select(.done | not) | "  running   \(.kind) \(.target): \(.status)"' <<<"$st"
+          info "cancel it with: sudo vercelify llm --cancel"
+        else
+          info "Ollama is not installed — run: sudo vercelify llm install"
+        fi
         return 0
       fi
       line Ollama "$(jq -r 'if .ready then "running" elif .running then "warn" else "stopped" end' <<<"$st")" "$(jq -r '.version // ""' <<<"$st")"

@@ -60,6 +60,21 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   [[ "$output" == *"file does not exist"* ]]
 }
 
+@test "llm: status shows an install that is still running instead of offering another" {
+  curl -s -X POST -H "Authorization: Bearer test-agent-token" -d '{"tier":"ssd"}' "$AGENT_LOCAL_URL/v1/llm/install" >/dev/null
+  run "$CLI" llm
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"install"*"pulling"* ]]
+  [[ "$output" != *"run: sudo vercelify llm install"* ]]
+}
+
+@test "llm: a download that ends badly prints its reason, not a bare 'failed' first" {
+  "$CLI" llm install >/dev/null 2>&1
+  run "$CLI" llm pull bad:1b
+  [ "$status" -ne 0 ]
+  [[ "$output" != *"• failed"* ]]
+}
+
 @test "llm: install puts models on the HDD when it is mounted" {
   mountpoint() { return 0; }
   export -f mountpoint
