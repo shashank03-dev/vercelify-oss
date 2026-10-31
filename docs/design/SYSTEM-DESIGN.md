@@ -847,7 +847,8 @@ container block). A database's public port changing bumps the map version.
   `allowed_ports` (`DEVICE_PORTS`: 7420, 80, 443, 11434/tcp, 5600–5610/udp, and Sunshine's
   47984, 47989–47990, 48010/tcp and 47998–48000/udp for Moonlight). Anything else
   from the mesh: drop. Plain iptables rules, no ipset: a mesh has tens of devices, not
-  thousands. `vfy0` is in the container isolation rules (containers can't reach the
+  thousands. The chains are replaced in one `iptables-restore --noflush` commit, never
+  flushed and refilled rule by rule, so a map update has no moment without the final drop. `vfy0` is in the container isolation rules (containers can't reach the
   mesh).
 
 ### 13.9 Rotation and revocation

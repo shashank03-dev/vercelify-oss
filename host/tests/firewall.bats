@@ -15,6 +15,9 @@ case " $* " in
 esac
 exit 0
 STUB
+  # iptables-restore: one recorded line per input line, after "restore:".
+  printf '#!/usr/bin/env bash\nwhile IFS= read -r l; do echo "${0##*/}: $l" >>"$RULES"; done\necho "${0##*/}: END" >>"$RULES"\n' >"$T/bin/iptables-restore"
+  cp "$T/bin/iptables-restore" "$T/bin/ip6tables-restore"
   cp "$T/bin/iptables" "$T/bin/ip6tables"
   chmod +x "$T/bin/"*
   export RULES="$T/rules" PATH="$T/bin:$PATH" FIREWALL_CONF="$T/firewall.conf"
@@ -72,22 +75,20 @@ JSON
   MESH_ACL="$T/acl.json" FIREWALL_LOCK="$T/fw.lock" run "$FW" apply
   [ "$status" -eq 0 ]
   [[ "$output" == *"mesh rules re-applied"* ]]
-  grep -q -- '^iptables -w -A VERCELIFY-MESH -s 10.77.0.4 -p tcp --dport 7420 -j RETURN$' "$RULES"
-  grep -q -- '^iptables -w -A VERCELIFY-MESH -j DROP$' "$RULES"
+  grep -q -- '^iptables-restore: -A VERCELIFY-MESH -s 10.77.0.4 -p tcp --dport 7420 -j RETURN$' "$RULES"
+  grep -q -- '^iptables-restore: -A VERCELIFY-MESH -j DROP$' "$RULES"
 }
 
-@test "two mesh updates at once never interleave: every rebuild ends with its DROP before the next starts" {
-  command -v flock >/dev/null || skip "needs flock (util-linux)"
+@test "a mesh update replaces its chains in one commit: never empty, never half-built" {
   command -v jq >/dev/null || skip "needs jq"
   acl
-  # A slow iptables widens the window the race needs.
-  sed -i.orig 's/^exit 0$/sleep 0.01; exit 0/' "$T/bin/iptables"
   export MESH_ACL="$T/acl.json" FIREWALL_LOCK="$T/fw.lock"
-  rm -f "$T/bin/ip6tables"
-  "$FW" mesh >/dev/null & a=$!
-  "$FW" mesh >/dev/null & b=$!
-  wait "$a" "$b"
-  # Only the input chain's lines, in order: F, rules…, DROP, F, rules…, DROP.
-  seq=$(grep -E '^iptables -w -(F|A) VERCELIFY-MESH( |$)' "$RULES" | sed -E 's/^iptables -w -(F|A) VERCELIFY-MESH ?//; s/^$/FLUSH/; s/.*-j DROP$/DROP/; s/.*RETURN$/R/' | tr '\n' ' ')
-  [[ "$seq" =~ ^FLUSH\ (R\ )+DROP\ FLUSH\ (R\ )+DROP\ $ ]]
+  rm -f "$T/bin/ip6tables" "$T/bin/ip6tables-restore"
+  "$FW" mesh >/dev/null
+  "$FW" mesh >/dev/null
+  # No rule-by-rule flush and refill of the mesh chains…
+  ! grep -qE '^iptables -w -(F|A) VERCELIFY-MESH' "$RULES"
+  # …each update is one restore that declares the chain, fills it and ends with its DROP.
+  seq=$(grep '^iptables-restore: ' "$RULES" | sed -E 's/^iptables-restore: //' | grep -E '^(:VERCELIFY-MESH |-A VERCELIFY-MESH |COMMIT|END)' | sed -E 's/^:.*/NEW/; s/.*-j DROP$/DROP/; s/^-A .*/R/' | tr '\n' ' ')
+  [[ "$seq" =~ ^NEW\ (R\ )+DROP\ COMMIT\ END\ NEW\ (R\ )+DROP\ COMMIT\ END\ $ ]] || { echo "$seq"; false; }
 }

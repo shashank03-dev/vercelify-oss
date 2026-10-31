@@ -115,43 +115,44 @@ mesh_out_rules() {
   ' "$MESH_ACL"
 }
 
-apply_mesh_family() {
-  IPT=$1
-  local fam=4 rule
-  [[ "$IPT" == ip6tables ]] && fam=6
-  ipt -n -L "$MESH" >/dev/null 2>&1 || ipt -N "$MESH"
-  ipt -F "$MESH"
-  ipt -A "$MESH" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
-  while IFS= read -r rule; do
-    [[ -n "$rule" ]] || continue
-    # shellcheck disable=SC2086 # the rule is a list of arguments
-    ipt -A "$MESH" $rule
-  done < <(mesh_rules "$fam")
-  ipt -A "$MESH" -j DROP
-  ipt -C INPUT -i "$MESH_IFACE" -j "$MESH" 2>/dev/null || ipt -I INPUT 1 -i "$MESH_IFACE" -j "$MESH"
-  # Published container ports (Traefik on 80/443…) are reached through
-  # FORWARD after DNAT: the same list, on the original destination port.
-  if ipt -n -L DOCKER-USER >/dev/null 2>&1; then
-    ipt -n -L "$MESH_FWD" >/dev/null 2>&1 || ipt -N "$MESH_FWD"
-    ipt -F "$MESH_FWD"
-    ipt -A "$MESH_FWD" -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+# The mesh's chains, as iptables-restore input: each `:CHAIN` line empties
+# that chain and the rules after it fill it, in one commit (--noflush keeps
+# everything else). Flushing and refilling rule by rule would leave a moment
+# with no DROP, when a device could reach any port (a map update does this).
+mesh_restore() {
+  local fam=$1 fwd=$2 rule
+  echo "*filter"
+  echo ":$MESH - [0:0]"
+  echo "-A $MESH -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN"
+  while IFS= read -r rule; do [[ -n "$rule" ]] && echo "-A $MESH $rule"; done < <(mesh_rules "$fam")
+  echo "-A $MESH -j DROP"
+  if [[ "$fwd" == 1 ]]; then
+    # Published container ports (Traefik on 80/443…) are reached through
+    # FORWARD after DNAT: the same list, on the original destination port.
+    echo ":$MESH_FWD - [0:0]"
+    echo "-A $MESH_FWD -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN"
     while IFS= read -r rule; do
-      [[ -n "$rule" ]] || continue
-      # shellcheck disable=SC2086
-      ipt -A "$MESH_FWD" ${rule/--dport/-m conntrack --ctdir ORIGINAL --ctorigdstport}
+      [[ -n "$rule" ]] && echo "-A $MESH_FWD ${rule/--dport/-m conntrack --ctdir ORIGINAL --ctorigdstport}"
     done < <(mesh_rules "$fam")
-    ipt -A "$MESH_FWD" -j DROP
-    ipt -C DOCKER-USER -i "$MESH_IFACE" -j "$MESH_FWD" 2>/dev/null || ipt -I DOCKER-USER 1 -i "$MESH_IFACE" -j "$MESH_FWD"
+    echo "-A $MESH_FWD -j DROP"
     # Containers out to other servers: only what the map lists; the rest
     # falls through to the mesh block in VERCELIFY-FWD.
-    ipt -n -L "$MESH_OUT" >/dev/null 2>&1 || ipt -N "$MESH_OUT"
-    ipt -F "$MESH_OUT"
-    while IFS= read -r rule; do
-      [[ -n "$rule" ]] || continue
-      # shellcheck disable=SC2086
-      ipt -A "$MESH_OUT" $rule
-    done < <(mesh_out_rules "$fam")
-    ipt -A "$MESH_OUT" -j RETURN
+    echo ":$MESH_OUT - [0:0]"
+    while IFS= read -r rule; do [[ -n "$rule" ]] && echo "-A $MESH_OUT $rule"; done < <(mesh_out_rules "$fam")
+    echo "-A $MESH_OUT -j RETURN"
+  fi
+  echo "COMMIT"
+}
+
+apply_mesh_family() {
+  IPT=$1
+  local fam=4 fwd=0
+  [[ "$IPT" == ip6tables ]] && fam=6
+  ipt -n -L DOCKER-USER >/dev/null 2>&1 && fwd=1
+  mesh_restore "$fam" "$fwd" | "$IPT-restore" -w --noflush
+  ipt -C INPUT -i "$MESH_IFACE" -j "$MESH" 2>/dev/null || ipt -I INPUT 1 -i "$MESH_IFACE" -j "$MESH"
+  if [[ "$fwd" == 1 ]]; then
+    ipt -C DOCKER-USER -i "$MESH_IFACE" -j "$MESH_FWD" 2>/dev/null || ipt -I DOCKER-USER 1 -i "$MESH_IFACE" -j "$MESH_FWD"
     ipt -C DOCKER-USER -o "$MESH_IFACE" -j "$MESH_OUT" 2>/dev/null || ipt -I DOCKER-USER 1 -o "$MESH_IFACE" -j "$MESH_OUT"
   fi
 }
