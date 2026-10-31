@@ -624,6 +624,10 @@ fn identity_changed(running: &State, now: Option<&State>) -> Option<&'static str
     }
 }
 
+fn beacon_due(silence: Option<Duration>, ticks: u64) -> bool {
+    silence.is_none_or(|age| age >= Duration::from_secs(30)) && ticks >= 6 && ticks.is_multiple_of(6)
+}
+
 /// Run the node on the mesh until a signal ends it.
 pub async fn up(opts: UpOptions) -> Result<()> {
     let opts = Arc::new(opts);
@@ -822,10 +826,10 @@ pub async fn up(opts: UpOptions) -> Result<()> {
                     }
                 }
                 write_status(&live, &opts, &ctl).await;
-                // No word from the coordinator for 3 minutes: every 5 minutes,
-                // see whether it posted a new address.
-                let lost = live.coordinator_seen.read().unwrap().is_none_or(|t| t.elapsed() > Duration::from_secs(180));
-                if let (true, true, Some(base)) = (lost, ticks >= 36 && ticks % 60 == 36, opts.beacon.clone()) {
+                // After 30 seconds of silence, check its signed address every
+                // 30 seconds so a new quick tunnel does not strand devices.
+                let lost = beacon_due(live.coordinator_seen.read().unwrap().map(|t| t.elapsed()), ticks);
+                if let (true, Some(base)) = (lost, opts.beacon.clone()) {
                     let live = live.clone();
                     tokio::spawn(async move { check_beacon(&live, &base).await });
                 }
@@ -870,6 +874,15 @@ mod tests {
     use super::*;
     use crate::addr::Addressing;
     use crate::keys::CoordinatorKey;
+
+    #[test]
+    fn a_lost_coordinator_checks_its_signed_address_within_a_minute() {
+        assert!(beacon_due(Some(Duration::from_secs(30)), 6));
+        assert!(beacon_due(Some(Duration::from_secs(60)), 12));
+        assert!(!beacon_due(Some(Duration::from_secs(25)), 6));
+        assert!(!beacon_due(Some(Duration::from_secs(60)), 7));
+        assert!(beacon_due(None, 6));
+    }
 
     #[test]
     fn a_new_pairing_restarts_the_daemon_but_its_own_updates_dont() {

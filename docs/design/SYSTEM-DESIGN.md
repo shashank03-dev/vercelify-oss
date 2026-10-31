@@ -1068,3 +1068,7 @@ still exists and removes retained SSD data through Docker (which refuses in-use
 volumes). HDD folder deletion requires manual mount checks and is not offered by
 the UI. Volumes orphaned by earlier releases remain visible in the raw host list;
 recovering their removed ownership metadata is not implemented.
+
+When the coordinator has been silent for 30 seconds, devices check its signed
+beacon address every 30 seconds, allowing a replacement quick tunnel to be
+discovered within about a minute without waiting for the old three-minute gate.
