@@ -827,7 +827,11 @@ daemon checks it with the webpki roots).
   the map lets talk (a device to a server and back, servers among themselves), keeps no
   packets beyond 256 queued per destination (then drops), and counts bytes per node
   (`relay_connected`, `relayed_bytes` in `GET /v1/mesh/nodes`).
-- A newer connection of the same key replaces the older; revocation closes it at once.
+- A newer connection of the same key replaces the older; revocation closes it at once. So
+  the node opens its relay URLs side by side (each 300 ms behind the one before it, in the
+  map's order) and answers the challenge on the first to open only: a LAN address that never
+  answers from another network doesn't hold up the tunnel, and a new map mid-round restarts
+  it.
 - Payloads are WireGuard or disco packets, so the relay only sees ciphertext. Pings every
   25 s (client) and 30 s (relay) keep tunnels and proxies from idling it out.
 

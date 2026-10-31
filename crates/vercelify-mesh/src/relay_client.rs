@@ -54,16 +54,19 @@ async fn run(
             }
             continue;
         }
-        let mut connected = false;
-        for url in &urls {
-            match session(url, &mut cfg, &to_engine, &mut from_engine, &up).await {
-                Ok(ran) => {
-                    connected |= ran;
-                    break;
-                }
-                Err(e) => tracing::debug!("relay {url}: {e}"),
+        let key = cfg.key.borrow_and_update().clone();
+        let dialed = tokio::select! {
+            d = dial_first(&urls, &key, &cfg.coordinator) => d,
+            // A new map mid-round (the server moved): start over with it.
+            r = cfg.urls.changed() => if r.is_err() { return } else { continue },
+        };
+        let connected = match dialed {
+            Some((url, ws)) => {
+                serve(&url, ws, &mut cfg, &to_engine, &mut from_engine, &up).await;
+                true
             }
-        }
+            None => false,
+        };
         up.store(false, Ordering::Relaxed);
         if to_engine.is_closed() {
             return;
@@ -77,15 +80,40 @@ async fn run(
     }
 }
 
-/// One connection, until it drops or the URLs or key change. Ok(true) when
-/// it got as far as being connected.
-async fn session(
-    url: &str,
-    cfg: &mut RelayConfig,
-    to_engine: &mpsc::Sender<(PublicKey, Vec<u8>)>,
-    from_engine: &mut mpsc::Receiver<(PublicKey, Vec<u8>)>,
-    up: &AtomicBool,
-) -> Result<bool, String> {
+type Ws = tokio_tungstenite::WebSocketStream<Box<dyn http::Io>>;
+
+/// How long each URL waits for the ones before it: the preferred one wins
+/// when it answers quickly, and one that never answers (a LAN address seen
+/// from another network) doesn't hold up the rest.
+const HEAD_START: Duration = Duration::from_millis(300);
+
+/// Open the URLs side by side, earlier ones a little ahead, and answer the
+/// challenge on the first that opens (only one: the relay keeps the newest
+/// connection of a key, so a second would replace it). If that one refuses,
+/// the next to open gets its turn.
+async fn dial_first(urls: &[String], key: &NodeKey, coordinator: &PublicKey) -> Option<(String, Ws)> {
+    let mut dials: futures_util::stream::FuturesUnordered<_> = urls
+        .iter()
+        .enumerate()
+        .map(|(i, url)| async move {
+            tokio::time::sleep(HEAD_START * i as u32).await;
+            (url, open(url).await)
+        })
+        .collect();
+    while let Some((url, r)) = dials.next().await {
+        match r {
+            Ok(ws) => match answer(ws, key, coordinator).await {
+                Ok(ws) => return Some((url.clone(), ws)),
+                Err(e) => tracing::debug!("relay {url}: {e}"),
+            },
+            Err(e) => tracing::debug!("relay {url}: {e}"),
+        }
+    }
+    None
+}
+
+/// Connect and open the WebSocket.
+async fn open(url: &str) -> Result<Ws, String> {
     let u = http::parse_url(url).map_err(|e| e.to_string())?;
     let io = http::connect_io(&u, Duration::from_secs(10))
         .await
@@ -93,19 +121,21 @@ async fn session(
     let mut wsc = WebSocketConfig::default();
     wsc.max_message_size = Some(relay::MAX_MESSAGE);
     wsc.max_frame_size = Some(relay::MAX_MESSAGE);
-    let (mut ws, _) = tokio::time::timeout(
+    let (ws, _) = tokio::time::timeout(
         Duration::from_secs(10),
         tokio_tungstenite::client_async_with_config(url, io, Some(wsc)),
     )
     .await
     .map_err(|_| "handshake timed out".to_string())?
     .map_err(|e| e.to_string())?;
+    Ok(ws)
+}
 
-    // The challenge, answered sealed with this node's key.
-    let key = cfg.key.borrow_and_update().clone();
+/// The challenge, answered sealed with this node's key.
+async fn answer(mut ws: Ws, key: &NodeKey, coordinator: &PublicKey) -> Result<Ws, String> {
     let text = next_text(&mut ws).await?;
     let ch: Challenge = serde_json::from_str(&text).map_err(|e| format!("challenge: {e}"))?;
-    let session = NodeSession::new(&key, &cfg.coordinator).map_err(|e| e.to_string())?;
+    let session = NodeSession::new(key, coordinator).map_err(|e| e.to_string())?;
     let answer = session.seal_request(
         &serde_json::to_vec(&Answer {
             challenge: ch.challenge,
@@ -121,6 +151,18 @@ async fn session(
     if !verdict.contains("\"ok\":true") {
         return Err(format!("refused: {verdict}"));
     }
+    Ok(ws)
+}
+
+/// One connection, until it drops or the URLs or key change.
+async fn serve(
+    url: &str,
+    mut ws: Ws,
+    cfg: &mut RelayConfig,
+    to_engine: &mpsc::Sender<(PublicKey, Vec<u8>)>,
+    from_engine: &mut mpsc::Receiver<(PublicKey, Vec<u8>)>,
+    up: &AtomicBool,
+) {
     // What queued while down is stale: WireGuard resends what matters.
     while from_engine.try_recv().is_ok() {}
     up.store(true, Ordering::Relaxed);
@@ -135,24 +177,24 @@ async fn session(
                         let _ = to_engine.try_send((src, packet.to_vec()));
                     }
                 }
-                Some(Ok(Message::Close(_))) | None => return Ok(true),
+                Some(Ok(Message::Close(_))) | None => return,
                 Some(Ok(_)) => {}
                 Some(Err(e)) => {
                     tracing::info!("relay {url}: {e}");
-                    return Ok(true);
+                    return;
                 }
             },
             out = from_engine.recv() => match out {
                 Some((dst, packet)) => {
                     if ws.send(Message::Binary(relay::frame(&dst, &packet).into())).await.is_err() {
-                        return Ok(true);
+                        return;
                     }
                 }
-                None => return Ok(true),
+                None => return,
             },
             _ = ping.tick() => {
                 if ws.send(Message::Ping(Default::default())).await.is_err() {
-                    return Ok(true);
+                    return;
                 }
             }
             // (A dropped sender: the key stays as it is.)
@@ -160,13 +202,13 @@ async fn session(
                 if r.is_ok() {
                     tracing::debug!("relay: the key changed; reconnecting");
                     let _ = ws.close(None).await;
-                    return Ok(true);
+                    return;
                 }
             }
             r = cfg.urls.changed() => {
                 if r.is_err() || !cfg.urls.borrow().iter().any(|x| x == url) {
                     let _ = ws.close(None).await;
-                    return Ok(true);
+                    return;
                 }
             }
         }
@@ -183,6 +225,54 @@ where
             Ok(Some(Ok(Message::Text(t)))) => return Ok(t.to_string()),
             Ok(Some(Ok(Message::Ping(_) | Message::Pong(_)))) => continue,
             Ok(other) => return Err(format!("unexpected {other:?}")),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::keys::NodeKey;
+
+    /// A relay that greets with a challenge and accepts any answer.
+    async fn relay() -> String {
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = server.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            while let Ok((c, _)) = server.accept().await {
+                tokio::spawn(async move {
+                    let mut ws = tokio_tungstenite::accept_async(c).await.unwrap();
+                    let hello = r#"{"challenge":"c"}"#;
+                    ws.send(Message::Text(hello.into())).await.unwrap();
+                    let _ = ws.next().await;
+                    ws.send(Message::Text(r#"{"ok":true}"#.into())).await.unwrap();
+                    while ws.next().await.is_some() {}
+                });
+            }
+        });
+        format!("ws://127.0.0.1:{port}{}", relay::RELAY_PATH)
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_address_doesnt_hold_up_the_next() {
+        let good = relay().await;
+        // TEST-NET-2: routed to the default gateway and never answered, like
+        // the server's LAN address seen from another network.
+        let (_urls, rx) = watch::channel(vec![format!("ws://198.51.100.1:7443{}", relay::RELAY_PATH), good]);
+        let (_key, key) = watch::channel(Arc::new(NodeKey::generate()));
+        let link = spawn(RelayConfig {
+            urls: rx,
+            key,
+            coordinator: NodeKey::generate().public(),
+        });
+        let started = std::time::Instant::now();
+        while !link.up.load(Ordering::Relaxed) {
+            assert!(
+                started.elapsed() < Duration::from_secs(3),
+                "still not connected after {:?}",
+                started.elapsed()
+            );
+            tokio::time::sleep(Duration::from_millis(50)).await;
         }
     }
 }
