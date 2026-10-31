@@ -25,6 +25,47 @@ extern "C" {
     fn dispatch_get_global_queue(identifier: isize, flags: usize) -> *mut c_void;
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct CGRect {
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+}
+
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGMainDisplayID() -> u32;
+    fn CGDisplayBounds(display: u32) -> CGRect;
+    fn CGBeginDisplayConfiguration(config: *mut *mut c_void) -> i32;
+    fn CGConfigureDisplayOrigin(config: *mut c_void, display: u32, x: i32, y: i32) -> i32;
+    fn CGCompleteDisplayConfiguration(config: *mut c_void, option: u32) -> i32;
+}
+
+/// Where the new display goes: right of the main screen, tops aligned. macOS
+/// puts a new display on the left otherwise, where nobody looks for it.
+fn right_of(main_x: f64, main_y: f64, main_width: f64) -> (i32, i32) {
+    ((main_x + main_width) as i32, main_y as i32)
+}
+
+/// Move `display` to the right of the main screen for this login session
+/// (Displays settings can still rearrange it). Best effort: a refusal leaves
+/// it where macOS put it.
+fn place_right(display: u32) {
+    // SAFETY: plain CoreGraphics display-configuration calls; the config is
+    // completed or cancelled by CGCompleteDisplayConfiguration.
+    unsafe {
+        let main = CGDisplayBounds(CGMainDisplayID());
+        let (x, y) = right_of(main.x, main.y, main.w);
+        let mut config = std::ptr::null_mut();
+        if CGBeginDisplayConfiguration(&mut config) == 0 && CGConfigureDisplayOrigin(config, display, x, y) == 0 {
+            // kCGConfigureForSession
+            CGCompleteDisplayConfiguration(config, 1);
+        }
+    }
+}
+
 /// A display that is on screen until this is dropped.
 pub struct VirtualDisplay {
     // Held, not used: releasing it takes the display away.
@@ -66,6 +107,8 @@ pub fn create(name: &str, width: u32, height: u32, hz: f64) -> Result<VirtualDis
         if !applied {
             return Err(format!("macOS refused a {width}×{height} virtual display"));
         }
+        let id: u32 = msg_send![&display, displayID];
+        place_right(id);
         Ok(VirtualDisplay { _display: display })
     }
 }
@@ -78,6 +121,12 @@ unsafe impl Send for VirtualDisplay {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_new_display_sits_right_of_the_main_screen() {
+        assert_eq!(right_of(0.0, 0.0, 1470.0), (1470, 0));
+        assert_eq!(right_of(-200.0, 40.0, 1920.0), (1720, 40));
+    }
 
     #[link(name = "CoreGraphics", kind = "framework")]
     extern "C" {
@@ -104,6 +153,14 @@ mod tests {
         assert_eq!(active().len(), displays.len() + 1, "not among the active displays");
         let added = vercelify_core::avfoundation::added_screen(&before, &screens());
         assert!(added.is_some(), "ffmpeg sees no new screen");
+        let main = unsafe { CGDisplayBounds(CGMainDisplayID()) };
+        let new = active().into_iter().find(|id| !displays.contains(id)).unwrap();
+        let b = unsafe { CGDisplayBounds(new) };
+        assert_eq!(
+            (b.x, b.y),
+            (main.x + main.w, main.y),
+            "not to the right of the main screen"
+        );
         drop(d);
         std::thread::sleep(std::time::Duration::from_secs(2));
         assert_eq!(active(), displays, "still there after drop");

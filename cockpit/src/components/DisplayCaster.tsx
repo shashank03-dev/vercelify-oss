@@ -264,7 +264,7 @@ export function DisplayCaster() {
         {(tools.error || screens.error || display.error) && <p role="alert" className="mb-4 text-sm text-warn">{display.error?.message || tools.error?.message || screens.error?.message}</p>}
         <Button variant="ghost" size="sm" onClick={() => { void tools.refresh(); void screens.refresh(); void display.refresh(); }} data-testid="refresh-display">Refresh setup</Button>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Screen" hint={extend ? "A new display appears while it streams: arrange it in System Settings → Displays" : undefined}>
+          <Field label="Screen" hint={extend ? "A new display appears to the right of your screen while it streams: drag a window off the right edge and it shows on the laptop. Rearrange it in System Settings → Displays." : undefined}>
             {isMac && source === "avfoundation" && (
               <div className="mb-2">
                 <Segmented
