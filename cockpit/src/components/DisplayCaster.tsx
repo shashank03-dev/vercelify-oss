@@ -1,11 +1,12 @@
 import { AlertTriangle, ExternalLink, Laptop, Link2, MonitorPlay, MonitorUp, Play, ScreenShare, Square, TerminalSquare } from "lucide-react";
 import { useEffect, useState } from "react";
-import { agentOn, local } from "../lib/api";
+import { agentOn, local, mesh } from "../lib/api";
 import { hasCap } from "../lib/caps";
 import { useLive } from "../lib/live";
 import { usePoll } from "../lib/hooks";
 import { agentHost, useSession } from "../lib/session";
 import { openExternal } from "../lib/open";
+import { streamPath } from "../lib/stream-path";
 import { inTauri } from "../lib/transport";
 import type { CaptureSource, StreamTransport, VideoEncoder } from "../types";
 import { useToast } from "./Toast";
@@ -63,6 +64,9 @@ export function DisplayCaster() {
   const moon = usePoll(() => local.moonlightStatus(), 2000);
   const tools = usePoll(() => local.tools(), 0);
   const screens = usePoll(() => local.captureScreens(), 0);
+  const peers = usePoll(() => mesh.local(), 5000);
+  // Unknown until the tools are read: don't hold SRT back on a guess.
+  const srtOk = tools.data?.find((t) => t.name === "ffmpeg")?.features.includes("srt") ?? true;
 
   const [transport, setTransport] = useState<StreamTransport>("udp");
   const [qualityId, setQualityId] = useState("smooth");
@@ -100,6 +104,7 @@ export function DisplayCaster() {
         if (!inTauri) throw new Error("Available in the desktop app only — open Vercelify to share a screen.");
         throw new Error(captureTool?.install_hint || "Install ffmpeg on this computer, then refresh setup.");
       }
+      if (transport === "srt" && !captureTool.features.includes("srt")) throw new Error(NO_SRT);
       const receiver = display.data ?? await agent.display();
       if (!receiver.mpv_installed) throw new Error("Install the Linux display receiver: sudo apt install mpv");
       if (source === "avfoundation" && !(screens.data ?? await local.captureScreens()).length) throw new Error("No screens are available. Allow Screen Recording for Vercelify in System Settings, restart the app, then retry.");
@@ -251,6 +256,11 @@ export function DisplayCaster() {
         }
       >
         {captureError && <div data-testid="capture-error" className="mb-4"><Callout tone="bad" title="Screen capture stopped">{captureError}</Callout></div>}
+        <PathWarning
+          path={streamPath(peers.data?.peers ?? [], agentHost(settings))}
+          light={qualityId === "light"}
+          onLight={() => setQualityId("light")}
+        />
         <div className="dot-grid relative mb-5 flex items-center gap-4 rounded-xl border border-line bg-bg px-5 py-6">
           <Endpoint icon={<Laptop className="size-5" />} title="This computer" sub="Capture" on={senderOn} />
           <div className="relative h-px flex-1 overflow-hidden bg-line-strong">
@@ -310,7 +320,7 @@ export function DisplayCaster() {
         <details className="mt-4 text-[12px]">
           <summary className="cursor-pointer text-fg-muted" data-testid="display-advanced">Advanced streaming settings</summary>
           <div className="mt-3 grid grid-cols-2 gap-4 lg:grid-cols-3">
-          <Field label="Transport" hint={transport === "udp" ? "Lowest latency (home / office)" : "Survives packet loss (cellular)"}>
+          <Field label="Transport" hint={transport === "udp" ? "Lowest latency (home / office)" : srtOk ? "Survives packet loss (cellular)" : NO_SRT}>
             <Segmented label="transport" value={transport} onChange={setTransport} options={[{ value: "udp", label: "UDP" }, { value: "srt", label: "SRT" }]} />
           </Field>
           <Field label="Source">
@@ -454,5 +464,30 @@ function Prereq({ ok, label, hint }: { ok: boolean; label: string; hint: string 
       {label}
       {!ok && hint && <span className="text-fg-dim">— {hint}</span>}
     </span>
+  );
+}
+
+const NO_SRT = "This Mac's ffmpeg can't send SRT (Homebrew's is built without it): use UDP, or install an ffmpeg built with SRT.";
+
+/** A stream that leaves this network loses packets, and a moving picture
+ * breaks up: say so, and offer the lightest quality. */
+function PathWarning({ path, light, onLight }: { path: ReturnType<typeof streamPath>; light: boolean; onLight: () => void }) {
+  if (path.kind === "local" || path.kind === "unknown") return null;
+  const how =
+    path.kind === "internet" ? `over the internet${path.rtt !== undefined ? ` (${path.rtt} ms round trip)` : ""}, not over your own network`
+    : path.kind === "relay" ? "through the server's relay, not over your own network"
+    : "at the moment: there's no connection";
+  return (
+    <div data-testid="stream-path-warning" className="mb-4">
+      <Callout tone="warn" title="The picture may break up">
+        This Mac reaches {path.name ?? "the server"} {how}. Lost packets break up a moving picture. Put both on the same Wi-Fi
+        (a phone hotspot can keep its devices apart){light ? "." : ", or send less with Light."}
+        {!light && (
+          <div className="mt-2">
+            <Button size="sm" variant="subtle" onClick={onLight} data-testid="use-light">Use Light</Button>
+          </div>
+        )}
+      </Callout>
+    </div>
   );
 }

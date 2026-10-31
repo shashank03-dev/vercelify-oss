@@ -251,8 +251,28 @@ pub fn moonlight_pair_args(host: &str, pin: &str) -> Result<Vec<String>, StreamE
     Ok(vec!["pair".into(), host.into(), "--pin".into(), pin.into()])
 }
 
+/// Whether `ffmpeg -protocols` output lists `proto` for output (an ffmpeg
+/// can read SRT and still not send it; Homebrew's is built without libsrt).
+pub fn can_send(protocols: &str, proto: &str) -> bool {
+    protocols
+        .lines()
+        .skip_while(|l| l.trim() != "Output:")
+        .skip(1)
+        .any(|l| l.trim() == proto)
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_ffmpeg_without_srt_output_is_noticed() {
+        let with = "Supported file protocols:\nInput:\n  file\n  srt\n  udp\nOutput:\n  file\n  srt\n  udp\n";
+        let without = "Supported file protocols:\nInput:\n  file\n  srt\nOutput:\n  file\n  udp\n";
+        assert!(can_send(with, "srt"));
+        assert!(!can_send(without, "srt"), "only reading SRT isn't enough to send it");
+        assert!(can_send(without, "udp"));
+        assert!(!can_send("", "udp"));
+    }
+
     use super::*;
 
     #[test]

@@ -364,6 +364,10 @@ pub struct ToolStatus {
     pub installed: bool,
     pub path: Option<String>,
     pub install_hint: String,
+    /// What this build can do, where that varies: `srt` for an ffmpeg that
+    /// can send SRT.
+    #[serde(default)]
+    pub features: Vec<String>,
 }
 
 /// Cockpit connection settings (stored on the Mac with 0600 permissions).

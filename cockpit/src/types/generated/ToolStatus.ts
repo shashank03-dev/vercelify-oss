@@ -3,4 +3,9 @@
 /**
  * An external program the cockpit can drive (ffmpeg, Moonlight).
  */
-export type ToolStatus = { name: string, installed: boolean, path: string | null, install_hint: string, };
+export type ToolStatus = { name: string, installed: boolean, path: string | null, install_hint: string, 
+/**
+ * What this build can do, where that varies: `srt` for an ffmpeg that
+ * can send SRT.
+ */
+features: Array<string>, };

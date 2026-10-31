@@ -60,11 +60,28 @@ fn user_moonlight(home: &Path) -> Option<PathBuf> {
     .find(|path| path.is_file())
 }
 
+/// `srt` when this ffmpeg can send SRT (Homebrew's can't).
+fn ffmpeg_features(ffmpeg: &std::path::Path) -> Vec<String> {
+    let out = Command::new(ffmpeg).args(["-hide_banner", "-protocols"]).output();
+    let text = out
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    if vercelify_core::stream::can_send(&text, "srt") {
+        vec!["srt".into()]
+    } else {
+        vec![]
+    }
+}
+
 pub fn tools() -> Vec<ToolStatus> {
     let mac = cfg!(target_os = "macos");
     let entry = |name: &str, path: Option<PathBuf>, hint: &str| ToolStatus {
         name: name.into(),
         installed: path.is_some(),
+        features: match (&path, name) {
+            (Some(p), "ffmpeg") => ffmpeg_features(p),
+            _ => vec![],
+        },
         path: path.map(|p| p.to_string_lossy().into_owned()),
         install_hint: hint.into(),
     };

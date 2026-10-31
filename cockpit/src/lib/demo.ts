@@ -618,8 +618,8 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
       return "https://127.0.0.1:47990";
     case "tools_status":
       return [
-        { name: "ffmpeg", installed: true, path: "/opt/homebrew/bin/ffmpeg", install_hint: "brew install ffmpeg" },
-        { name: "moonlight", installed: false, path: null, install_hint: "brew install --cask moonlight" },
+        { name: "ffmpeg", installed: true, path: "/opt/homebrew/bin/ffmpeg", install_hint: "brew install ffmpeg", features: ["srt"] },
+        { name: "moonlight", installed: false, path: null, install_hint: "brew install --cask moonlight", features: [] },
       ];
     case "capture_screens":
       return [{ index: 1, name: "Built-in Retina Display" }];

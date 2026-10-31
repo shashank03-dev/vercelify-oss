@@ -72,8 +72,13 @@ UDP port 5600–5610 is only accepted from the mesh (`vfy0`, firewall rules).
 | Phone hotspot / far away | SRT (retransmits lost packets, +120 ms), *Light* (720p30, 4 Mbps) |
 | Laptop CPU is old | keep *Hardware* encoder on the Mac; decoding uses VA-API on the i5's iGPU via `--hwdec=auto-safe` |
 
-Check that the server's path is **lan** or **direct**, not **relay** (Servers → network
-in the app, or `vercelify-mesh status`); relays add a lot of latency.
+The page warns when the Mac doesn't reach the server over your own network: through the
+relay, or "direct" but to a public address (a phone hotspot that keeps its devices apart
+sends everything out to the mobile network and back; measured: a quarter to over half
+the packets lost, 180–210 ms). No setting makes a moving picture whole on such a path:
+put both machines on the same Wi-Fi, or use *Light* (less to lose). SRT needs an ffmpeg
+that can send it: Homebrew's `ffmpeg` is built without libsrt, and the page says so
+rather than failing to start.
 
 ### Desktop running on the host?
 

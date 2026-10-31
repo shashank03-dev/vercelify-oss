@@ -8,12 +8,17 @@ vi.mock("../lib/live", () => ({ useLive: () => ({ health: { data: { capabilities
 
 const sent = vi.hoisted(() => [] as { cmd: string; args?: Record<string, unknown> }[]);
 const stopped = vi.hoisted(() => ({ capture: true }));
+const meshPath = vi.hoisted(() => ({ endpoint: "", noSrt: false }));
 
 vi.mock("../lib/transport", async (original) => ({
   ...await original<typeof import("../lib/transport")>(),
   call: async (cmd: string, args?: Record<string, unknown>) => {
     sent.push({ cmd, args });
     if (cmd === "extend_display_start") return { index: 4, name: "Capture screen 1" };
+    if (cmd === "tools_status" && meshPath.noSrt)
+      return [{ name: "ffmpeg", installed: true, path: "/opt/homebrew/bin/ffmpeg", install_hint: "brew install ffmpeg", features: [] }];
+    if (cmd === "mesh_local" && meshPath.endpoint)
+      return { installed: true, running: true, userspace: true, peers: [{ name: "laptop", addresses: ["10.77.0.1"], path: "direct", endpoint: meshPath.endpoint, rtt_ms: 212 }] };
     const path = (args?.request as { path?: string } | undefined)?.path;
     if (cmd === "agent_request" && path === "/v1/display/receiver/start")
       return { receiver: { running: true, pid: 2, command: "mpv", started_at: null, last_output: [], exit_code: null }, receiver_config: null, receiver_url: "udp://10.77.0.1:5600", mpv_installed: true, sunshine: null, playback_active: false };
@@ -64,4 +69,38 @@ it("extends the desktop: a new display is made and that screen is streamed", asy
   expect(config.width).toBeNull();
   ua.mockRestore();
   stopped.capture = true;
+});
+
+it("warns that a moving picture breaks up over the internet, and offers Light", async () => {
+  const { fireEvent } = await import("@testing-library/react");
+  meshPath.endpoint = "49.43.246.18:51820";
+  const settings: CockpitSettings = { agent_url: "http://10.77.0.1:7420", agent_token: "test", hostname: "laptop" };
+  const session = { settings, servers: [settings], unpair: async () => {}, update: async () => {}, select: async () => {}, remove: async () => {}, addServer: () => {}, revision: 0 };
+  render(<ToastProvider><SessionProvider value={session}><DisplayCaster /></SessionProvider></ToastProvider>);
+  const warning = await screen.findByTestId("stream-path-warning", {}, { timeout: 4000 });
+  expect(warning).toHaveTextContent("over the internet");
+  expect(warning).toHaveTextContent("212 ms");
+  fireEvent.click(screen.getByTestId("use-light"));
+  expect(screen.getByTestId("quality")).toHaveValue("light");
+  meshPath.endpoint = "";
+});
+
+it("says when this Mac's ffmpeg can't send SRT, instead of failing to start", async () => {
+  const { fireEvent } = await import("@testing-library/react");
+  meshPath.noSrt = true;
+  sent.length = 0;
+  stopped.capture = false;
+  const ua = vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0)");
+  const settings: CockpitSettings = { agent_url: "http://10.77.0.1:7420", agent_token: "test", hostname: "laptop" };
+  const session = { settings, servers: [settings], unpair: async () => {}, update: async () => {}, select: async () => {}, remove: async () => {}, addServer: () => {}, revision: 0 };
+  render(<ToastProvider><SessionProvider value={session}><DisplayCaster /></SessionProvider></ToastProvider>);
+  fireEvent.click(await screen.findByTestId("display-advanced"));
+  fireEvent.click(await screen.findByRole("radio", { name: "SRT" }));
+  expect(await screen.findByText(/can't send SRT/)).toBeInTheDocument();
+  fireEvent.click(await screen.findByTestId("start-extend"));
+  expect(await screen.findAllByText(/can't send SRT/, {}, { timeout: 4000 })).not.toHaveLength(0);
+  expect(sent.some((c) => c.cmd === "sender_start")).toBe(false);
+  ua.mockRestore();
+  stopped.capture = true;
+  meshPath.noSrt = false;
 });
