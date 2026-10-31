@@ -445,6 +445,15 @@ impl Llm {
                 )));
             }
         }
+        // An Ollama installed with its own installer (a systemd service on
+        // 127.0.0.1:11434) would make ours fail to start after a download of
+        // several GB: say so now.
+        let port = self.cfg.ollama_port;
+        if self.container_state().await.is_none() && port_taken(port) {
+            return Err(AppError::conflict(format!(
+                "port {port} is already in use on this server, most likely by an Ollama installed outside Vercelify — stop it first (sudo systemctl disable --now ollama), then install again"
+            )));
+        }
         // Resolve the storage first so a missing HDD fails the request itself.
         let vol = volumes::create(
             &self.cfg,
@@ -724,6 +733,13 @@ fn free_bytes(path: &std::path::Path) -> Option<u64> {
     // The field types differ between targets (u32 on some 32-bit libcs).
     #[allow(clippy::unnecessary_cast)]
     Some(st.f_bfree as u64 * st.f_frsize as u64)
+}
+
+/// Another program listens on `port` (loopback or every address).
+fn port_taken(port: u16) -> bool {
+    ["127.0.0.1", "0.0.0.0"]
+        .iter()
+        .any(|ip| std::net::TcpListener::bind((*ip, port)).is_err())
 }
 
 #[cfg(test)]

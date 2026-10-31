@@ -429,6 +429,9 @@ impl Config {
         if let Some(v) = var("VERCELIFY_OLLAMA_URL") {
             self.ollama_url = v;
         }
+        if let Some(p) = var("VERCELIFY_OLLAMA_PORT").and_then(|v| v.parse().ok()) {
+            self.ollama_port = p;
+        }
         if let Some(v) = var("VERCELIFY_SSH_KEYGEN_BIN") {
             self.ssh_keygen_bin = v;
         }

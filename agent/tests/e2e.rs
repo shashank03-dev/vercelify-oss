@@ -753,8 +753,11 @@ fn fake_ollama(r: &Seen) -> (u16, &'static str, String) {
 #[test]
 fn pairing_llm_and_doctor() {
     let (ollama_port, ollama_seen) = fake_server(fake_ollama);
+    let published = free_port();
     let a = start_with(&[
         ("VERCELIFY_OLLAMA_URL", format!("http://127.0.0.1:{ollama_port}")),
+        // The install checks this port is free; a developer's Ollama may hold 11434.
+        ("VERCELIFY_OLLAMA_PORT", published.to_string()),
         ("STUB_OLLAMA_STATE", "running".into()),
     ]);
 
@@ -1045,7 +1048,7 @@ fn pairing_llm_and_doctor() {
         "{calls}"
     );
     assert!(
-        calls.contains("-p 11434:11434 -v ollama-models:/root/.ollama"),
+        calls.contains(&format!("-p {published}:11434 -v ollama-models:/root/.ollama")),
         "{calls}"
     );
     assert!(calls.contains("docker restart vercelify-ollama"), "{calls}");
@@ -2345,7 +2348,10 @@ fn cancelling_an_ai_install_stops_its_child_process() {
     )
     .unwrap();
     std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let a = start_with(&[("VERCELIFY_DOCKER_BIN", docker.to_string_lossy().into_owned())]);
+    let a = start_with(&[
+        ("VERCELIFY_DOCKER_BIN", docker.to_string_lossy().into_owned()),
+        ("VERCELIFY_OLLAMA_PORT", free_port().to_string()),
+    ]);
     let (status, body) = post(&a, "/v1/llm/install", json!({"tier":"ssd"}));
     assert_eq!(status, 200, "{body}");
     let deadline = Instant::now() + Duration::from_secs(5);
@@ -2386,6 +2392,23 @@ fn cancelling_an_ai_install_stops_its_child_process() {
     let (_, job) = get(&a, &format!("/v1/jobs/{id}"));
     assert_eq!(job["status"], "failed");
     assert!(job["detail"].as_str().unwrap().contains("cancelled"));
+}
+
+#[test]
+fn an_ai_install_stops_before_downloading_when_another_program_holds_the_port() {
+    // An Ollama installed with its own installer listens on 127.0.0.1:11434.
+    let taken = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = taken.local_addr().unwrap().port();
+    let a = start_with(&[("VERCELIFY_OLLAMA_PORT", port.to_string())]);
+    let (status, body) = post(&a, "/v1/llm/install", json!({"tier":"ssd"}));
+    assert_eq!(status, 409, "{body}");
+    let msg = body["error"].as_str().unwrap();
+    assert!(
+        msg.contains(&format!("port {port}")) && msg.contains("systemctl disable --now ollama"),
+        "{msg}"
+    );
+    let calls = std::fs::read_to_string(&a.log).unwrap_or_default();
+    assert!(!calls.contains("pull"), "downloaded anyway: {calls}");
 }
 
 #[test]
