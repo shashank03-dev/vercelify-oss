@@ -28,6 +28,7 @@ WITH_DISPLAY=0
 FROM_SOURCE=0
 SOURCE_DIR=''
 MESH_FAILED=0
+RELEASE_WHY=""
 WITH_MESH=1
 MESH_SYSTEM=0
 MESH_LABEL=dev.vercelify.mesh
@@ -158,10 +159,14 @@ install_from_release() {
   WORK=$(mktemp -d)
   json="$WORK/release.json"
   if ! curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' -o "$json" "$GITHUB_API/repos/$REPO/releases/latest" 2>/dev/null; then
+    RELEASE_WHY="couldn't ask GitHub for the latest release (no internet, or GitHub is limiting requests: try again in a few minutes)"
     return 1
   fi
   url=$(pick_asset "$json" "$(uname -m)")
-  [[ -n "$url" ]] || return 1
+  if [[ -z "$url" ]]; then
+    RELEASE_WHY="the latest release ($(release_tag "$json")) has no Mac app for $(uname -m)"
+    return 1
+  fi
   tag=$(release_tag "$json")
   info "downloading $APP_NAME ${tag:-latest} ($(basename "$url"))…"
   curl -fL --retry 3 --progress-bar -o "$WORK/app.dmg" "$url" || die "download failed: $url"
@@ -389,7 +394,7 @@ main() {
   if (( FROM_SOURCE )); then
     install_from_source "$dest"
   elif ! install_from_release "$dest"; then
-    warn "no downloadable release of $REPO yet"
+    warn "${RELEASE_WHY:-no downloadable release of $REPO}"
     if confirm "Build the app from source now (needs Xcode CLT, Node 20+ and Rust)?"; then
       install_from_source "$dest"
     else

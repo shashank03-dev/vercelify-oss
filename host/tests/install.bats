@@ -6,7 +6,7 @@ setup() {
   INSTALL="$BATS_TEST_DIRNAME/../../install.sh"
   # A release tarball, served by a fake curl; setup-host.sh only records it ran.
   mkdir -p "$T/src/vercelify-oss/host" "$T/bin" "$T/tmp"
-  printf '#!/usr/bin/env bash\necho "setup-host ref=$VERCELIFY_INSTALL_REF $*" >"%s/ran"\n' "$T" >"$T/src/vercelify-oss/host/setup-host.sh"
+  printf '#!/usr/bin/env bash\necho "setup-host ref=$VERCELIFY_INSTALL_REF sha=$VERCELIFY_INSTALL_SHA $*" >"%s/ran"\n' "$T" >"$T/src/vercelify-oss/host/setup-host.sh"
   chmod +x "$T/src/vercelify-oss/host/setup-host.sh"
   tar -czf "$T/release.tgz" -C "$T/src" vercelify-oss
   # -o FILE with -C - resumes; \$T/cut-once: the first try stops after 100
@@ -17,7 +17,9 @@ out=''; prev=''
 for a in "\$@"; do [ "\$prev" = -o ] && out=\$a; prev=\$a; done
 case "\$*" in
   *releases/latest*) printf '{\n  "tag_name": "v9.9.9"\n}\n' ;;
+  *commits/main*) [ -e "$T/main-sha" ] && cat "$T/main-sha" || exit 22 ;;
   *codeload*)
+    echo "url=\${*: -1}" >>"$T/curl.log"
     if [ -e "$T/damaged" ]; then echo garbage >"\$out"; exit 0; fi
     have=\$(wc -c <"\$out" 2>/dev/null || echo 0)
     if [ -e "$T/cut-once" ]; then rm "$T/cut-once"; head -c 100 "$T/release.tgz" >"\$out"; exit 18; fi
@@ -67,4 +69,21 @@ teardown() { rm -rf "$T"; }
   [[ "$output" == *"run the same command again"* ]]
   [ ! -e "$T/opt" ]
   [ ! -e "$T/ran" ]
+}
+
+@test "an edge install downloads the exact commit main points at, and says which" {
+  [ "$EUID" -eq 0 ] || skip "install.sh needs root"
+  echo 0123456789abcdef0123456789abcdef01234567 >"$T/main-sha"
+  run env PATH="$T/bin:$PATH" TMPDIR="$T/tmp" VERCELIFY_SRC_DIR="$T/opt" VERCELIFY_CHANNEL=edge bash <"$INSTALL"
+  [ "$status" -eq 0 ]
+  grep -q 'url=.*/tar.gz/0123456789abcdef0123456789abcdef01234567' "$T/curl.log"
+  grep -q 'setup-host ref=main sha=0123456789abcdef0123456789abcdef01234567' "$T/ran"
+}
+
+@test "an edge install without the commit API still installs main" {
+  [ "$EUID" -eq 0 ] || skip "install.sh needs root"
+  run env PATH="$T/bin:$PATH" TMPDIR="$T/tmp" VERCELIFY_SRC_DIR="$T/opt" VERCELIFY_CHANNEL=edge bash <"$INSTALL"
+  [ "$status" -eq 0 ]
+  grep -q 'url=.*/tar.gz/main' "$T/curl.log"
+  grep -q 'setup-host ref=main sha= ' "$T/ran"
 }

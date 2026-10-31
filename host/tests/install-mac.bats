@@ -201,3 +201,14 @@ STUB
   grep -q 'build --release -q -p vercelify-mesh --features daemon' "$T/cargo.log"
   [ ! -e "$T/curl.log" ]   # no release download
 }
+
+@test "a failed release download says why instead of claiming there is none" {
+  GITHUB_API="http://127.0.0.1:9"
+  curl() { return 7; }
+  install_from_release "$T/apps" || true
+  [[ "$RELEASE_WHY" == *"couldn't ask GitHub"* ]]
+  curl() { local out='' prev=''; for a in "$@"; do [[ "$prev" == -o ]] && out=$a; prev=$a; done; grep -v '\.dmg' "$FIX/github-release.json" >"$out"; }
+  RELEASE_WHY=''
+  install_from_release "$T/apps" || true
+  [[ "$RELEASE_WHY" == *"v0.2.0"*"no Mac app"* ]]
+}

@@ -20,6 +20,8 @@ build_version() {
     echo "$VERSION"; return
   fi
   sha=$(git -C "$VERCELIFY_SRC" rev-parse --short=7 HEAD 2>/dev/null || true)
+  # A downloaded tree has no .git: install.sh says which commit it fetched.
+  [[ -n "$sha" ]] || sha=${VERCELIFY_INSTALL_SHA:0:7}
   ref=${ref:-edge}
   ref=${ref//[^0-9A-Za-z-]/-}
   echo "$VERSION+$ref${sha:+.$sha}"

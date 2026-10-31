@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  <a href="#try-it-in-five-minutes">Try it in 5 minutes</a> ·
   <a href="#set-up-your-own-server">Set up your server</a> ·
+  <a href="#try-it-without-a-server">Try it without a server</a> ·
   <a href="#how-the-ai-works">How the AI works</a> ·
   <a href="#hacktoberfest-hack-day-2026">Hack Day submission</a>
 </p>
@@ -107,9 +107,206 @@ reads the important part and answers in three short lines:
   </tr>
 </table>
 
-## Try it in five minutes
+## Set up your own server
 
-You don't need a spare server for any of these. Pick one.
+This is the full setup: an old laptop becomes your server, and your Mac becomes the
+remote control. Plan for **30 to 45 minutes**, most of it waiting for downloads.
+
+### What you need
+
+| | Requirement | Notes |
+| --- | --- | --- |
+| 🖥️ | **A spare laptop or PC** (64-bit, Intel or AMD) | 4 GB of memory works; 8 GB is comfortable. 20 GB of free disk space or more. A 7th-gen Core i5 with 8 GB is plenty. A Raspberry Pi 4 or 5 can join later as an extra worker ([guide](docs/RASPBERRY-PI.md)). |
+| 🐧 | **Ubuntu 24.04 LTS** on that machine | Debian 12/13 and Ubuntu 22.04 also work. If it still runs Windows, follow Ubuntu's [install guide](https://ubuntu.com/tutorials/install-ubuntu-desktop) to replace it. **Back up anything you want to keep first.** |
+| 💻 | **A Mac** | This is where the Vercelify desktop app runs. You control the server from here. |
+| 🌐 | **Internet on both machines** | A network cable on the server is more reliable than Wi-Fi, but either works. |
+
+### Step 1: Install Vercelify on the old laptop
+
+On the old laptop, open **Terminal** (press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> on
+Ubuntu) and paste these two commands:
+
+```bash
+sudo apt update && sudo apt install -y curl
+```
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install.sh | sudo bash -s -- --storage-device none
+```
+
+Type your Ubuntu password when asked (it won't show as you type; that's normal). Here's
+what happens next:
+
+<p align="center">
+  <img src="docs/demos/install-server.svg" width="900" alt="Animated terminal showing the Vercelify server installer: system checks, optional configuration, installation steps, and the final summary with a pairing code" />
+  <br/><sub>The server installer from start to finish (shortened; the real run takes 10–20 minutes).</sub>
+</p>
+
+**1. It checks the machine.** Operating system, memory, disk space and internet. If
+something is missing, it tells you what to fix.
+
+**2. It uses simple defaults.** Your server and apps stay private. You do not need
+an AI model, domain, Cloudflare account or remote-desktop setup to get started.
+After connecting, add those features when you need them:
+
+| Optional feature | Add it later |
+| --- | --- |
+| Your domain | `sudo vercelify domain` |
+| Access from other networks | `sudo vercelify remote on` |
+| Local AI | See [Step 5](#step-5-optional-turn-on-ai-on-the-server) |
+| Control the Linux desktop | `sudo vercelify desktop on`, then **Launch Moonlight** in the app (it pairs by itself) |
+
+For the original guided questions, add `--configure` to the server installer.
+
+**3. It installs everything.** You'll see one line per step. The important ones:
+
+- **Docker** runs each of your apps in its own sealed box, so they can't interfere with
+  each other.
+- **Vercelify agent** is a small program that builds and runs your apps, and lets the Mac
+  app see and manage the server.
+- **Private network** (`vercelify-mesh`) links your Mac and any extra servers
+  to this one, encrypted, wherever they are. No account, no open ports.
+- **Laptop server mode** keeps the laptop running with the lid closed, and the
+  **power & thermal guard** protects the battery and slows things down if it gets too hot.
+
+**4. It prints a summary.** It ends with **one command for your Mac** that installs the
+app and connects it to this server, and an **8-character pairing code** (like
+`K7QF-M2XD`) for a Mac that already has the app. Keep this window open for Step 2. The
+codes are valid for one hour; `sudo vercelify pair` prints new ones.
+
+> **Storage defaults to the main disk.** `--storage-device none` makes that explicit. If the
+> machine has a second disk you'd like to use for databases and backups, pass
+> `--storage-device /dev/sdb` (your disk's name) instead. Vercelify only erases a disk
+> if you also add `--format-storage`, so it never wipes anything by surprise.
+
+From now on, leave the laptop plugged in and connected. You can close the lid.
+
+### Step 2: Install the app on your Mac
+
+Open **Terminal** on your Mac (press <kbd>⌘</kbd>+<kbd>Space</kbd>, type *Terminal*) and
+paste the Mac command from the end of Step 1. It looks like this:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash -s -- --pair vfy2.…
+```
+
+With `--pair` the app connects to your server by itself the first time it opens, so you
+can skip Step 3. Without it, the installer only installs the app.
+
+<p align="center">
+  <img src="docs/demos/install-mac.svg" width="900" alt="Animated terminal showing the Mac installer: builds the Vercelify app, installs its network daemon and the vfy tool, then opens the app" />
+  <br/><sub>The Mac installer.</sub>
+</p>
+
+This installs three things:
+
+1. **The Vercelify app**, into your Applications folder, from the
+   [latest release](https://github.com/shashank03-dev/vercelify-oss/releases/latest)
+   (a `.dmg`; the installer checks its checksum). You can also download the
+   `.dmg` yourself and drag the app to Applications, then run the command above for the
+   rest. If the download fails, the installer says why and offers to build the app on
+   your Mac instead (5–15 minutes, see [building from source](#building-the-mac-app-from-source)).
+2. **`vercelify-mesh`**, which puts the Mac on your servers' private network when you
+   pair. It runs in your login session; nothing to sign in to.
+3. **`vfy`**, a command-line tool for deploying and reading logs from the terminal.
+
+### Step 3: Connect the app to your server
+
+Installed with `--pair`? The app is already connected: go to Step 4. Otherwise
+Vercelify opens when the installer finishes.
+
+<p align="center">
+  <img src="docs/screenshots/pairing.jpg" width="860" alt="The Vercelify welcome screen listing servers on the private network, with an 8-character pairing code typed in" />
+</p>
+
+1. Find your laptop by name in the list of servers on your network.
+2. Type the **8-character code** from the end of Step 1.
+3. Click **Connect**. The app joins the server's private network, so it keeps working
+   when you take the Mac elsewhere.
+
+Don't see your laptop? The list shows servers on the same Wi-Fi or wired network. If
+the Mac is elsewhere, paste the **full pairing code** from Step 1 instead (it starts with
+`vfy2.`). Joining from another network works when you answered `y` to *Reach this
+server from anywhere?* (or later: `sudo vercelify remote on`); see the
+[network guide](docs/MESH.md).
+
+### Step 4: Deploy your first app
+
+1. In the app, click **New app**.
+2. Paste the URL of a GitHub repository, for example a Next.js, Vite, Express or
+   Python project, or anything with a `Dockerfile`.
+3. Choose the branch to deploy (usually `main`).
+4. Add any environment variables your app needs (API keys, database URLs).
+5. Click **Deploy** and watch the build log live.
+
+When it finishes, you get a link to your running app. It works on any device on your
+Vercelify network (add another Linux laptop with `sudo vercelify mesh invite --device`). Private
+repositories need Git access set up first; see the [auto-deploy guide](docs/AUTODEPLOY.md),
+which also covers automatic deploys on every push and preview links for pull requests.
+
+**If the build fails,** open it, click **Build logs**, then **Explain with AI**.
+
+### Step 5 (optional): Turn on AI on the server
+
+So that **Explain with AI** works from the app, install Ollama and a model on the server.
+Run this on the laptop:
+
+```bash
+sudo vercelify ai install
+sudo vercelify ai pull gemma4:e2b
+```
+
+On a machine with 8 GB that's also running apps, Gemma 4 E2B may not have enough free
+memory. Use a smaller model (`sudo vercelify ai pull gemma3:1b`) or keep using
+`vfy why --log` on your Mac. More in the [AI guide](docs/AI.md).
+
+### Step 6 (optional): Put an app on the public internet
+
+Apps start private. To give one a public address like `https://blog.yourdomain.com`, you
+need a domain name. The easiest route is to manage it with a free Cloudflare account:
+Vercelify then creates a secure tunnel, so you don't have to change any router settings,
+and it works even when your internet provider doesn't give you a public IP address.
+
+1. Add your domain to Cloudflare.
+2. Create an API token at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
+   with these permissions: *Account › Cloudflare Tunnel › Edit*, *Zone › DNS › Edit* and
+   *Zone › Zone › Read*.
+3. On the server, run:
+
+```bash
+sudo vercelify domain yourdomain.com --cloudflare-token YOUR_TOKEN
+```
+
+New apps then get addresses like `https://myapp.yourdomain.com`. Details, and the option
+without Cloudflare, are in the [platform guide](docs/PLATFORM.md#1-domains-and-https).
+
+### If something goes wrong
+
+| Problem | What to do |
+| --- | --- |
+| The installer stopped with an error | Fix what it mentions and **run the same command again**. Finished steps are skipped. |
+| Not sure what's wrong with the server | `sudo vercelify doctor` checks everything and suggests fixes. |
+| Pairing code expired | `sudo vercelify pair` prints a new one. |
+| The Mac app can't see the server | Make sure the laptop is awake and online. On another network, paste the full pairing code (`sudo vercelify pair`); that needs `sudo vercelify remote on` (or a Cloudflare domain) on the server. `vercelify-mesh status` on the Mac shows how it reaches each server. |
+| Need the full installer log | It's in `/var/log/vercelify-setup.log` on the server. |
+
+More answers are in [troubleshooting](docs/TROUBLESHOOTING.md).
+
+### Building the Mac app from source
+
+For developers, or when no release fits your Mac: `install-mac.sh --from-source` (or
+answer `y` when the installer offers it). It needs three free developer tools, and stops
+with the exact command if one is missing:
+
+- Xcode Command Line Tools: `xcode-select --install`
+- Node.js 20+: `brew install node` (or from [nodejs.org](https://nodejs.org/))
+- Rust: `curl https://sh.rustup.rs -sSf | sh`
+
+The network daemon is then built from the same checkout, so the two always match.
+
+## Try it without a server
+
+To look around before setting up a server, pick one of these.
 
 ### Option A: Run the AI on your own computer (free, offline)
 
@@ -177,192 +374,6 @@ Open [localhost:1420](http://localhost:1420) in your browser and:
 
 Demo mode uses made-up servers and a pre-written AI answer, so you can see the whole
 flow without any setup. For a real model answer, use Option A or B.
-
-## Set up your own server
-
-This is the full setup: an old laptop becomes your server, and your Mac becomes the
-remote control. Plan for **30 to 45 minutes**, most of it waiting for downloads.
-
-### What you need
-
-| | Requirement | Notes |
-| --- | --- | --- |
-| 🖥️ | **A spare laptop or PC** (64-bit, Intel or AMD) | 4 GB of memory works; 8 GB is comfortable. 20 GB of free disk space or more. A 7th-gen Core i5 with 8 GB is plenty. A Raspberry Pi 4 or 5 can join later as an extra worker ([guide](docs/RASPBERRY-PI.md)). |
-| 🐧 | **Ubuntu 24.04 LTS** on that machine | Debian 12/13 and Ubuntu 22.04 also work. If it still runs Windows, follow Ubuntu's [install guide](https://ubuntu.com/tutorials/install-ubuntu-desktop) to replace it. **Back up anything you want to keep first.** |
-| 💻 | **A Mac** | This is where the Vercelify desktop app runs. You control the server from here. |
-| 🌐 | **Internet on both machines** | A network cable on the server is more reliable than Wi-Fi, but either works. |
-
-### Step 1: Install Vercelify on the old laptop
-
-On the old laptop, open **Terminal** (press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> on
-Ubuntu) and paste these two commands:
-
-```bash
-sudo apt update && sudo apt install -y curl
-```
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install.sh | sudo bash -s -- --storage-device none
-```
-
-Type your Ubuntu password when asked (it won't show as you type; that's normal). Here's
-what happens next:
-
-<p align="center">
-  <img src="docs/demos/install-server.svg" width="900" alt="Animated terminal showing the Vercelify server installer: system checks, optional configuration, installation steps, and the final summary with a pairing code" />
-  <br/><sub>The server installer from start to finish (shortened; the real run takes 10–20 minutes).</sub>
-</p>
-
-**1. It checks the machine.** Operating system, memory, disk space and internet. If
-something is missing, it tells you what to fix.
-
-**2. It uses simple defaults.** Your server and apps stay private. You do not need
-an AI model, domain, Cloudflare account or remote-desktop setup to get started.
-After connecting, add those features when you need them:
-
-| Optional feature | Add it later |
-| --- | --- |
-| Your domain | `sudo vercelify domain` |
-| Access from other networks | `sudo vercelify remote on` |
-| Local AI | See [Step 5](#step-5-optional-turn-on-ai-on-the-server) |
-| Control the Linux desktop | `sudo vercelify desktop on`, then **Launch Moonlight** in the app (it pairs by itself) |
-
-For the original guided questions, add `--configure` to the server installer.
-
-**3. It installs everything.** You'll see one line per step. The important ones:
-
-- **Docker** runs each of your apps in its own sealed box, so they can't interfere with
-  each other.
-- **Vercelify agent** is a small program that builds and runs your apps, and lets the Mac
-  app see and manage the server.
-- **Private network** (`vercelify-mesh`) links your Mac, your phone and any extra servers
-  to this one, encrypted, wherever they are. No account, no open ports.
-- **Laptop server mode** keeps the laptop running with the lid closed, and the
-  **power & thermal guard** protects the battery and slows things down if it gets too hot.
-
-**4. It prints a summary.** It ends with **one command for your Mac** that installs the
-app and connects it to this server, and an **8-character pairing code** (like
-`K7QF-M2XD`) for a Mac that already has the app. Keep this window open for Step 2. The
-codes are valid for one hour; `sudo vercelify pair` prints new ones.
-
-> **Storage defaults to the main disk.** `--storage-device none` makes that explicit. If the
-> machine has a second disk you'd like to use for databases and backups, pass
-> `--storage-device /dev/sdb` (your disk's name) instead. Vercelify only erases a disk
-> if you also add `--format-storage`, so it never wipes anything by surprise.
-
-From now on, leave the laptop plugged in and connected. You can close the lid.
-
-### Step 2: Install the app on your Mac
-
-Open **Terminal** on your Mac (press <kbd>⌘</kbd>+<kbd>Space</kbd>, type *Terminal*) and
-paste the Mac command from the end of Step 1. It looks like this:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash -s -- --pair vfy2.…
-```
-
-With `--pair` the app connects to your server by itself the first time it opens, so you
-can skip Step 3. Without it, the installer only installs the app.
-
-<p align="center">
-  <img src="docs/demos/install-mac.svg" width="900" alt="Animated terminal showing the Mac installer: builds the Vercelify app, installs its network daemon and the vfy tool, then opens the app" />
-  <br/><sub>The Mac installer (the build step is shortened).</sub>
-</p>
-
-This installs three things:
-
-1. **The Vercelify app**, into your Applications folder. While there's no ready-made
-   download yet, the installer offers to build the app on your Mac (answer `y`). The build
-   takes 5–15 minutes and needs three free developer tools. If one is missing, the
-   installer stops and tells you exactly what to run:
-   - Xcode Command Line Tools: `xcode-select --install`
-   - Node.js: `brew install node` (or from [nodejs.org](https://nodejs.org/))
-   - Rust: `curl https://sh.rustup.rs -sSf | sh`
-2. **`vercelify-mesh`**, which puts the Mac on your servers' private network when you
-   pair. It runs in your login session; nothing to sign in to.
-3. **`vfy`**, a command-line tool for deploying and reading logs from the terminal.
-
-### Step 3: Connect the app to your server
-
-Installed with `--pair`? The app is already connected: go to Step 4. Otherwise
-Vercelify opens when the installer finishes.
-
-<p align="center">
-  <img src="docs/screenshots/pairing.jpg" width="860" alt="The Vercelify welcome screen listing servers on the private network, with an 8-character pairing code typed in" />
-</p>
-
-1. Find your laptop by name in the list of servers on your network.
-2. Type the **8-character code** from the end of Step 1.
-3. Click **Connect**. The app joins the server's private network, so it keeps working
-   when you take the Mac elsewhere.
-
-Don't see your laptop? The list shows servers on the same Wi-Fi or wired network. If
-the Mac is elsewhere, paste the **full pairing code** from Step 1 instead (it starts with
-`vfy2.`). Joining from another network works when you answered `y` to *Reach this
-server from anywhere?* (or later: `sudo vercelify remote on`); see the
-[network guide](docs/MESH.md).
-
-### Step 4: Deploy your first app
-
-1. In the app, click **New app**.
-2. Paste the URL of a GitHub repository, for example a Next.js, Vite, Express or
-   Python project, or anything with a `Dockerfile`.
-3. Choose the branch to deploy (usually `main`).
-4. Add any environment variables your app needs (API keys, database URLs).
-5. Click **Deploy** and watch the build log live.
-
-When it finishes, you get a link to your running app. It works on any device on your
-Vercelify network (add your phone with `sudo vercelify mesh invite --device`). Private
-repositories need Git access set up first; see the [auto-deploy guide](docs/AUTODEPLOY.md),
-which also covers automatic deploys on every push and preview links for pull requests.
-
-**If the build fails,** open it, click **Build logs**, then **Explain with AI**.
-
-### Step 5 (optional): Turn on AI on the server
-
-So that **Explain with AI** works from the app, install Ollama and a model on the server.
-Run this on the laptop:
-
-```bash
-sudo vercelify ai install
-sudo vercelify ai pull gemma4:e2b
-```
-
-On a machine with 8 GB that's also running apps, Gemma 4 E2B may not have enough free
-memory. Use a smaller model (`sudo vercelify ai pull gemma3:1b`) or keep using
-`vfy why --log` on your Mac. More in the [AI guide](docs/AI.md).
-
-### Step 6 (optional): Put an app on the public internet
-
-Apps start private. To give one a public address like `https://blog.yourdomain.com`, you
-need a domain name. The easiest route is to manage it with a free Cloudflare account:
-Vercelify then creates a secure tunnel, so you don't have to change any router settings,
-and it works even when your internet provider doesn't give you a public IP address.
-
-1. Add your domain to Cloudflare.
-2. Create an API token at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
-   with these permissions: *Account › Cloudflare Tunnel › Edit*, *Zone › DNS › Edit* and
-   *Zone › Zone › Read*.
-3. On the server, run:
-
-```bash
-sudo vercelify domain yourdomain.com --cloudflare-token YOUR_TOKEN
-```
-
-New apps then get addresses like `https://myapp.yourdomain.com`. Details, and the option
-without Cloudflare, are in the [platform guide](docs/PLATFORM.md#1-domains-and-https).
-
-### If something goes wrong
-
-| Problem | What to do |
-| --- | --- |
-| The installer stopped with an error | Fix what it mentions and **run the same command again**. Finished steps are skipped. |
-| Not sure what's wrong with the server | `sudo vercelify doctor` checks everything and suggests fixes. |
-| Pairing code expired | `sudo vercelify pair` prints a new one. |
-| The Mac app can't see the server | Make sure the laptop is awake and online. On another network, paste the full pairing code (`sudo vercelify pair`); that needs `sudo vercelify remote on` (or a Cloudflare domain) on the server. `vercelify-mesh status` on the Mac shows how it reaches each server. |
-| Need the full installer log | It's in `/var/log/vercelify-setup.log` on the server. |
-
-More answers are in [troubleshooting](docs/TROUBLESHOOTING.md).
 
 ## How the AI works
 

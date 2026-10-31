@@ -76,8 +76,9 @@ export function Onboarding({ onPaired }: { onPaired: (s: CockpitSettings, note?:
             </Step>
             <Step n={2} title="Connect" last>
               <p className="mb-3 text-[13px] text-fg-muted">
-                On the same Wi-Fi the server shows up below: type its code and this computer joins its private network. Anywhere else, paste
-                the full code that <InlineCode>sudo vercelify pair</InlineCode> prints.
+                On the same Wi-Fi the server shows up below: type its code and this computer joins its private network. From another
+                network, paste the full code that <InlineCode>sudo vercelify pair</InlineCode> prints; that needs{" "}
+                <InlineCode>sudo vercelify remote on</InlineCode> on the server first.
               </p>
               <PairForm onPaired={onPaired} />
             </Step>

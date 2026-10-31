@@ -143,6 +143,8 @@ function makeAgent(server?: string) {
     revokeToken: (id: string) => req<{ ok: boolean }>("DELETE", `/v1/tokens/${q(id)}`),
     /** The mesh's nodes (on its coordinator). */
     meshNodes: () => req<MeshNode[]>("GET", "/v1/mesh/nodes"),
+    /** The coordinator's view; `reachable_from_anywhere` once `vercelify remote on` gave it a public address. */
+    meshStatus: () => req<{ coordinator: { reachable_from_anywhere?: boolean } | null }>("GET", "/v1/mesh/status"),
     /** Take a node off the mesh; its peers drop it within seconds. */
     meshRevoke: (id: string) => req<{ revoked: string }>("DELETE", `/v1/mesh/nodes/${q(id)}`, undefined, 20),
     meshInvite: (kind: "server" | "device", role = "owner") =>

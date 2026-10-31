@@ -129,13 +129,7 @@ impl Coordinator {
     /// posts it). Signed at startup: the address only changes with a restart.
     fn write_beacon(&self) {
         let path = self.cfg.mesh_dir.join("beacon");
-        let public = self
-            .cfg
-            .mesh_public_url
-            .as_deref()
-            .is_some_and(|u| !u.trim().is_empty())
-            || !self.cfg.mesh_public_endpoints.is_empty();
-        if !public {
+        if !reachable_from_anywhere(&self.cfg) {
             let _ = std::fs::remove_file(&path);
             return;
         }
@@ -667,11 +661,18 @@ async fn status(State(s): State<AppState>) -> ApiResult<Value> {
                 "revoked": nodes.iter().filter(|n| n.revoked_at.is_some()).count(),
                 "map_version": co.store.with(reg::versions)?.0,
                 "control": control_addresses(&s.config),
+                "reachable_from_anywhere": reachable_from_anywhere(&s.config),
             })
         }
         None => Value::Null,
     };
     Ok(Json(json!({ "daemon": daemon, "coordinator": coordinator })))
+}
+
+/// Devices on another network can join and reach this coordinator: a public
+/// address (`vercelify remote on`: router ports or a tunnel) is configured.
+pub fn reachable_from_anywhere(cfg: &Config) -> bool {
+    cfg.mesh_public_url.as_deref().is_some_and(|u| !u.trim().is_empty()) || !cfg.mesh_public_endpoints.is_empty()
 }
 
 /// Where this server is reached privately: its mesh address.
@@ -690,6 +691,22 @@ pub fn own_ipv4(cfg: &Config) -> Option<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn away_from_home_needs_a_public_address() {
+        let mut cfg = Config::default();
+        assert!(
+            !reachable_from_anywhere(&cfg),
+            "the default install is this network only"
+        );
+        cfg.mesh_public_url = Some("  ".into());
+        assert!(!reachable_from_anywhere(&cfg));
+        cfg.mesh_public_url = Some("https://abc.trycloudflare.com".into());
+        assert!(reachable_from_anywhere(&cfg));
+        cfg.mesh_public_url = None;
+        cfg.mesh_public_endpoints = vec!["203.0.113.7:51820".into()];
+        assert!(reachable_from_anywhere(&cfg));
+    }
 
     #[test]
     fn hostnames_become_node_names() {

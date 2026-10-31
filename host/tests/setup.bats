@@ -341,6 +341,34 @@ fake_pgrep() {
   [ ! -e "$T/release-download" ]
 }
 
+@test "an edge install takes CI's build of its exact commit, checked, before compiling" {
+  export VERCELIFY_INSTALL_REF=main VERCELIFY_INSTALL_CHANNEL=edge
+  export VERCELIFY_INSTALL_SHA=0123456789abcdef0123456789abcdef01234567
+  printf 'agent-bin' >"$T/bin"
+  curl() {
+    local out='' prev='' url=''
+    for a in "$@"; do [[ "$prev" == -o ]] && out=$a; prev=$a; url=$a; done
+    echo "$url" >>"$T/urls"
+    case "$url" in
+      */download/edge/vercelify-agent-*-0123456789ab) cp "$T/bin" "$out" ;;
+      */download/edge/vercelify-agent-*-0123456789ab.sha256)
+        if [ -e "$T/tamper" ]; then echo "ffff  bin" >"$out"; else sha256sum "$T/bin" >"$out"; fi ;;
+      *) return 22 ;;
+    esac
+  }
+  have() { [[ "$1" == docker ]]; }
+  run_cmd() { echo source-build >&2; }
+  run obtain_binary vercelify-agent VERCELIFY_AGENT_BINARY '-p vercelify-agent'
+  [ "$status" -eq 0 ]
+  [[ "$output" != *source-build* ]]
+  [ "$(cat "${lines[-1]}")" = agent-bin ]
+  # A damaged download is never installed: it compiles instead.
+  touch "$T/tamper"
+  run obtain_binary vercelify-agent VERCELIFY_AGENT_BINARY '-p vercelify-agent'
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"checksum mismatch"* && "$output" == *source-build* ]]
+}
+
 @test "default setup defers optional feature questions" {
   has_tty() { return 0; }
   ask() { echo unexpected-prompt; return 1; }

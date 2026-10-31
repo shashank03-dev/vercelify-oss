@@ -22,15 +22,37 @@ function ago(iso: string | null | undefined): string {
 }
 
 /** The paired server that coordinates the mesh (answers /v1/mesh/nodes). */
-async function findCoordinator(urls: string[]): Promise<{ url: string; nodes: MeshNode[] } | null> {
+async function findCoordinator(urls: string[]): Promise<{ url: string; nodes: MeshNode[]; away?: boolean } | null> {
   for (const url of urls) {
     try {
-      return { url, nodes: await agentOn(url).meshNodes() };
+      const nodes = await agentOn(url).meshNodes();
+      // Older agents don't say; then the line isn't shown.
+      const away = await agentOn(url).meshStatus().then((s) => s.coordinator?.reachable_from_anywhere, () => undefined);
+      return { url, nodes, away };
     } catch {
       /* not a coordinator, or an older agent */
     }
   }
   return null;
+}
+
+/** Whether devices can join from another network (review F13). */
+export function AwayLine({ away }: { away?: boolean }) {
+  if (away === undefined) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]" data-testid="mesh-away">
+      {away ? (
+        <StatusText health="ok" label="Ready away from home" />
+      ) : (
+        <>
+          <StatusText health="idle" label="This network only" />
+          <span className="text-fg-dim">
+            To connect from elsewhere, on the server: <InlineCode>sudo vercelify remote on</InlineCode>
+          </span>
+        </>
+      )}
+    </div>
+  );
 }
 
 /** How this computer reaches a node right now. */
@@ -201,6 +223,7 @@ export function MeshNetwork() {
     >
       <div className="border-b border-line px-4 py-2.5">
         <LocalLine local={local.data} />
+        <AwayLine away={c?.away} />
       </div>
       {rows.length > 0 ? (
         <div className="overflow-x-auto">

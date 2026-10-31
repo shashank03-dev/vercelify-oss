@@ -401,7 +401,7 @@ function meshRoute(req: HttpRequest, p: string): unknown {
   if (p === "/v1/mesh/status") {
     return {
       daemon: { name: "thinkpad-t470", ipv4: "10.77.0.1", interface: "vfy0" },
-      coordinator: { nodes: meshNodes.filter((n) => !n.revoked_at).length, revoked: meshNodes.filter((n) => n.revoked_at).length, map_version: 42, control: ["192.168.1.20:7443"] },
+      coordinator: { nodes: meshNodes.filter((n) => !n.revoked_at).length, revoked: meshNodes.filter((n) => n.revoked_at).length, map_version: 42, control: ["192.168.1.20:7443"], reachable_from_anywhere: false },
     };
   }
   return undefined;

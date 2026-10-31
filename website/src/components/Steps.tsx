@@ -11,14 +11,14 @@ const STEPS = [
   {
     n: "02",
     title: "Install the Mac app",
-    body: "One more line installs the Vercelify app and its network daemon. No account to create, nothing to sign in to.",
+    body: "Paste the Mac command the laptop printed: it downloads the app, installs its network daemon and connects to the laptop by itself. No account, nothing to sign in to.",
     cmd: INSTALL_MAC,
     display: "curl -fsSL …/install-mac.sh | bash",
   },
   {
     n: "03",
-    title: "Type the pairing code",
-    body: "Pick your laptop in the app and enter its 8-character code. Your dashboard opens, ready for the first app.",
+    title: "Deploy your first app",
+    body: "The dashboard opens connected. Already had the app? Pick your laptop in it and type the 8-character code instead.",
   },
 ];
 

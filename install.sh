@@ -28,6 +28,15 @@ latest_tag() {
     sed -n 's/^[[:space:]]*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/p' | head -1
 }
 
+# The commit a branch points at now (edge installs download exactly that
+# commit, so CI's prebuilt binaries of it can be used), or nothing.
+commit_of() {
+  local sha
+  sha=$(curl -fsSL --retry 3 -m 20 -H 'Accept: application/vnd.github.sha' "$API/repos/$REPO/commits/$1" 2>/dev/null || true)
+  [[ "$sha" =~ ^[0-9a-f]{40}$ ]] && echo "$sha"
+  return 0
+}
+
 resolve_ref() {
   [[ -n "$REF" ]] && { echo "$REF"; return; }
   if [[ "$CHANNEL" == edge ]]; then echo main; return; fi
@@ -42,7 +51,7 @@ resolve_ref() {
 # Everything runs from main, called on the last line: a download cut short
 # by the network runs nothing instead of half the steps.
 main() {
-  local here src ref
+  local here src ref sha=''
   here=''
   if [[ -n "${BASH_SOURCE[0]:-}" && -f "${BASH_SOURCE[0]}" ]]; then
     here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -56,6 +65,11 @@ main() {
     command -v tar >/dev/null || apt-get install -y -qq tar >/dev/null
     ref=$(resolve_ref)
     [[ "$ref" =~ ^[A-Za-z0-9._/-]+$ ]] || { echo "invalid ref '$ref'" >&2; exit 1; }
+    local get=$ref
+    if [[ "$ref" != v[0-9]* ]]; then
+      sha=$(commit_of "$ref")
+      get=${sha:-$ref}
+    fi
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     echo "==> Downloading Vercelify ($REPO@$ref)…" >&2
@@ -64,7 +78,7 @@ main() {
     local i
     for i in 1 2 3 4 5; do
       curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 20 -C - -o "$tmp/src.tar.gz" \
-        "https://codeload.github.com/$REPO/tar.gz/$ref" && break
+        "https://codeload.github.com/$REPO/tar.gz/$get" && break
       (( i < 5 )) || { echo "download failed (network?) — run the same command again" >&2; exit 1; }
       echo "   download interrupted, resuming…" >&2
       sleep 3
@@ -85,7 +99,7 @@ main() {
     src=$DEST
   fi
 
-  export VERCELIFY_INSTALL_REF=$ref VERCELIFY_INSTALL_CHANNEL=$CHANNEL
+  export VERCELIFY_INSTALL_REF=$ref VERCELIFY_INSTALL_CHANNEL=$CHANNEL VERCELIFY_INSTALL_SHA=${sha:-}
   exec bash "$src/host/setup-host.sh" "$@"
 }
 

@@ -996,6 +996,8 @@ The server installer (`install.sh` → `host/setup-host.sh`) and the Mac install
    address changed. Nothing else is exposed: WireGuard drops packets from unknown keys,
    and the control port takes sealed, single-use, rate-limited enrollments and SPAKE2.
    `vercelify remote off` removes the mappings, the timer and only the keys it wrote.
+   `GET /v1/mesh/status` reports `reachable_from_anywhere` (a public endpoint or URL is
+   set), and the app shows "This network only" with the command, or "Ready away from home".
 
 The cockpit finds servers among its own mesh
 peers (`discover_servers` probes each server peer's `/v1/health`) and on the
@@ -1014,7 +1016,11 @@ questions; `--configure` retains the interactive wizard. Storage defaults to the
 system disk; a second disk is selected explicitly with `--storage-device`. Final readiness reports
 agent health and mesh availability, and supplies recovery commands for incomplete
 connections. A rerun preserves the saved machine role. Only matching release refs
-may use numbered release binaries; local, branch and edge refs build their own.
+may use numbered release binaries; local and branch refs build their own. An edge
+install resolves `main` to its commit (`/repos/…/commits/main`), downloads that exact
+tree and first tries CI's build of it from the rolling `edge` prerelease
+(`<binary>-<target>-<sha12>` plus `.sha256`, published by `.github/workflows/edge.yml`
+for the last 20 commits); without a matching, checksum-verified asset it builds locally.
 Existing Docker installations are checked for both Buildx and Compose v2 before
 setup succeeds; the engine being reachable alone is insufficient.
 

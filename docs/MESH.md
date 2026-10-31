@@ -1,6 +1,6 @@
 # Vercelify's private network
 
-Your Mac, your phone and every server you add talk to each other over Vercelify's own
+Your Mac, your Linux laptops and every server you add talk to each other over Vercelify's own
 network: `vercelify-mesh`, a small WireGuard daemon on each machine, coordinated by your
 main server. Nothing needs an account anywhere, and the agent, AI models and database
 ports are never on the internet. The design is in
@@ -34,10 +34,16 @@ server:
 
 ```bash
 sudo vercelify mesh invite              # a server (worker)
-sudo vercelify mesh invite --device     # a laptop or phone of yours
+sudo vercelify mesh invite --device     # another Linux laptop or desktop of yours
 ```
 
-and run what it prints on the new machine.
+and run what it prints (`sudo vercelify mesh join vfyj1.…`) on the new machine; it
+needs `vercelify-mesh`, which the server installer puts there. A Mac joins by pairing
+(above), not with an invite.
+
+**Phones and tablets** can't join yet: there is no mobile app, and the network doesn't
+hand out standard WireGuard configs. To open a private app from a phone, give the app a
+public domain (Cloudflare Tunnel) and protect it, or use the Mac.
 
 ## Reaching your servers from anywhere
 

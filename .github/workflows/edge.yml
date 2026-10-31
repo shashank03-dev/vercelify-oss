@@ -1,0 +1,81 @@
+name: Edge binaries
+
+# Every push to main publishes the server binaries of that commit to the
+# rolling `edge` prerelease, named after it:
+#   vercelify-agent-<target>-<sha12>, vercelify-mesh-<target>-<sha12> (+ .sha256)
+# `vercelify update --edge` (install.sh with VERCELIFY_CHANNEL=edge) downloads
+# exactly the commit it installs and uses these, so an old laptop doesn't
+# compile for 20 minutes. Without a matching asset it still builds locally.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: edge-binaries
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Edge ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - run: pip install cargo-zigbuild
+      - name: Build
+        run: |
+          # The version the installer stamps for this commit (setup-host.sh build_version).
+          v=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)
+          export VERCELIFY_BUILD="$v+main.${GITHUB_SHA::7}"
+          cargo zigbuild --release --locked -p vercelify-agent --target ${{ matrix.target }}
+          cargo zigbuild --release --locked -p vercelify-mesh --features daemon --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          mkdir -p out
+          for bin in vercelify-agent vercelify-mesh; do
+            name="$bin-${{ matrix.target }}-${GITHUB_SHA::12}"
+            cp "target/${{ matrix.target }}/release/$bin" "out/$name"
+            (cd out && sha256sum "$name" > "$name.sha256")
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: edge-${{ matrix.target }}
+          path: out/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 20
+      - uses: actions/download-artifact@v4
+        with:
+          path: out
+          merge-multiple: true
+      - name: Upload to the edge prerelease
+        run: |
+          gh release view edge >/dev/null 2>&1 ||
+            gh release create edge --prerelease --target main --title "Edge (main)" \
+              --notes "Server binaries of recent commits on main, for \`vercelify update --edge\`. Not a release."
+          gh release upload edge out/* --clobber
+      - name: Keep the last 20 commits' binaries
+        run: |
+          keep=$(git log -20 --format=%H | cut -c1-12)
+          gh release view edge --json assets -q '.assets[].name' | while read -r name; do
+            sha=${name%.sha256}
+            sha=${sha##*-}
+            grep -qx "$sha" <<<"$keep" || gh release delete-asset edge "$name" -y
+          done

@@ -25,6 +25,20 @@ agent_api() {
   printf '%s' "$out"
 }
 
+# Download URL and URL.sha256 to OUT; succeeds only when they match.
+fetch_verified() {
+  local url=$1 out=$2 name=$3
+  curl -fsSL --connect-timeout 15 -o "$out" "$url" 2>/dev/null &&
+    curl -fsSL --connect-timeout 15 -o "$out.sha256" "$url.sha256" 2>/dev/null || { rm -f "$out" "$out.sha256"; return 1; }
+  if [[ "$(sha256sum "$out" | cut -d' ' -f1)" == "$(awk '{print $1}' "$out.sha256")" ]]; then
+    chmod +x "$out"
+    return 0
+  fi
+  warn "checksum mismatch for downloaded $name — ignoring it" >&2
+  rm -f "$out" "$out.sha256"
+  return 1
+}
+
 # obtain_binary NAME OVERRIDE_VAR "CARGO ARGS" — locate or obtain a release
 # binary (vercelify-agent, vercelify-mesh) for this architecture; prints its path.
 obtain_binary() {
@@ -42,21 +56,22 @@ obtain_binary() {
     echo "$VERCELIFY_SRC/dist/$name-$target"; return
   fi
   # 3. The release asset of *this* version, so scripts and binaries always
-  #    match (checksum verified). Edge installs from main fall through to a build.
+  #    match (checksum verified).
   tmp=$(mktemp -d)
   local tag="v${VERSION:-0}"
-  url="https://github.com/$VERCELIFY_REPO/releases/download/$tag/$name-$target"
-  local source_ref=${VERCELIFY_INSTALL_REF:-}
+  local source_ref=${VERCELIFY_INSTALL_REF:-} sha=${VERCELIFY_INSTALL_SHA:-}
   if [[ "${VERSION:-dev}" != dev && "${VERCELIFY_INSTALL_CHANNEL:-stable}" != edge ]] &&
      [[ -z "$source_ref" || "$source_ref" == "$tag" || "$source_ref" == "${VERSION:-dev}" ]] &&
-     curl -fsSL --connect-timeout 15 -o "$tmp/bin" "$url" 2>/dev/null &&
-     curl -fsSL --connect-timeout 15 -o "$tmp/bin.sha256" "$url.sha256" 2>/dev/null; then
-    if (cd "$tmp" && echo "$(awk '{print $1}' bin.sha256)  bin" | sha256sum -c --quiet -); then
-      chmod +x "$tmp/bin"
-      info "downloaded $name $tag" >&2
-      echo "$tmp/bin"; return
-    fi
-    warn "checksum mismatch for downloaded $name — ignoring it" >&2
+     fetch_verified "https://github.com/$VERCELIFY_REPO/releases/download/$tag/$name-$target" "$tmp/bin" "$name"; then
+    info "downloaded $name $tag" >&2
+    echo "$tmp/bin"; return
+  fi
+  # 3b. Edge: CI's build of exactly the commit install.sh fetched (the
+  #     rolling `edge` prerelease), so an old laptop doesn't compile.
+  if [[ "${VERCELIFY_INSTALL_CHANNEL:-stable}" == edge && "$sha" =~ ^[0-9a-f]{40}$ ]] &&
+     fetch_verified "https://github.com/$VERCELIFY_REPO/releases/download/edge/$name-$target-${sha:0:12}" "$tmp/bin" "$name"; then
+    info "downloaded $name built by CI for ${sha:0:7}" >&2
+    echo "$tmp/bin"; return
   fi
   # 4. Build from source in a throwaway Rust container (a few minutes)
   [[ -f "$VERCELIFY_SRC/Cargo.toml" ]] || die "no $name binary available and no source tree to build from"
