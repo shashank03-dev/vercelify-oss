@@ -1095,9 +1095,10 @@ volumes). HDD folder deletion requires manual mount checks and is not offered by
 the UI. Volumes orphaned by earlier releases remain visible in the raw host list;
 recovering their removed ownership metadata is not implemented.
 
-When the coordinator has been silent for 30 seconds, devices check its signed
-beacon address every 30 seconds, allowing a replacement quick tunnel to be
-discovered within about a minute without waiting for the old three-minute gate.
+When the coordinator has been silent for 30 seconds (the map stream pings every 25), devices
+check its signed beacon address every 10 seconds for five minutes, then every 30 seconds,
+so a replacement quick tunnel (published about 15 seconds after it starts) is followed
+within about 40 seconds without waiting for the old three-minute gate.
 Every start of the quick tunnel is a new address, so the tunnel's unit starts
 the `vercelify remote refresh` oneshot as it starts (not only the 20-minute
 timer): the agent learns the address and the note is posted right away.

@@ -638,8 +638,17 @@ fn save_own(running: &State, dir: &Path) -> std::io::Result<()> {
     }
 }
 
+/// Whether to read the coordinator's signed address on this 5-s tick: after
+/// 30 s of silence (the map stream pings every 25 s), every 10 s for the
+/// first five minutes (a restarted quick tunnel is published within ~15 s),
+/// then every 30 s.
 fn beacon_due(silence: Option<Duration>, ticks: u64) -> bool {
-    silence.is_none_or(|age| age >= Duration::from_secs(30)) && ticks >= 6 && ticks.is_multiple_of(6)
+    let every = match silence {
+        Some(age) if age < Duration::from_secs(30) => return false,
+        Some(age) if age < Duration::from_secs(300) => 2,
+        _ => 6,
+    };
+    ticks >= every && ticks.is_multiple_of(every)
 }
 
 /// Run the node on the mesh until a signal ends it.
@@ -840,8 +849,8 @@ pub async fn up(opts: UpOptions) -> Result<()> {
                     }
                 }
                 write_status(&live, &opts, &ctl).await;
-                // After 30 seconds of silence, check its signed address every
-                // 30 seconds so a new quick tunnel does not strand devices.
+                // After 30 seconds of silence, check its signed address
+                // (`beacon_due`) so a new quick tunnel does not strand devices.
                 let lost = beacon_due(live.coordinator_seen.read().unwrap().map(|t| t.elapsed()), ticks);
                 if let (true, Some(base)) = (lost, opts.beacon.clone()) {
                     let live = live.clone();
@@ -896,6 +905,20 @@ mod tests {
         assert!(!beacon_due(Some(Duration::from_secs(25)), 6));
         assert!(!beacon_due(Some(Duration::from_secs(60)), 7));
         assert!(beacon_due(None, 6));
+    }
+
+    #[test]
+    fn a_lost_coordinator_is_checked_every_ten_seconds_at_first() {
+        // A restarted quick tunnel is published ~15 s after the drop: the
+        // first minutes are checked closely, then every 30 s.
+        assert!(beacon_due(Some(Duration::from_secs(35)), 8));
+        assert!(beacon_due(Some(Duration::from_secs(45)), 10));
+        assert!(
+            !beacon_due(Some(Duration::from_secs(40)), 9),
+            "every 10 s, not every tick"
+        );
+        assert!(!beacon_due(Some(Duration::from_secs(400)), 82));
+        assert!(beacon_due(Some(Duration::from_secs(400)), 84));
     }
 
     #[test]

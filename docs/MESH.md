@@ -65,7 +65,7 @@ A timer (`vercelify-remote.timer`, every 20 minutes) renews the forwards, follow
 public address or tunnel, and switches back to a direct forward when the router allows
 it. Each time the address changes, the agent signs it with the mesh's coordinator key and
 the server posts it to a public message drop (ntfy.sh, under a topic derived from that
-key). Devices retry that lookup every 30 seconds while disconnected. A machine that hasn't heard from the main server for 30 seconds reads the
+key). Devices retry that lookup every 10 seconds while disconnected (every 30 after five minutes). A machine that hasn't heard from the main server for 30 seconds reads the
 newest note there, checks the signature, and follows it, so a reboot that gives the
 quick tunnel a new address doesn't strand your Mac. `sudo vercelify remote` shows the
 current address; `sudo vercelify remote off` removes the forwards and the tunnel.
