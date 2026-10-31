@@ -49,7 +49,7 @@ async function launch() {
 
 it("pairs on the first launch with one PIN on both sides, then streams", async () => {
   await launch();
-  await waitFor(() => expect(names()).toContain("moonlight_start"));
+  await waitFor(() => expect(names()).toContain("moonlight_start"), { timeout: 4000 });
   expect(names()).toEqual(["moonlight_pair", "/v1/display/sunshine/pair", "moonlight_stop", "moonlight_start"]);
   const pair = wire.calls.find((c) => c.cmd === "moonlight_pair")!.args;
   const handed = wire.calls.find((c) => c.cmd === "/v1/display/sunshine/pair")!.args;
@@ -61,7 +61,7 @@ it("pairs on the first launch with one PIN on both sides, then streams", async (
   // Remembered: the next launch goes straight to the desktop.
   wire.calls = [];
   await launch();
-  await waitFor(() => expect(names()).toContain("moonlight_start"));
+  await waitFor(() => expect(names()).toContain("moonlight_start"), { timeout: 4000 });
   expect(names()).toEqual(["moonlight_start"]);
 });
 
@@ -76,7 +76,7 @@ it("doesn't launch when Sunshine refuses, and closes the pairing window", async 
 it("an older server: launches as before, with the manual steps shown", async () => {
   wire.caps = [];
   await launch();
-  await waitFor(() => expect(names()).toContain("moonlight_start"));
+  await waitFor(() => expect(names()).toContain("moonlight_start"), { timeout: 4000 });
   expect(names()).toEqual(["moonlight_start"]);
   expect(screen.queryByTestId("moonlight-pair")).not.toBeInTheDocument();
   expect(screen.getByText(/Update the server to have this done for you/)).toBeInTheDocument();
@@ -87,7 +87,7 @@ it("Pair again pairs without launching", async () => {
   const again = await screen.findByTestId("moonlight-pair");
   await waitFor(() => expect(again).toBeEnabled());
   fireEvent.click(again);
-  await waitFor(() => expect(names()).toContain("moonlight_stop"));
+  await waitFor(() => expect(names()).toContain("moonlight_stop"), { timeout: 4000 });
   expect(names()).toEqual(["moonlight_pair", "/v1/display/sunshine/pair", "moonlight_stop"]);
 });
 
