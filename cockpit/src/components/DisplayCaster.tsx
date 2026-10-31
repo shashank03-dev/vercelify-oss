@@ -120,7 +120,8 @@ export function DisplayCaster() {
         screen_index: screenIndex,
         fps: quality.fps,
         bitrate_kbps: quality.kbps,
-        width: quality.width,
+        // The extended display is already the size to send (see vdisplay.rs).
+        width: extend ? null : quality.width,
         encoder,
         show_cursor: true,
       });

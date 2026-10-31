@@ -49,6 +49,22 @@ fn right_of(main_x: f64, main_y: f64, main_width: f64) -> (i32, i32) {
     ((main_x + main_width) as i32, main_y as i32)
 }
 
+/// The display's size in points: as wide as the main screen (so the pointer
+/// crosses the laptop with the same trackpad travel as the Mac's own screen,
+/// and fewer pixels go through the stream), never wider than asked, in the
+/// asked shape, even-sized for the encoder. The laptop scales it to fill.
+fn fit(main_width: f64, width: u32, height: u32) -> (u32, u32) {
+    let w = if main_width >= 2.0 {
+        width.min(main_width as u32) & !1
+    } else {
+        width
+    };
+    if w == width {
+        return (width, height);
+    }
+    (w, (u64::from(w) * u64::from(height) / u64::from(width)) as u32 & !1)
+}
+
 /// Move `display` to the right of the main screen for this login session
 /// (Displays settings can still rearrange it). Best effort: a refusal leaves
 /// it where macOS put it.
@@ -76,8 +92,12 @@ fn class(name: &CStr) -> Result<&'static AnyClass, String> {
     AnyClass::get(name).ok_or_else(|| "this Mac can't make a virtual display (it needs macOS 11 or later)".into())
 }
 
-/// Make a `width`×`height` display at `hz`. Call on the main thread.
+/// Make a display of at most `width`×`height` (see `fit`) at `hz`. Call on the
+/// main thread.
 pub fn create(name: &str, width: u32, height: u32, hz: f64) -> Result<VirtualDisplay, String> {
+    // SAFETY: plain CoreGraphics queries.
+    let main = unsafe { CGDisplayBounds(CGMainDisplayID()) };
+    let (width, height) = fit(main.w, width, height);
     let (descriptor_class, display_class) = (class(c"CGVirtualDisplayDescriptor")?, class(c"CGVirtualDisplay")?);
     let (settings_class, mode_class) = (class(c"CGVirtualDisplaySettings")?, class(c"CGVirtualDisplayMode")?);
     // SAFETY: the selectors and their types are CGVirtualDisplay's since
@@ -123,6 +143,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_new_display_is_as_wide_as_the_main_screen_in_points() {
+        // A MacBook at "looks like 1512×982": the pointer crosses the laptop
+        // with the same trackpad travel as the Mac's own screen.
+        assert_eq!(fit(1512.0, 1920, 1080), (1512, 850));
+        // Never wider than the quality asks for, nor odd-sized for the encoder.
+        assert_eq!(fit(2560.0, 1920, 1080), (1920, 1080));
+        assert_eq!(fit(1470.0, 1920, 1080), (1470, 826));
+        assert_eq!(fit(1280.0, 1280, 720), (1280, 720));
+        // A main screen we can't read keeps the asked size.
+        assert_eq!(fit(0.0, 1920, 1080), (1920, 1080));
+    }
+
+    #[test]
     fn the_new_display_sits_right_of_the_main_screen() {
         assert_eq!(right_of(0.0, 0.0, 1470.0), (1470, 0));
         assert_eq!(right_of(-200.0, 40.0, 1920.0), (1720, 40));
@@ -148,7 +181,7 @@ mod tests {
     fn a_virtual_display_appears_and_goes() {
         let screens = || crate::local::capture_screens().unwrap();
         let (before, displays) = (screens(), active());
-        let d = create("Vercelify test", 1280, 720, 60.0).unwrap();
+        let d = create("Vercelify test", 1920, 1080, 60.0).unwrap();
         std::thread::sleep(std::time::Duration::from_secs(2));
         assert_eq!(active().len(), displays.len() + 1, "not among the active displays");
         let added = vercelify_core::avfoundation::added_screen(&before, &screens());
@@ -161,6 +194,8 @@ mod tests {
             (main.x + main.w, main.y),
             "not to the right of the main screen"
         );
+        let (w, h) = fit(main.w, 1920, 1080);
+        assert_eq!((b.w, b.h), (f64::from(w), f64::from(h)), "not the main screen's width");
         drop(d);
         std::thread::sleep(std::time::Duration::from_secs(2));
         assert_eq!(active(), displays, "still there after drop");

@@ -26,8 +26,10 @@ because two processes exist.
   restart the app and allow it once more.
 - **Host:** the installer installs `mpv` (skip with `--no-display`).
 - **A real extended desktop:** choose **Extend** next to Screen. While it
-  streams, the app adds a display of its own (1080p for Smooth, 720p for
-  Light), to the right of your main screen: drag windows off the right
+  streams, the app adds a display of its own, as wide as your Mac's screen
+  (at most 1080p for Smooth, 720p for Light; the laptop scales it to fill its
+  screen, so the pointer crosses it as quickly as your own), to the right of
+  your main screen: drag windows off the right
   edge onto it like any monitor, or rearrange it in System Settings →
   Displays. Stopping the stream removes it and its windows come
   back. **Mirror** shares a screen as it is.

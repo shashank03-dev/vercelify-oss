@@ -58,7 +58,10 @@ it("extends the desktop: a new display is made and that screen is streamed", asy
   const made = sent.find((c) => c.cmd === "extend_display_start");
   expect(made?.args).toMatchObject({ width: 1920, height: 1080, fps: 60 });
   const start = sent.find((c) => c.cmd === "sender_start");
-  expect((start?.args?.config as { screen_index: number }).screen_index).toBe(4);
+  const config = start?.args?.config as { screen_index: number; width: number | null };
+  expect(config.screen_index).toBe(4);
+  // Sent at the new display's own size, not scaled back up to the quality's.
+  expect(config.width).toBeNull();
   ua.mockRestore();
   stopped.capture = true;
 });
