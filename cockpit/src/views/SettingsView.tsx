@@ -1,8 +1,8 @@
-import { KeyRound, Laptop, LogOut, Monitor, Moon, Palette, PlugZap, Server, Sun, Wrench } from "lucide-react";
+import { ChevronDown, KeyRound, LogOut, Monitor, Moon, Palette, PlugZap, Server, Sun, Wrench } from "lucide-react";
 import { useState } from "react";
 import { AlertsCard, AuditCard, BackupsCard, DevicesCard, DomainCard, PowerGuardCard } from "../components/ServerCare";
 import { useToast } from "../components/Toast";
-import { Button, Card, cx, Field, InlineCode, PageHeader, StatusDot, Tabs, TextInput } from "../components/ui";
+import { Button, Card, cx, Field, InlineCode, PageHeader, StatusDot, TextInput } from "../components/ui";
 import { local, pairingToSettings, settings as settingsApi } from "../lib/api";
 import { usePoll } from "../lib/hooks";
 import { useNav } from "../lib/nav";
@@ -18,7 +18,6 @@ export function SettingsView() {
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const tools = usePoll(() => local.tools(), 0);
-  const [section, setSection] = useState<"server" | "computer">("server");
 
   async function save(s: CockpitSettings) {
     setBusy(true);
@@ -53,38 +52,26 @@ export function SettingsView() {
 
   return (
     <>
-      <PageHeader title="Settings" subtitle="What the server does on its own, and how this computer connects to it." />
-      <Tabs
-        className="mb-6 border-b border-line"
-        label="settings section"
-        value={section}
-        onChange={setSection}
-        items={[
-          { value: "server", label: settings.hostname, icon: <Server />, testId: "settings-server" },
-          { value: "computer", label: "This computer", icon: <Laptop />, testId: "settings-computer" },
-        ]}
-      />
-      {section === "server" ? (
-        <>
-          <p className="mb-4 text-[13px] text-fg-muted">
-            Alerts, power, backups and access. These live on {settings.hostname} and keep working with this app closed.
-          </p>
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-            <div className="space-y-6">
-              <AlertsCard />
-              <PowerGuardCard />
-              <DevicesCard />
-            </div>
-            <div className="space-y-6">
-              <BackupsCard />
-              <DomainCard />
-              <AuditCard />
-            </div>
-          </div>
-        </>
-      ) : (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <div className="space-y-6">
+      <PageHeader title="Settings" subtitle="Backups, alerts and access." />
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className="space-y-3">
+          <AlertsCard />
+          <PowerGuardCard />
+          <DevicesCard />
+        </div>
+        <div className="space-y-3">
+          <BackupsCard />
+          <DomainCard />
+          <AuditCard />
+        </div>
+      </div>
+      <details className="group mt-6">
+        <summary className="mb-3 flex cursor-pointer list-none items-center gap-2 text-[13px] font-medium text-fg-muted [&::-webkit-details-marker]:hidden" data-testid="settings-computer">
+          <ChevronDown className="size-4 transition group-open:rotate-180" />
+          This computer
+        </summary>
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+          <div className="space-y-3">
             <Card
               title="Connection"
               description={`${settings.hostname}${servers.length > 1 ? ` · one of ${servers.length} servers (switch in the sidebar)` : ""}`}
@@ -127,7 +114,7 @@ export function SettingsView() {
             </Card>
           </div>
 
-          <div className="space-y-6">
+          <div className="space-y-3">
             <Appearance />
 
             <Card title="Tools on this computer" icon={<Wrench />} description="Used for display streaming and remote desktop">
@@ -152,7 +139,7 @@ export function SettingsView() {
             </Card>
           </div>
         </div>
-      )}
+      </details>
     </>
   );
 }

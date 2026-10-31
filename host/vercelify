@@ -33,7 +33,7 @@ Usage: sudo vercelify <command> [args]
                          Use this laptop's desktop from the Mac (remote desktop): installs
                          and starts Sunshine for the logged-in desktop; the Mac pairs with
                          it by itself (reset-login: forget a Sunshine login made by hand)
-  llm [status|install [ssd|hdd]|pull MODEL|rm MODEL|chat MODEL PROMPT|start|stop|restart]
+  llm [status|install [ssd|hdd]|pull MODEL|rm MODEL|chat MODEL PROMPT|start|stop|restart|--cancel]
                          Local AI models (Ollama) on this machine
   backup [status|setup [--to REPO]…|run|list|restore [SNAP] [--instance]]
                          Encrypted nightly backups (restic) to the HDD, another server
@@ -226,6 +226,15 @@ cmd_llm() {
   local sub=${1:-status}
   (( $# )) && shift
   case "$sub" in
+    --cancel)
+      local jobs id
+      jobs=$(agent_api GET /v1/jobs | jq -r '.[] | select(.status == "running" and (.kind | startswith("llm-"))) | .id')
+      if [[ -z "$jobs" ]]; then info "no running AI jobs to cancel"; return 0; fi
+      while IFS= read -r id; do
+        agent_api DELETE "/v1/jobs/$id" >/dev/null
+        ok "cancellation requested for $id"
+      done <<<"$jobs"
+      ;;
     status)
       local st
       st=$(agent_api GET /v1/llm)

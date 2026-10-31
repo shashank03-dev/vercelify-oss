@@ -550,7 +550,7 @@ case "$cmd" in
     case "${2:-30}" in
       off) api agent PUT "/v1/sleep/$uuid" '{"enabled":false}' >/dev/null
            printf '%s✓%s %s stays awake\n' "$G" "$N" "$1" ;;
-      *[!0-9]*) die "usage: vfy sleep APP [MINUTES|off]" ;;
+      *[!0-9]*) die "usage: vfy sleep APP [MINUTES|off] (5 to 1440 minutes)" ;;
       *) api agent PUT "/v1/sleep/$uuid" "$(jq -nc --argjson m "${2:-30}" '{enabled: true, idle_minutes: $m}')" >/dev/null
          printf '%s✓%s %s sleeps after %s idle minutes; the next visit wakes it\n' "$G" "$N" "$1" "${2:-30}" ;;
     esac

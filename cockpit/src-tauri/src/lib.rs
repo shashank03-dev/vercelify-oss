@@ -101,6 +101,43 @@ fn load_config_file(path: &std::path::Path) -> (CockpitConfig, Option<String>) {
     (CockpitConfig::default(), Some(note))
 }
 
+/// Where a private download goes: `dir/name` with only safe characters,
+/// numbered (`name-2.txt`…) rather than replacing a file already there.
+fn private_download_path(dir: &std::path::Path, filename: &str) -> PathBuf {
+    let clean: String = filename
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    let clean = clean.trim_start_matches('.');
+    let clean = if clean.is_empty() { "vercelify.txt" } else { clean };
+    let (stem, ext) = clean.rsplit_once('.').unwrap_or((clean, "txt"));
+    let mut path = dir.join(format!("{stem}.{ext}"));
+    let mut n = 2;
+    while path.symlink_metadata().is_ok() {
+        path = dir.join(format!("{stem}-{n}.{ext}"));
+        n += 1;
+    }
+    path
+}
+
+/// Save a secret the user asked for (a backup recovery kit) in Downloads,
+/// readable only by them (0600). Returns where it went.
+#[tauri::command]
+fn save_private_file(filename: String, text: String) -> CmdResult<String> {
+    let home = std::env::var_os("HOME").map(PathBuf::from).ok_or("no home folder")?;
+    let dir = home.join("Downloads");
+    std::fs::create_dir_all(&dir).map_err(|e| format!("can't open {}: {e}", dir.display()))?;
+    let path = private_download_path(&dir, &filename);
+    write_private(&path, &text).map_err(|e| format!("can't save {}: {e}", path.display()))?;
+    Ok(path.display().to_string())
+}
+
 /// The note about an unreadable settings file, once.
 #[tauri::command]
 fn config_notice(state: State<'_, AppState>) -> Option<String> {
@@ -631,6 +668,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             config_notice,
+            save_private_file,
             mesh_start,
             settings_load,
             settings_save,
@@ -709,6 +747,22 @@ mod release_tests {
 mod settings_tests {
     use super::*;
     use std::os::unix::fs::{symlink, PermissionsExt};
+
+    #[test]
+    fn a_private_download_never_replaces_a_file_and_stays_in_its_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let first = private_download_path(dir.path(), "vercelify-recovery-dell.txt");
+        assert_eq!(first, dir.path().join("vercelify-recovery-dell.txt"));
+        write_private(&first, "kit").unwrap();
+        assert_eq!(
+            private_download_path(dir.path(), "vercelify-recovery-dell.txt"),
+            dir.path().join("vercelify-recovery-dell-2.txt")
+        );
+        let odd = private_download_path(dir.path(), "../../etc/passwd");
+        assert_eq!(odd.parent(), Some(dir.path()), "{odd:?}");
+        let mode = std::fs::metadata(&first).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
 
     #[test]
     fn saving_credentials_replaces_a_public_file_with_a_private_one() {

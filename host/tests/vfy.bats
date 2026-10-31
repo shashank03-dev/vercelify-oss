@@ -57,6 +57,7 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   [[ "$output" == *"5 minutes to 24 hours"* ]]
   run "$VFY" sleep blog soon
   [ "$status" -ne 0 ]
+  [[ "$output" == *"5 to 1440 minutes"* ]]
 }
 
 @test "config check reads vercel.json and vercelify.json from a folder" {

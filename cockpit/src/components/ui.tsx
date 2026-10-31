@@ -71,6 +71,7 @@ export function Card({
   testId,
   flush,
   spotlight,
+  collapsible,
 }: {
   children: ReactNode;
   className?: string;
@@ -82,8 +83,27 @@ export function Card({
   /** No body padding (tables and lists that run edge to edge). */
   flush?: boolean;
   spotlight?: boolean;
+  /** Starts closed; the header opens it. */
+  collapsible?: boolean;
 }) {
   const onMove = useSpotlight();
+  if (collapsible) {
+    return (
+      <details className={cx("group rounded-xl border border-line bg-surface", className)} data-testid={testId}>
+        <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 px-4 py-2 [&::-webkit-details-marker]:hidden">
+          <span className="min-w-0">
+            <span className="flex items-center gap-2 text-[13px] font-medium text-fg">
+              {icon && <span className="text-fg-dim [&>svg]:size-4">{icon}</span>}
+              {title}
+            </span>
+            {description && <span className="mt-0.5 block text-xs text-fg-dim">{description}</span>}
+          </span>
+          <ChevronDown className="size-4 shrink-0 text-fg-dim transition group-open:rotate-180" />
+        </summary>
+        <div className={cx("border-t border-line", !flush && "p-4")}>{children}</div>
+      </details>
+    );
+  }
   return (
     <section
       className={cx("rounded-xl border border-line bg-surface", spotlight && "spotlight", className)}

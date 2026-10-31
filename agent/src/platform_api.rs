@@ -94,6 +94,7 @@ pub fn router() -> Router<AppState> {
             "/platform/databases/{db}",
             get(db_get).patch(db_patch).delete(db_delete),
         )
+        .route("/platform/databases/{db}/status", get(db_runtime_status))
         .route("/platform/databases/{db}/link", post(db_link))
         .route("/platform/databases/{db}/move", post(db_move))
         .route("/platform/databases/{db}/backups", get(db_backups).post(db_backup_run))
@@ -1302,6 +1303,26 @@ async fn db_get(
 ) -> ApiResult<Database> {
     check_reveal(&actor, &q)?;
     Ok(Json(tx(&s, move |c, k| databases::get(c, k, &db, q.reveal)).await?))
+}
+
+async fn db_runtime_status(State(s): State<AppState>, Path(db): Path<String>) -> ApiResult<Value> {
+    let d = tx(&s, move |c, k| databases::get(c, k, &db, false)).await?;
+    let p = platform(&s)?;
+    let runtime = p
+        .engine
+        .deployer
+        .docker
+        .inspect(&d.container)
+        .await
+        .map_err(AppError::from)?;
+    let operation = s
+        .jobs
+        .list()
+        .into_iter()
+        .find(|j| j.kind == "database" && j.target.as_deref() == Some(d.id.as_str()));
+    Ok(Json(
+        json!({ "state": runtime.map(|r| r.status).unwrap_or_else(|| "missing".into()), "operation": operation }),
+    ))
 }
 
 /// Start (or restart) a database in the background; the API answers at once.

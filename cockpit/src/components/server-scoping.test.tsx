@@ -2,6 +2,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import type { ReactNode } from "react";
 import { SessionProvider } from "../lib/session";
 import type { CockpitSettings, DisplayStatus } from "../types";
+import { ServersView } from "../views/ServersView";
 import { DisplayCaster } from "./DisplayCaster";
 import { ExplainFailure } from "./ExplainFailure";
 import { ToastProvider } from "./Toast";
@@ -11,6 +12,7 @@ const wire = vi.hoisted(() => ({
   discoveryFinished: false, streams: 0, selected: "server-a", blocked: "", release: () => {},
   requests: [] as { host: string; path: string; method?: string }[],
 }));
+vi.mock("../lib/release", () => ({ useLatestRelease: () => ({ version: "0.1.0" }) }));
 vi.mock("../lib/open", () => ({ openExternal: async (url: string) => { wire.opens.push(url); } }));
 vi.mock("../lib/live", () => ({
   useLive: () => ({ asleep: new Set(), system: { data: undefined }, alerts: { data: undefined }, jobs: [], health: { data: { capabilities: [] } } }),
@@ -123,4 +125,11 @@ it("attempts receiver cleanup when the start response is lost", async () => {
   render(<Page><DisplayCaster /></Page>);
   fireEvent.click(await screen.findByTestId("start-extend"));
   await waitFor(() => expect(wire.requests.some((r) => r.path === "/v1/display/receiver/stop")).toBe(true));
+});
+
+it("an identical stable version does not reinstall the server", async () => {
+  render(<Page><ServersView /></Page>);
+  fireEvent.click(await screen.findByLabelText("Update Vercelify (agent 0.1.0)"));
+  expect(await screen.findByText("Already up to date")).toBeInTheDocument();
+  expect(wire.requests.some((r) => r.path === "/v1/update" && r.method === "POST")).toBe(false);
 });

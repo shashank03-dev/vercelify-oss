@@ -4,7 +4,7 @@ import { HealthChecks } from "../components/HealthChecks";
 import { MeshNetwork } from "../components/MeshNetwork";
 import { PlatformServers } from "../components/PlatformServers";
 import { useToast } from "../components/Toast";
-import { Button, Card, ErrorNote, IconButton, Meter, PageHeader, PixelWave, ShimmerText, StatusDot, StatusText } from "../components/ui";
+import { Button, Card, ErrorNote, IconButton, Meter, PageHeader, PixelWave, ShimmerText, Select, StatusDot, StatusText } from "../components/ui";
 import { agentOn, isWorker } from "../lib/api";
 import { platformOn } from "../lib/platform";
 import { compareVersions, newestVersion } from "../lib/caps";
@@ -16,12 +16,16 @@ import { useSession } from "../lib/session";
 import { toCockpitError } from "../lib/transport";
 import type { CockpitSettings, UpdateStatus } from "../types";
 
+/** "" keeps the channel each server was installed with (install.env). */
+type Channel = "" | "stable" | "edge";
+
 export function ServersView() {
   const { servers, settings, addServer } = useSession();
   const toast = useToast();
   // Bumped by "Update all" so every card starts following its update.
   const [updateAll, setUpdateAll] = useState(0);
   const [updatingAll, setUpdatingAll] = useState(false);
+  const [channel, setChannel] = useState<Channel>("");
   // Agents older than the newest release (or than another server) get an "update available" note.
   const [versions, setVersions] = useState<Record<string, string>>({});
   const release = useLatestRelease();
@@ -30,9 +34,12 @@ export function ServersView() {
   async function startAll() {
     setUpdatingAll(true);
     const failed: string[] = [];
+    let started = 0;
     for (const s of servers) {
+      if (channel !== "edge" && release?.version === versions[s.agent_url]) continue;
       try {
-        await agentOn(s.agent_url).updateStart();
+        await agentOn(s.agent_url).updateStart(channel || undefined);
+        started++;
       } catch (e) {
         failed.push(`${s.hostname}: ${toCockpitError(e).message}`);
       }
@@ -40,16 +47,22 @@ export function ServersView() {
     setUpdatingAll(false);
     setUpdateAll((n) => n + 1);
     if (failed.length) toast.bad(`Could not start every update — ${failed.join("; ")}`);
-    else toast.ok(`Updating ${servers.length} server${servers.length === 1 ? "" : "s"}; apps keep running`);
+    else if (!started) toast.info("Already up to date");
+    else toast.ok(`Updating ${started} server${started === 1 ? "" : "s"}; apps keep running`);
   }
 
   return (
     <>
       <PageHeader
         title="Servers"
-        subtitle="Every old laptop and PC you've connected. Switch to one to deploy, run AI models or check its health, or add workers to a main server so one dashboard deploys to all of them."
+        subtitle="Connected machines, their health and update channel."
         actions={
           <>
+            <Select aria-label="Update channel" value={channel} onChange={(e) => setChannel(e.target.value as Channel)}>
+              <option value="">Each server's channel</option>
+              <option value="stable">Stable</option>
+              <option value="edge">Edge</option>
+            </Select>
             <Button icon={<ArrowUpCircle />} busy={updatingAll} onClick={() => void startAll()} data-testid="update-all">
               Update all
             </Button>
@@ -67,6 +80,8 @@ export function ServersView() {
             active={s.agent_url === settings.agent_url}
             follow={updateAll}
             newest={newest}
+            channel={channel}
+            stableVersion={release?.version}
             onVersion={(v) => setVersions((p) => (p[s.agent_url] === v ? p : { ...p, [s.agent_url]: v }))}
           />
         ))}
@@ -98,12 +113,16 @@ function ServerCard({
   active,
   follow,
   newest,
+  channel,
+  stableVersion,
   onVersion,
 }: {
   s: CockpitSettings;
   active: boolean;
   follow: number;
   newest?: string;
+  channel: Channel;
+  stableVersion?: string;
   onVersion: (v: string) => void;
 }) {
   const { select, remove, revision } = useSession();
@@ -117,7 +136,7 @@ function ServerCard({
   // The workers this main server places apps on.
   const pool = usePoll(() => (worker ? Promise.resolve([]) : platformOn(s.agent_url).nodes().then((n) => n.filter((x) => x.role === "worker"))), worker ? 0 : 30_000, [s.agent_url, revision]);
   const doctor = usePoll(() => api.doctor(), 60_000, [s.agent_url, revision]);
-  const upd = useUpdate(s, follow, () => void Promise.all([sys.refresh(), doctor.refresh()]));
+  const upd = useUpdate(s, follow, () => void Promise.all([sys.refresh(), doctor.refresh()]), channel);
   const d = sys.data;
   const online = !!d && !sys.error;
   const version = d?.host.agent_version;
@@ -126,6 +145,8 @@ function ServerCard({
     // onVersion is a new closure each render; the version is what matters.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version]);
+  // A release build equal to the newest release has nothing to install (an edge build carries +sha).
+  const currentStable = channel !== "edge" && !!stableVersion && version === stableVersion;
   const behind = !!version && !!newest && compareVersions(version, newest) < 0;
   const ssd = d?.disks.find((x) => x.role === "system");
   const hdd = d?.disks.find((x) => x.role === "storage");
@@ -261,7 +282,7 @@ function ServerCard({
               {version} → {newest}
             </span>
           )}
-          <IconButton label={`Update Vercelify (agent ${d?.host.agent_version ?? "?"})`} disabled={upd.busy || !!upd.status?.running} onClick={() => void upd.start()}>
+          <IconButton label={`Update Vercelify (agent ${d?.host.agent_version ?? "?"})`} disabled={upd.busy || !!upd.status?.running} onClick={() => currentStable ? toast.info("Already up to date") : void upd.start()}>
             <ArrowUpCircle />
           </IconButton>
         </div>
@@ -303,7 +324,7 @@ function Metric({ label, value, icon, children }: { label: string; value: string
 }
 
 /** Follow `vercelify update` on one server; the agent restarts midway, so polls may fail for a moment. */
-function useUpdate(s: CockpitSettings, follow: number, onFinished: () => void) {
+function useUpdate(s: CockpitSettings, follow: number, onFinished: () => void, channel: Channel) {
   const toast = useToast();
   const api = agentOn(s.agent_url);
   const [status, setStatus] = useState<UpdateStatus>();
@@ -347,7 +368,7 @@ function useUpdate(s: CockpitSettings, follow: number, onFinished: () => void) {
   async function start() {
     setBusy(true);
     try {
-      setStatus(await api.updateStart());
+      setStatus(await api.updateStart(channel || undefined));
       setRun((r) => r + 1);
       toast.info(`Updating ${s.hostname}; apps keep running`);
     } catch (e) {

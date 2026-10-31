@@ -39,6 +39,7 @@ case "$1" in
       echo "Error: No such object: $last" >&2; exit 1
     fi
     ;;
+  container) echo "Error: No such container" >&2; exit 1 ;;
   pull|run|rm|network) echo "ok" ;;
   image) exit 0 ;;
   images) exit 0 ;;

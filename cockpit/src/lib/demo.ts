@@ -420,7 +420,7 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
       pairing_open: false,
       api_version: 2,
       capabilities: [
-        "doctor", "update", "rollback", "hardware", "alerts", "metrics", "uptime", "tokens", "audit", "backup", "previews",
+        "doctor", "update", "rollback", "hardware", "alerts", "metrics", "uptime", "tokens", "audit", "backup", "backup-recovery-kit", "previews",
         "auto-rollback", "events", "jobs", "sleep", "power-guard", "domain", "projects", "roles", "sunshine-pair",
         ...(h.hostname === ENGINE_DOWN_HOST || isWorkerHost(h) ? [] : ["platform"]),
       ],
@@ -525,6 +525,9 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
   }
   if (p === "/v1/audit") return audit;
   if (p === "/v1/backup") return backup;
+  if (p === "/v1/backup/recovery-kit") {
+    return { filename: "vercelify-recovery-dell-e7450.txt", text: "# Vercelify backup recovery kit (demo)\nRESTIC_PASSWORD='demo'\n" };
+  }
   if (p === "/v1/backup/run") {
     backup.running = true;
     const job = startJob("backup", "Backup", null);
@@ -616,6 +619,8 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
       ];
     case "capture_screens":
       return [{ index: 1, name: "Built-in Retina Display" }];
+    case "save_private_file":
+      return `~/Downloads/${String(args?.filename ?? "vercelify.txt")}`;
     case "sender_status":
     case "moonlight_pair":
     case "moonlight_status":

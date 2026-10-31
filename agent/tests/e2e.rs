@@ -1050,7 +1050,7 @@ fn pairing_llm_and_doctor() {
     );
     assert!(calls.contains("docker restart vercelify-ollama"), "{calls}");
     assert!(calls.contains("systemd-run --unit=vercelify-update"), "{calls}");
-    assert!(calls.contains("vercelify update noninteractive=1"), "{calls}");
+    assert!(calls.contains("vercelify update --stable noninteractive=1"), "{calls}");
 }
 
 #[test]
@@ -2326,4 +2326,118 @@ fn retained_volumes_can_be_deleted_only_after_their_owner_is_removed() {
     assert_eq!(req(&a, "DELETE", &path, Some(TOKEN), None).0, 200);
     let (_, volumes) = get(&a, "/v1/platform/volumes");
     assert!(volumes.as_array().unwrap().is_empty());
+}
+
+#[test]
+fn cancelling_an_ai_install_stops_its_child_process() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let docker = dir.path().join("docker");
+    let pidfile = dir.path().join("pid");
+    let stub = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/stubs/docker");
+    std::fs::write(
+        &docker,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = pull ]; then echo $$ > '{}'; exec sleep 60; fi\nexec '{}' \"$@\"\n",
+            pidfile.display(),
+            stub.display()
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let a = start_with(&[("VERCELIFY_DOCKER_BIN", docker.to_string_lossy().into_owned())]);
+    let (status, body) = post(&a, "/v1/llm/install", json!({"tier":"ssd"}));
+    assert_eq!(status, 200, "{body}");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while !pidfile.exists() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let pid = std::fs::read_to_string(&pidfile).unwrap();
+    let (_, jobs) = get(&a, "/v1/jobs");
+    let id = jobs
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|j| j["kind"] == "llm-install")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap();
+    let (status, _, _) = req(&a, "DELETE", &format!("/v1/jobs/{id}"), Some(TOKEN), None);
+    // Running, not a zombie waiting for tokio to reap it (Linux): killed is stopped.
+    let alive = || {
+        let out = Command::new("ps")
+            .args(["-o", "stat=", "-p", pid.trim()])
+            .stderr(Stdio::null())
+            .output()
+            .unwrap();
+        let stat = String::from_utf8_lossy(&out.stdout);
+        out.status.success() && !stat.trim().is_empty() && !stat.trim().starts_with('Z')
+    };
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while status == 200 && alive() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let stopped = !alive();
+    if !stopped {
+        let _ = Command::new("kill").args(["-KILL", pid.trim()]).status();
+    }
+    assert_eq!(status, 200);
+    assert!(stopped, "cancelled job left its child running");
+    let (_, job) = get(&a, &format!("/v1/jobs/{id}"));
+    assert_eq!(job["status"], "failed");
+    assert!(job["detail"].as_str().unwrap().contains("cancelled"));
+}
+
+#[test]
+fn update_requests_choose_a_channel_without_shell_injection() {
+    let a = start();
+    for channel in ["edge", "stable"] {
+        let (status, body) = post(&a, "/v1/update", json!({"channel":channel}));
+        assert_eq!(status, 200, "{body}");
+        let calls = std::fs::read_to_string(&a.log).unwrap();
+        assert!(calls.contains(&format!("vercelify update --{channel}")));
+    }
+    let (status, _) = post(&a, "/v1/update", json!({"channel":"edge; echo bad"}));
+    assert_eq!(status, 400);
+}
+
+#[test]
+fn database_runtime_reports_missing_containers_instead_of_desired_running() {
+    let a = start_with(&[("VERCELIFY_ENGINE", "platform".into())]);
+    let (status, db) = post(
+        &a,
+        "/v1/platform/databases",
+        json!({"name":"waiting-db","kind":"postgresql"}),
+    );
+    assert_eq!(status, 200, "{db}");
+    assert_eq!(db["desired"], "running");
+    let (status, runtime) = get(&a, "/v1/platform/databases/waiting-db/status");
+    assert_eq!(status, 200);
+    assert_eq!(runtime["state"], "missing");
+}
+
+#[test]
+fn only_an_owner_gets_the_backup_recovery_kit() {
+    let a = start();
+    let (status, _) = post(&a, "/v1/backup/recovery-kit", json!({}));
+    assert_eq!(status, 400, "not set up yet");
+    write(
+        &a.root,
+        "backup.env",
+        "RESTIC_PASSWORD=s3cret-pw\nBACKUP_REPOS=/mnt/storage/backups/restic\n",
+    );
+    let (_, status_body) = get(&a, "/v1/backup");
+    assert!(!status_body.to_string().contains("s3cret-pw"), "{status_body}");
+    for role in ["viewer", "deployer"] {
+        let (_, t) = post(&a, "/v1/tokens", json!({"name": role, "role": role}));
+        let secret = t["secret"].as_str().unwrap();
+        let (status, _, _) = req(&a, "POST", "/v1/backup/recovery-kit", Some(secret), Some(json!({})));
+        assert_eq!(status, 403, "{role}");
+    }
+    let (status, kit) = post(&a, "/v1/backup/recovery-kit", json!({}));
+    assert_eq!(status, 200, "{kit}");
+    assert!(kit["text"].as_str().unwrap().contains("RESTIC_PASSWORD='s3cret-pw'"));
+    assert!(kit["filename"].as_str().unwrap().starts_with("vercelify-recovery-"));
+    let (_, audit) = get(&a, "/v1/audit");
+    assert!(audit.to_string().contains("/v1/backup/recovery-kit"), "{audit}");
 }

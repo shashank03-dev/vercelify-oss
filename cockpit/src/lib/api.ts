@@ -150,6 +150,8 @@ function makeAgent(server?: string) {
     audit: (limit = 50) => req<AuditEntry[]>("GET", `/v1/audit?limit=${limit}`),
     backup: () => req<BackupStatus>("GET", "/v1/backup"),
     backupRun: () => req<BackupStatus>("POST", "/v1/backup/run", {}),
+    /** Owner-only: the backup password and repositories, to keep off the server. */
+    backupRecoveryKit: () => req<{ filename: string; text: string }>("POST", "/v1/backup/recovery-kit", {}),
     jobs: () => req<Job[]>("GET", "/v1/jobs"),
     /** The live event stream (newline-delimited JSON); see `useLive`. */
     events: (onEvent: (e: AgentEvent) => void) =>
@@ -178,7 +180,7 @@ function makeAgent(server?: string) {
     removeProject: (appUuid: string) => req<{ removed: boolean }>("DELETE", `/v1/projects/${q(appUuid)}`),
     runCron: (appUuid: string, path: string) => req<Job>("POST", `/v1/projects/${q(appUuid)}/crons/run`, { path }),
     update: () => req<UpdateStatus>("GET", "/v1/update"),
-    updateStart: () => req<UpdateStatus>("POST", "/v1/update", {}),
+    updateStart: (channel?: "edge" | "stable") => req<UpdateStatus>("POST", "/v1/update", channel ? { channel } : {}),
   };
 }
 
@@ -201,6 +203,8 @@ export const agentOn = (server: string) => makeAgent(server);
 export const local = {
   system: () => call<SystemSnapshot>("local_system"),
   tools: () => call<ToolStatus[]>("tools_status"),
+  /** Save a secret file for the user (0600 in Downloads); returns where it went. */
+  savePrivateFile: (filename: string, text: string) => call<string>("save_private_file", { filename, text }),
   captureScreens: () => call<CaptureScreen[]>("capture_screens"),
   senderStart: (config: SenderConfig) => call<ProcessStatus>("sender_start", { config }),
   senderStop: () => call<ProcessStatus>("sender_stop"),

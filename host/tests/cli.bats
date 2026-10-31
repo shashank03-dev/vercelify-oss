@@ -296,3 +296,10 @@ EOF
   [ "$status" -eq 0 ]
   [[ "$output" == "vercelify 0.2.5+main.1a2b3c4"* ]]
 }
+
+@test "llm --cancel stops running AI jobs" {
+  run "$CLI" llm --cancel
+  [ "$status" -eq 0 ]
+  grep -q 'DELETE /v1/jobs/job-ai' "$T/requests.log"
+  [[ "$output" == *"cancel"* ]]
+}

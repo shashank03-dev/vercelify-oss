@@ -39,6 +39,7 @@ import {
   Webhook,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { DatabaseStatus } from "../components/DatabaseStatus";
 import { GithubAppModal, WebhookModal } from "../components/GitIntegrations";
 import { TerminalView } from "../components/Terminal";
 import { useToast } from "../components/Toast";
@@ -1805,7 +1806,7 @@ function DatabasesCard({
                     {d.public_port ? ` · public on :${d.public_port}` : ""}
                   </span>
                 </span>
-                <StatusText health={d.desired === "running" ? "ok" : "idle"} label={d.desired === "running" ? "Running" : "Stopped"} className="w-28 shrink-0" />
+                <DatabaseStatus id={d.id} client={client} />
               </button>
             ))}
           </div>
@@ -1929,6 +1930,7 @@ function DatabaseDetail({ db, apps, client, onChanged, onClose }: { db: Database
         </div>
       </Modal>
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-5">
+        <DatabaseStatus id={db.id} client={client} />
         <Card title="Connect" description="Apps of this project reach it by name. Use the reference in a variable so the password never sits in your app's settings.">
           <div className="space-y-3">
             <div className="flex items-center gap-2">

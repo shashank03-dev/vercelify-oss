@@ -227,7 +227,6 @@ fn finish(j: &mut Job, result: Result<String, String>) {
 }
 
 impl JobHandle {
-    #[cfg(test)]
     pub fn id(&self) -> &str {
         &self.id
     }

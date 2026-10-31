@@ -167,9 +167,10 @@ pub fn router(state: AppState) -> Router {
         .route("/uptime", get(uptime))
         .route("/backup", get(backup_status))
         .route("/backup/run", post(backup_run))
+        .route("/backup/recovery-kit", post(backup_recovery_kit))
         .route("/update", get(update_status).post(update_start))
         .route("/jobs", get(jobs_list))
-        .route("/jobs/{id}", get(job_get))
+        .route("/jobs/{id}", get(job_get).delete(job_cancel))
         .route("/sleep", get(sleep_status))
         .route("/sleep/proxy", post(sleep_proxy))
         .route("/sleep/{app}", put(sleep_set))
@@ -269,6 +270,7 @@ pub const CAPABILITIES: &[&str] = &[
     "tokens",
     "audit",
     "backup",
+    "backup-recovery-kit",
     "previews",
     "auto-rollback",
     "images",
@@ -374,6 +376,14 @@ async fn uptime(State(s): State<AppState>) -> Json<Vec<UptimeCheck>> {
 
 async fn backup_status(State(s): State<AppState>) -> Json<BackupStatus> {
     Json(crate::update::backup_status(&s.config).await)
+}
+
+/// Owner-only (a POST): the restic password and repositories, as a file.
+async fn backup_recovery_kit(State(s): State<AppState>) -> ApiResult<Value> {
+    let kit = crate::update::backup_recovery_kit(&s.config, &crate::mesh::hostname())?;
+    Ok(Json(
+        json!({ "filename": format!("vercelify-recovery-{}.txt", crate::mesh::hostname()), "text": kit }),
+    ))
 }
 
 async fn backup_run(State(s): State<AppState>) -> ApiResult<BackupStatus> {
@@ -566,8 +576,14 @@ async fn update_status(State(s): State<AppState>) -> Json<UpdateStatus> {
     Json(update::status(&s.config).await)
 }
 
-async fn update_start(State(s): State<AppState>) -> ApiResult<UpdateStatus> {
-    let st = update::start(&s.config).await?;
+#[derive(Deserialize, Default)]
+struct UpdateRequest {
+    channel: Option<String>,
+}
+
+async fn update_start(State(s): State<AppState>, request: Option<Json<UpdateRequest>>) -> ApiResult<UpdateStatus> {
+    let channel = request.and_then(|Json(r)| r.channel);
+    let st = update::start(&s.config, channel.as_deref()).await?;
     let id = s
         .jobs
         .start("update", format!("Update from {}", crate::VERSION), None)
@@ -584,6 +600,17 @@ async fn update_start(State(s): State<AppState>) -> ApiResult<UpdateStatus> {
 
 async fn jobs_list(State(s): State<AppState>) -> Json<Vec<Job>> {
     Json(s.jobs.list())
+}
+
+async fn job_cancel(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
+    let job = s.jobs.get(&id).ok_or_else(|| AppError::not_found("no such job"))?;
+    if job.status != vercelify_core::JobStatus::Running {
+        return Err(AppError::conflict("this job has already finished"));
+    }
+    if !s.llm.cancel_job(&id).await {
+        return Err(AppError::conflict("this job cannot be cancelled safely"));
+    }
+    Ok(Json(json!({ "ok": true })))
 }
 
 async fn job_get(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Job> {

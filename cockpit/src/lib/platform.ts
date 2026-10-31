@@ -153,6 +153,7 @@ export function platformOn(server?: string) {
     runTask: (app: string, id: string) => req<{ status: string }>("POST", `/apps/${q(app)}/tasks/${q(id)}/run`, {}, 900),
 
     databases: (reveal = false) => req<Database[]>("GET", `/databases${reveal ? "?reveal=true" : ""}`),
+    databaseStatus: (db: string) => req<{ state: string; operation?: { status: string; detail?: string | null } | null }>("GET", `/databases/${q(db)}/status`),
     database: (db: string, reveal = false) => req<Database>("GET", `/databases/${q(db)}${reveal ? "?reveal=true" : ""}`),
     createDatabase: (r: DatabaseCreate) => req<Database>("POST", "/databases", r, 60),
     patchDatabase: (db: string, p: DatabasePatch) => req<Database>("PATCH", `/databases/${q(db)}`, p),

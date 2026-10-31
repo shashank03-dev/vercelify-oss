@@ -174,6 +174,7 @@ struct TaskJob {
     handle: crate::events::JobHandle,
     status: String,
     pct: Option<u32>,
+    cancel: Option<tokio::sync::oneshot::Sender<()>>,
 }
 
 pub struct Llm {
@@ -181,6 +182,12 @@ pub struct Llm {
     tasks: Mutex<Vec<LlmTask>>,
     jobs: std::sync::OnceLock<Arc<crate::events::Jobs>>,
     task_jobs: Mutex<std::collections::HashMap<(String, String), TaskJob>>,
+}
+
+async fn cancellation(cancelled: tokio::sync::oneshot::Receiver<()>) {
+    if cancelled.await.is_err() {
+        std::future::pending::<()>().await;
+    }
 }
 
 impl Llm {
@@ -196,6 +203,14 @@ impl Llm {
     /// Installs and downloads show up in the activity list.
     pub fn set_jobs(&self, j: Arc<crate::events::Jobs>) {
         let _ = self.jobs.set(j);
+    }
+
+    pub async fn cancel_job(&self, id: &str) -> bool {
+        let mut jobs = self.task_jobs.lock().await;
+        jobs.values_mut()
+            .find(|j| j.handle.id() == id)
+            .and_then(|j| j.cancel.take())
+            .is_some_and(|cancel| cancel.send(()).is_ok())
     }
 
     fn api(&self, path: &str) -> String {
@@ -304,7 +319,12 @@ impl Llm {
     }
 
     /// Register a task, refusing a duplicate that is still running.
-    async fn begin(&self, kind: &str, target: &str, status: &str) -> Result<(), AppError> {
+    async fn begin(
+        &self,
+        kind: &str,
+        target: &str,
+        status: &str,
+    ) -> Result<tokio::sync::oneshot::Receiver<()>, AppError> {
         let mut tasks = self.tasks.lock().await;
         if tasks.iter().any(|t| !t.done && t.kind == kind && t.target == target) {
             return Err(AppError::conflict(format!(
@@ -323,6 +343,7 @@ impl Llm {
             error: None,
             started_at: now(),
         });
+        let (cancel, cancelled) = tokio::sync::oneshot::channel();
         if let Some(jobs) = self.jobs.get() {
             let title = if kind == "pull" {
                 format!("Download AI model {target}")
@@ -337,6 +358,7 @@ impl Llm {
                     handle,
                     status: status.into(),
                     pct: None,
+                    cancel: Some(cancel),
                 },
             );
         }
@@ -349,7 +371,7 @@ impl Llm {
                 None => break,
             }
         }
-        Ok(())
+        Ok(cancelled)
     }
 
     async fn update(&self, kind: &str, target: &str, f: impl FnOnce(&mut LlmTask)) {
@@ -436,10 +458,13 @@ impl Llm {
         )
         .await?;
         let image = self.cfg.ollama_image.clone();
-        self.begin("install", &image, "downloading the Ollama image").await?;
+        let cancelled = self.begin("install", &image, "downloading the Ollama image").await?;
         let me = self.clone();
         tokio::spawn(async move {
-            let r = me.do_install(&vol.source).await;
+            let r = tokio::select! {
+                r = me.do_install(&vol.source) => r,
+                _ = cancellation(cancelled) => Err("cancelled by user".into()),
+            };
             if let Err(e) = &r {
                 tracing::warn!("ollama install failed: {e}");
             }
@@ -547,11 +572,14 @@ impl Llm {
             ));
         }
         self.require_ready().await?;
-        self.begin("pull", model, "starting download").await?;
+        let cancelled = self.begin("pull", model, "starting download").await?;
         let me = self.clone();
         let model = model.to_string();
         tokio::spawn(async move {
-            let r = me.do_pull(&model).await;
+            let r = tokio::select! {
+                r = me.do_pull(&model) => r,
+                _ = cancellation(cancelled) => Err("cancelled by user".into()),
+            };
             me.update("pull", &model, |t| {
                 if t.done {
                     return; // Ollama already reported success or an error
@@ -564,6 +592,14 @@ impl Llm {
                 });
             })
             .await;
+            let error = me
+                .tasks
+                .lock()
+                .await
+                .iter()
+                .find(|t| t.kind == "pull" && t.target == model)
+                .and_then(|t| t.error.clone());
+            me.finish("pull", &model, error.map_or(Ok(()), Err)).await;
         });
         Ok(())
     }

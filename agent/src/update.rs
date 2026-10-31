@@ -91,7 +91,12 @@ pub async fn status(cfg: &Config) -> UpdateStatus {
     }
 }
 
-pub async fn start(cfg: &Config) -> Result<UpdateStatus, AppError> {
+pub async fn start(cfg: &Config, channel: Option<&str>) -> Result<UpdateStatus, AppError> {
+    let saved = cfg.install_value("channel");
+    let channel = channel.or(saved.as_deref()).unwrap_or("stable");
+    if !matches!(channel, "edge" | "stable") {
+        return Err(AppError::bad_request("update channel must be edge or stable"));
+    }
     if unit_active(cfg).await {
         return Err(AppError::conflict("an update is already running on this server"));
     }
@@ -113,7 +118,7 @@ pub async fn start(cfg: &Config) -> Result<UpdateStatus, AppError> {
     // A previous failed run would block the unit name.
     let _ = run(&cfg.systemctl_bin, &["reset-failed", UNIT], Duration::from_secs(10)).await;
     let script = format!(
-        "{cli} update >>{log} 2>&1; echo $? >{exit}",
+        "{cli} update --{channel} >>{log} 2>&1; echo $? >{exit}",
         cli = sh_quote(&cfg.cli_bin),
         log = sh_quote(&f.log.to_string_lossy()),
         exit = sh_quote(&f.exit.to_string_lossy()),
@@ -247,6 +252,39 @@ pub async fn follow_unit(
     jobs.finish_by_id(&job_id, result(&cfg, &started_at));
 }
 
+/// What it takes to restore this server's backups elsewhere: the restic
+/// password and the repositories, with their credentials (design §15). Only
+/// an owner asks for it (a POST); `GET /v1/backup` never carries it.
+pub fn backup_recovery_kit(cfg: &Config, hostname: &str) -> Result<String, AppError> {
+    let env = crate::config::backup_env_values(&cfg.backup_env);
+    let (Some(pw), Some(repos)) = (env.get("RESTIC_PASSWORD"), env.get("BACKUP_REPOS")) else {
+        return Err(AppError::bad_request(
+            "backups are not set up on this server — run: sudo vercelify backup setup",
+        ));
+    };
+    let first = repos.split_whitespace().next().unwrap_or_default();
+    let mut out = format!(
+        "# Vercelify backup recovery kit for {hostname}, {at}\n\
+         # Keep this file private: with it anyone can read these backups, and\n\
+         # without the password nobody (you included) can restore them.\n\
+         #\n\
+         # On a fresh server (after the one-line install):\n\
+         #   sudo VERCELIFY_BACKUP_PASSWORD={pw_q} vercelify backup setup --to {first}\n\
+         #   sudo vercelify backup restore --instance\n\
+         RESTIC_PASSWORD={pw_q}\n\
+         BACKUP_REPOS={repos_q}\n",
+        at = chrono::Utc::now().format("%Y-%m-%d %H:%M UTC"),
+        pw_q = sh_quote(pw),
+        repos_q = sh_quote(repos),
+    );
+    for k in ["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"] {
+        if let Some(v) = env.get(k) {
+            out.push_str(&format!("{k}={}\n", sh_quote(v)));
+        }
+    }
+    Ok(out)
+}
+
 /// The result `vercelify backup run` wrote, if it is from this run (started
 /// at `started_at`, RFC 3339 like `finished_at`, so they compare as text).
 pub fn backup_result(cfg: &Config, started_at: &str) -> Result<String, String> {
@@ -326,6 +364,30 @@ mod tests {
         assert_eq!(tail(log, 2), vec!["✓ docker ready", "last"]);
         assert_eq!(tail(log, 10).len(), 3);
         assert!(tail("", 5).is_empty());
+    }
+
+    #[test]
+    fn the_recovery_kit_has_what_a_restore_needs() {
+        let dir = tempfile::tempdir().unwrap();
+        let cfg = Config {
+            backup_env: dir.path().join("backup.env"),
+            ..Config::default()
+        };
+        assert!(backup_recovery_kit(&cfg, "dell").is_err(), "nothing set up");
+        std::fs::write(
+            &cfg.backup_env,
+            "RESTIC_PASSWORD='p w$x'\nBACKUP_REPOS=\"/mnt/storage/backups/restic s3:https://s3.example.com/b\"\nAWS_SECRET_ACCESS_KEY=sec\n",
+        )
+        .unwrap();
+        let kit = backup_recovery_kit(&cfg, "dell").unwrap();
+        assert!(kit.contains("recovery kit for dell"), "{kit}");
+        assert!(kit.contains("RESTIC_PASSWORD='p w$x'\n"), "{kit}");
+        assert!(
+            kit.contains("BACKUP_REPOS='/mnt/storage/backups/restic s3:https://s3.example.com/b'"),
+            "{kit}"
+        );
+        assert!(kit.contains("AWS_SECRET_ACCESS_KEY='sec'"), "{kit}");
+        assert!(kit.contains("backup setup --to /mnt/storage/backups/restic"), "{kit}");
     }
 
     #[test]

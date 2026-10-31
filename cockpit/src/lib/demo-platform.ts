@@ -749,6 +749,7 @@ export function platformRoute(req: HttpRequest): unknown {
     }
     const db = findDb(seg[1]);
     switch (seg[2]) {
+      case "status": return { state: db.desired === "running" ? "running" : "exited", operation: null };
       case undefined:
         if (m === "PATCH") {
           Object.assign(db, body, { updated_at: isoNow() });

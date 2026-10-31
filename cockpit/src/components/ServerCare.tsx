@@ -1,6 +1,6 @@
-import { Archive, BellRing, Globe, History, Laptop, Send, ShieldAlert, Thermometer, Trash2 } from "lucide-react";
+import { Archive, BellRing, Globe, History, KeyRound, Laptop, Send, ShieldAlert, Thermometer, Trash2 } from "lucide-react";
 import { useState } from "react";
-import { agent } from "../lib/api";
+import { agent, local } from "../lib/api";
 import { hasCap } from "../lib/caps";
 import { ago, type Health } from "../lib/format";
 import { usePoll } from "../lib/hooks";
@@ -11,7 +11,7 @@ import { toCockpitError } from "../lib/transport";
 import type { Alert, PowerGuardSettings } from "../types";
 import { NeedsUpdate } from "./Hardware";
 import { useToast } from "./Toast";
-import { Button, Card, ErrorNote, Field, IconButton, InlineCode, Loading, LogView, StatusDot, TextInput, Toggle } from "./ui";
+import { Button, Callout, Card, ErrorNote, Field, IconButton, InlineCode, Loading, LogView, StatusDot, TextInput, Toggle } from "./ui";
 
 export function alertHealth(a: Alert): Health {
   if (a.resolved) return "ok";
@@ -113,7 +113,7 @@ export function AlertsCard() {
               void save();
             }}
           >
-            <Field label="Notification URL" hint={<>An ntfy topic (<InlineCode>https://ntfy.sh/a-long-secret-name</InlineCode>), or a Discord/Slack webhook.</>}>
+            <Field label="Notification URL" hint="ntfy topic or Discord/Slack webhook">
               <TextInput value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://ntfy.sh/…" spellCheck={false} data-testid="alerts-url" />
             </Field>
             <Button type="submit" variant="primary" busy={busy === "save"} disabled={!url.trim()}>
@@ -220,6 +220,7 @@ export function BackupsCard() {
   const b = usePoll(() => (supported ? agent.backup() : Promise.resolve(null)), supported ? 15_000 : 0, [supported]);
   useLiveTopic("backup", () => void b.refresh());
   const st = b.data;
+  const [saving, setSaving] = useState(false);
 
   async function run() {
     try {
@@ -231,6 +232,21 @@ export function BackupsCard() {
     }
   }
 
+  async function saveKit() {
+    setSaving(true);
+    try {
+      const kit = await agent.backupRecoveryKit();
+      const where = await local.savePrivateFile(kit.filename, kit.text);
+      toast.ok(`Recovery kit saved to ${where}. Keep it somewhere other than this server`);
+    } catch (e) {
+      toast.bad(toCockpitError(e).message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Only folders on this machine: one dead disk (or a stolen laptop) loses them too.
+  const localOnly = !!st?.targets.length && st.targets.every((t) => t.startsWith("/"));
   const status: Health = !st?.configured ? "warn" : st.running ? "idle" : st.last_ok === false ? "bad" : st.last_ok ? "ok" : "warn";
   return (
     <Card
@@ -272,6 +288,12 @@ export function BackupsCard() {
                   ? `Last backup ${ago(st.last_finished_at)}`
                   : `Last backup failed ${ago(st.last_finished_at)}: ${st.last_error ?? ""}`}
           </p>
+          {localOnly && (
+            <Callout title="On this machine only">
+              If this laptop dies or is lost, the backups go with it. Add another server or an S3 bucket:{" "}
+              <InlineCode>sudo vercelify backup setup --to sftp:root@pi:/mnt/storage/backups/{settings.hostname}</InlineCode>
+            </Callout>
+          )}
           <ul className="space-y-1">
             {st.targets.map((t) => (
               <li key={t} className="truncate font-mono text-xs text-fg-muted">
@@ -280,6 +302,14 @@ export function BackupsCard() {
             ))}
           </ul>
           {st.log_tail.length > 0 && <LogView className="max-h-32">{st.log_tail.join("\n")}</LogView>}
+          {hasCap(health.data, "backup-recovery-kit") && (
+            <div className="flex items-center justify-between gap-3 border-t border-line pt-3">
+              <span className="text-xs text-fg-muted">Without the password nobody can restore these backups. Owners only.</span>
+              <Button size="sm" icon={<KeyRound />} busy={saving} onClick={() => void saveKit()} data-testid="backup-recovery-kit">
+                Save recovery kit
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </Card>
@@ -293,7 +323,7 @@ export function AuditCard() {
   const a = usePoll(() => (supported ? agent.audit(30) : Promise.resolve([])), 0, [supported]);
   if (!supported) return null;
   return (
-    <Card title="Recent changes" icon={<History />} description="Every change made through the agent, and from which device" testId="audit" flush>
+    <Card title="Recent changes" icon={<History />} description="Every change made through the agent, and from which device" testId="audit" flush collapsible>
       {a.loading ? (
         <div className="p-4">
           <Loading rows={2} />
@@ -358,7 +388,7 @@ export function PowerGuardCard() {
 
   const guardHealth: Health = !st ? "idle" : !st.active ? "bad" : st.state?.state === "ok" ? "ok" : st.state?.state ? "warn" : "idle";
   return (
-    <Card title="Power guard" icon={<Thermometer />} description="Keeps the machine safe when it runs hot or the battery runs out" testId="power-guard">
+    <Card title="Power guard" icon={<Thermometer />} description="Thermal and battery limits" testId="power-guard" collapsible>
       {!health.data || (supported && pg.loading) ? (
         <Loading rows={3} />
       ) : !supported ? (

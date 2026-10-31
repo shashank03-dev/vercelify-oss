@@ -151,6 +151,10 @@ the volumes, and starts the agent, whose reconciler brings apps and databases ba
 - **Master key**: 32 random bytes at `/var/lib/vercelify/master.key`, mode 0600, owned by
   root. Created by the installer, or by the agent on first start if missing. Included in
   restic backups (which are themselves encrypted with the user's restic password).
+- **Backup recovery kit**: the restic password lives in `/etc/vercelify/backup.env` (0600)
+  and never appears in `GET /v1/backup`. An owner token can `POST /v1/backup/recovery-kit`
+  (audited like any change) for the password, repositories and S3 keys with restore steps;
+  the Mac app saves it as a 0600 file in Downloads, never over an existing file.
 - **Sealed value** (`secrets::seal`): `0x01 ‖ nonce (24 B) ‖ XChaCha20-Poly1305(ciphertext ‖ tag)`.
   AAD = `"<table>/<column>/<row id>"`, so a value copied into another row or column fails
   to open instead of silently decrypting.
@@ -1072,3 +1076,9 @@ recovering their removed ownership metadata is not implemented.
 When the coordinator has been silent for 30 seconds, devices check its signed
 beacon address every 30 seconds, allowing a replacement quick tunnel to be
 discovered within about a minute without waiting for the old three-minute gate.
+
+AI install and model-download jobs accept `DELETE /v1/jobs/{id}`. Cancellation
+interrupts their pending command/HTTP future; child commands use kill-on-drop,
+and the job/task finishes with “cancelled by user”. Finished jobs and operations
+that cannot be safely interrupted return 409. `vercelify llm --cancel` cancels the
+server's running AI jobs. Normal model-download completion also closes its job.

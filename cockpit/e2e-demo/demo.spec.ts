@@ -273,6 +273,7 @@ test("live: activity, sleeping apps, the domain and power guard", async ({ page 
   await page.getByTestId("nav-settings").click();
   await expect(page.getByTestId("domain")).toContainText("Cloudflare tunnel");
   await expect(page.getByTestId("power-guard")).toContainText("AC power");
+  await page.getByTestId("power-guard").getByText("Power guard").first().click();
   await page.getByTestId("pg-thermal_pause_c").fill("85");
   await page.getByTestId("pg-save").click();
   await expect(page.getByText("Power guard updated")).toBeVisible();
@@ -617,4 +618,36 @@ test("new apps accept Compose content", async ({ page }) => {
   await page.getByTestId("new-compose").fill("services:\n  web:\n    image: nginx:alpine\n    ports:\n      - '80'\n");
   await page.getByTestId("create-app").click();
   await expect(page.getByTestId("app-detail")).toContainText("compose-web");
+});
+
+test("server updates let the user choose edge or stable", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "dell-e7450");
+  await page.getByTestId("nav-servers").click();
+  const channel = page.getByRole("combobox", { name: "Update channel" });
+  await expect(channel).toBeVisible({ timeout: 2000 });
+  await channel.selectOption("edge");
+  await page.getByTestId("update-all").click();
+  await expect(page.getByText(/Updating .*server.*apps keep running/).first()).toBeVisible();
+});
+
+test("Settings keeps server controls on one page with collapsible history", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "dell-e7450");
+  await page.getByTestId("nav-settings").click();
+  await expect(page.getByRole("tablist", { name: "settings section" })).toHaveCount(0);
+  const history = page.getByTestId("audit");
+  await expect(history).not.toHaveAttribute("open");
+  await expect(history.getByText("/v1/update").first()).toBeHidden();
+  await history.getByText("Recent changes").click();
+  await expect(history).toHaveAttribute("open");
+  await expect(history.getByText("/v1/update").first()).toBeVisible();
+});
+
+test("owners can save the backup recovery kit", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "dell-e7450");
+  await page.getByTestId("nav-settings").click();
+  await page.getByTestId("backup-recovery-kit").click();
+  await expect(page.getByText(/Recovery kit saved to .*vercelify-recovery-dell-e7450\.txt/)).toBeVisible();
 });

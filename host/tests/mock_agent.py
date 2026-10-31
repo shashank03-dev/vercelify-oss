@@ -71,6 +71,10 @@ class H(BaseHTTPRequestHandler):
             return self.reply(401, {"error": "missing or invalid agent token"})
         body = json.loads(raw) if raw else {}
         p = self.path
+        if p == "/v1/jobs" and method == "GET":
+            return self.reply(200, [{"id": "job-ai", "kind": "llm-install", "status": "running"}])
+        if p == "/v1/jobs/job-ai" and method == "DELETE":
+            return self.reply(200, {"ok": True})
         if method == "GET" and p.startswith("/v1/doctor"):
             return self.reply(200, {"role": "main", "agent_version": "0.2.0", "checks": [
                 {"id": "docker", "label": "Docker", "status": "ok", "detail": "Docker 27.3.1", "fix": None},

@@ -172,11 +172,25 @@ pub struct HealthCheck {
     pub command: Option<Vec<String>>,
 }
 
+fn runtime_port<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<u16>, D::Error> {
+    let value = Option::<i64>::deserialize(deserializer)?;
+    value
+        .map(|port| {
+            if (1..=65535).contains(&port) {
+                Ok(port as u16)
+            } else {
+                Err(serde::de::Error::custom("port must be between 1 and 65535"))
+            }
+        })
+        .transpose()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[serde(default)]
 #[ts(export)]
 pub struct AppRuntime {
     /// Port the app listens on inside the container (default: detected, else 3000).
+    #[serde(default, deserialize_with = "runtime_port")]
     pub port: Option<u16>,
     /// Override the image's start command.
     pub command: Option<Vec<String>>,
@@ -1154,6 +1168,16 @@ pub struct DatabaseBackup {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_runtime_ports_name_the_supported_range() {
+        for port in [0, -1, 65536, 99999] {
+            let error = serde_json::from_value::<AppRuntime>(serde_json::json!({"port": port}))
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("port must be between 1 and 65535"), "{error}");
+        }
+    }
 
     #[test]
     fn enums_use_their_wire_names() {

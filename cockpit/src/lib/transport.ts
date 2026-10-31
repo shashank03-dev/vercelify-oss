@@ -288,6 +288,14 @@ async function webCall<T>(cmd: string, args: Record<string, unknown>): Promise<T
       throw new CockpitError("Pairing over the LAN needs the desktop app — paste a pairing code instead");
     case "tools_status":
       return r([]);
+    case "save_private_file": {
+      // The browser's own download (its Downloads folder; it asks where if set to).
+      const url = URL.createObjectURL(new Blob([String(args.text ?? "")], { type: "text/plain" }));
+      const link = Object.assign(document.createElement("a"), { href: url, download: String(args.filename ?? "vercelify.txt") });
+      link.click();
+      URL.revokeObjectURL(url);
+      return r("your browser's downloads");
+    }
     case "capture_screens":
       return r([]);
     case "sender_status":
