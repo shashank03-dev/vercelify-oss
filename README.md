@@ -5,126 +5,198 @@
 <h1 align="center">Vercelify</h1>
 
 <p align="center">
-  <b>Turn the old laptop in your drawer into your own Vercel.</b><br/>
-  When a deploy breaks, a free, open AI model reads the log and tells you why.
+  <b>Put your websites online from an old laptop you already own.</b><br/>
+  Free. No monthly bill. Controlled from an app on your Mac.
 </p>
 
 <p align="center">
-  <a href="https://github.com/shashank03-dev/vercelify-oss/actions/workflows/ci.yml"><img src="https://github.com/shashank03-dev/vercelify-oss/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/shashank03-dev/vercelify-oss/releases/latest"><img src="https://img.shields.io/github/v/release/shashank03-dev/vercelify-oss?label=download" alt="Latest release"></a>
+  <a href="https://github.com/shashank03-dev/vercelify-oss/actions/workflows/ci.yml"><img src="https://github.com/shashank03-dev/vercelify-oss/actions/workflows/ci.yml/badge.svg" alt="Tests"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License"></a>
-  <a href="skills/vercelify/SKILL.md"><img src="https://img.shields.io/badge/Agent%20Skill-included-orange.svg" alt="Agent Skill included"></a>
-  <a href="CONTRIBUTING.md"><img src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg" alt="PRs welcome"></a>
 </p>
 
 <p align="center">
-  <a href="#set-up-your-own-server">Set up your server</a> ·
-  <a href="#try-it-without-a-server">Try it without a server</a> ·
-  <a href="#how-the-ai-works">How the AI works</a> ·
-  <a href="#hacktoberfest-hack-day-2026">Hack Day submission</a>
+  <a href="#what-you-can-do">What you can do</a> ·
+  <a href="#what-you-need">What you need</a> ·
+  <a href="#set-it-up">Set it up</a> ·
+  <a href="#try-it-first">Try it first</a> ·
+  <a href="#questions">Questions</a>
 </p>
 
 ---
 
-Hosting a small website or API usually means a monthly bill, or an afternoon lost to
-server setup. Most students already own something good enough to host it: an old laptop
-or PC that nobody uses any more.
+## What is Vercelify?
 
-**Vercelify turns that machine into a personal hosting platform.** You push code to
-GitHub and your app goes live, just like on Vercel or Netlify, except it runs on hardware
-you own and costs nothing per month. Everything is controlled from a desktop app on your
-Mac.
+Putting a website or app online usually means paying a hosting company every month.
+But many people have an old laptop or PC sitting in a drawer that could do the same job.
 
-When a build fails, Vercelify doesn't leave you scrolling through 300 lines of log. An
-open AI model (Google's **Gemma 4**, running on your own computer through **Ollama**)
-reads the important part and answers in three short lines:
+**Vercelify turns that old computer into your own hosting service.** You connect your
+code on GitHub, and your site goes live. Every time you change the code, the site
+updates by itself. If a change breaks something, you go back to the last working
+version with one click.
 
-<p align="center">
-  <img src="docs/demos/vfy-why.svg" width="860" alt="Animated terminal: vfy why reads a failed build log and Gemma 4 explains the cause, the fix and how to check it" />
-  <br/><sub>A real Gemma 4 answer for the <a href="cli/examples/failed-build.log">example failed build</a>, recorded through the Gemini API on 23 Oct 2026. Leave out <code>--provider gemini</code> to run the same model on your own computer.</sub>
-</p>
+You don't need to know how servers work. You install Vercelify once on the old laptop,
+install the Vercelify app on your Mac, and do everything else from the app.
 
-## What you get
+It costs nothing to use. The only costs are the ones you already have: electricity for
+the laptop and your internet connection (and a domain name, if you want one).
 
-- **Push to deploy.** Connect a GitHub repository. Every push to your branch builds and
-  publishes a new version automatically.
-- **Preview links for pull requests.** Each pull request gets its own temporary copy of
-  the site, so you can check a change before merging it.
-- **One-click rollback.** If a new version breaks something, go back to the last
-  working one.
-- **"Why did my deploy fail?"** A local AI model explains failed builds in plain English,
-  with a suggested fix and a command to confirm it.
-- **Databases.** Run PostgreSQL, MySQL, MongoDB or Redis next to your apps.
-- **Your own domain with HTTPS.** Optional. Works even if your home internet doesn't give
-  you a public IP address.
-- **Private by default.** Nothing is exposed to the internet until you choose to publish
-  an app.
-- **Looks after old hardware.** Watches temperature, battery, disk space and memory, and
-  warns you before something fails.
+## What you can do
 
-## See it in action
+### Put your projects online
+
+- **Publish straight from GitHub.** Pick a repository and click **Deploy**. Websites
+  made with Next.js, Vite, React, Express, Python and most other tools work as they
+  are.
+- **Updates go live by themselves.** Every time you push a change to GitHub, Vercelify
+  builds the new version and switches over once it's working. Your site stays up while
+  this happens.
+- **A preview for every pull request.** Each pull request gets its own temporary link,
+  so you can check a change before you merge it.
+- **Go back in one click.** Every version is kept. If the new one has a problem, return
+  to an earlier one.
+- **Private repositories, GitLab and Gitea** work too, after a one-time setup.
+- **Run several projects at once.** One old laptop can run many sites, previews and
+  databases side by side.
+
+### Understand what went wrong
+
+- **"Why did my deploy fail?"** When a build fails, click **Explain with AI**. A free AI
+  model running on your own computer reads the log and tells you, in three short lines,
+  what went wrong, how to fix it and how to check the fix. Nothing is sent to an outside
+  company.
+- **Live logs.** Watch each build as it happens, and read what your app prints while it
+  runs.
+- **Run AI models for your own apps.** Download free AI models to the laptop from the
+  app's **AI models** page and use them in your projects.
+
+### Store your data
+
+- **Databases in one click:** PostgreSQL, MySQL, MongoDB and Redis.
+- **Ready-made tools** you can add with one click, such as Umami (visitor statistics)
+  and MinIO (file storage).
+- **Secret settings** like passwords and API keys are stored encrypted, and you can copy
+  them to your Mac with one command when you work on your code.
+- **Nightly backups.** Your apps' data is backed up every night, encrypted, to a second
+  disk, another computer or online storage, and you can restore it when you need to.
+
+### Share your sites safely
+
+- **Private by default.** Your apps can only be reached from your own devices until you
+  decide to make one public.
+- **Your own web address with the padlock (HTTPS).** Use a domain like
+  `blog.yourname.com`. This works even when your internet provider doesn't let other
+  people connect to your home (common on mobile and some home connections). You don't
+  have to change any router settings.
+- **Reach your server from anywhere.** Take your Mac to a café or school and it still
+  connects to the laptop at home, over an encrypted connection. Turn it on with one
+  command; there's no account to create.
+- **Your private apps open in your normal browser** on the Mac, without making them
+  public.
+- **Lose a device?** Remove its access from the server in one step.
+
+### Look after the old laptop
+
+- **Works with the lid closed** and keeps running when you're not around.
+- **Watches the hardware:** temperature, battery, memory and disk space, with a warning
+  before something runs out.
+- **Protects the battery** and slows things down if the laptop gets too hot.
+- **Puts quiet apps to sleep** to free memory on small machines. The next visitor wakes
+  the app up in a second or two.
+- **Installs security updates by itself** at night (on from the start), and restarts
+  only when an update needs it and nothing important is running.
+- **Safe updates.** Updating Vercelify keeps all your apps and data. If an update goes
+  wrong, it goes back to the previous version by itself.
+- **A health check** (`sudo vercelify doctor`) looks at everything and tells you, in
+  plain words, what to fix.
+
+### Use the laptop's screen too
+
+- **A second screen for your Mac.** Use the laptop's screen as an extra monitor: drag
+  windows onto it, or show a copy of your Mac's screen.
+- **Control the laptop's desktop from your Mac**, with the free Moonlight app. The app
+  sets up the connection for you.
+
+### Grow when you need to
+
+- **Add more computers.** Another old laptop or a Raspberry Pi can join and share the
+  work.
+- **A backup server.** A second machine can keep a copy of everything and take over if
+  the main one dies.
+
+### For people coming from Vercel
+
+- Vercelify understands the usual parts of a `vercel.json` file: redirects, rewrites,
+  headers and scheduled jobs. See [what's supported](docs/VERCEL-PARITY.md).
+- **`vfy`**, a command-line tool for the Mac, lets you deploy, read logs, roll back and
+  copy settings from the terminal.
+
+## See it
 
 <p align="center">
   <img src="docs/screenshots/explain-failure.png" width="860" alt="The Vercelify app showing a failed build and the Explain with AI panel with Cause, Fix and Check" />
-  <br/><sub>Open a failed deployment, click <b>Explain with AI</b>, and get the cause, the fix and a way to check it.</sub>
+  <br/><sub>A failed build, explained: what went wrong, how to fix it, and how to check.</sub>
 </p>
 
 <table>
   <tr>
     <th width="50%">Your apps</th>
-    <th width="50%">Every deployment, with logs</th>
+    <th width="50%">Every version, with its log</th>
   </tr>
   <tr>
     <td>
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/apps.png" />
-        <img src="docs/screenshots/apps-light.png" alt="The Apps page, listing deployed apps and their status" />
+        <img src="docs/screenshots/apps-light.png" alt="The Apps page, listing apps and whether each one is running" />
       </picture>
     </td>
     <td>
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/deployments.png" />
-        <img src="docs/screenshots/deployments-light.png" alt="Deployment history for an app, with production, preview and failed builds and rebuild buttons" />
+        <img src="docs/screenshots/deployments-light.png" alt="The list of versions of one app, with live, preview and failed ones" />
       </picture>
     </td>
   </tr>
   <tr>
-    <th>Storage and disks</th>
-    <th>Server health</th>
+    <th>Disks and storage</th>
+    <th>Laptop health</th>
   </tr>
   <tr>
     <td>
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/storage.png" />
-        <img src="docs/screenshots/storage-light.png" alt="Storage page showing the fast and large disks and which app data lives on each" />
+        <img src="docs/screenshots/storage-light.png" alt="The Storage page, showing the disks and which app's data is on each" />
       </picture>
     </td>
     <td>
       <picture>
         <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/health.png" />
-        <img src="docs/screenshots/health-light.png" alt="Health page showing CPU, memory, disk, temperature, a 24-hour chart and the power guard" />
+        <img src="docs/screenshots/health-light.png" alt="The Health page, showing processor, memory, disk, temperature and battery over the last day" />
       </picture>
     </td>
   </tr>
 </table>
 
-## Set up your own server
+## What you need
 
-This is the full setup: an old laptop becomes your server, and your Mac becomes the
-remote control. Plan for **30 to 45 minutes**, most of it waiting for downloads.
-
-### What you need
-
-| | Requirement | Notes |
+| | What | Details |
 | --- | --- | --- |
-| 🖥️ | **A spare laptop or PC** (64-bit, Intel or AMD) | 4 GB of memory works; 8 GB is comfortable. 20 GB of free disk space or more. A 7th-gen Core i5 with 8 GB is plenty. A Raspberry Pi 4 or 5 can join later as an extra worker ([guide](docs/RASPBERRY-PI.md)). |
-| 🐧 | **Ubuntu 24.04 LTS** on that machine | Debian 12/13 and Ubuntu 22.04 also work. If it still runs Windows, follow Ubuntu's [install guide](https://ubuntu.com/tutorials/install-ubuntu-desktop) to replace it. **Back up anything you want to keep first.** |
-| 💻 | **A Mac** | This is where the Vercelify desktop app runs. You control the server from here. |
-| 🌐 | **Internet on both machines** | A network cable on the server is more reliable than Wi-Fi, but either works. |
+| 🖥️ | **An old laptop or PC** | 64-bit, Intel or AMD. 4 GB of memory works, 8 GB is better. At least 20 GB of free disk space. |
+| 🐧 | **Ubuntu on that computer** | Ubuntu 24.04 or 22.04 (Debian 12 and 13 work too). Still on Windows? Ubuntu's [install guide](https://ubuntu.com/tutorials/install-ubuntu-desktop) shows how to replace it. **Copy anything you want to keep off the computer first.** |
+| 💻 | **A Mac** | The Vercelify app runs here. (There's also a Linux version.) |
+| 🌐 | **Internet** on both | A cable on the old laptop is the most reliable, but Wi-Fi works. |
 
-### Step 1: Install Vercelify on the old laptop
+You don't need a domain name, a Cloudflare account, an AI subscription or a credit
+card to start.
 
-On the old laptop, open **Terminal** (press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd> on
-Ubuntu) and paste these two commands:
+## Set it up
+
+Plan for about 30 minutes, most of it waiting for downloads.
+
+### 1. Install Vercelify on the old laptop
+
+On the old laptop, open **Terminal** (press <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>T</kbd>) and
+paste these two lines, one after the other:
 
 ```bash
 sudo apt update && sudo apt install -y curl
@@ -134,454 +206,199 @@ sudo apt update && sudo apt install -y curl
 curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install.sh | sudo bash -s -- --storage-device none
 ```
 
-Type your Ubuntu password when asked (it won't show as you type; that's normal). Here's
-what happens next:
+Type your password when it asks (nothing shows while you type; that's normal).
 
 <p align="center">
-  <img src="docs/demos/install-server.svg" width="900" alt="Animated terminal showing the Vercelify server installer: system checks, optional configuration, installation steps, and the final summary with a pairing code" />
-  <br/><sub>The server installer from start to finish (shortened; the real run takes 10–20 minutes).</sub>
+  <img src="docs/demos/install-server.svg" width="900" alt="The server installer running: it checks the computer, installs each part, and ends with a pairing code" />
+  <br/><sub>The installer, shortened. The real run takes 10 to 20 minutes.</sub>
 </p>
 
-**1. It checks the machine.** Operating system, memory, disk space and internet. If
-something is missing, it tells you what to fix.
+The installer checks the computer, installs everything, and tells you if something is
+missing. At the end it shows **a line to paste on your Mac** and **an 8-letter pairing
+code** (like `K7QF-M2XD`). Keep that window open.
 
-**2. It uses simple defaults.** Your server and apps stay private. You do not need
-an AI model, domain, Cloudflare account or remote-desktop setup to get started.
-After connecting, add those features when you need them:
+From now on, leave the laptop plugged in and online. You can close the lid.
 
-| Optional feature | Add it later |
-| --- | --- |
-| Your domain | `sudo vercelify domain` |
-| Access from other networks | `sudo vercelify remote on` |
-| Local AI | See [Step 5](#step-5-optional-turn-on-ai-on-the-server) |
-| Control the Linux desktop | `sudo vercelify desktop on`, then **Launch Moonlight** in the app (it pairs by itself) |
+> **Have a second disk in the laptop?** Use `--storage-device /dev/sdb` (your disk's
+> name) instead of `--storage-device none` to keep databases and backups on it.
+> Vercelify never erases a disk unless you also add `--format-storage`.
 
-For the original guided questions, add `--configure` to the server installer.
+### 2. Install the app on your Mac
 
-**3. It installs everything.** You'll see one line per step. The important ones:
-
-- **Docker** runs each of your apps in its own sealed box, so they can't interfere with
-  each other.
-- **Vercelify agent** is a small program that builds and runs your apps, and lets the Mac
-  app see and manage the server.
-- **Private network** (`vercelify-mesh`) links your Mac and any extra servers
-  to this one, encrypted, wherever they are. No account, no open ports.
-- **Laptop server mode** keeps the laptop running with the lid closed, and the
-  **power & thermal guard** protects the battery and slows things down if it gets too hot.
-
-**4. It prints a summary.** It ends with **one command for your Mac** that installs the
-app and connects it to this server, and an **8-character pairing code** (like
-`K7QF-M2XD`) for a Mac that already has the app. Keep this window open for Step 2. The
-codes are valid for one hour; `sudo vercelify pair` prints new ones.
-
-> **Storage defaults to the main disk.** `--storage-device none` makes that explicit. If the
-> machine has a second disk you'd like to use for databases and backups, pass
-> `--storage-device /dev/sdb` (your disk's name) instead. Vercelify only erases a disk
-> if you also add `--format-storage`, so it never wipes anything by surprise.
-
-From now on, leave the laptop plugged in and connected. You can close the lid.
-
-### Step 2: Install the app on your Mac
-
-Open **Terminal** on your Mac (press <kbd>⌘</kbd>+<kbd>Space</kbd>, type *Terminal*) and
-paste the Mac command from the end of Step 1. It looks like this:
+On your Mac, open **Terminal** (press <kbd>⌘</kbd>+<kbd>Space</kbd> and type *Terminal*) and
+paste the line the laptop showed you. It looks like this:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash -s -- --pair vfy2.…
 ```
 
-With `--pair` the app connects to your server by itself the first time it opens, so you
-can skip Step 3. Without it, the installer only installs the app.
+This installs the Vercelify app in your Applications folder and connects it to your
+laptop. When the app opens, you're ready.
 
-<p align="center">
-  <img src="docs/demos/install-mac.svg" width="900" alt="Animated terminal showing the Mac installer: builds the Vercelify app, installs its network daemon and the vfy tool, then opens the app" />
-  <br/><sub>The Mac installer.</sub>
-</p>
+> Prefer to download the app yourself? Get the `.dmg` from the
+> [latest release](https://github.com/shashank03-dev/vercelify-oss/releases/latest) and
+> drag Vercelify to Applications. The first time, **right-click the app and choose
+> Open**, because it isn't notarized by Apple. Then pick your laptop in the app and type
+> the 8-letter code.
 
-This installs three things:
-
-1. **The Vercelify app**, into your Applications folder, from the
-   [latest release](https://github.com/shashank03-dev/vercelify-oss/releases/latest)
-   (a `.dmg`; the installer checks its checksum). You can also download the
-   `.dmg` yourself and drag the app to Applications, then run the command above for the
-   rest. If the download fails, the installer says why and offers to build the app on
-   your Mac instead (5–15 minutes, see [building from source](#building-the-mac-app-from-source)).
-2. **`vercelify-mesh`**, which puts the Mac on your servers' private network when you
-   pair. It runs in your login session; nothing to sign in to.
-3. **`vfy`**, a command-line tool for deploying and reading logs from the terminal.
-
-### Step 3: Connect the app to your server
-
-Installed with `--pair`? The app is already connected: go to Step 4. Otherwise
-Vercelify opens when the installer finishes.
-
-<p align="center">
-  <img src="docs/screenshots/pairing.jpg" width="860" alt="The Vercelify welcome screen listing servers on the private network, with an 8-character pairing code typed in" />
-</p>
-
-1. Find your laptop by name in the list of servers on your network.
-2. Type the **8-character code** from the end of Step 1.
-3. Click **Connect**. The app joins the server's private network, so it keeps working
-   when you take the Mac elsewhere.
-
-Don't see your laptop? The list shows servers on the same Wi-Fi or wired network. If
-the Mac is elsewhere, paste the **full pairing code** from Step 1 instead (it starts with
-`vfy2.`). Joining from another network works when you answered `y` to *Reach this
-server from anywhere?* (or later: `sudo vercelify remote on`); see the
-[network guide](docs/MESH.md).
-
-### Step 4: Deploy your first app
+### 3. Put your first project online
 
 1. In the app, click **New app**.
-2. Paste the URL of a GitHub repository, for example a Next.js, Vite, Express or
-   Python project, or anything with a `Dockerfile`.
-3. Choose the branch to deploy (usually `main`).
-4. Add any environment variables your app needs (API keys, database URLs).
-5. Click **Deploy** and watch the build log live.
+2. Paste the address of a GitHub repository.
+3. Pick the branch (usually `main`) and add any settings your app needs.
+4. Click **Deploy** and watch it build.
 
-When it finishes, you get a link to your running app. It works on any device on your
-Vercelify network (add another Linux laptop with `sudo vercelify mesh invite --device`). Private
-repositories need Git access set up first; see the [auto-deploy guide](docs/AUTODEPLOY.md),
-which also covers automatic deploys on every push and preview links for pull requests.
+When it's done, you get a link to your running app. If the build fails, open it and
+click **Explain with AI**.
 
-**If the build fails,** open it, click **Build logs**, then **Explain with AI**.
+## Extra features
 
-### Step 5 (optional): Turn on AI on the server
+Each of these is one command on the laptop, whenever you want it.
 
-So that **Explain with AI** works from the app, install Ollama and a model on the server.
-Run this on the laptop:
-
-```bash
-sudo vercelify ai install
-sudo vercelify ai pull gemma4:e2b
-```
-
-On a machine with 8 GB that's also running apps, Gemma 4 E2B may not have enough free
-memory. Use a smaller model (`sudo vercelify ai pull gemma3:1b`) or keep using
-`vfy why --log` on your Mac. More in the [AI guide](docs/AI.md).
-
-### Step 6 (optional): Put an app on the public internet
-
-Apps start private. To give one a public address like `https://blog.yourdomain.com`, you
-need a domain name. The easiest route is to manage it with a free Cloudflare account:
-Vercelify then creates a secure tunnel, so you don't have to change any router settings,
-and it works even when your internet provider doesn't give you a public IP address.
-
-1. Add your domain to Cloudflare.
-2. Create an API token at [dash.cloudflare.com/profile/api-tokens](https://dash.cloudflare.com/profile/api-tokens)
-   with these permissions: *Account › Cloudflare Tunnel › Edit*, *Zone › DNS › Edit* and
-   *Zone › Zone › Read*.
-3. On the server, run:
-
-```bash
-sudo vercelify domain yourdomain.com --cloudflare-token YOUR_TOKEN
-```
-
-New apps then get addresses like `https://myapp.yourdomain.com`. Details, and the option
-without Cloudflare, are in the [platform guide](docs/PLATFORM.md#1-domains-and-https).
-
-### If something goes wrong
-
-| Problem | What to do |
+| To do this | Run this on the laptop |
 | --- | --- |
-| The installer stopped with an error | Fix what it mentions and **run the same command again**. Finished steps are skipped. |
-| Not sure what's wrong with the server | `sudo vercelify doctor` checks everything and suggests fixes. |
-| Pairing code expired | `sudo vercelify pair` prints a new one. |
-| The Mac app can't see the server | Make sure the laptop is awake and online. On another network, paste the full pairing code (`sudo vercelify pair`); that needs `sudo vercelify remote on` (or a Cloudflare domain) on the server. `vercelify-mesh status` on the Mac shows how it reaches each server. |
-| Need the full installer log | It's in `/var/log/vercelify-setup.log` on the server. |
+| Reach the laptop from anywhere | `sudo vercelify remote on` |
+| Use your own web address | `sudo vercelify domain yourname.com` ([how](docs/PLATFORM.md#1-domains-and-https)) |
+| Turn on **Explain with AI** | `sudo vercelify ai install` then `sudo vercelify ai pull gemma4:e2b` ([which model?](docs/AI.md)) |
+| Back up every night | `sudo vercelify backup setup` ([how](docs/BACKUPS.md)) |
+| Control the laptop's desktop from the Mac | `sudo vercelify desktop on`, then **Launch Moonlight** in the app |
+| Put quiet apps to sleep | `sudo vercelify sleep on APP` |
+| Pair another Mac | `sudo vercelify pair` |
+| See every device that has access, and remove one | `sudo vercelify tokens` |
+| Update Vercelify | `sudo vercelify update` |
+| Check that everything is fine | `sudo vercelify doctor` |
 
-More answers are in [troubleshooting](docs/TROUBLESHOOTING.md).
+The second screen needs nothing extra: open **Second screen** in the app and press
+**Start**.
 
-### Building the Mac app from source
+## Try it first
 
-For developers, or when no release fits your Mac: `install-mac.sh --from-source` (or
-answer `y` when the installer offers it). It needs three free developer tools, and stops
-with the exact command if one is missing:
+You can look around before you set up a laptop.
 
-- Xcode Command Line Tools: `xcode-select --install`
-- Node.js 20+: `brew install node` (or from [nodejs.org](https://nodejs.org/))
-- Rust: `curl https://sh.rustup.rs -sSf | sh`
-
-The network daemon is then built from the same checkout, so the two always match.
-
-## Try it without a server
-
-To look around before setting up a server, pick one of these.
-
-### Option A: Run the AI on your own computer (free, offline)
-
-This runs the open Gemma 4 model on your laptop and asks it to explain a real failed
-build log that ships with the repository.
-
-**You need:** macOS or Linux, [Git](https://git-scm.com/downloads), `jq`
-(`brew install jq` or `sudo apt install jq`), and [Ollama](https://ollama.com/download),
-a free app that runs AI models locally. Open Ollama once after installing it so it's
-running in the background.
+**See the app with sample data.** You need [Node.js](https://nodejs.org/) and
+[Git](https://git-scm.com/downloads):
 
 ```bash
-# 1. Download this project
 git clone https://github.com/shashank03-dev/vercelify-oss.git
-cd vercelify-oss
+cd vercelify-oss/cockpit && npm ci && VITE_DEMO=1 npm run dev
+```
 
-# 2. Download the Gemma 4 model (one time, several GB)
+Open [localhost:1420](http://localhost:1420), pick the server **dell-e7450** and type the
+code `K7QF-M2XD`. Everything you see is made up, so feel free to click anything.
+
+**Ask the AI about a failed build.** Install [Ollama](https://ollama.com/download) (a free
+app that runs AI models on your computer) and open it once. Then, in the
+`vercelify-oss` folder:
+
+```bash
 ollama pull gemma4:e2b
-
-# 3. Ask it why the example build failed
 ./cli/vfy why --log cli/examples/failed-build.log
 ```
 
-The first answer takes a little longer while the model loads. You'll see three lines:
-**Cause**, **Fix** and **Check**. Nothing leaves your computer.
+It reads a real failed build log and answers with what went wrong, the fix and a way to
+check it. The model is a few gigabytes to download; after that it works offline.
 
-> **Low on memory?** Gemma 4 E2B needs roughly 7 GB of disk space and a similar amount of
-> free memory while it answers. On a smaller machine, pull any smaller chat model and tell
-> `vfy` to use it, for example `VFY_AI_MODEL=gemma3:1b ./cli/vfy why --log cli/examples/failed-build.log`.
+## Questions
 
-### Option B: Use Gemma 4 through Google's Gemini API (no download)
+**Is it really free?**
+Yes. Vercelify is open source and has no paid plan. You pay only for electricity, your
+internet, and a domain name if you want one. The optional connection for public sites
+uses Cloudflare's free plan.
 
-Same feature, but the model runs on Google's servers instead of your laptop. This is how
-the answer at the top of this page was recorded. The log you send goes to Google, so
-check it for passwords or keys first.
+**Is my data safe?**
+Your apps and data stay on your own laptop. Your devices talk to it over an encrypted
+connection, apps stay private until you publish them, and you can remove any device's
+access at any time. Backups are encrypted. More in [security](SECURITY.md).
 
-1. Get a free API key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
-2. From the `vercelify-oss` folder, run:
+**Will an old laptop be fast enough?**
+For personal sites, side projects, school work and small apps, yes. A 2017 laptop with 8 GB
+of memory runs several apps and databases at once. Vercelify is built to use little
+memory and keeps an eye on the hardware for you.
 
-```bash
-cp .env.example .env
-# Open .env in any text editor and paste your key after GEMINI_API_KEY=
-set -a; . ./.env; set +a
-./cli/vfy why --log cli/examples/failed-build.log --provider gemini
-```
+**What happens when the laptop is off?**
+Your sites are offline until it's back. Vercelify starts everything again by itself when
+the laptop turns on. A second machine can be set up as a backup server that takes over.
 
-The default model is `gemma-4-26b-a4b-it`. Choose another with `VFY_GEMINI_MODEL`. The
-`.env` file is ignored by Git, so your key is never committed.
+**Something isn't working.**
+Run `sudo vercelify doctor` on the laptop. It checks everything and says what to do. If
+the installer stopped, fix what it mentions and run the same line again; finished steps
+are skipped. More answers in [troubleshooting](docs/TROUBLESHOOTING.md).
 
-### Option C: Click around the app with sample data
-
-**You need:** [Node.js 22](https://nodejs.org/) and Git.
-
-```bash
-cd vercelify-oss/cockpit
-npm ci
-VITE_DEMO=1 npm run dev
-```
-
-Open [localhost:1420](http://localhost:1420) in your browser and:
-
-1. Pick the server called **dell-e7450** and type the pairing code `K7QF-M2XD`.
-2. Open the **notes-api** app → **Deployments & logs**.
-3. Click the deployment marked **Error** → **Build logs** → **Explain with AI**.
-
-Demo mode uses made-up servers and a pre-written AI answer, so you can see the whole
-flow without any setup. For a real model answer, use Option A or B.
-
-## How the AI works
-
-The AI feature does one useful job: **explain why a deployment failed.**
-
-```text
-failed build log ──▶ keep only the useful lines ──▶ Gemma 4 (local, via Ollama) ──▶ Cause / Fix / Check
-     (300+ lines)         (errors + context,              same prompt in the              (under 120 words)
-                           last 30 lines, ≤ 5,000 chars)   app and the CLI)
-```
-
-1. **It picks the right lines.** Build logs are long and mostly noise. Vercelify keeps the
-   error lines with a little context around them, plus the last 30 lines, up to 5,000
-   characters. That keeps answers fast even on an old CPU.
-2. **It asks a small open model.** The trimmed log goes to **Gemma 4 E2B** running in
-   Ollama, on your Mac or on your server. Nothing goes to a paid service.
-3. **It answers in a fixed format.** **Cause** (what went wrong), **Fix** (what to change)
-   and **Check** (a command to confirm the fix works), in under 120 words. Low temperature
-   (0.2) keeps answers focused.
-4. **You stay in control.** The AI only suggests. It never edits your code or redeploys
-   on its own. It only sees the log, not your repository, so double-check its advice.
-
-| Part | Where it lives |
-| --- | --- |
-| Prompt and log trimming | [`cockpit/src/lib/explain.ts`](cockpit/src/lib/explain.ts), with [tests](cockpit/src/lib/explain.test.ts) that keep the app and CLI prompts identical |
-| Command line | `vfy why APP` (a deployment on your server) and `vfy why --log FILE` (any log file), in [`cli/vfy`](cli/vfy) |
-| Desktop app | **Explain with AI** on a failed build, in [`AppsView.tsx`](cockpit/src/views/AppsView.tsx), streamed from the server's Ollama |
-| Model choice | Uses `gemma4:e2b` if installed, then any other Gemma 4, then any installed chat model. Override with `VFY_AI_MODEL`. |
-| Hosted option | `--provider gemini` calls Gemma 4 through the Gemini API (`why_gemini` in [`cli/vfy`](cli/vfy)) |
-
-Vercelify uses existing open models; it doesn't train its own. The work here is
-everything around the model: picking the right part of the log, the shared prompt, and
-putting the answer exactly where you need it. Full details in the [AI guide](docs/AI.md).
-
-### Agent Skill for coding assistants
-
-[`skills/vercelify`](skills/vercelify/SKILL.md) is an
-[Agent Skill](https://agentskills.io/specification) that teaches AI coding assistants
-(Claude Code, OpenCode and other skill-aware agents) how to install Vercelify, deploy
-with `vfy`, read a failed build with `vfy why`, fix it and redeploy. It follows the open
-Agent Skills format: a `SKILL.md` with name, description, license and compatibility,
-plus reference files for the CLI and the agent API.
-
-To use it, copy the folder into your agent's skills directory, for example:
-
-```bash
-cp -r skills/vercelify ~/.claude/skills/vercelify
-```
-
-## Hacktoberfest Hack Day 2026
-
-Built for **Hacktoberfest Hack Day Bengaluru** (23 October 2026, Atria Institute of
-Technology, hosted by the AWS Student Builder Group at Atria Institute of Technology).
-
-**Submitted to Track 1: Best Open-Source AI Project.** It also uses Gemma 4 through the
-Gemini API, which is relevant to Track 2: Best Use of Gemma 4.
-
-| Track requirement | How Vercelify meets it |
-| --- | --- |
-| Open-source or open-weight AI is an important part of the project | Gemma 4 (open weights, Apache 2.0) running in Ollama (MIT) explains every failed deployment, in both the app and the CLI. |
-| Public GitHub repository with an open-source license | This repository, under the [MIT License](LICENSE). |
-| Agent skills follow the Agent Skill open standard | [`skills/vercelify/SKILL.md`](skills/vercelify/SKILL.md) follows the [specification](https://agentskills.io/specification). |
-| A demo you can actually run | [Option A](#option-a-run-the-ai-on-your-own-computer-free-offline) runs a real model on the included log in three commands; [Option C](#option-c-click-around-the-app-with-sample-data) shows the full app. |
-
-**Judging walkthrough (about 3 minutes):**
-
-1. Open [`cli/examples/failed-build.log`](cli/examples/failed-build.log). The real error
-   is buried near line 25.
-2. Run `./cli/vfy why --log cli/examples/failed-build.log` and compare the answer with
-   the log.
-3. Show the prompt and log trimming in [`explain.ts`](cockpit/src/lib/explain.ts).
-4. Open the app in demo mode and click **Explain with AI** on the failed deployment
-   (the demo answer is pre-written; step 2 is the live one).
-5. Show the [Agent Skill](skills/vercelify/SKILL.md).
-
-## How it's built
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.svg" />
-    <img src="docs/diagrams/architecture-light.svg" width="960" alt="Vercelify architecture. Your Mac runs the Vercelify app and the vfy tool. Over Vercelify's own encrypted network they talk to the old laptop, which runs the Vercelify agent with its build and deploy engine, Ollama, Docker containers for your apps and databases, Traefik, and a power guard with firewall. The agent checks GitHub for new commits. Optional: Cloudflare Tunnel brings internet visitors to Traefik, and Raspberry Pi workers add capacity." />
-  </picture>
-</p>
-
-How the pieces work together:
-
-1. **You click Deploy** in the app (or push to GitHub). The app talks to the server over
-   **vercelify-mesh**, Vercelify's own encrypted WireGuard network, so the server never
-   needs an open port.
-2. **The Vercelify agent** on the server is the app's point of contact. It reports health
-   and disks, handles pairing, coordinates the network, checks GitHub for new commits
-   every minute, and forwards AI requests.
-3. **Its engine** builds your code with BuildKit and starts it in its own **Docker**
-   container, next to any databases it needs, switching traffic only once the new
-   version answers its health check.
-4. **Traefik** sends each web request to the right app. To open an app to the internet,
-   an optional **Cloudflare Tunnel** carries visitors in without exposing your home network.
-5. **Ollama** runs Gemma 4 on the server so **Explain with AI** works without any paid
-   service.
-
-- **Desktop app:** Tauri v2, React 19, TypeScript and Tailwind ([`cockpit/`](cockpit))
-- **Server agent and engine:** a small static Rust program ([`agent/`](agent),
-  [`crates/vercelify-platform`](crates/vercelify-platform), [`crates/vercelify-core`](crates/vercelify-core))
-- **Private network:** `vercelify-mesh`, WireGuard with NAT traversal and a relay
-  ([`crates/vercelify-mesh`](crates/vercelify-mesh))
-- **Installer and admin tool:** Bash, tested with bats and ShellCheck ([`host/`](host))
-- **Command line:** [`cli/vfy`](cli/vfy), Bash, works on the bash that ships with macOS
-
-Vercelify builds on proven parts (Docker, BuildKit, Traefik and WireGuard) and does the
-rest itself: builds, deployments, previews, databases, the private network, hardware
-care, `vercel.json` support and the AI workflow. The connection between your Mac and the
-server stays inside your private network and uses revocable access tokens. More in
-[architecture](docs/ARCHITECTURE.md), [the platform guide](docs/PLATFORM.md) and
-[security](SECURITY.md).
-
-**Coming from Vercel?** Vercelify reads the common parts of `vercel.json` (redirects,
-rewrites, headers and cron jobs). See [what's supported](docs/VERCEL-PARITY.md) and the
-[configuration guide](docs/PROJECT-CONFIG.md).
-
-## What it costs
-
-There's no subscription and no paid AI API. You pay only for what you'd pay anyway:
-electricity for the laptop (old laptops usually draw little power when idle), your internet
-connection, and a domain name if you want a public address. Cloudflare's free plan covers
-the optional tunnel.
-
-## Contributing
-
-Bug reports, docs fixes and code are all welcome. Start with
-[CONTRIBUTING.md](CONTRIBUTING.md) for setup and conventions, and open an issue first for
-bigger changes. Please follow the [Code of Conduct](CODE_OF_CONDUCT.md) and report
-security issues privately as described in [SECURITY.md](SECURITY.md).
-
-<details>
-<summary><b>Build from source and run the tests</b></summary>
-
-Prerequisites: Rust (stable), Node.js 22, `jq`, `shellcheck` and `bats`. The Rust
-workspace also needs the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
-and a `cockpit/dist` folder; see [DEVELOPMENT.md](docs/DEVELOPMENT.md).
-
-```bash
-cd cockpit && npm ci && npm run tauri build    # build the Mac app
-```
-
-| Check | Command (from the repository root) |
-| --- | --- |
-| Rust tests | `cargo test --workspace --all-features` |
-| Installer and CLI tests | `bats host/tests` |
-| App type check | `cd cockpit && npm run typecheck` |
-| App unit tests | `cd cockpit && npm test` |
-| App end-to-end tests | `cd cockpit && npm run e2e:demo` |
-| Project rules on the real proxy | `sudo host/tests/contract/routing.sh` (needs Docker) |
-| The network in network namespaces | `sudo host/tests/contract/mesh.sh` |
-
-The animated terminal demos in this README are generated by
-[`docs/demos/build-demos.py`](docs/demos/build-demos.py) from the installers' real output.
-Re-run it when that output changes. The architecture diagram comes from
-[`docs/diagrams/build-architecture.py`](docs/diagrams/build-architecture.py), and the app
-screenshots from [`cockpit/scripts/screenshots.mjs`](cockpit/scripts/screenshots.mjs),
-which captures them from demo mode in both themes.
-
-</details>
-
-<details>
-<summary><b>Repository layout</b></summary>
-
-```text
-agent/                  Rust server agent
-crates/vercelify-core/  Shared Rust code: models, hardware checks
-crates/vercelify-platform/  The engine: builds, deployments, databases, proxy routes
-crates/vercelify-mesh/  The private network and its daemon
-cockpit/                Desktop app (Tauri + React)
-cli/vfy                 Command-line tool for Mac and Linux
-cli/examples/           Sample failed build log for the AI demo
-host/                   Server installer, admin tool, services and tests
-skills/vercelify/       Agent Skill for AI coding assistants
-website/                Project website
-docs/                   Guides, screenshots and demos
-install.sh              Server installer
-install-mac.sh          Mac installer
-```
-
-</details>
+**Is this made by Vercel?**
+No. Vercelify is an independent project, inspired by how simple Vercel makes publishing.
 
 ## Guides
 
 | Guide | What it covers |
 | --- | --- |
-| [AI](docs/AI.md) | Running models, choosing one, using them from your apps |
-| [Platform](docs/PLATFORM.md) | Domains and HTTPS, Git access, databases, workers |
-| [Network](docs/MESH.md) | The private network: devices, servers, reaching them from anywhere |
-| [Auto-deploy](docs/AUTODEPLOY.md) | Deploy on every push, pull request previews |
-| [Project configuration](docs/PROJECT-CONFIG.md) | `vercel.json`, firewall rules, cron jobs |
-| [Backups](docs/BACKUPS.md) | Nightly backups and restoring them |
-| [More servers](docs/SERVERS.md) · [Raspberry Pi](docs/RASPBERRY-PI.md) | Adding machines and workers |
-| [Second screen](docs/DISPLAY.md) | Using the laptop's screen as an extra monitor |
+| [Platform](docs/PLATFORM.md) | Domains, private repositories, databases, more computers |
+| [Automatic deploys](docs/AUTODEPLOY.md) | Updating on every push, previews for pull requests |
+| [Network](docs/MESH.md) | Reaching the laptop from anywhere, adding devices |
+| [AI](docs/AI.md) | Choosing and running AI models |
+| [Backups](docs/BACKUPS.md) | Nightly backups and getting your data back |
+| [Second screen](docs/DISPLAY.md) | Using the laptop as an extra monitor |
+| [More servers](docs/SERVERS.md) · [Raspberry Pi](docs/RASPBERRY-PI.md) | Adding computers |
+| [Project settings](docs/PROJECT-CONFIG.md) | `vercel.json`, scheduled jobs, access rules |
 | [Troubleshooting](docs/TROUBLESHOOTING.md) | Fixing common problems |
-| [Development](docs/DEVELOPMENT.md) | Working on Vercelify itself |
+
+## For developers
+
+<details>
+<summary><b>How it's built</b></summary>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.svg" />
+    <img src="docs/diagrams/architecture-light.svg" width="960" alt="Vercelify architecture: the Mac app and vfy talk over Vercelify's encrypted network to the laptop, which runs the Vercelify agent and engine, Ollama, Docker for apps and databases, Traefik, and a power guard with firewall. Optional: a Cloudflare Tunnel for visitors, and Raspberry Pi workers." />
+  </picture>
+</p>
+
+- **Mac app:** Tauri v2, React 19, TypeScript, Tailwind ([`cockpit/`](cockpit))
+- **On the server:** one small Rust program, the agent, with its own build and deploy
+  engine ([`agent/`](agent), [`crates/vercelify-platform`](crates/vercelify-platform))
+- **Private network:** `vercelify-mesh`, Vercelify's own WireGuard network with direct
+  connections and a relay ([`crates/vercelify-mesh`](crates/vercelify-mesh))
+- **Installer and admin tool:** Bash, tested with bats and ShellCheck ([`host/`](host))
+- **Command line:** [`cli/vfy`](cli/vfy)
+- **Built on:** Docker and BuildKit (builds and apps), Traefik (web traffic and HTTPS),
+  WireGuard via boringtun (the network), Ollama (AI)
+
+Read more in [architecture](docs/ARCHITECTURE.md), the
+[design](docs/design/SYSTEM-DESIGN.md) and [development](docs/DEVELOPMENT.md).
+[`skills/vercelify`](skills/vercelify/SKILL.md) teaches AI coding assistants to deploy
+and fix apps with `vfy`.
+
+</details>
+
+<details>
+<summary><b>Build it and run the tests</b></summary>
+
+```bash
+./dev setup        # install the tools
+./dev check all    # every test the CI runs
+./dev app          # the Mac app, from this checkout
+./dev host user@laptop   # install this checkout on a laptop
+```
+
+[DEVELOPMENT.md](docs/DEVELOPMENT.md) covers the network, installer and end-to-end tests.
+
+</details>
+
+## Contributing
+
+Bug reports, fixes and ideas are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md),
+and open an issue first for bigger changes. Please follow the
+[Code of Conduct](CODE_OF_CONDUCT.md) and report security problems privately as
+described in [SECURITY.md](SECURITY.md).
 
 ## License and thanks
 
-Vercelify and its Agent Skill are released under the [MIT License](LICENSE). Gemma 4
-model weights are released separately by Google under
-[Apache 2.0](https://ai.google.dev/gemma/apache_2). Other projects keep their own licenses.
+Vercelify is released under the [MIT License](LICENSE). AI models such as Gemma keep
+their own licenses.
 
-Vercelify stands on the shoulders of [Docker](https://github.com/moby/moby),
+Vercelify is built on [Docker](https://github.com/moby/moby),
 [BuildKit](https://github.com/moby/buildkit), [Traefik](https://github.com/traefik/traefik),
 [WireGuard](https://www.wireguard.com) and [boringtun](https://github.com/cloudflare/boringtun),
-[Ollama](https://github.com/ollama/ollama), [Gemma](https://ai.google.dev/gemma) and
-[Tauri](https://github.com/tauri-apps/tauri).
-Vercelify is an independent project and is not affiliated with Vercel.
+[Ollama](https://github.com/ollama/ollama), [Gemma](https://ai.google.dev/gemma),
+[Sunshine](https://github.com/LizardByte/Sunshine), [Moonlight](https://moonlight-stream.org)
+and [Tauri](https://github.com/tauri-apps/tauri). It is not affiliated with Vercel.
