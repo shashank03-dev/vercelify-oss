@@ -308,7 +308,7 @@ fn apply_map(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>, map: Pe
     {
         let mut st = live.state.write().unwrap();
         st.map = Some(signed.to_string());
-        let _ = st.save(&opts.dir);
+        let _ = save_own(&st, &opts.dir);
     }
     tracing::info!("map {} (epoch {}): {} peers", map.version, map.epoch, map.peers.len());
     *live.map.write().unwrap() = Some(map);
@@ -514,7 +514,7 @@ async fn renew(live: &Live, opts: &UpOptions, ctl: &mpsc::Sender<Control>, force
     {
         let mut s = live.state.write().unwrap();
         s.certificate = certificate;
-        s.save(&opts.dir)?;
+        save_own(&s, &opts.dir)?;
     }
     live.use_key(ctl, &next).await;
     tracing::info!("certificate renewed until {until} with a new key");
@@ -624,6 +624,17 @@ fn identity_changed(running: &State, now: Option<&State>) -> Option<&'static str
             Some("joined another mesh")
         }
         Some(_) => None,
+    }
+}
+
+/// Save this process's state (a new map, a renewed certificate), unless
+/// the file now holds another identity: a new pairing written while this
+/// process runs is what it restarts on, not something to overwrite.
+fn save_own(running: &State, dir: &Path) -> std::io::Result<()> {
+    match State::load(dir) {
+        Ok(now) if identity_changed(running, now.as_ref()).is_none() => running.save(dir),
+        // Replaced, gone, or being written: leave it.
+        _ => Ok(()),
     }
 }
 
@@ -913,6 +924,36 @@ mod tests {
         moved.coordinator.public_key = "wg2".into();
         assert!(identity_changed(&s, Some(&moved)).is_some());
         assert!(identity_changed(&s, None).is_some(), "left");
+    }
+
+    // Pairing again writes a new token while the old daemon still runs; the
+    // map the server sends for that join must not put the old token back
+    // (field test F100: the next agent restart then refused the Mac).
+    #[test]
+    fn its_own_updates_dont_overwrite_a_new_pairing() {
+        let dir = tempfile::tempdir().unwrap();
+        let running: State = serde_json::from_value(serde_json::json!({
+            "node_id": "n1", "name": "mac", "kind": "device", "ipv4": "10.77.0.2", "ipv6": "",
+            "ipv4_prefix_len": 16, "certificate": "c", "node_token": "old", "coordinator_key": "ck",
+            "coordinator": {"public_key": "wg", "ipv4": "10.77.0.1", "endpoints": []},
+            "api_url": "http://10.77.0.1:7420"
+        }))
+        .unwrap();
+        running.save(dir.path()).unwrap();
+        let mut own = running.clone();
+        own.map = Some("map 1".into());
+        save_own(&own, dir.path()).unwrap();
+        assert_eq!(
+            State::load(dir.path()).unwrap().unwrap().map.as_deref(),
+            Some("map 1"),
+            "its own update is kept"
+        );
+        let mut paired = running.clone();
+        paired.node_token = "new".into();
+        paired.save(dir.path()).unwrap();
+        own.map = Some("map 2".into());
+        save_own(&own, dir.path()).unwrap();
+        assert_eq!(State::load(dir.path()).unwrap().unwrap().node_token, "new");
     }
 
     fn rec(id: &str, name: &str, kind: NodeKind, idx: u16) -> NodeRecord {
