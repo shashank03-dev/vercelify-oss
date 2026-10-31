@@ -293,9 +293,39 @@ pub fn enroll(c: &Connection, e: &Enrollment) -> Result<(Node, String)> {
         )
         .optional()?;
     if let Some(n) = clash {
+        // The same machine (its key proven by the sealed request) pairing
+        // again, with a fresh code: it keeps its node and address and gets a
+        // new token, instead of a dead end (F77).
+        if n.revoked_at.is_none() && n.public_key == pk && n.kind == e.kind {
+            let token = format!("vfyn_{}", random_token(40));
+            let endpoints: Vec<String> = e
+                .endpoints
+                .iter()
+                .filter(|s| valid_endpoint(s))
+                .take(MAX_ENDPOINTS)
+                .cloned()
+                .collect();
+            if e.kind == NodeKind::Device {
+                c.execute("UPDATE mesh_nodes SET role = ?2 WHERE id = ?1", params![n.id, role])?;
+            }
+            c.execute(
+                "UPDATE mesh_nodes SET token_hash = ?2, endpoints = ?3, last_seen_at = ?4 WHERE id = ?1",
+                params![n.id, hash(&token), serde_json::to_string(&endpoints)?, now()],
+            )?;
+            c.execute(
+                "UPDATE mesh_claims SET used_at = ?2, used_by = ?3 WHERE hash = ?1",
+                params![hash(e.claim), now(), n.id],
+            )?;
+            bump(c)?;
+            return Ok((get(c, &n.id)?, token));
+        }
         if n.revoked_at.is_none() {
             return Err(Error::Conflict(if n.public_key == pk {
-                format!("this machine is already on the mesh as {}", n.name)
+                format!(
+                    "this machine is already on the mesh as {} (a {})",
+                    n.name,
+                    kind_str(n.kind)
+                )
             } else {
                 format!("a node named {} is on the mesh already: pick another name", n.name)
             }));
@@ -532,8 +562,23 @@ mod tests {
         let (c2, _) = s.tx(|c| invite(c, NodeKind::Server, "owner", 60)).unwrap();
         let err = s.tx(|c| enroll(c, &enrollment(&c2, "pi5", &other))).unwrap_err();
         assert!(err.to_string().contains("pick another name"), "{err}");
-        let err = s.tx(|c| enroll(c, &enrollment(&c2, "other", &pk))).unwrap_err();
-        assert!(err.to_string().contains("already on the mesh"), "{err}");
+        // The same machine with a fresh code: its node again, a new token (F77).
+        let (same, token2) = s.tx(|c| enroll(c, &enrollment(&c2, "other", &pk))).unwrap();
+        assert_eq!(
+            (same.id.as_str(), same.ip_index, same.name.as_str()),
+            (pi.id.as_str(), 2, "pi5")
+        );
+        assert!(
+            s.with(|c| by_token(c, &token)).unwrap().is_none(),
+            "the old token is replaced"
+        );
+        assert_eq!(s.with(|c| by_token(c, &token2)).unwrap().unwrap().id, pi.id);
+        let token = token2;
+        let err = s.tx(|c| enroll(c, &enrollment(&c2, "pi5", &pk))).unwrap_err();
+        assert!(
+            err.to_string().contains("used already"),
+            "the code still works once: {err}"
+        );
 
         // Revoked: the token stops working, the name and key are free again.
         assert!(s.tx(|c| revoke(c, "pi5")).unwrap().revoked_at.is_some());
@@ -543,7 +588,8 @@ mod tests {
             "no relay for a revoked key"
         );
         assert!(s.tx(|c| revoke(c, "main")).is_err(), "not the coordinator");
-        let (again, _) = s.tx(|c| enroll(c, &enrollment(&c2, "pi5", &pk))).unwrap();
+        let (c3, _) = s.tx(|c| invite(c, NodeKind::Server, "owner", 60)).unwrap();
+        let (again, _) = s.tx(|c| enroll(c, &enrollment(&c3, "pi5", &pk))).unwrap();
         assert_eq!(again.ip_index, 2, "the freed address is reused");
 
         // Endpoints change the map only when they change.

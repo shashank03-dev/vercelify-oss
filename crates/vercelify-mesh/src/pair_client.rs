@@ -80,9 +80,18 @@ pub async fn claim(control: &[String], code: &str) -> Result<String, PairError> 
             Err(e) => last = Some(e),
         }
     }
-    Err(last
-        .map(PairError::from)
-        .unwrap_or_else(|| PairError::Msg("no address to ask".into())))
+    // Nothing answered at all. Found on this Wi-Fi (mDNS reached us) yet
+    // unreachable is what client isolation looks like: phone hotspots and
+    // guest networks keep devices from talking to each other (F73).
+    Err(match last {
+        Some(e) => PairError::Msg(format!(
+            "{} didn't answer ({e}). If it's on this Wi-Fi, the network probably keeps devices apart \
+             (common on phone hotspots and guest Wi-Fi): put both on the same home network, or on the \
+             server run `sudo vercelify pair` and paste the full code it prints",
+            control.join(", ")
+        )),
+        None => PairError::Msg("no address to ask".into()),
+    })
 }
 
 /// `host[:port]` as a control address (default port 7443).
@@ -100,6 +109,18 @@ pub fn control_of(server: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn nothing_answering_names_a_network_that_keeps_devices_apart() {
+        // A port nothing listens on: refused at once, like an isolated Wi-Fi.
+        let free = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap();
+        let err = claim(&[free.to_string()], "ABCD-EFGH").await.unwrap_err().to_string();
+        assert!(err.contains("keeps devices apart"), "{err}");
+        assert!(err.contains("sudo vercelify pair"), "{err}");
+    }
 
     #[test]
     fn control_addresses() {

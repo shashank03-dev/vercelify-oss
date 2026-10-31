@@ -46,7 +46,37 @@ function PathCell({ peer }: { peer?: MeshPeer }) {
   );
 }
 
-function LocalLine({ local }: { local?: MeshLocal }) {
+/** The daemon stopped (a crash, a launchd hiccup): start it from here. */
+function StartNetwork() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string>();
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Button
+        size="sm"
+        variant="subtle"
+        data-testid="mesh-start"
+        busy={busy}
+        onClick={async () => {
+          setBusy(true);
+          setError(undefined);
+          try {
+            await mesh.start();
+          } catch (e) {
+            setError(toCockpitError(e).message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        Start network
+      </Button>
+      {error && <span className="text-bad">{error}</span>}
+    </span>
+  );
+}
+
+export function LocalLine({ local }: { local?: MeshLocal }) {
   if (!local) return null;
   if (!local.installed)
     return (
@@ -60,6 +90,7 @@ function LocalLine({ local }: { local?: MeshLocal }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted" data-testid="mesh-local">
       <StatusText health={local.running ? "ok" : "bad"} label={local.running ? `This computer: ${local.name}` : `${local.name}: vercelify-mesh isn't running`} />
+      {!local.running && <StartNetwork />}
       <span className="font-mono">{local.ipv4}</span>
       <span>{local.userspace ? "app mode (no admin rights needed)" : "system mode"}</span>
       {local.coordinator_seen_secs != null && local.coordinator_seen_secs > 120 && (

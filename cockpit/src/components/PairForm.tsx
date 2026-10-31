@@ -53,6 +53,7 @@ export function PairForm({
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<CockpitError>();
+  const [notice, setNotice] = useState<string | null>(null);
 
   const scan = useCallback(async () => {
     setScanning(true);
@@ -75,6 +76,7 @@ export function PairForm({
   // Installed with `install-mac.sh --pair CODE`: pair with it right away.
   useEffect(() => {
     if (hidePaste) return;
+    void settingsApi.configNotice().then(setNotice, () => {});
     void settingsApi.pendingPairing().then(
       (c) => {
         if (!c) return;
@@ -103,8 +105,14 @@ export function PairForm({
     }
   }, [autoScanMs, found, picked, byAddress, paired]);
 
-  /** Test, fall back to the address we found the host at, then save. */
-  async function connect(s: CockpitSettings, fallbackHost?: string) {
+  /**
+   * Test, fall back to the address we found the host at, then save.
+   * `joined`: this computer joined the server's network with a one-time
+   * code. That code is spent, so a server that doesn't answer yet (the
+   * tunnel still coming up) is saved anyway and the app keeps trying,
+   * instead of asking for a new code.
+   */
+  async function connect(s: CockpitSettings, fallbackHost?: string, joined = false) {
     setBusy(true);
     setError(undefined);
     try {
@@ -132,6 +140,15 @@ export function PairForm({
       await settingsApi.save(final);
       onPaired(final);
     } catch (e) {
+      if (joined) {
+        try {
+          await settingsApi.save(s);
+          onPaired(s, "Paired. The server doesn't answer over the network yet; the app keeps trying.");
+          return;
+        } catch {
+          // fall through to the original error
+        }
+      }
       setError(toCockpitError(e));
     } finally {
       setBusy(false);
@@ -171,7 +188,7 @@ export function PairForm({
       setBusy(true);
       const p = await settingsApi.joinPairing(given);
       setBusy(false);
-      await connect(pairingToSettings(p));
+      await connect(pairingToSettings(p), undefined, !!p.mesh_join);
     } catch (e) {
       setError(toCockpitError(e));
       setBusy(false);
@@ -213,6 +230,7 @@ export function PairForm({
 
   return (
     <div className="space-y-5">
+      {notice && <ErrorNote error={{ message: notice }} />}
       {lan.length > 0 && (
         <section data-testid="lan-servers">
           <div className="mb-2 flex items-center gap-2 text-[13px] font-medium">

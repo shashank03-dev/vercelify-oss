@@ -60,6 +60,8 @@ export const settings = {
   joinPairing: (code: string) => call<Pairing>("pair_join", { code }),
   /** A code `install-mac.sh --pair` left for the first start (read once). */
   pendingPairing: () => call<string | null>("pair_pending"),
+  /** Once: why the saved servers are gone (their file couldn't be read). */
+  configNotice: () => call<string | null>("config_notice"),
   test: (s: CockpitSettings) =>
     call<{ hostname: string }>("test_connection", { settings: s }),
 };
@@ -77,6 +79,8 @@ export const servers = {
 /** This computer on Vercelify's own network (vercelify-mesh). */
 export const mesh = {
   local: () => call<MeshLocal>("mesh_local"),
+  /** Start (or restart) this computer's vercelify-mesh. */
+  start: () => call<void>("mesh_start"),
   /** Servers on this LAN (mDNS). */
   discover: () => call<LanServer[]>("mesh_discover"),
   /** A short code → the pairing, over the LAN; joins the mesh. */

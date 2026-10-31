@@ -38,8 +38,11 @@ export function SettingsView() {
   async function repair() {
     setBusy(true);
     try {
-      const next = pairingToSettings(await settingsApi.joinPairing(code));
-      if (await save(next)) {
+      const joined = await settingsApi.joinPairing(code);
+      const next = pairingToSettings(joined);
+      // A network code is spent once joined: keep the pairing even if the
+      // server doesn't answer yet (save() said why), rather than lose it.
+      if ((await save(next)) || (joined.mesh_join && (await update(next).then(() => true, () => false)))) {
         setForm(next);
         setCode("");
       }

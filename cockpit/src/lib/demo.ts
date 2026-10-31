@@ -585,6 +585,8 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
     }
     case "test_connection":
       return { hostname: "thinkpad-t470" };
+    case "mesh_start":
+    case "config_notice":
     case "pair_pending":
       return null;
     case "pair_join":

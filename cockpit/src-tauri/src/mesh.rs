@@ -75,8 +75,12 @@ pub fn status_from(installed: bool, raw: Option<&str>, now: u64) -> MeshLocal {
         ipv4: v["ipv4"].as_str().map(String::from),
         revoked: v["revoked"].as_bool().unwrap_or(false),
         coordinator_seen_secs: v["coordinator_seen_secs"].as_u64(),
+        // Peers from a stale file are what was true when the daemon stopped,
+        // not now: showing them "direct, 1.2 ms" under "isn't running"
+        // contradicts it (F59).
         peers: v["peers"]
             .as_array()
+            .filter(|_| fresh)
             .map(|a| {
                 a.iter()
                     .filter_map(|p| serde_json::from_value::<MeshPeer>(p.clone()).ok())
@@ -84,6 +88,58 @@ pub fn status_from(installed: bool, raw: Option<&str>, now: u64) -> MeshLocal {
             })
             .unwrap_or_default(),
     }
+}
+
+/// Start (or restart) this user's network daemon: the LaunchAgent the
+/// installer wrote, loaded again if launchd forgot it.
+#[cfg(target_os = "macos")]
+pub fn start() -> Result<(), String> {
+    let uid = Command::new("id")
+        .arg("-u")
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .map_err(|e| e.to_string())?;
+    let domain = format!("gui/{uid}");
+    let job = format!("{domain}/dev.vercelify.mesh");
+    let launchctl = |args: &[&str]| Command::new("launchctl").args(args).output();
+    let kicked = launchctl(&["kickstart", "-k", &job])
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !kicked {
+        let plist = dirs_home().join("Library/LaunchAgents/dev.vercelify.mesh.plist");
+        if !plist.exists() {
+            return Err("vercelify-mesh isn't set up on this Mac: run install-mac.sh again".into());
+        }
+        let out = launchctl(&["bootstrap", &domain, &plist.to_string_lossy()]).map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(format!(
+                "launchctl couldn't start vercelify-mesh: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+    }
+    // Running once it writes a fresh status.
+    let until = std::time::Instant::now() + Duration::from_secs(15);
+    while std::time::Instant::now() < until {
+        if status().running {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Err(format!(
+        "vercelify-mesh started but isn't answering yet: see {}",
+        home().join("run/mesh.log").display()
+    ))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn start() -> Result<(), String> {
+    Err("start it with: sudo systemctl start vercelify-mesh".into())
+}
+
+#[cfg(target_os = "macos")]
+fn dirs_home() -> PathBuf {
+    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
 }
 
 pub fn status() -> MeshLocal {
@@ -357,10 +413,10 @@ mod tests {
         assert_eq!(s.ipv4.as_deref(), Some("10.77.0.5"));
         assert_eq!(s.peers[0].path, "lan");
         assert_eq!(s.peers[0].rtt_ms, Some(1.2));
-        assert!(
-            !status_from(true, Some(raw), 2000).running,
-            "a stale file isn't a running daemon"
-        );
+        let stale = status_from(true, Some(raw), 2000);
+        assert!(!stale.running, "a stale file isn't a running daemon");
+        assert!(stale.peers.is_empty(), "nor are its peers current");
+        assert_eq!(stale.name.as_deref(), Some("mac"));
         let none = status_from(false, None, 0);
         assert!(!none.installed && !none.running && none.peers.is_empty());
     }

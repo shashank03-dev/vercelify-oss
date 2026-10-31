@@ -34,3 +34,12 @@ it("keeps the code available for retry when connection testing fails", async () 
   expect(screen.getByPlaceholderText("vfy2.…")).toHaveValue("vfy2.retry-code");
   expect(api.update).not.toHaveBeenCalled();
 });
+it("a network code spent on joining is kept even when the server doesn't answer yet", async () => {
+  api.joinPairing.mockResolvedValue({ agent_url: "b", hostname: "B", agent_token: "new", mesh_join: "vfyj1.x" });
+  api.test.mockRejectedValue(new Error("unreachable"));
+  render(<ToastProvider><SettingsView /></ToastProvider>);
+  fireEvent.click(screen.getByTestId("settings-computer"));
+  fireEvent.change(await screen.findByPlaceholderText("vfy2.…"), { target: { value: "vfy2.spent" } });
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await waitFor(() => expect(api.update).toHaveBeenCalledWith(expect.objectContaining({ agent_token: "new" })));
+});

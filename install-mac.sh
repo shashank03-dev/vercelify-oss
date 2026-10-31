@@ -26,6 +26,8 @@ BUNDLE_ID=dev.vercelify.cockpit
 
 WITH_DISPLAY=0
 FROM_SOURCE=0
+SOURCE_DIR=''
+MESH_FAILED=0
 WITH_MESH=1
 MESH_SYSTEM=0
 MESH_LABEL=dev.vercelify.mesh
@@ -42,6 +44,7 @@ step() { printf '\n%s==>%s %s%s%s\n' "$C" "$N" "$B" "$*" "$N" >&2; }
 ok()   { printf '  %s✓%s %s\n' "$G" "$N" "$*" >&2; }
 info() { printf '  %s•%s %s\n' "$C" "$N" "$*" >&2; }
 warn() { printf '  %s!%s %s\n' "$Y" "$N" "$*" >&2; }
+err()  { printf '  %s✗ %s%s\n' "$R" "$*" "$N" >&2; }
 die()  { printf '  %s✗ %s%s\n' "$R" "$*" "$N" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
@@ -189,6 +192,9 @@ install_from_source() {
     rm -rf "$src"
     git clone --depth 1 -q "https://github.com/$REPO" "$src"
   fi
+  # The network daemon comes from this same checkout (install_mesh): a
+  # release's would be older than the app and miss what it relies on.
+  SOURCE_DIR=$src
   (cd "$src/cockpit" && npm ci --no-audit --no-fund >/dev/null && npx tauri build --bundles app) >&2 || die "the build failed (output above)"
   local app
   # Cargo workspace builds land in the root target/; older layouts used src-tauri/target/.
@@ -263,6 +269,13 @@ PLIST
 obtain_mesh_binary() {
   local out=$1 json url src="${XDG_CACHE_HOME:-$HOME/Library/Caches}/vercelify-src"
   if [[ -n "${VERCELIFY_MESH_BINARY:-}" ]]; then cp "$VERCELIFY_MESH_BINARY" "$out"; return; fi
+  # The app was built from source: its daemon too, from the same commit.
+  if [[ -n "${SOURCE_DIR:-}" ]]; then
+    info "building vercelify-mesh from the same source as the app"
+    (cd "$SOURCE_DIR" && ${CARGO:-cargo} build --release -q -p vercelify-mesh --features daemon) >&2 || return 1
+    cp "$SOURCE_DIR/target/release/vercelify-mesh" "$out"
+    return 0
+  fi
   json="${WORK:-$(mktemp -d)}/release.json"
   if [[ -s "$json" ]] || curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' -o "$json" "$GITHUB_API/repos/$REPO/releases/latest" 2>/dev/null; then
     url=$(mesh_asset "$json")
@@ -276,6 +289,31 @@ obtain_mesh_binary() {
   [[ -d "$src/.git" ]] || git clone --depth 1 -q "https://github.com/$REPO" "$src" || return 1
   (cd "$src" && cargo build --release -q -p vercelify-mesh --features daemon) >&2 || return 1
   cp "$src/target/release/vercelify-mesh" "$out"
+}
+
+: "${LAUNCHCTL:=launchctl}"
+
+# mesh_job_restart DOMAIN PLIST [sudo] — (re)load the launchd job and check it
+# runs. `bootout` returns before the old job is gone, and a `bootstrap` in
+# that window fails ("Bootstrap failed: 5"), leaving nothing running: wait it
+# out, retry, then look.
+mesh_job_restart() {
+  local domain=$1 plist=$2 sudo=${3:-} i
+  $sudo "$LAUNCHCTL" bootout "$domain/$MESH_LABEL" 2>/dev/null || true
+  for i in $(seq 1 "${MESH_JOB_WAIT:-20}"); do
+    $sudo "$LAUNCHCTL" print "$domain/$MESH_LABEL" >/dev/null 2>&1 || break
+    sleep 0.5
+  done
+  for i in 1 2 3; do
+    $sudo "$LAUNCHCTL" bootstrap "$domain" "$plist" 2>/dev/null && break
+    (( i < 3 )) || return 1
+    sleep 1
+  done
+  for i in $(seq 1 "${MESH_JOB_WAIT:-20}"); do
+    $sudo "$LAUNCHCTL" print "$domain/$MESH_LABEL" 2>/dev/null | grep -q 'state = running' && return 0
+    sleep 0.5
+  done
+  return 1
 }
 
 install_mesh() {
@@ -303,8 +341,11 @@ install_mesh() {
   rm -f "$tmp"
   mesh_plist "$bin" "$home" "$MESH_SYSTEM" | $sudo tee "$plist" >/dev/null
   if [[ "${VERCELIFY_NO_LAUNCHCTL:-0}" != 1 ]]; then
-    $sudo launchctl bootout "$domain/$MESH_LABEL" 2>/dev/null || true
-    $sudo launchctl bootstrap "$domain" "$plist" || warn "launchctl couldn't start $MESH_LABEL (see $home/run/mesh.log)"
+    if ! mesh_job_restart "$domain" "$plist" "$sudo"; then
+      err "vercelify-mesh isn't running: the app can't reach your servers until it does"
+      info "see $home/run/mesh.log, then try: launchctl bootstrap $domain \"$plist\""
+      return 1
+    fi
   fi
   if (( MESH_SYSTEM )); then
     ok "vercelify-mesh runs as root (*.vfy names on this Mac); join with:"
@@ -356,11 +397,15 @@ main() {
     fi
   fi
 
-  (( WITH_MESH )) && install_mesh
+  (( WITH_MESH )) && { install_mesh || MESH_FAILED=1; }
   (( WITH_DISPLAY )) && install_display_tools
   install_cli
 
-  printf '\n%s%s✔ Done.%s Opening %s…\n\n' "$B" "$G" "$N" "$APP_NAME" >&2
+  if (( MESH_FAILED )); then
+    printf '\n%s%sInstalled, but the network daemon is not running%s (see above). Opening %s…\n\n' "$B" "$Y" "$N" "$APP_NAME" >&2
+  else
+    printf '\n%s%s✔ Done.%s Opening %s…\n\n' "$B" "$G" "$N" "$APP_NAME" >&2
+  fi
   if [[ -n "$PAIR_CODE" ]]; then
     leave_pairing "$PAIR_CODE"
     printf '  The app pairs with your server as it opens.\n\n' >&2

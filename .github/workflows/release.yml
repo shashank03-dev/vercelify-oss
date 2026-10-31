@@ -48,6 +48,10 @@ jobs:
   mesh-macos:
     name: vercelify-mesh for macOS (universal)
     runs-on: macos-14
+    env:
+      # Signed and notarised with the app's secrets (see the cockpit job), so
+      # Gatekeeper and the firewall treat the daemon like the app.
+      HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_ID != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -62,7 +66,36 @@ jobs:
           mkdir -p out
           lipo -create -output out/vercelify-mesh-universal-apple-darwin \
             target/aarch64-apple-darwin/release/vercelify-mesh target/x86_64-apple-darwin/release/vercelify-mesh
-          cd out && shasum -a 256 vercelify-mesh-universal-apple-darwin > vercelify-mesh-universal-apple-darwin.sha256
+      - name: Sign and notarise vercelify-mesh
+        if: env.HAS_APPLE_SIGNING == 'true'
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          kc="$RUNNER_TEMP/mesh.keychain-db" kcpw=$(uuidgen)
+          printf '%s' "$APPLE_CERTIFICATE" | base64 --decode >"$RUNNER_TEMP/mesh.p12"
+          security create-keychain -p "$kcpw" "$kc"
+          security set-keychain-settings -lut 21600 "$kc"
+          security unlock-keychain -p "$kcpw" "$kc"
+          security import "$RUNNER_TEMP/mesh.p12" -k "$kc" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign >/dev/null
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpw" "$kc" >/dev/null
+          security list-keychains -d user -s "$kc" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/mesh.p12"
+          bin=out/vercelify-mesh-universal-apple-darwin
+          codesign --force --options runtime --timestamp --identifier dev.vercelify.mesh \
+            --keychain "$kc" --sign "$APPLE_SIGNING_IDENTITY" "$bin"
+          codesign --verify --strict --verbose=2 "$bin"
+          ditto -c -k "$bin" "$RUNNER_TEMP/mesh.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/mesh.zip" --apple-id "$APPLE_ID" \
+            --password "$APPLE_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          security delete-keychain "$kc"
+      - name: Checksum
+        run: cd out && shasum -a 256 vercelify-mesh-universal-apple-darwin > vercelify-mesh-universal-apple-darwin.sha256
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:

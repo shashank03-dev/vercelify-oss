@@ -144,3 +144,59 @@ teardown() { rm -rf "$T"; }
   [ "$status" -eq 0 ]
   [[ "$output" != *"ffmpeg and Moonlight ready"* ]]
 }
+
+# A launchctl whose old job lingers for $T/linger prints, whose first
+# bootstrap fails like macOS's "Bootstrap failed: 5", then runs the job.
+fake_launchctl() {
+  cat >"$T/launchctl" <<STUB
+#!/usr/bin/env bash
+echo "launchctl \$*" >>"$T/calls"
+case "\$1" in
+  bootout) echo 2 >"$T/linger"; exit 0 ;;
+  print)
+    n=\$(cat "$T/linger" 2>/dev/null || echo 0)
+    if (( n > 0 )); then echo \$(( n - 1 )) >"$T/linger"; echo "state = running"; exit 0; fi
+    [ -e "$T/loaded" ] && { [ -e "$T/never-runs" ] && echo "state = spawn scheduled" || echo "state = running"; exit 0; }
+    exit 113 ;;
+  bootstrap)
+    if [ ! -e "$T/failed-once" ]; then touch "$T/failed-once"; echo "Bootstrap failed: 5: Input/output error" >&2; exit 5; fi
+    touch "$T/loaded" ;;
+esac
+STUB
+  chmod +x "$T/launchctl"
+  printf '#!/bin/sh\nexit 0\n' >"$T/sleep"; chmod +x "$T/sleep"
+  export LAUNCHCTL="$T/launchctl" PATH="$T:$PATH"
+}
+
+@test "the network job is restarted reliably: waits for the old one, retries, checks it runs" {
+  fake_launchctl
+  run mesh_job_restart "gui/501" "$T/job.plist"
+  [ "$status" -eq 0 ]
+  # bootstrap only after the old job was gone, and tried again after the failure
+  [ "$(grep -c 'launchctl bootstrap' "$T/calls")" -eq 2 ]
+  first_bootstrap=$(grep -n 'bootstrap' "$T/calls" | head -1 | cut -d: -f1)
+  last_print_before=$(head -n "$first_bootstrap" "$T/calls" | grep -c 'print')
+  [ "$last_print_before" -ge 3 ]
+}
+
+@test "a network job that never runs fails loudly instead of claiming success" {
+  fake_launchctl
+  touch "$T/never-runs"
+  printf '#!/bin/sh\necho mesh\n' >"$T/fake-mesh"
+  HOME=$T VERCELIFY_MESH_BINARY="$T/fake-mesh" MESH_JOB_WAIT=3 run install_mesh
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"vercelify-mesh isn't running"* ]]
+  [[ "$output" != *"runs in your session"* ]]
+}
+
+@test "an app built from source gets its network daemon from the same checkout" {
+  mkdir -p "$T/src/target/release"
+  printf '#!/bin/sh\necho "cargo $*" >>"%s/cargo.log"; printf "#!/bin/sh\\n" >"%s/src/target/release/vercelify-mesh"\n' "$T" "$T" >"$T/cargo"
+  chmod +x "$T/cargo"
+  printf '#!/bin/sh\necho "curl $*" >>"%s/curl.log"; exit 22\n' "$T" >"$T/curl"; chmod +x "$T/curl"
+  SOURCE_DIR="$T/src" CARGO="$T/cargo" PATH="$T:$PATH" run obtain_mesh_binary "$T/out"
+  [ "$status" -eq 0 ]
+  [ -e "$T/out" ]
+  grep -q 'build --release -q -p vercelify-mesh --features daemon' "$T/cargo.log"
+  [ ! -e "$T/curl.log" ]   # no release download
+}

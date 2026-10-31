@@ -104,6 +104,39 @@ pub fn capture_screens() -> Result<Vec<CaptureScreen>, String> {
     Ok(parse_screens(&String::from_utf8_lossy(&out.stderr)))
 }
 
+/// Screen Recording permission, checked before capture starts. macOS ties
+/// the grant to the app's signature: after an update the switch in System
+/// Settings can still be on while the grant no longer matches, and ffmpeg
+/// then blocks and sends nothing (F68). The check asks again and says how
+/// to clear the stale entry.
+#[cfg(target_os = "macos")]
+pub fn screen_recording_allowed() -> Result<(), String> {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+        fn CGRequestScreenCaptureAccess() -> bool;
+    }
+    // SAFETY: both take no arguments and only read or prompt for this
+    // process's permission.
+    if unsafe { CGPreflightScreenCaptureAccess() } {
+        return Ok(());
+    }
+    if unsafe { CGRequestScreenCaptureAccess() } {
+        return Ok(());
+    }
+    Err(SCREEN_RECORDING_HELP.into())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn screen_recording_allowed() -> Result<(), String> {
+    Ok(())
+}
+
+pub const SCREEN_RECORDING_HELP: &str =
+    "Vercelify isn't allowed to record the screen. In System Settings → Privacy & Security → \
+Screen & System Audio Recording, select Vercelify and remove it with −, then start again and allow it \
+(or run: tccutil reset ScreenCapture dev.vercelify.cockpit). Quit and reopen Vercelify if macOS asks to.";
+
 #[cfg(test)]
 mod tests {
     use super::*;

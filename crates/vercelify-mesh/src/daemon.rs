@@ -603,6 +603,25 @@ async fn configure_resolver(interface: &str, ip: &str) {
     }
 }
 
+/// Why the daemon should restart: `state.json` now names another node or
+/// another coordinator, or is gone. Its own updates (the last map, a new
+/// certificate) change neither.
+fn identity_changed(running: &State, now: Option<&State>) -> Option<&'static str> {
+    match now {
+        None => Some("left the mesh"),
+        Some(n) if n.node_id != running.node_id => Some("joined as another node"),
+        // The same node paired again (F77): the old token no longer works.
+        Some(n) if n.node_token != running.node_token => Some("paired again"),
+        Some(n)
+            if n.coordinator_key != running.coordinator_key
+                || n.coordinator.public_key != running.coordinator.public_key =>
+        {
+            Some("joined another mesh")
+        }
+        Some(_) => None,
+    }
+}
+
 /// Run the node on the mesh until a signal ends it.
 pub async fn up(opts: UpOptions) -> Result<()> {
     let opts = Arc::new(opts);
@@ -775,6 +794,18 @@ pub async fn up(opts: UpOptions) -> Result<()> {
         tokio::select! {
             _ = every5.tick() => {
                 ticks += 1;
+                // Joined again (a re-pairing, a new main server) or left:
+                // this process runs the old identity until it restarts, so
+                // it ends and launchd / systemd start it on the new one.
+                if ticks.is_multiple_of(2) {
+                    // An unreadable file (being written) is no change.
+                    let why = State::load(&opts.dir).ok().and_then(|now| identity_changed(&state, now.as_ref()));
+                    if let Some(why) = why {
+                        tracing::info!("{why}: restarting on the new state");
+                        let _ = std::fs::remove_file(opts.run_dir.join("mesh.pid"));
+                        return Ok(());
+                    }
+                }
                 write_status(&live, &opts, &ctl).await;
                 // No word from the coordinator for 3 minutes: every 5 minutes,
                 // see whether it posted a new address.
@@ -824,6 +855,34 @@ mod tests {
     use super::*;
     use crate::addr::Addressing;
     use crate::keys::CoordinatorKey;
+
+    #[test]
+    fn a_new_pairing_restarts_the_daemon_but_its_own_updates_dont() {
+        let s: State = serde_json::from_value(serde_json::json!({
+            "node_id": "n1", "name": "mac", "kind": "device", "ipv4": "10.77.0.2", "ipv6": "",
+            "ipv4_prefix_len": 16, "certificate": "c", "node_token": "t", "coordinator_key": "ck",
+            "coordinator": {"public_key": "wg", "ipv4": "10.77.0.1", "endpoints": []},
+            "api_url": "http://10.77.0.1:7420"
+        }))
+        .unwrap();
+        let mut own = s.clone();
+        own.map = Some("signed map".into());
+        own.certificate = "renewed".into();
+        assert_eq!(identity_changed(&s, Some(&own)), None);
+        let mut rejoined = s.clone();
+        rejoined.node_id = "n7".into();
+        assert!(identity_changed(&s, Some(&rejoined)).is_some());
+        let mut repaired = s.clone();
+        repaired.node_token = "t2".into();
+        assert!(identity_changed(&s, Some(&repaired)).is_some());
+        let mut other = s.clone();
+        other.coordinator_key = "another".into();
+        assert!(identity_changed(&s, Some(&other)).is_some());
+        let mut moved = s.clone();
+        moved.coordinator.public_key = "wg2".into();
+        assert!(identity_changed(&s, Some(&moved)).is_some());
+        assert!(identity_changed(&s, None).is_some(), "left");
+    }
 
     fn rec(id: &str, name: &str, kind: NodeKind, idx: u16) -> NodeRecord {
         NodeRecord {

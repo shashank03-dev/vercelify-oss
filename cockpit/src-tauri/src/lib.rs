@@ -38,6 +38,8 @@ struct AppState {
     mesh_http: reqwest::Client,
     procs: Processes,
     collector: Collector,
+    /// Said once: the settings file couldn't be read and was put aside.
+    config_notice: Mutex<Option<String>>,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -63,12 +65,46 @@ fn settings_path(app: &AppHandle) -> CmdResult<PathBuf> {
     Ok(dir.join("settings.json"))
 }
 
-fn read_config(app: &AppHandle) -> CockpitConfig {
-    settings_path(app)
-        .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok())
-        .and_then(|raw| CockpitConfig::from_json(&raw))
-        .unwrap_or_default()
+fn read_config(app: &AppHandle) -> (CockpitConfig, Option<String>) {
+    match settings_path(app) {
+        Ok(p) => load_config_file(&p),
+        Err(_) => (CockpitConfig::default(), None),
+    }
+}
+
+/// The saved servers. A file that can't be read is moved aside (never
+/// overwritten by the next save, which would lose every pairing), and the
+/// note says where it went.
+fn load_config_file(path: &std::path::Path) -> (CockpitConfig, Option<String>) {
+    let Ok(raw) = std::fs::read_to_string(path) else {
+        return (CockpitConfig::default(), None);
+    };
+    if raw.trim().is_empty() {
+        return (CockpitConfig::default(), None);
+    }
+    if let Some(c) = CockpitConfig::from_json(&raw) {
+        return (c, None);
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    let aside = path.with_extension(format!("json.corrupt-{stamp}"));
+    let note = match std::fs::rename(path, &aside) {
+        Ok(()) => format!(
+            "This app's saved servers couldn't be read, so it starts fresh: pair again. The old file is kept as {}.",
+            aside.display()
+        ),
+        Err(e) => format!("This app's saved servers couldn't be read ({e}): pair again."),
+    };
+    tracing::warn!("{note}");
+    (CockpitConfig::default(), Some(note))
+}
+
+/// The note about an unreadable settings file, once.
+#[tauri::command]
+fn config_notice(state: State<'_, AppState>) -> Option<String> {
+    state.config_notice.lock().ok()?.take()
 }
 
 fn write_private(path: &PathBuf, contents: &str) -> std::io::Result<()> {
@@ -180,8 +216,10 @@ async fn pair_claim(state: State<'_, AppState>, agent_url: String, code: String)
     if !(agent_url.starts_with("http://") || agent_url.starts_with("https://")) {
         return Err("invalid agent URL".into());
     }
+    // A server found on the mesh (10.77.x) is reached through the mesh
+    // daemon's proxy in app mode, like every other request to it.
     let v = http::send(
-        &state.http,
+        state.client_for(&agent_url),
         &agent_url,
         None,
         http::Request {
@@ -203,7 +241,12 @@ async fn pair_join(code: String) -> CmdResult<Pairing> {
     if let Some(token) = p.mesh_join.clone() {
         tauri::async_runtime::spawn_blocking(move || {
             mesh::join(&token)?;
-            mesh::wait_connected(std::time::Duration::from_secs(30))
+            // The code is spent now: a tunnel that's slow to come up is no
+            // reason to lose it. The app saves the server and keeps trying.
+            if let Err(e) = mesh::wait_connected(std::time::Duration::from_secs(30)) {
+                eprintln!("pair_join: joined, tunnel not up yet: {e}");
+            }
+            Ok::<_, String>(())
         })
         .await
         .map_err(|e| e.to_string())??;
@@ -251,6 +294,14 @@ async fn mesh_pair(code: String, server: Option<String>) -> CmdResult<Pairing> {
     .await
     .map_err(|e| e.to_string())??;
     pairing::decode(&full).map_err(|e| e.to_string())
+}
+
+/// Start this computer's network daemon (the network panel's button).
+#[tauri::command]
+async fn mesh_start() -> CmdResult<()> {
+    tauri::async_runtime::spawn_blocking(mesh::start)
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// This computer on the mesh (the network panel).
@@ -434,6 +485,7 @@ fn forward_to(owner: &str, host: &str, ports: &[(bool, u16, u16)]) -> CmdResult<
 async fn sender_start(state: State<'_, AppState>, mut config: SenderConfig) -> CmdResult<ProcessStatus> {
     sender_args(&config).map_err(|e| e.to_string())?;
     let bin = local::ffmpeg().ok_or("ffmpeg is not installed — on macOS: brew install ffmpeg")?;
+    local::screen_recording_allowed()?;
     // The stream (UDP, or SRT over UDP) to a server on the mesh in app mode
     // goes through a forward: 127.0.0.1:<port + 10000>.
     let url = config.url.clone();
@@ -565,9 +617,10 @@ pub fn run() {
                 }
                 Err(e) => tracing::warn!("menu-bar item unavailable: {e}"),
             }
-            let config = read_config(app.handle());
+            let (config, notice) = read_config(app.handle());
             app.manage(AppState {
                 config: Mutex::new(config),
+                config_notice: Mutex::new(notice),
                 streams: Mutex::new(HashMap::new()),
                 http: http::client(),
                 mesh_http: http::mesh_client(),
@@ -577,6 +630,8 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            config_notice,
+            mesh_start,
             settings_load,
             settings_save,
             settings_clear,
@@ -687,7 +742,43 @@ mod settings_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::take_pending;
+    use super::{load_config_file, take_pending};
+
+    #[test]
+    fn an_unreadable_settings_file_is_kept_aside_not_overwritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("settings.json");
+        assert!(load_config_file(&path).1.is_none(), "no file: a first start");
+        std::fs::write(&path, "{ \"servers\": [ truncated").unwrap();
+        let (c, note) = load_config_file(&path);
+        assert!(c.servers.is_empty());
+        let note = note.expect("the user is told");
+        assert!(note.contains("pair again") && note.contains(".corrupt-"), "{note}");
+        assert!(!path.exists(), "moved aside, so a save can't overwrite it");
+        let kept: Vec<_> = std::fs::read_dir(dir.path()).unwrap().flatten().collect();
+        assert_eq!(kept.len(), 1);
+        assert_eq!(
+            std::fs::read_to_string(kept[0].path()).unwrap(),
+            "{ \"servers\": [ truncated"
+        );
+    }
+
+    /// Every request to an agent picks its client by URL: a server on the
+    /// mesh is reachable only through the mesh daemon's proxy in app mode
+    /// (the short code once went direct and could never pair, F76).
+    #[test]
+    fn agent_requests_choose_their_client_by_url() {
+        let src = include_str!("lib.rs");
+        // Split so this test doesn't find itself.
+        let needle = concat!("http::", "send(");
+        for (i, call) in src.split(needle).skip(1).enumerate() {
+            let first = call.trim_start().split(',').next().unwrap_or("");
+            assert!(
+                first.starts_with("state.client_for("),
+                "http::send call {i} uses `{first}`"
+            );
+        }
+    }
 
     #[test]
     fn a_pending_code_is_taken_once() {
