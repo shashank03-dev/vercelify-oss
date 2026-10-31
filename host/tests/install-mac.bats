@@ -89,6 +89,7 @@ teardown() { rm -rf "$T"; }
   run mesh_plist /x/vercelify-mesh "/Users/me/Library/Application Support/Vercelify" 0
   [[ "$output" == *"<string>--userspace</string>"* ]]
   [[ "$output" == *"<string>127.0.0.1:7480</string>"* ]]
+  [[ "$output" == *"<string>--gateway</string><string>127.0.0.1:7481</string>"* ]]
   [[ "$output" == *"<string>/Users/me/Library/Application Support/Vercelify/mesh</string>"* ]]
   [[ "$output" == *"<key>KeepAlive</key><true/>"* ]]
   run mesh_plist /x/vercelify-mesh /L 1

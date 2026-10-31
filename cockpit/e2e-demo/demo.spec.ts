@@ -568,3 +568,19 @@ test("platform engine: a GitHub App for private repositories, and a webhook", as
   await expect(hook.getByTestId("webhook-url")).toContainText("/v1/webhooks/github/git_");
   await expect(hook.getByTestId("webhook-secret")).toHaveText(/\S{30,}/);
 });
+
+test("private app domains open through the app-mode browser gateway", async ({ page }) => {
+  await page.addInitScript(() => {
+    window.open = (url) => { (window as unknown as { openedUrl: string }).openedUrl = String(url); return null; };
+  });
+  await page.goto("/");
+  await pairFound(page, "dell-e7450");
+  await page.getByTestId("papp-shop").getByRole("button", { name: /shop/ }).first().click();
+  await page.getByRole("tab", { name: /Domains/ }).click();
+  await page.getByTestId("domain-input").fill("private.main.vfy");
+  await page.getByTestId("domain-add").click();
+  const domain = page.getByTestId("domain-private.main.vfy");
+  await expect(domain).toContainText("private.main.vfy.localhost:7481");
+  await domain.getByRole("button", { name: "Open private.main.vfy", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { openedUrl: string }).openedUrl)).toBe("http://private.main.vfy.localhost:7481/");
+});

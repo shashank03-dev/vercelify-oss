@@ -10,6 +10,8 @@ pub mod daemon;
 pub mod disco;
 pub mod dns;
 #[cfg(feature = "daemon")]
+pub mod gateway;
+#[cfg(feature = "daemon")]
 pub mod http;
 pub mod keys;
 pub mod mdns;

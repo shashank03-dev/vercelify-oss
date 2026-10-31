@@ -247,6 +247,7 @@ function NavTip({ label, hint, keys }: { label?: string; hint: string; keys: str
 /** Wraps a sidebar control so it gets a tooltip only when the labels are hidden. */
 /** A newer release of the app: where to download it (install-mac.sh does the same). */
 function AppUpdate({ collapsed }: { collapsed: boolean }) {
+  const toast = useToast();
   const release = useLatestRelease();
   if (!release || !appBehind(release)) return null;
   return (
@@ -255,7 +256,7 @@ function AppUpdate({ collapsed }: { collapsed: boolean }) {
         type="button"
         data-testid="app-update"
         aria-label={`Update the app to ${release.version}`}
-        onClick={() => void openExternal(release.url)}
+        onClick={() => void openExternal(release.url).catch((e: unknown) => toast.bad(`Could not open browser: ${String(e)}`))}
         className={cx(
           "flex h-9 w-full items-center gap-2.5 rounded-lg text-[13px] text-fg-muted transition hover:bg-fg/[0.05] hover:text-fg",
           collapsed ? "justify-center" : "px-2.5",

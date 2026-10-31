@@ -234,6 +234,8 @@ pub struct UpOptions {
 pub struct Userspace {
     /// SOCKS5 on loopback (`127.0.0.1:7480`).
     pub socks: Option<SocketAddr>,
+    /// The browser gateway for private apps (`127.0.0.1:7481`, `*.localhost`).
+    pub gateway: Option<SocketAddr>,
     pub forwards: Vec<crate::socks::Forward>,
 }
 
@@ -688,6 +690,19 @@ pub async fn up(opts: UpOptions) -> Result<()> {
                     .map_err(|e| msg(format!("SOCKS on {addr}: {e}")))?;
                 tokio::spawn(crate::socks::serve_socks(l, stack.clone(), resolver.clone()));
                 tracing::info!("SOCKS5 to the mesh on {addr}");
+            }
+            if let Some(addr) = us.gateway {
+                // Not fatal: the app works without it, only browser links don't.
+                match tokio::net::TcpListener::bind(addr).await {
+                    Ok(l) => {
+                        tokio::spawn(crate::gateway::serve(l, stack.clone(), resolver.clone()));
+                        tracing::info!(
+                            "private apps in the browser: http://<app address>.localhost:{}/",
+                            addr.port()
+                        );
+                    }
+                    Err(e) => tracing::warn!("browser gateway on {addr}: {e}"),
+                }
             }
             for f in us.forwards.clone() {
                 let (stack, resolver) = (stack.clone(), resolver.clone());

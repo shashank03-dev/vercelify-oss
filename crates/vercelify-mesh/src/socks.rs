@@ -46,10 +46,17 @@ impl Resolver {
         if let Ok(ip) = host.trim_matches(['[', ']']).parse::<IpAddr>() {
             return self.on_mesh(ip).then_some(ip);
         }
-        let z = self.zone.read().unwrap_or_else(|e| e.into_inner());
         let host = host.to_ascii_lowercase();
+        if let Some(ip) = crate::gateway::embedded_ipv4(&host) {
+            let ip = IpAddr::V4(ip);
+            return self.on_mesh(ip).then_some(ip);
+        }
+        let z = self.zone.read().unwrap_or_else(|e| e.into_inner());
         let node = crate::dns::node_of(&host, &z.zone).or_else(|| (!host.contains('.')).then_some(host.as_str()))?;
-        z.records.get(node).and_then(|s| s.parse().ok())
+        z.records
+            .get(node)
+            .and_then(|s| s.parse().ok())
+            .filter(|ip| self.on_mesh(*ip))
     }
 }
 
@@ -403,6 +410,15 @@ mod tests {
             Some("10.77.0.1:7420".parse().unwrap())
         );
         assert!(resolve_target(&r, "main.vfy").is_none());
+    }
+
+    #[test]
+    fn sslip_and_nip_names_resolve_without_public_dns() {
+        let r = resolver();
+        for host in ["blog.10.77.0.1.sslip.io", "PR-3.10-77-0-1.NIP.IO"] {
+            assert_eq!(r.resolve(host), Some("10.77.0.1".parse().unwrap()));
+        }
+        assert_eq!(r.resolve("blog.8.8.8.8.sslip.io"), None);
     }
 
     #[test]

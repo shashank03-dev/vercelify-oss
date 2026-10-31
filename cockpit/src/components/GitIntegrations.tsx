@@ -51,7 +51,7 @@ export function GithubAppModal({ client, onClose, onCreated }: { client: Platfor
       const g = await client.convertGithubApp(parsed.code, parsed.state);
       toast.ok(`${g.name} is ready: install it on your repositories`);
       onCreated(g);
-      if (g.app_url) void openExternal(`${g.app_url}/installations/new`);
+      if (g.app_url) void openExternal(`${g.app_url}/installations/new`).catch((e: unknown) => toast.bad(`Could not open browser: ${String(e)}`));
       onClose();
     } catch (e) {
       toast.bad((e as Error).message);
@@ -77,7 +77,7 @@ export function GithubAppModal({ client, onClose, onCreated }: { client: Platfor
             <p className="text-[13px] text-fg-muted">
               GitHub opened in your browser. Confirm there; it comes back to this server by itself and the app appears under Credentials.
             </p>
-            <Button size="sm" variant="ghost" icon={<ExternalLink />} onClick={() => void openExternal(start.start_url)}>
+            <Button size="sm" variant="ghost" icon={<ExternalLink />} onClick={() => void openExternal(start.start_url).catch((e: unknown) => toast.bad(`Could not open browser: ${String(e)}`))}>
               Open GitHub again
             </Button>
             <Field label="Didn't come back?" hint="Paste the address your browser ended on (it has ?code=…)">

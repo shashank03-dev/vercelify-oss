@@ -5,7 +5,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { isWorker } from "../lib/api";
 import { hostOf } from "../lib/format";
 import { NAV, useNav } from "../lib/nav";
-import { openExternal } from "../lib/open";
+import { useBrowser } from "../lib/browser";
 import { listedApp, platform, type ListedApp } from "../lib/platform";
 import { useSession } from "../lib/session";
 import { useToast } from "./Toast";
@@ -18,6 +18,7 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
   const { go, setTheme } = useNav();
   const { settings, servers, select, addServer } = useSession();
   const toast = useToast();
+  const browser = useBrowser();
   const [apps, setApps] = useState<ListedApp[]>();
   const [search, setSearch] = useState("");
 
@@ -103,13 +104,13 @@ export function CommandPalette({ open, onClose }: { open: boolean; onClose: () =
                 {!!apps?.length && (
                   <Command.Group heading="Apps">
                     {apps.map((a) => {
-                      const url = a.url;
+                      const url = a.url ? browser.url(a.url) : null;
                       return [
                         <Item key={`open-${a.id}`} value={`open ${a.name} deployments logs`} icon={<SquareArrowOutUpRight />} onSelect={run(() => go("apps", { app: a.id }))}>
                           {a.name} <span className="text-fg-dim">— deployments & logs</span>
                         </Item>,
                         url && (
-                          <Item key={`visit-${a.id}`} value={`visit ${a.name} ${hostOf(url)}`} icon={<ExternalLink />} onSelect={run(() => openExternal(url))}>
+                          <Item key={`visit-${a.id}`} value={`visit ${a.name} ${hostOf(url)}`} icon={<ExternalLink />} onSelect={run(() => browser.open(url))}>
                             Visit <span className="font-mono text-[12px]">{hostOf(url)}</span>
                           </Item>
                         ),

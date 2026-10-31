@@ -59,6 +59,10 @@ enum Cmd {
         /// With --userspace: a SOCKS5 proxy to the mesh (`127.0.0.1:7480`).
         #[arg(long, requires = "userspace")]
         socks: Option<std::net::SocketAddr>,
+        /// With --userspace: private apps in the browser at
+        /// `http://<app address>.localhost:PORT/` (`127.0.0.1:7481`).
+        #[arg(long, requires = "userspace")]
+        gateway: Option<std::net::SocketAddr>,
         /// With --userspace: `[udp:]127.0.0.1:PORT=HOST:PORT`, repeatable.
         #[arg(long = "forward", requires = "userspace")]
         forwards: Vec<vercelify_mesh::socks::Forward>,
@@ -219,6 +223,7 @@ fn main() {
             interface,
             userspace,
             socks,
+            gateway,
             forwards,
             port,
             no_dns,
@@ -239,7 +244,11 @@ fn main() {
                     .filter(|s| !s.is_empty())
                     .map(String::from)
                     .collect(),
-                userspace: userspace.then_some(daemon::Userspace { socks, forwards }),
+                userspace: userspace.then_some(daemon::Userspace {
+                    socks,
+                    gateway,
+                    forwards,
+                }),
                 beacon: Some(beacon.trim().trim_end_matches('/').to_string()).filter(|b| !b.is_empty()),
             };
             if let Err(e) = rt.block_on(daemon::up(opts)) {

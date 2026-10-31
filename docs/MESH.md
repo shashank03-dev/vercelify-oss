@@ -93,11 +93,41 @@ works as a worker too.
 ## On a Mac: app mode and system mode
 
 By default `vercelify-mesh` runs in your login session without root ("app mode"): there
-is no network interface, and only the app (and `vfy`) use the network, through the
+is no network interface. The app (and `vfy`) use the network through the
 daemon's SOCKS proxy (`socks5h://127.0.0.1:7480`). For the display stream and Moonlight
 the app adds forwards from `127.0.0.1` by itself. Any other program can use the SOCKS
 proxy. To give the whole Mac a real interface and `*.vfy` names, install with
 `install-mac.sh --mesh-system` (it asks for your password once).
+
+Private apps also open in your normal browser through a loopback HTTP gateway
+on `127.0.0.1:7481`. The cockpit opens
+`http://blog.10.77.0.1.sslip.io.localhost:7481/` for
+`http://blog.10.77.0.1.sslip.io/`, preserving the path and query. Previews and
+private HTTP domains use the same mapping. The gateway restores the original
+Host for Traefik, supports WebSockets, and only connects to mesh destinations.
+Public HTTPS domains retain their public URL. Chrome and Firefox handle
+`*.localhost` locally; Safari resolution has not been verified. If Safari cannot
+open it, use Chrome/Firefox pending the Mac field check, or use system mode.
+
+Ollama is served directly on the mesh at port 11434. There is no `ai.<server>`
+Traefik route, so an `ai.<server>.localhost:7481/v1` snippet would fail. In app
+mode, use SOCKS with clients that support it, for example:
+
+```bash
+curl --socks5-hostname 127.0.0.1:7480 http://10.77.0.1:11434/api/tags
+```
+
+For clients without SOCKS support (including the Ollama CLI), add a loopback TCP
+forward to `~/Library/Application Support/Vercelify/run/forwards`, preserving its
+other lines:
+
+```text
+127.0.0.1:11434=10.77.0.1:11434 # ollama
+```
+
+The daemon reads the file every second. Use `http://127.0.0.1:11434` as the client
+base URL (`/v1` for OpenAI clients). Remove that line when finished. The direct
+mesh URLs in the AI snippets require system mode or a SOCKS-aware client.
 
 ## Day to day
 

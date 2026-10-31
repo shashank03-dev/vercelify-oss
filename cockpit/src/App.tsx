@@ -9,6 +9,7 @@ import { ToastProvider, useToast } from "./components/Toast";
 import { Logo, Modal, PixelWave } from "./components/ui";
 import { isWorker, servers as serversApi, settings as settingsApi } from "./lib/api";
 import { isTab, NAV, NavProvider, type Nav, type Tab } from "./lib/nav";
+import { BrowserProvider } from "./lib/browser";
 import { LiveProvider } from "./lib/live";
 import { SessionProvider } from "./lib/session";
 import { useTheme } from "./lib/theme";
@@ -39,7 +40,7 @@ function initialTab(): Tab {
 export default function App() {
   return (
     <ToastProvider>
-      <Shell />
+      <BrowserProvider><Shell /></BrowserProvider>
     </ToastProvider>
   );
 }

@@ -70,7 +70,7 @@ import { agent } from "../lib/api";
 import { hasCap } from "../lib/caps";
 import { useLive, useLiveTopic } from "../lib/live";
 import { useNav } from "../lib/nav";
-import { openExternal } from "../lib/open";
+import { useBrowser } from "../lib/browser";
 import { ENV_KEY, readDotenv } from "../lib/env";
 import {
   appState,
@@ -295,6 +295,7 @@ function sourceLabel(a: App): string {
 
 function AppRow({ app, client, onOpen, onChanged }: { app: App; client: PlatformClient; onOpen: (tab?: DetailTab) => void; onChanged: () => void }) {
   const { busy, act } = useAct();
+  const browser = useBrowser();
   const state = appState(app);
   const deploying = !!app.last_status && RUNNING.includes(app.last_status);
   return (
@@ -309,8 +310,8 @@ function AppRow({ app, client, onOpen, onChanged }: { app: App; client: Platform
       <StatusText health={state.health} label={state.label} className="hidden w-44 shrink-0 sm:flex" testId={`status-${app.name}`} />
       <div className="hidden w-56 min-w-0 shrink-0 lg:block">
         {app.url ? (
-          <button type="button" className="flex max-w-full items-center gap-1 truncate text-[12px] text-fg-muted hover:text-fg" onClick={() => void openExternal(app.url!)}>
-            <span className="truncate">{hostOf(app.url)}</span>
+          <button type="button" className="flex max-w-full items-center gap-1 truncate text-[12px] text-fg-muted hover:text-fg" onClick={() => void browser.open(app.url!)}>
+            <span className="truncate">{hostOf(browser.url(app.url))}</span>
             <ExternalLink className="size-3 shrink-0" />
           </button>
         ) : (
@@ -580,6 +581,7 @@ function AppDetail({
   const deps = usePoll(() => client.deployments(app.id, 30), 5000, [app.id, client]);
   const previews = usePoll(() => client.previews(app.id), 20_000, [app.id, client]);
   useLiveTopic("deployments", () => void deps.refresh());
+  const browser = useBrowser();
   const state = appState(app);
   const { busy, act } = useAct();
   const deploying = (deps.data ?? []).some(isRunning);
@@ -599,8 +601,8 @@ function AppDetail({
         <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="font-mono">{sourceLabel(app)}</span>
           {app.url && (
-            <button type="button" className="inline-flex items-center gap-1 text-fg-muted hover:text-fg" onClick={() => void openExternal(app.url!)}>
-              {hostOf(app.url)} <ExternalLink className="size-3" />
+            <button type="button" className="inline-flex items-center gap-1 text-fg-muted hover:text-fg" onClick={() => void browser.open(app.url!)}>
+              {hostOf(browser.url(app.url))} <ExternalLink className="size-3" />
             </button>
           )}
         </span>
@@ -1079,6 +1081,7 @@ const CERT: Record<string, { health: "ok" | "warn" | "bad" | "idle"; label: stri
 };
 
 function DomainsTab({ app, client, onChanged }: { app: App; client: PlatformClient; onChanged: () => void }) {
+  const browser = useBrowser();
   const { busy, act } = useAct();
   const [host, setHost] = useState("");
   const setting = usePoll(() => client.domain(), 0, [client]);
@@ -1104,12 +1107,12 @@ function DomainsTab({ app, client, onChanged }: { app: App; client: PlatformClie
               return (
                 <div key={d.id} className="flex items-center gap-3 px-4 py-2.5" data-testid={`domain-${d.host}`}>
                   <span className="min-w-0 flex-1 truncate text-[13px] text-fg">
-                    {d.host}
+                    {hostOf(browser.url(`${d.https ? "https" : "http"}://${d.host}`))}
                     {d.is_primary && <span className="ml-2 text-[11px] text-fg-dim">primary</span>}
                     {d.redirect_to && <span className="ml-2 text-[11px] text-fg-dim">→ {d.redirect_to}</span>}
                   </span>
                   <StatusText health={d.https ? c.health : "idle"} label={d.https ? c.label : "HTTP only"} className="w-44 shrink-0" />
-                  <IconButton label={`Open ${d.host}`} onClick={() => void openExternal(`${d.https ? "https" : "http"}://${d.host}`)}>
+                  <IconButton label={`Open ${d.host}`} onClick={() => void browser.open(`${d.https ? "https" : "http"}://${d.host}`)}>
                     <ExternalLink />
                   </IconButton>
                   <IconButton
@@ -1175,6 +1178,7 @@ function PreviewsTab({
   onChanged: () => void;
 }) {
   const { busy, act } = useAct();
+  const browser = useBrowser();
   const open = (previews.data ?? []).filter((p) => !p.closed_at);
   if (app.kind !== "git") {
     return <Callout tone="idle">Previews build pull requests, so they need an app deployed from a Git repository.</Callout>;
@@ -1218,7 +1222,7 @@ function PreviewsTab({
                 </span>
                 <StatusText health={p.asleep ? "idle" : p.status === "healthy" ? "ok" : p.status === "failed" ? "bad" : "warn"} label={p.asleep ? "Asleep" : STATUS_LABEL[p.status as Deployment["status"]] ?? p.status} className="w-28 shrink-0" />
                 {p.url && (
-                  <IconButton label="Open preview" onClick={() => void openExternal(p.url)}>
+                  <IconButton label="Open preview" onClick={() => void browser.open(p.url)}>
                     <ExternalLink />
                   </IconButton>
                 )}

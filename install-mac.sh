@@ -238,7 +238,7 @@ mesh_plist() {
   if [[ "$system" == 1 ]]; then
     mode='<string>--port</string><string>0</string>'
   else
-    mode='<string>--userspace</string><string>--port</string><string>0</string><string>--socks</string><string>127.0.0.1:7480</string>'
+    mode='<string>--userspace</string><string>--port</string><string>0</string><string>--socks</string><string>127.0.0.1:7480</string><string>--gateway</string><string>127.0.0.1:7481</string>'
   fi
   cat <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

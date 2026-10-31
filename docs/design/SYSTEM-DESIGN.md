@@ -728,6 +728,18 @@ depends on re-serialising JSON (`vercelify-mesh::cert`).
   own requests to mesh addresses (map stream, endpoint reports, renewal) go over the same
   stack. Devices bind a random UDP port (`--port 0`) and report the real one. No DNS
   server (nothing could query it); the server's firewall applies as to any device.
+- Browser gateway (`--gateway 127.0.0.1:7481`, app mode):
+  `http://<original app host>.localhost:7481/path` reaches the server's port 80
+  through the same stack. It removes `.localhost` from Host, resolves embedded
+  sslip.io/nip.io IPv4 addresses before mesh-zone and system DNS, and refuses
+  destinations outside the mesh prefixes. Plain HTTP connections close after
+  each request; WebSocket upgrades bridge bytes in both directions. The Mac
+  installer enables it alongside SOCKS. The cockpit maps private app, preview
+  and HTTP domain links; public HTTPS links keep their public route. Browser
+  opener errors appear as a toast. Chrome/Firefox resolve `*.localhost` locally;
+  Safari remains unverified and needs the M7 Mac field check.
+  Ollama remains on its own mesh port (11434), with no `ai.*` proxy route: clients
+  use SOCKS or a local TCP forward, rather than an invented gateway hostname.
 - macOS system mode: `utun` via the kernel control `com.apple.net.utun_control` (`utun.rs`),
   addresses and routes with `ifconfig`/`route`, `*.vfy` through `/etc/resolver/vfy`; the
   same engine as Linux.
