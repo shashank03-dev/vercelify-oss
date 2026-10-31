@@ -833,7 +833,10 @@ daemon checks it with the webpki roots).
   answers from another network doesn't hold up the tunnel, and a new map mid-round restarts
   it.
 - Payloads are WireGuard or disco packets, so the relay only sees ciphertext. Pings every
-  25 s (client) and 30 s (relay) keep tunnels and proxies from idling it out.
+  25 s (client) and 30 s (relay) keep tunnels and proxies from idling it out; a client that
+  hears nothing for 40 s takes the connection as dead (it can die without a reset) and
+  reconnects. When the relay comes (back) up, the engine handshakes at once with every peer it
+  carries, rather than at WireGuard's next retry.
 
 ### 13.8 DNS and ACLs
 

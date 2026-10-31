@@ -80,6 +80,11 @@ async fn run(
     }
 }
 
+/// Pings every 25 s (the relay pings every 30): hearing nothing for longer
+/// than this means the connection died without a reset.
+const PING_EVERY: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 25 });
+const SILENCE: Duration = Duration::from_secs(if cfg!(test) { 3 } else { 40 });
+
 type Ws = tokio_tungstenite::WebSocketStream<Box<dyn http::Io>>;
 
 /// How long each URL waits for the ones before it: the preferred one wins
@@ -167,23 +172,27 @@ async fn serve(
     while from_engine.try_recv().is_ok() {}
     up.store(true, Ordering::Relaxed);
     tracing::info!("relay connected: {url}");
-    let mut ping = tokio::time::interval(Duration::from_secs(25));
+    let mut ping = tokio::time::interval(PING_EVERY);
     ping.tick().await;
+    let mut heard = tokio::time::Instant::now();
     loop {
         tokio::select! {
-            m = ws.next() => match m {
-                Some(Ok(Message::Binary(b))) => {
-                    if let Some((src, packet)) = relay::split(&b) {
-                        let _ = to_engine.try_send((src, packet.to_vec()));
+            m = ws.next() => {
+                heard = tokio::time::Instant::now();
+                match m {
+                    Some(Ok(Message::Binary(b))) => {
+                        if let Some((src, packet)) = relay::split(&b) {
+                            let _ = to_engine.try_send((src, packet.to_vec()));
+                        }
+                    }
+                    Some(Ok(Message::Close(_))) | None => return,
+                    Some(Ok(_)) => {}
+                    Some(Err(e)) => {
+                        tracing::info!("relay {url}: {e}");
+                        return;
                     }
                 }
-                Some(Ok(Message::Close(_))) | None => return,
-                Some(Ok(_)) => {}
-                Some(Err(e)) => {
-                    tracing::info!("relay {url}: {e}");
-                    return;
-                }
-            },
+            }
             out = from_engine.recv() => match out {
                 Some((dst, packet)) => {
                     if ws.send(Message::Binary(relay::frame(&dst, &packet).into())).await.is_err() {
@@ -193,6 +202,10 @@ async fn serve(
                 None => return,
             },
             _ = ping.tick() => {
+                if heard.elapsed() > SILENCE {
+                    tracing::info!("relay {url}: silent for {}s; reconnecting", heard.elapsed().as_secs());
+                    return;
+                }
                 if ws.send(Message::Ping(Default::default())).await.is_err() {
                     return;
                 }
@@ -251,6 +264,45 @@ mod tests {
             }
         });
         format!("ws://127.0.0.1:{port}{}", relay::RELAY_PATH)
+    }
+
+    #[tokio::test]
+    async fn a_relay_gone_silent_is_dropped() {
+        // Accepts, then neither reads nor answers: a connection that died
+        // without a reset.
+        let server = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = server.local_addr().unwrap().port();
+        tokio::spawn(async move {
+            let mut held = vec![];
+            while let Ok((c, _)) = server.accept().await {
+                let mut ws = tokio_tungstenite::accept_async(c).await.unwrap();
+                ws.send(Message::Text(r#"{"challenge":"c"}"#.into())).await.unwrap();
+                let _ = ws.next().await;
+                ws.send(Message::Text(r#"{"ok":true}"#.into())).await.unwrap();
+                held.push(ws);
+            }
+        });
+        let (_urls, rx) = watch::channel(vec![format!("ws://127.0.0.1:{port}{}", relay::RELAY_PATH)]);
+        let (_key, key) = watch::channel(Arc::new(NodeKey::generate()));
+        let link = spawn(RelayConfig {
+            urls: rx,
+            key,
+            coordinator: NodeKey::generate().public(),
+        });
+        let started = std::time::Instant::now();
+        while !link.up.load(Ordering::Relaxed) {
+            assert!(started.elapsed() < Duration::from_secs(3), "never connected");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        let up_at = std::time::Instant::now();
+        while link.up.load(Ordering::Relaxed) {
+            assert!(
+                up_at.elapsed() < SILENCE + Duration::from_secs(2),
+                "still up {:?} after going silent",
+                up_at.elapsed()
+            );
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
     }
 
     #[tokio::test]

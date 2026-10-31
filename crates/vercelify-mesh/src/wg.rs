@@ -299,6 +299,8 @@ pub struct Engine<D: Device> {
     relay_tx: Option<mpsc::Sender<(PublicKey, Vec<u8>)>>,
     relay_rx: Option<mpsc::Receiver<(PublicKey, Vec<u8>)>>,
     relay_up: Arc<AtomicBool>,
+    /// The relay as the last timer tick saw it.
+    relay_was_up: bool,
     local: Vec<SocketAddr>,
     stun_servers: Vec<SocketAddr>,
     stun_pending: Vec<(stun::TxId, Instant)>,
@@ -329,6 +331,7 @@ impl<D: Device> Engine<D> {
             relay_tx: None,
             relay_rx: None,
             relay_up: Arc::new(AtomicBool::new(false)),
+            relay_was_up: false,
             local: vec![],
             stun_servers: vec![],
             stun_pending: vec![],
@@ -765,9 +768,22 @@ impl<D: Device> Engine<D> {
     async fn timers(&mut self, out: &mut [u8]) {
         let now = Instant::now();
         let relay_up = self.relay_up();
+        // The relay just came (back) up: handshake with the peers it carries
+        // now rather than at WireGuard's next retry, which backs off while
+        // the relay was down and stops after 90 s.
+        let relay_back = relay_up && !self.relay_was_up;
+        self.relay_was_up = relay_up;
         self.stun_round(now).await;
         for i in 0..self.peers.len() {
             self.disco_round(i, now).await;
+            let Some(p) = self.peers[i].as_mut() else { continue };
+            if relay_back && p.route(now, true) == Route::Relay {
+                if let TunnResult::WriteToNetwork(b) = p.tunn.format_handshake_initiation(out, true) {
+                    let data = b.to_vec();
+                    self.send_wg(i, &data).await;
+                }
+                continue;
+            }
             let Some(p) = self.peers[i].as_mut() else { continue };
             // Without a relay, step through the candidates for a handshake.
             if !relay_up && p.maybe_next_candidate(now) {
@@ -1152,6 +1168,30 @@ mod tests {
         expect_packet(&mut a.delivered, b"and back").await;
         let st = until(&a, "relay path", |s| s[0].path == "relay").await;
         assert!(st[0].endpoint.is_none());
+    }
+
+    #[tokio::test]
+    async fn a_relay_coming_back_handshakes_at_once() {
+        let (a, ea, ca) = node(Ipv4Addr::new(10, 77, 0, 1)).await;
+        let (mut b, eb, cb) = node(Ipv4Addr::new(10, 77, 0, 2)).await;
+        let (la, lb) = relay_pair(a.key.public(), b.key.public());
+        // A's relay is down at first, as after a tunnel restart.
+        la.up.store(false, Ordering::Relaxed);
+        let a_up = la.up.clone();
+        let (mut ea, mut eb) = (ea.with_relay(la), eb.with_relay(lb));
+        ea.set_peers(vec![spec(&b, vec![])]);
+        eb.set_peers(vec![spec(&a, vec![])]);
+        tokio::spawn(ea.run(ca));
+        tokio::spawn(eb.run(cb));
+        // A packet waits on a handshake that had nowhere to go.
+        a.inject.send(ipv4(a.ip, b.ip, b"waiting")).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(600)).await;
+        a_up.store(true, Ordering::Relaxed);
+        let started = tokio::time::Instant::now();
+        // Not at WireGuard's next 5-s retry: as the relay comes up.
+        tokio::time::timeout(Duration::from_millis(1500), expect_packet(&mut b.delivered, b"waiting"))
+            .await
+            .unwrap_or_else(|_| panic!("not through {:?} after the relay came up", started.elapsed()));
     }
 
     #[tokio::test]
