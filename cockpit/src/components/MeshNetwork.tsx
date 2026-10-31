@@ -55,6 +55,16 @@ export function AwayLine({ away }: { away?: boolean }) {
   );
 }
 
+/** Relay use under a node's name: "on the relay" only while it's the path in use. */
+export function RelayNote({ connected, bytes: relayed, path }: { connected: boolean; bytes: number; path?: string }) {
+  if (!connected || relayed <= 0) return null;
+  return (
+    <div className="text-[11px] text-fg-dim" data-testid="mesh-relay-note">
+      {path === "relay" ? `on the relay · ${bytes(relayed)} relayed` : `relay on standby · ${bytes(relayed)} relayed so far`}
+    </div>
+  );
+}
+
 /** How this computer reaches a node right now. */
 function PathCell({ peer }: { peer?: MeshPeer }) {
   if (!peer) return <span className="text-fg-dim">—</span>;
@@ -251,9 +261,7 @@ export function MeshNetwork() {
                           {n.kind === "device" && n.role !== "owner" ? ` · ${n.role}` : ""}
                         </span>
                       </div>
-                      {n.relay_connected && n.relayed_bytes > 0 && (
-                        <div className="text-[11px] text-fg-dim">on the relay · {bytes(n.relayed_bytes)} relayed</div>
-                      )}
+                      <RelayNote connected={n.relay_connected} bytes={n.relayed_bytes} path={peer?.path} />
                     </td>
                     <td className="px-2 py-2 font-mono text-[12px] text-fg-muted">{n.ipv4}</td>
                     <td className="px-2 py-2">

@@ -1,5 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { AwayLine, LocalLine } from "./MeshNetwork";
+import { AwayLine, LocalLine, RelayNote } from "./MeshNetwork";
 
 const api = vi.hoisted(() => ({ mesh: { start: vi.fn() }, agentOn: vi.fn() }));
 vi.mock("../lib/api", () => api);
@@ -35,4 +35,14 @@ it("says when the network only works at home, and how to change that (review F13
   expect(screen.getByText("Ready away from home")).toBeInTheDocument();
   rerender(<AwayLine away={undefined} />);
   expect(screen.queryByTestId("mesh-away")).toBeNull();
+});
+
+it("says 'on the relay' only when the relay is the path in use", () => {
+  const { rerender } = render(<RelayNote connected bytes={7300} path="lan" />);
+  expect(screen.queryByText(/on the relay/)).toBeNull();
+  expect(screen.getByText(/relay on standby/)).toBeInTheDocument();
+  rerender(<RelayNote connected bytes={7300} path="relay" />);
+  expect(screen.getByText(/on the relay · 7.1 KB relayed/)).toBeInTheDocument();
+  rerender(<RelayNote connected={false} bytes={7300} path="relay" />);
+  expect(screen.queryByTestId("mesh-relay-note")).toBeNull();
 });
