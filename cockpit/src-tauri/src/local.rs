@@ -132,6 +132,7 @@ pub fn screen_recording_allowed() -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(target_os = "macos")]
 pub const SCREEN_RECORDING_HELP: &str =
     "Vercelify isn't allowed to record the screen. In System Settings → Privacy & Security → \
 Screen & System Audio Recording, select Vercelify and remove it with −, then start again and allow it \
