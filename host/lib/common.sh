@@ -44,28 +44,30 @@ have() { command -v "$1" >/dev/null 2>&1; }
 has_tty() { [[ "${VERCELIFY_NONINTERACTIVE:-0}" != 1 ]] && { : </dev/tty; } 2>/dev/null; }
 
 # ask VAR "Prompt" [default]
+# Its locals are __ask_* so they never shadow the caller's VAR (`ask reply`
+# from a function with its own `local reply` must set that one).
 ask() {
-  local __var=$1 prompt=$2 def=${3:-} reply=''
+  local __ask_var=$1 __ask_prompt=$2 __ask_def=${3:-} __ask_reply=''
   if has_tty; then
-    if [[ -n "$def" ]]; then
-      printf '  %s?%s %s %s[%s]%s ' "$C_YELLOW" "$C_RESET" "$prompt" "$C_DIM" "$def" "$C_RESET" >/dev/tty
+    if [[ -n "$__ask_def" ]]; then
+      printf '  %s?%s %s %s[%s]%s ' "$C_YELLOW" "$C_RESET" "$__ask_prompt" "$C_DIM" "$__ask_def" "$C_RESET" >/dev/tty
     else
-      printf '  %s?%s %s ' "$C_YELLOW" "$C_RESET" "$prompt" >/dev/tty
+      printf '  %s?%s %s ' "$C_YELLOW" "$C_RESET" "$__ask_prompt" >/dev/tty
     fi
-    IFS= read -r reply </dev/tty || true
+    IFS= read -r __ask_reply </dev/tty || true
   fi
-  printf -v "$__var" '%s' "${reply:-$def}"
+  printf -v "$__ask_var" '%s' "${__ask_reply:-$__ask_def}"
 }
 
 # ask_secret VAR "Prompt"
 ask_secret() {
-  local __var=$1 prompt=$2 reply=''
+  local __ask_var=$1 __ask_prompt=$2 __ask_reply=''
   if has_tty; then
-    printf '  %s?%s %s ' "$C_YELLOW" "$C_RESET" "$prompt" >/dev/tty
-    IFS= read -rs reply </dev/tty || true
+    printf '  %s?%s %s ' "$C_YELLOW" "$C_RESET" "$__ask_prompt" >/dev/tty
+    IFS= read -rs __ask_reply </dev/tty || true
     printf '\n' >/dev/tty
   fi
-  printf -v "$__var" '%s' "$reply"
+  printf -v "$__ask_var" '%s' "$__ask_reply"
 }
 
 # confirm "Question" [default y|n] — returns 0 for yes.

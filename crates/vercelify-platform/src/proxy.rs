@@ -259,15 +259,27 @@ pub fn route_keys(c: &ProxyConfig) -> Vec<String> {
 }
 
 fn config_hash(c: &ProxyConfig) -> String {
-    // The directory too: a proxy that mounts another one never sees our routes.
+    // The directory too: a proxy that mounts another one never sees our
+    // routes. By identity, not only by path: a bind mount follows the
+    // directory it was made with, so after the folder is deleted and made
+    // again (a reinstall) an old proxy at the same path still serves the old
+    // one, and every route 404s.
+    let id = |p: &std::path::Path| {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::metadata(p)
+            .map(|m| format!("{}:{}", m.dev(), m.ino()))
+            .unwrap_or_default()
+    };
     let h = Sha256::digest(format!(
-        "{}|{}|{}|{}|{}|{}",
+        "{}|{}|{}|{}|{}|{}|{}|{}",
         static_config(c),
         c.image,
         c.http_port,
         c.https_port,
         c.metrics_port,
-        c.dir.display()
+        c.dir.display(),
+        id(&c.dynamic_dir()),
+        id(&c.dir.join("acme")),
     ));
     h.iter().take(8).map(|b| format!("{b:02x}")).collect()
 }
@@ -519,6 +531,29 @@ mod tests {
             .next()
             .unwrap();
         assert!(secure0.contains("vfy-blog-auth"));
+    }
+
+    #[test]
+    fn a_proxy_folder_made_again_at_the_same_path_recreates_the_proxy() {
+        let dir = tempfile::tempdir().unwrap();
+        let c = ProxyConfig {
+            dir: dir.path().join("proxy"),
+            http_port: 80,
+            https_port: 443,
+            metrics_port: 8082,
+            acme_email: None,
+            dns_challenge: false,
+            image: TRAEFIK_IMAGE.into(),
+        };
+        std::fs::create_dir_all(c.dynamic_dir()).unwrap();
+        std::fs::create_dir_all(c.dir.join("acme")).unwrap();
+        let before = config_hash(&c);
+        assert_eq!(config_hash(&c), before, "stable while nothing changes");
+        // Uninstalled, folder deleted (moved aside), installed again.
+        std::fs::rename(&c.dir, dir.path().join("proxy.old")).unwrap();
+        std::fs::create_dir_all(c.dynamic_dir()).unwrap();
+        std::fs::create_dir_all(c.dir.join("acme")).unwrap();
+        assert_ne!(config_hash(&c), before);
     }
 
     #[test]

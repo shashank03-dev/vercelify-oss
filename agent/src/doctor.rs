@@ -75,6 +75,8 @@ pub struct Facts {
     pub max_temp_c: Option<f32>,
     pub on_battery: bool,
     pub battery_pct: Option<u8>,
+    /// The most worn battery: full charge as a % of its design capacity.
+    pub battery_health_pct: Option<f32>,
     pub power_guard: Option<String>,
     pub firewall_active: bool,
     pub power_guard_active: bool,
@@ -407,6 +409,17 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
                 f.battery_pct.map(|p| format!(" ({p}%)")).unwrap_or_default()
             ),
             Some(&fix),
+        ));
+    }
+    // A worn-out battery reads "100 %" but empties in minutes: the power
+    // guard can't shut down cleanly on it after a power cut.
+    if let Some(h) = f.battery_health_pct.filter(|h| *h < 20.0) {
+        out.push(check(
+            "battery",
+            "Battery",
+            Warn,
+            format!("worn out: holds {h:.0}% of its design charge, so it won't carry the server through a power cut"),
+            Some("keep it on the charger (or a UPS); a power cut is then an abrupt stop, which Docker and SQLite survive"),
         ));
     }
     out.push(if f.power_guard_active {
@@ -767,6 +780,9 @@ pub async fn gather(s: &AppState) -> Facts {
         max_temp_c: snap.as_ref().and_then(|s| s.thermal.max_c),
         on_battery: snap.as_ref().is_some_and(|s| s.power.on_battery),
         battery_pct: snap.as_ref().and_then(|s| s.power.lowest_capacity_pct),
+        battery_health_pct: snap
+            .as_ref()
+            .and_then(|s| s.power.batteries.iter().filter_map(|b| b.health_pct).reduce(f32::min)),
         power_guard: pg.map(|p| p.state),
         firewall_active: active(services::status(&cfg.systemctl_bin, "vercelify-firewall").await),
         power_guard_active: active(services::status(&cfg.systemctl_bin, "vercelify-power-guard").await),
@@ -832,7 +848,7 @@ pub async fn report(s: &AppState) -> DoctorReport {
     let facts = gather(s).await;
     DoctorReport {
         role: facts.role.clone(),
-        agent_version: env!("CARGO_PKG_VERSION").into(),
+        agent_version: crate::VERSION.into(),
         checks: evaluate(&facts),
     }
 }
@@ -919,6 +935,7 @@ mod tests {
             max_temp_c: Some(52.0),
             on_battery: false,
             battery_pct: Some(80),
+            battery_health_pct: Some(85.0),
             power_guard: Some("ok".into()),
             firewall_active: true,
             power_guard_active: true,
@@ -966,6 +983,23 @@ mod tests {
         assert!(c.iter().all(|c| c.fix.is_none()));
         assert_eq!(status_of(&c, "ollama"), None, "no AI check when Ollama isn't installed");
         assert_eq!(status_of(&c, "smart-sda"), Some(Fine));
+    }
+
+    #[test]
+    fn a_worn_out_battery_is_flagged() {
+        let worn = evaluate(&Facts {
+            battery_health_pct: Some(12.4),
+            ..healthy_main()
+        });
+        assert_eq!(status_of(&worn, "battery"), Some(Warn));
+        assert!(worn.iter().any(|c| c.id == "battery" && c.detail.contains("12%")));
+        for ok in [Some(85.0), None] {
+            let c = evaluate(&Facts {
+                battery_health_pct: ok,
+                ..healthy_main()
+            });
+            assert_eq!(status_of(&c, "battery"), None);
+        }
     }
 
     #[test]

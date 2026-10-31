@@ -59,7 +59,19 @@ main() {
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     echo "==> Downloading Vercelify ($REPO@$ref)…" >&2
-    curl -fsSL --retry 3 "https://codeload.github.com/$REPO/tar.gz/$ref" | tar -xz -C "$tmp" --strip-components=1
+    # To a file first, resuming where a weak link dropped it; extracted only
+    # once it's whole.
+    local i
+    for i in 1 2 3 4 5; do
+      curl -fsSL --retry 5 --retry-delay 3 --connect-timeout 20 -C - -o "$tmp/src.tar.gz" \
+        "https://codeload.github.com/$REPO/tar.gz/$ref" && break
+      (( i < 5 )) || { echo "download failed (network?) — run the same command again" >&2; exit 1; }
+      echo "   download interrupted, resuming…" >&2
+      sleep 3
+    done
+    gzip -t "$tmp/src.tar.gz" 2>/dev/null || { echo "the download is damaged — run the same command again" >&2; exit 1; }
+    tar -xzf "$tmp/src.tar.gz" -C "$tmp" --strip-components=1
+    rm -f "$tmp/src.tar.gz"
     rm -rf "$DEST.new"
     mkdir -p "$DEST.new"
     cp -a "$tmp/." "$DEST.new/"

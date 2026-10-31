@@ -2,6 +2,13 @@
 //! workers) and exposes host state to the cockpit over Vercelify's mesh.
 
 mod auth;
+
+/// This build: the release number, plus where it was built from when that
+/// isn't the release (`0.2.5+main.1a2b3c4`, set by the installer's build).
+pub const VERSION: &str = match option_env!("VERCELIFY_BUILD") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
 mod cli;
 mod config;
 mod cron;
@@ -113,11 +120,11 @@ async fn main() {
     };
     match cli.cmd {
         Cmd::Version => {
-            println!("vercelify-agent {}", env!("CARGO_PKG_VERSION"));
+            println!("vercelify-agent {}", crate::VERSION);
             return;
         }
         Cmd::Help => {
-            println!("vercelify-agent {}\n{}", env!("CARGO_PKG_VERSION"), cli::USAGE);
+            println!("vercelify-agent {}\n{}", crate::VERSION, cli::USAGE);
             return;
         }
         _ => {}
@@ -155,7 +162,11 @@ async fn main() {
             // Each pairing gets its own token, so a lost Mac can be revoked
             // alone (`vercelify tokens revoke`).
             let name = name.unwrap_or_else(|| format!("paired {}", chrono::Utc::now().format("%Y-%m-%d %H:%M UTC")));
-            let token = match tokens::create(&cfg, &name) {
+            // A code that's never claimed (left in a log, say) goes stale:
+            // its token must be used within a day, or the code's own life
+            // if that's longer.
+            let unused_for = std::time::Duration::from_secs(ttl.max(24 * 3600));
+            let token = match tokens::create_for_pairing(&cfg, &name, unused_for) {
                 Ok((_, secret)) => secret,
                 Err(e) => fatal(&format!(
                     "could not write {}: {e} (run as root)",
@@ -197,6 +208,13 @@ async fn main() {
         Cmd::Promote { force } => match standby::promote(&cfg, force).await {
             Ok(m) => println!("{m}"),
             Err(e) => fatal(&e),
+        },
+        Cmd::DbBackup { dest } => match vercelify_platform::store::copy_without_migrating(&cfg.platform_db, &dest) {
+            Ok(v) => println!(
+                "schema {v} (this agent understands {})",
+                vercelify_platform::store::latest_version()
+            ),
+            Err(e) => fatal(&format!("{}: {e}", cfg.platform_db.display())),
         },
         Cmd::TokensList => {
             let all = tokens::list(&cfg);

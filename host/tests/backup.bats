@@ -10,7 +10,7 @@ setup() {
 #!/usr/bin/env bash
 echo "restic $* repo=$RESTIC_REPOSITORY pw=${RESTIC_PASSWORD:+set}" >>"$CALLS"
 case "$1" in
-  cat) [[ -e "$RESTIC_REPOSITORY/config" ]] ;;
+  cat) [[ -e "$RESTIC_REPOSITORY/config" && ! -e "$RESTIC_REPOSITORY/other-password" ]] ;;
   init) mkdir -p "$RESTIC_REPOSITORY" && touch "$RESTIC_REPOSITORY/config" ;;
   backup) [[ "$RESTIC_REPOSITORY" == *broken* ]] && { echo "Fatal: unable to open repository" >&2; exit 1; }
           echo "snapshot 1a2b3c4d saved" ;;
@@ -138,6 +138,18 @@ teardown() { rm -rf "$T"; }
   [ "$status" -eq 0 ]
   [ "$output" = kept-secret ]
   run ! grep -q 'restic init' "$CALLS"
+}
+
+@test "a reinstall without the old config never re-creates over old backups, and says how to get them back" {
+  mkdir -p "$T/old" && touch "$T/old/config" "$T/old/other-password"
+  run "$CLI" backup setup --to "$T/old"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"already holds backups locked with another password"* ]]
+  [[ "$output" == *"VERCELIFY_BACKUP_PASSWORD"* ]]
+  [[ "$output" == *"mv $T/old $T/old.old"* ]]
+  run ! grep -q 'restic init' "$CALLS"
+  # No half-made config that would hide the problem next time.
+  [ ! -e "$T/etc/backup.env" ]
 }
 
 @test "a database that can't be dumped doesn't stop the rest from being saved" {

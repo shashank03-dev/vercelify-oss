@@ -63,6 +63,7 @@ obtain_binary() {
   have docker || die "Docker is required to build $name from source"
   info "building $name from source in Docker (one-time, ~5 min on a laptop CPU)…" >&2
   run_cmd docker run --rm -v "$VERCELIFY_SRC":/src:ro -v "$tmp":/out -w /tmp -e NAME="$name" -e ARGS="$cargo_args" \
+    -e VERCELIFY_BUILD="$( { declare -F build_version >/dev/null && build_version; } || echo "${VERSION:-dev}")" \
     rust:1-alpine sh -ec '
       apk add --no-cache musl-dev >/dev/null
       mkdir /tmp/build

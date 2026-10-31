@@ -221,3 +221,78 @@ STUB
   [ "$status" -ne 0 ]
   [[ "$output" == *"usage: vercelify pair [--host HOST]"* ]]
 }
+
+@test "ask sets the caller's variable even when the caller has a local of the same name" {
+  run bash -c '. "$1/lib/common.sh"; has_tty() { return 1; }
+    f() { local reply; ask reply "Sure?" fallback; printf "%s" "$reply"; }; f
+    g() { local reply; confirm "Sure?" y && echo yes || echo no; }; g' _ "$BATS_TEST_DIRNAME/.."
+  [ "$status" -eq 0 ]
+  [ "$output" = "fallbackyes" ]
+}
+
+@test "a declined uninstall says so, exits non-zero and changes nothing" {
+  mkdir -p "$T/bin" "$T/systemd" "$T/lib"
+  printf '#!/bin/sh\necho "$*" >>"%s/calls"\n' "$T" >"$T/bin/systemctl"
+  printf '#!/bin/sh\necho "docker $*" >>"%s/calls"\n' "$T" >"$T/bin/docker"
+  chmod +x "$T/bin/"*
+  touch "$T/systemd/vercelify-agent.service"
+  PATH="$T/bin:$PATH" VERCELIFY_NONINTERACTIVE=1 VERCELIFY_TEST=1 SYSTEMD_DIR="$T/systemd" VERCELIFY_LIB="$T/lib" \
+    run "$CLI" uninstall
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cancelled"* ]]
+  [ -f "$T/systemd/vercelify-agent.service" ]
+  [ ! -s "$T/calls" ]
+}
+
+@test "uninstall stops the apps and removes the proxy, builder and slice, and gives the lid back" {
+  mkdir -p "$T/bin" "$T/systemd" "$T/lib" "$T/logind"
+  printf '#!/bin/sh\necho "systemctl $*" >>"%s/calls"\n' "$T" >"$T/bin/systemctl"
+  cat >"$T/bin/docker" <<EOF
+#!/bin/sh
+echo "docker \$*" >>"$T/calls"
+case "\$1 \$2" in
+  "ps -aq") echo c1; echo c2 ;;
+  "inspect vercelify-proxy"|"inspect buildx_buildkit_vercelify0") exit 0 ;;
+  inspect*) exit 1 ;;
+esac
+exit 0
+EOF
+  chmod +x "$T/bin/"*
+  touch "$T/systemd/vercelify.slice" "$T/logind/90-vercelify.conf" "$T/etc/sleep.vercelify"
+  echo '{"cgroup-parent":"vercelify.slice","log-driver":"json-file"}' >"$T/daemon.json"
+  PATH="$T/bin:$PATH" ASSUME_YES=1 VERCELIFY_TEST=1 SYSTEMD_DIR="$T/systemd" AGENT_BIN="$T/none" VERCELIFY_LIB="$T/lib" CLI_LINK="$T/cli-link" \
+    LOGIND_DROPIN="$T/logind/90-vercelify.conf" DOCKER_DAEMON_JSON="$T/daemon.json" AGENT_LOCAL_URL=http://127.0.0.1:9 \
+    run "$CLI" uninstall
+  [ "$status" -eq 0 ]
+  grep -q 'docker update --restart=no c1 c2' "$T/calls"
+  grep -q 'docker stop c1 c2' "$T/calls"
+  [[ "$output" == *"stopped 2 app container(s)"* ]]
+  grep -q 'docker rm -f vercelify-proxy' "$T/calls"
+  grep -q 'docker rm -f buildx_buildkit_vercelify0' "$T/calls"
+  [ ! -e "$T/systemd/vercelify.slice" ]
+  [ "$(jq -c . "$T/daemon.json")" = '{"log-driver":"json-file"}' ]
+  [ ! -e "$T/logind/90-vercelify.conf" ]
+  grep -q 'systemctl unmask --quiet sleep.target' "$T/calls"
+}
+
+@test "uninstall with remote access on but no router doesn't stop halfway" {
+  mkdir -p "$T/bin" "$T/systemd" "$T/lib"
+  printf '#!/bin/sh\nexit 0\n' >"$T/bin/systemctl"
+  printf '#!/bin/sh\n[ "$1" = inspect ] && exit 1\nexit 0\n' >"$T/bin/docker"
+  printf '#!/bin/sh\nexit 1\n' >"$T/bin/upnpc"
+  chmod +x "$T/bin/"*
+  echo 'enabled=1' >"$T/etc/remote.env"
+  PATH="$T/bin:$PATH" ASSUME_YES=1 VERCELIFY_TEST=1 SYSTEMD_DIR="$T/systemd" AGENT_BIN="$T/none" VERCELIFY_LIB="$T/lib" CLI_LINK="$T/cli-link" \
+    UPNPC="$T/bin/upnpc" NATPMPC="$T/bin/none" AGENT_LOCAL_URL=http://127.0.0.1:9 run "$CLI" uninstall
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"removed."* ]]
+}
+
+@test "version without sudo: install.env unreadable, the world-readable copy answers" {
+  rm "$T/etc/install.env"
+  mkdir -p "$T/lib"
+  echo '0.2.5+main.1a2b3c4' >"$T/lib/VERSION"
+  VERCELIFY_LIB="$T/lib" AGENT_BIN="$T/none" run "$CLI" version
+  [ "$status" -eq 0 ]
+  [[ "$output" == "vercelify 0.2.5+main.1a2b3c4"* ]]
+}

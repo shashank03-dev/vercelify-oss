@@ -13,6 +13,8 @@ describe("capabilities and versions", () => {
     expect(compareVersions("0.2.10", "0.2.9")).toBe(1);
     expect(compareVersions("0.1.0", "0.1.0")).toBe(0);
     expect(compareVersions("0.1", "0.1.1")).toBe(-1);
+    expect(compareVersions("0.2.5+main.1a2b3c4", "0.2.5")).toBe(0);
+    expect(compareVersions("0.2.5+main.9", "0.2.6")).toBe(-1);
     expect(newestVersion(["0.1.0", undefined, "0.2.0", "0.1.9"])).toBe("0.2.0");
     expect(newestVersion([])).toBeUndefined();
   });

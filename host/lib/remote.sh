@@ -87,8 +87,9 @@ remote_map_natpmp() {
 remote_unmap() {
   local proto port
   while read -r proto port; do
-    have "$UPNPC" && "$UPNPC" -d "$port" "${proto^^}" >/dev/null 2>&1
-    have "$NATPMPC" && "$NATPMPC" -a "$port" 0 "$proto" 0 >/dev/null 2>&1
+    # No router (or no client) is fine here: nothing to remove then.
+    { have "$UPNPC" && "$UPNPC" -d "$port" "${proto^^}" >/dev/null 2>&1; } || true
+    { have "$NATPMPC" && "$NATPMPC" -a "$port" 0 "$proto" 0 >/dev/null 2>&1; } || true
   done < <(remote_ports)
   return 0
 }

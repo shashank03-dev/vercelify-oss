@@ -18,6 +18,8 @@ commands:
       --name NAME               name of the device token minted for it
   tokens [list | revoke ID]   device tokens
   promote [--force]           on the standby: take over as the main server (see: vercelify promote)
+  db-backup FILE              consistent copy of the engine's database, as it is (no migration);
+                              prints its schema and the schema this agent understands
 
 options:
   -c, --config FILE   config file (default: $VERCELIFY_CONFIG or /etc/vercelify/agent.toml)
@@ -50,6 +52,9 @@ pub enum Cmd {
     },
     Promote {
         force: bool,
+    },
+    DbBackup {
+        dest: PathBuf,
     },
     Version,
     Help,
@@ -160,6 +165,11 @@ pub fn parse(args: impl IntoIterator<Item = String>, env_config: Option<String>)
             Some("--force") if a.next().is_none() => Cmd::Promote { force: true },
             Some(x) => return Err(unknown(x)),
         },
+        "db-backup" => match (a.next(), a.next()) {
+            (Some(dest), None) if !dest.starts_with('-') => Cmd::DbBackup { dest: dest.into() },
+            (None, _) => return Err("usage: vercelify-agent db-backup FILE".into()),
+            (Some(x), None) | (_, Some(x)) => return Err(unknown(&x)),
+        },
         "tokens" => match (a.next().as_deref(), a.next()) {
             (None | Some("list"), None) => Cmd::TokensList,
             (Some("revoke"), Some(id)) if a.next().is_none() => Cmd::TokensRevoke { id },
@@ -224,6 +234,14 @@ mod tests {
             Cmd::TokensRevoke { id: "tok_1".into() }
         );
         assert_eq!(p(&["promote", "--force"]).unwrap().cmd, Cmd::Promote { force: true });
+        assert_eq!(
+            p(&["db-backup", "/var/lib/x.db"]).unwrap().cmd,
+            Cmd::DbBackup {
+                dest: "/var/lib/x.db".into()
+            }
+        );
+        assert!(p(&["db-backup"]).is_err());
+        assert!(p(&["db-backup", "a", "b"]).is_err());
         assert_eq!(p(&["--version"]).unwrap().cmd, Cmd::Version);
         assert_eq!(p(&["pair", "-h"]).unwrap().cmd, Cmd::Help);
     }

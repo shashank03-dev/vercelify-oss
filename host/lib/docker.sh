@@ -51,9 +51,12 @@ ensure_buildx() {
   [[ "$VERCELIFY_DRY_RUN" == 1 ]] && { info "[dry-run] would verify Docker Buildx"; return 0; }
   docker buildx version >/dev/null 2>&1 && return 0
   info "Docker Buildx is missing — installing the build plugin"
+  # Docker CE's repository and the distro's name it differently: the one
+  # apt offers first, so the other's "E: unable to locate" never shows.
   apt_update_once
-  # Docker CE's repository and Ubuntu's repository use different names.
-  if ! apt_install docker-buildx-plugin && ! apt_install docker-buildx; then
+  local first=docker-buildx-plugin second=docker-buildx
+  apt_available docker-buildx-plugin || ! apt_available docker-buildx || { first=docker-buildx; second=docker-buildx-plugin; }
+  if ! apt_install "$first" 2>/dev/null && ! apt_install "$second"; then
     die "Docker runs, but its Buildx plugin could not be installed. Install Docker from https://docs.docker.com/engine/install/ and rerun setup; existing apps and data are preserved."
   fi
   docker buildx version >/dev/null 2>&1 || die "Docker Buildx is still unavailable after package installation — repair Docker's CLI plugins and rerun setup"
@@ -64,8 +67,12 @@ ensure_compose() {
   [[ "$VERCELIFY_DRY_RUN" == 1 ]] && { info "[dry-run] would verify Docker Compose"; return 0; }
   docker compose version >/dev/null 2>&1 && return 0
   info "Docker Compose is missing — installing the application runtime plugin"
+  # Docker CE's repository and the distro's name it differently: the one
+  # apt offers first, so the other's "E: unable to locate" never shows.
   apt_update_once
-  if ! apt_install docker-compose-plugin && ! apt_install docker-compose-v2; then
+  local first=docker-compose-plugin second=docker-compose-v2
+  apt_available docker-compose-plugin || ! apt_available docker-compose-v2 || { first=docker-compose-v2; second=docker-compose-plugin; }
+  if ! apt_install "$first" 2>/dev/null && ! apt_install "$second"; then
     die "Docker runs, but its Compose v2 plugin could not be installed. Install Docker from https://docs.docker.com/engine/install/ and rerun setup; existing apps and data are preserved."
   fi
   docker compose version >/dev/null 2>&1 || die "Docker Compose v2 is still unavailable after package installation — repair Docker's CLI plugins and rerun setup"

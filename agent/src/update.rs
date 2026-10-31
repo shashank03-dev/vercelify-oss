@@ -56,6 +56,19 @@ pub fn tail(text: &str, n: usize) -> Vec<String> {
     lines[lines.len().saturating_sub(n)..].to_vec()
 }
 
+/// Empty the update log, readable by root only (it carries the installer's
+/// output), whatever mode an older agent left it with.
+fn reset_log(path: &std::path::Path) -> std::io::Result<()> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+}
+
 async fn unit_active(cfg: &Config) -> bool {
     run(
         &cfg.systemctl_bin,
@@ -91,7 +104,7 @@ pub async fn start(cfg: &Config) -> Result<UpdateStatus, AppError> {
     let f = files(cfg);
     std::fs::create_dir_all(&cfg.state_dir).map_err(|e| AppError::internal(e.to_string()))?;
     let _ = std::fs::remove_file(&f.exit);
-    std::fs::write(&f.log, b"").map_err(|e| AppError::internal(e.to_string()))?;
+    reset_log(&f.log).map_err(|e| AppError::internal(e.to_string()))?;
     std::fs::write(
         &f.started,
         chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
@@ -254,7 +267,7 @@ pub fn update_result(cfg: &Config, _started_at: &str) -> Result<String, String> 
         .ok()
         .and_then(|s| s.trim().parse::<i32>().ok())
     {
-        Some(0) => Ok(format!("now on {}", env!("CARGO_PKG_VERSION"))),
+        Some(0) => Ok(format!("now on {}", crate::VERSION)),
         Some(code) => Err(format!(
             "the update failed (exit {code}): {}",
             tail(&std::fs::read_to_string(&f.log).unwrap_or_default(), 1).join("")
@@ -273,6 +286,18 @@ pub async fn resume_update_job(cfg: std::sync::Arc<Config>, jobs: std::sync::Arc
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_update_log_is_emptied_and_made_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("update.log");
+        std::fs::write(&log, "old run with a code").unwrap();
+        std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).unwrap();
+        reset_log(&log).unwrap();
+        assert_eq!(std::fs::read_to_string(&log).unwrap(), "");
+        assert_eq!(std::fs::metadata(&log).unwrap().permissions().mode() & 0o777, 0o600);
+    }
 
     #[test]
     fn a_backup_job_only_counts_its_own_result() {

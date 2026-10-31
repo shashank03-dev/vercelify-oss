@@ -12,6 +12,8 @@ for lib in common system hardware storage docker platform mesh cloudflare agent 
 done
 # shellcheck source=/dev/null
 [[ -r "$VERCELIFY_ETC/install.env" ]] && . "$VERCELIFY_ETC/install.env"
+# Without sudo install.env can't be read; the version is also kept here.
+[[ -z "${version:-}" && -r "$VERCELIFY_LIB/VERSION" ]] && version=$(<"$VERCELIFY_LIB/VERSION")
 ROLE=${role:-main}
 
 usage() {
@@ -381,8 +383,9 @@ snapshot_for_rollback() {
   mkdir -p "$tmp/units"
   [[ -x "$AGENT_BIN" ]] && cp -a "$AGENT_BIN" "$tmp/vercelify-agent"
   [[ -x "$MESH_BIN" ]] && cp -a "$MESH_BIN" "$tmp/vercelify-mesh"
-  # The engine's last consistent copy: a newer agent may move its schema on.
-  [[ -f "$PLATFORM_DB.bak" ]] && cp -a "$PLATFORM_DB.bak" "$tmp/platform.db"
+  # The engine's state as the running agent has it now: the new agent moves
+  # the schema on, and the old one can't open that.
+  [[ -f "$PLATFORM_DB" ]] && snapshot_platform_db "$tmp/platform.db"
   [[ -d "$VERCELIFY_LIB/host" ]] && cp -a "$VERCELIFY_LIB/host" "$tmp/host"
   [[ -f "$VERCELIFY_ETC/install.env" ]] && cp -a "$VERCELIFY_ETC/install.env" "$tmp/install.env"
   # The installer edits it too (new listen addresses the old agent can't read).
@@ -392,15 +395,31 @@ snapshot_for_rollback() {
   mv "$tmp" "$ROLLBACK_DIR"
 }
 
+# snapshot_platform_db DEST — a consistent copy of the live database, rows
+# still in the WAL included: online through the agent, or (an agent from
+# before `db-backup`) with the agent stopped for the copy.
+snapshot_platform_db() {
+  local dest=$1 was_active=0
+  "$AGENT_BIN" --config "$AGENT_CONFIG" db-backup "$dest" >/dev/null 2>&1 && return 0
+  systemctl is-active --quiet vercelify-agent 2>/dev/null && was_active=1
+  (( was_active )) && systemctl stop vercelify-agent
+  cp -a "$PLATFORM_DB" "$dest"
+  [[ -s "$PLATFORM_DB-wal" ]] && cp -a "$PLATFORM_DB-wal" "$dest-wal"
+  (( was_active )) && systemctl start vercelify-agent
+  return 0
+}
+
 restore_rollback() {
   [[ -d "$ROLLBACK_DIR" ]] || die "nothing to roll back to ($ROLLBACK_DIR is missing)"
+  # Stopped first: a clean stop checkpoints the WAL, so the schema read below
+  # is the database's real one (the file header lags while the agent runs).
+  systemctl stop vercelify-agent 2>/dev/null || true
   [[ -f "$ROLLBACK_DIR/vercelify-agent" ]] && install -m 0755 "$ROLLBACK_DIR/vercelify-agent" "$AGENT_BIN"
   [[ -f "$ROLLBACK_DIR/vercelify-mesh" ]] && install -m 0755 "$ROLLBACK_DIR/vercelify-mesh" "$MESH_BIN"
   # The old agent can't open a database a newer one migrated: back to the copy
   # taken before the update (changes made since then are lost, and said so).
   if [[ -f "$ROLLBACK_DIR/platform.db" && -f "$PLATFORM_DB" ]] &&
      (( $(sqlite_user_version "$PLATFORM_DB") > $(sqlite_user_version "$ROLLBACK_DIR/platform.db") )); then
-    systemctl stop vercelify-agent 2>/dev/null || true
     restore_state_file "$ROLLBACK_DIR/platform.db"
     warn "the engine's state is back to before the update: changes made since then are gone"
   fi
@@ -412,8 +431,24 @@ restore_rollback() {
   [[ -f "$ROLLBACK_DIR/agent.toml" ]] && cp -a "$ROLLBACK_DIR/agent.toml" "$VERCELIFY_ETC/agent.toml"
   cp -a "$ROLLBACK_DIR/units/." "$SYSTEMD_DIR/" 2>/dev/null || true
   systemctl daemon-reload 2>/dev/null || true
+  # The agent was stopped above: start it (try-restart leaves a stopped unit down).
+  systemctl restart vercelify-agent 2>/dev/null || true
   local u
-  for u in $UNITS; do systemctl try-restart "$u" 2>/dev/null || true; done
+  for u in $UNITS; do
+    [[ $u == vercelify-agent ]] || systemctl try-restart "$u" 2>/dev/null || true
+  done
+}
+
+# The engine answers too (main servers), not only the agent: an agent that
+# can't open its database still serves /v1/health.
+engine_up() {
+  [[ $ROLE == main ]] && platform_engine || return 0
+  local i
+  for i in $(seq 1 "${1:-15}"); do
+    curl -fsS -m 2 "$AGENT_LOCAL_URL/v1/health" 2>/dev/null | grep -q '"platform"' && return 0
+    (( i < ${1:-15} )) && sleep 1
+  done
+  return 1
 }
 
 # The agent answers /v1/health within N seconds.
@@ -449,6 +484,8 @@ restore_state_file() {
     info "the database it replaces is kept as $kept"
   fi
   install -m 0600 "$src" "$PLATFORM_DB"
+  # A copy taken with the agent stopped can carry its WAL.
+  if [[ -s "$src-wal" ]]; then install -m 0600 "$src-wal" "$PLATFORM_DB-wal"; fi
 }
 
 # restore-state [FILE] — the engine's state database back from its last
@@ -494,11 +531,16 @@ cmd_update() {
   [[ $ROLE == worker ]] && args+=(--worker)
   VERCELIFY_NONINTERACTIVE=1 VERCELIFY_CHANNEL=$chan VERCELIFY_REF=$ref bash "$installer" "${args[@]}" || rc=$?
   rm -f "$tmp"
-  if (( rc != 0 )) || ! agent_healthy "${UPDATE_HEALTH_SECS:-60}"; then
+  if (( rc != 0 )) || ! agent_healthy "${UPDATE_HEALTH_SECS:-60}" || ! engine_up "${UPDATE_ENGINE_SECS:-15}"; then
     err "update failed (exit $rc) — restoring the previous agent and scripts"
     restore_rollback
-    agent_healthy "${UPDATE_HEALTH_SECS:-60}" && ok "rolled back; the previous version is running again" ||
+    if ! agent_healthy "${UPDATE_HEALTH_SECS:-60}"; then
       err "the previous agent did not come back either — see: journalctl -u vercelify-agent -n 50"
+    elif ! engine_up "${UPDATE_ENGINE_SECS:-15}"; then
+      err "the agent runs but its engine can't open its state — put back the copy taken before the update: sudo vercelify restore-state $ROLLBACK_DIR/platform.db"
+    else
+      ok "rolled back; the previous version is running again"
+    fi
     die "update failed; full log: $VERCELIFY_LOG"
   fi
   ok "updated (channel $chan)"
@@ -508,13 +550,19 @@ cmd_rollback() {
   need_root rollback
   restore_rollback
   agent_healthy 30 || die "the agent did not come back — see: journalctl -u vercelify-agent -n 50"
+  engine_up "${UPDATE_ENGINE_SECS:-15}" ||
+    die "the agent runs but its engine can't open its state — put back the copy taken before the update: sudo vercelify restore-state $ROLLBACK_DIR/platform.db"
   ok "rolled back to the version installed before the last update (Docker, apps and their data are unchanged)"
 }
 
 cmd_uninstall() {
   need_root uninstall
-  confirm "Remove the Vercelify agent, its network, power guard, firewall and CLI? (apps' containers and all data stay)" n || exit 0
-  local u c
+  if ! confirm "Remove Vercelify (agent, network, proxy, firewall, CLI)? Your apps stop; their data and the config stay" n; then
+    info "cancelled; nothing changed"
+    exit 1
+  fi
+  _log_file "STEP uninstall"
+  local u c ids
   # Sleeping apps: wake them and drop the proxy's wake route while the agent
   # can still do it, or they stay down behind a route to nothing.
   for u in $( (agent_api GET /v1/sleep | jq -r '.settings[]?.app_uuid') 2>/dev/null); do
@@ -526,6 +574,19 @@ cmd_uninstall() {
     docker inspect "$c" >/dev/null 2>&1 || continue
     docker rm -f "$c" >/dev/null && info "removed the $c container (its data stays)"
   done
+  # The apps stop with the proxy and firewall that fronted them, and don't
+  # come back on their own at boot; their volumes stay.
+  ids=$(docker ps -aq --filter label=vercelify.managed=platform 2>/dev/null || true)
+  if [[ -n "$ids" ]]; then
+    # shellcheck disable=SC2086
+    { docker update --restart=no $ids && docker stop $ids; } >/dev/null 2>&1 || true
+    info "stopped $(wc -w <<<"$ids" | tr -d ' ') app container(s); their data stays (docker ps -a)"
+  fi
+  for c in "${PROXY_CONTAINER:-vercelify-proxy}" "${BUILDER_CONTAINER:-buildx_buildkit_vercelify0}"; do
+    docker inspect "$c" >/dev/null 2>&1 || continue
+    docker rm -f "$c" >/dev/null && info "removed the $c container"
+  done
+  docker buildx rm vercelify >/dev/null 2>&1 || true
   for u in vercelify-agent vercelify-mesh vercelify-power-guard vercelify-firewall; do
     systemctl disable --now "$u" >/dev/null 2>&1 || true
     rm -f "$SYSTEMD_DIR/$u.service"
@@ -538,10 +599,30 @@ cmd_uninstall() {
     systemctl disable --now "$u.timer" >/dev/null 2>&1 || true
     rm -f "$SYSTEMD_DIR/$u.timer" "$SYSTEMD_DIR/$u.service"
   done
+  # The memory-capped slice the containers ran in; Docker stops pointing at it
+  # (from its next restart).
+  systemctl stop vercelify.slice >/dev/null 2>&1 || true
+  rm -f "$SYSTEMD_DIR/vercelify.slice"
+  if [[ -s "$DOCKER_DAEMON_JSON" ]] && jq -e '."cgroup-parent" == "vercelify.slice"' "$DOCKER_DAEMON_JSON" >/dev/null 2>&1; then
+    jq 'del(."cgroup-parent")' "$DOCKER_DAEMON_JSON" >"$DOCKER_DAEMON_JSON.tmp" && mv "$DOCKER_DAEMON_JSON.tmp" "$DOCKER_DAEMON_JSON"
+    info "Docker no longer puts containers in vercelify.slice (from its next restart)"
+  fi
+  # Lid and suspend back to how they were.
+  if [[ -f "$LOGIND_DROPIN" ]]; then
+    rm -f "$LOGIND_DROPIN"
+    systemctl kill -s HUP systemd-logind >/dev/null 2>&1 || true
+    info "closing the lid suspends the laptop again"
+  fi
+  if [[ -e "$VERCELIFY_ETC/sleep.vercelify" && ! -e "$VERCELIFY_ETC/sleep-masked-before" ]]; then
+    systemctl unmask --quiet sleep.target suspend.target hibernate.target hybrid-sleep.target >/dev/null 2>&1 || true
+  fi
+  rm -f "$VERCELIFY_ETC/sleep.vercelify" "$VERCELIFY_ETC/sleep-masked-before"
   systemctl daemon-reload
   rm -f "$AGENT_BIN" "${MESH_BIN:-/usr/local/bin/vercelify-mesh}" "${CLI_LINK:-/usr/local/bin/vercelify}"
   rm -rf "$VERCELIFY_LIB"
-  ok "removed. Config kept in $VERCELIFY_ETC, the engine's state in /var/lib/vercelify (delete them yourself if you like)."
+  [[ -f "${BACKUP_ENV_FILE:-$VERCELIFY_ETC/backup.env}" ]] &&
+    warn "keep ${BACKUP_ENV_FILE:-$VERCELIFY_ETC/backup.env} (or its RESTIC_PASSWORD): without it the backups can't be opened"
+  ok "removed. Config kept in $VERCELIFY_ETC, the engine's state and app data in /var/lib/vercelify and Docker's volumes (delete them yourself if you like). Log: $VERCELIFY_LOG"
 }
 
 main() {

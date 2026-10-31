@@ -55,6 +55,8 @@ backup_setup() {
     shift
   done
   have "$RESTIC" || apt_install restic || die "could not install restic"
+  local had_env=0
+  [[ -e "$BACKUP_ENV_FILE" ]] && had_env=1
   if [[ -r "$BACKUP_ENV_FILE" ]]; then
     # shellcheck disable=SC1090
     pw=$(. "$BACKUP_ENV_FILE"; printf '%s' "${RESTIC_PASSWORD:-}")
@@ -87,6 +89,11 @@ backup_setup() {
       ok "repository ready: $r"
     elif [[ -n "${VERCELIFY_BACKUP_PASSWORD:-}" ]] && [[ "$r" != /* || -e "$r/config" ]]; then
       die "cannot open $r with that password"
+    elif [[ "$r" == /* && -e "$r/config" ]]; then
+      # Backups from an earlier install whose password went with its config:
+      # never re-create over them, say how to get them back.
+      (( had_env )) || rm -f "$BACKUP_ENV_FILE"
+      die "$r already holds backups locked with another password (from an earlier install?). Either put back the old $BACKUP_ENV_FILE, or give its password: sudo VERCELIFY_BACKUP_PASSWORD='…' vercelify backup setup — or start fresh, keeping the old ones aside: sudo mv $r $r.old && sudo vercelify backup setup"
     else
       run_cmd env RESTIC_REPOSITORY="$r" "$RESTIC" init >/dev/null || die "could not create the repository $r"
       ok "created repository: $r"

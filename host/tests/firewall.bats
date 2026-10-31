@@ -58,3 +58,36 @@ teardown() { rm -rf "$T"; }
   drop=$(grep -n -- '-A VERCELIFY-IN -p tcp --dport 7421 -j DROP' "$RULES" | head -1 | cut -d: -f1)
   [ -n "$drop" ] && [ "$trusted" -lt "$drop" ]
 }
+
+acl() {
+  cat >"$T/acl.json" <<'JSON'
+{"interface":"vfy0","version":3,"servers":["10.77.0.1"],
+ "devices":[{"name":"mac","ipv4":"10.77.0.4","ports":["7420/tcp","80/tcp","443/tcp"]}]}
+JSON
+}
+
+@test "a firewall restart rebuilds the mesh's chains too, so devices are never left unfiltered" {
+  command -v jq >/dev/null || skip "needs jq"
+  acl
+  MESH_ACL="$T/acl.json" FIREWALL_LOCK="$T/fw.lock" run "$FW" apply
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"mesh rules re-applied"* ]]
+  grep -q -- '^iptables -w -A VERCELIFY-MESH -s 10.77.0.4 -p tcp --dport 7420 -j RETURN$' "$RULES"
+  grep -q -- '^iptables -w -A VERCELIFY-MESH -j DROP$' "$RULES"
+}
+
+@test "two mesh updates at once never interleave: every rebuild ends with its DROP before the next starts" {
+  command -v flock >/dev/null || skip "needs flock (util-linux)"
+  command -v jq >/dev/null || skip "needs jq"
+  acl
+  # A slow iptables widens the window the race needs.
+  sed -i.orig 's/^exit 0$/sleep 0.01; exit 0/' "$T/bin/iptables"
+  export MESH_ACL="$T/acl.json" FIREWALL_LOCK="$T/fw.lock"
+  rm -f "$T/bin/ip6tables"
+  "$FW" mesh >/dev/null & a=$!
+  "$FW" mesh >/dev/null & b=$!
+  wait "$a" "$b"
+  # Only the input chain's lines, in order: F, rules…, DROP, F, rules…, DROP.
+  seq=$(grep -E '^iptables -w -(F|A) VERCELIFY-MESH( |$)' "$RULES" | sed -E 's/^iptables -w -(F|A) VERCELIFY-MESH ?//; s/^$/FLUSH/; s/.*-j DROP$/DROP/; s/.*RETURN$/R/' | tr '\n' ' ')
+  [[ "$seq" =~ ^FLUSH\ (R\ )+DROP\ FLUSH\ (R\ )+DROP\ $ ]]
+}

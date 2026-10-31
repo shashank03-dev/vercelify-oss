@@ -415,6 +415,7 @@ fake_pgrep() {
 }
 
 @test "an existing Docker daemon also gets the Buildx plugin" {
+  apt_available() { return 1; }   # apt can't tell: both names are tried
   docker() { [[ -e "$T/buildx" ]]; }
   apt_update_once() { return 0; }
   apt_install() {
@@ -438,6 +439,7 @@ fake_pgrep() {
 }
 
 @test "an existing Docker daemon also gets Compose v2" {
+  apt_available() { return 1; }   # apt can't tell: both names are tried
   docker() { [[ -e "$T/compose" ]]; }
   apt_update_once() { return 0; }
   apt_install() {
@@ -458,4 +460,70 @@ fake_pgrep() {
   run ensure_compose
   [ "$status" -ne 0 ]
   [[ "$output" == *"Compose v2 plugin could not be installed"* ]]
+}
+
+@test "an update (non-interactive re-run) mints no pairing code; a first install does" {
+  export VERCELIFY_ETC="$T/etc"
+  mkdir -p "$VERCELIFY_ETC"
+  printf '#!/bin/sh\necho minted >>"%s/minted"\nprintf "ABCD-EFGH\\nvfy2.secret\\n"\n' "$T" >"$T/agent"
+  chmod +x "$T/agent"
+  export AGENT_BIN="$T/agent"
+  mesh_ipv4() { echo 10.77.0.1; }
+  platform_engine() { return 1; }
+  curl() { return 0; }
+  findmnt() { return 1; }
+  systemctl() { return 0; }
+  ip() { echo 'inet 10.77.0.1/24'; }
+  ROLE=main
+  printf 'role=main\n' >"$VERCELIFY_ETC/install.env"
+  load_previous_install
+  VERCELIFY_NONINTERACTIVE=1 run summary
+  [[ "$output" != *"vfy2.secret"* ]]
+  [[ "$output" == *"Paired Macs keep working"* ]]
+  [ ! -e "$T/minted" ]
+  PREVIOUS_INSTALL=0 VERCELIFY_NONINTERACTIVE=1 run summary
+  [[ "$output" == *"vfy2.secret"* ]]
+  [ -e "$T/minted" ]
+}
+
+@test "everything installed: no package list refresh at all" {
+  fake_pgrep
+  printf '#!/bin/sh\nexit 0\n' >"$T/bin/dpkg"; chmod +x "$T/bin/dpkg"
+  run strict apt_install curl jq
+  [ "$status" -eq 0 ]
+  [ ! -e "$T/apt" ]
+}
+
+@test "a package list that can't be fetched is a note, not the end of the install" {
+  fake_pgrep
+  printf '#!/usr/bin/env bash\necho "apt-get $*" >>"%s/apt"\necho "E: Failed to fetch http://mirror/Packages  Connection timed out" >&2\nexit 100\n' "$T" >"$T/bin/apt-get"
+  printf '#!/bin/sh\nexit 0\n' >"$T/bin/sleep"; chmod +x "$T/bin/apt-get" "$T/bin/sleep"
+  run strict apt_update_once
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"using the ones already here"* ]]
+  [[ "$output" != *"E: Failed"* ]]
+}
+
+@test "Buildx: the package name apt offers is tried first, so no 'unable to locate' line" {
+  docker() { [[ -e "$T/buildx" ]]; }
+  apt_update_once() { return 0; }
+  apt_available() { [[ "$1" == docker-buildx ]]; }
+  apt_install() { echo "$1" >>"$T/packages"; touch "$T/buildx"; }
+  run ensure_buildx
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/packages")" = docker-buildx ]
+}
+
+@test "the version says what was installed: a release, or the branch and commit it was built from" {
+  VERSION=0.2.5
+  VERCELIFY_INSTALL_REF='' VERCELIFY_INSTALL_CHANNEL=stable run build_version
+  [ "$output" = 0.2.5 ]
+  VERCELIFY_INSTALL_REF=v0.2.5 VERCELIFY_INSTALL_CHANNEL=stable run build_version
+  [ "$output" = 0.2.5 ]
+  git() { echo 1a2b3c4; }
+  VERCELIFY_INSTALL_REF=main VERCELIFY_INSTALL_CHANNEL=edge run build_version
+  [ "$output" = 0.2.5+main.1a2b3c4 ]
+  git() { return 1; }
+  VERCELIFY_INSTALL_REF=feature/display VERCELIFY_INSTALL_CHANNEL=stable run build_version
+  [ "$output" = 0.2.5+feature-display ]
 }

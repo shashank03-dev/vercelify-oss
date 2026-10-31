@@ -10,6 +10,21 @@ VERCELIFY_SRC=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$VERCELIFY_SRC/Cargo.toml" 2>/dev/null | head -1)
 VERSION=${VERSION:-dev}
 
+# What's installed, said exactly: the release number, plus the branch or
+# commit when it was built from one (`0.2.5+main.1a2b3c4`), so main can be
+# told apart from the release it's numbered after.
+build_version() {
+  local ref=${VERCELIFY_INSTALL_REF:-} sha
+  if [[ -z "$ref" || "$ref" == "v$VERSION" || "$ref" == "$VERSION" ]] &&
+     [[ "${VERCELIFY_INSTALL_CHANNEL:-stable}" != edge ]]; then
+    echo "$VERSION"; return
+  fi
+  sha=$(git -C "$VERCELIFY_SRC" rev-parse --short=7 HEAD 2>/dev/null || true)
+  ref=${ref:-edge}
+  ref=${ref//[^0-9A-Za-z-]/-}
+  echo "$VERSION+$ref${sha:+.$sha}"
+}
+
 # shellcheck source=lib/common.sh
 . "$VERCELIFY_SRC/host/lib/common.sh"
 # shellcheck source=lib/system.sh
@@ -114,6 +129,7 @@ WITH_FIREWALL=1
 WITH_POWER_GUARD=1
 WITH_DISPLAY=1
 WITH_AI=0
+PREVIOUS_INSTALL=0
 AI_MODEL=''
 WITH_BACKUP=1
 CONFIGURE=0
@@ -252,6 +268,7 @@ plan() {
 load_previous_install() {
   local file="$VERCELIFY_ETC/install.env" prev mode
   [[ -r "$file" ]] || return 0
+  PREVIOUS_INSTALL=1
   if [[ "$ROLE_EXPLICIT" == 0 ]]; then
     local saved_role
     saved_role=$(sed -n 's/^role=//p' "$file" | tail -1)
@@ -337,7 +354,11 @@ summary() {
   local ip pair='' short='' summary_file="$VERCELIFY_ETC/summary.txt" wildcard=''
   ip=$(mesh_ipv4 || true)
   [[ $ROLE == main ]] && platform_engine && wildcard=$(app_wildcard)
-  if [[ "$VERCELIFY_DRY_RUN" != 1 ]] && [[ -x "$AGENT_BIN" ]]; then
+  # An update (non-interactive re-run): the Macs are paired already, and a
+  # fresh code would only land in the update's log.
+  local updating=0
+  [[ "${PREVIOUS_INSTALL:-0}" == 1 && "${VERCELIFY_NONINTERACTIVE:-0}" == 1 ]] && updating=1
+  if [[ "$VERCELIFY_DRY_RUN" != 1 ]] && [[ -x "$AGENT_BIN" ]] && (( ! updating )); then
     # One device token for both codes; the short one lasts long enough to
     # install the Mac app first.
     local both
@@ -384,6 +405,8 @@ summary() {
           "$C_BOLD" "$(hostname -s)" "$C_RESET" "$C_BOLD" "$short" "$C_RESET"
       fi
       printf '  New code any time: sudo vercelify pair\n'
+    elif (( updating )) && [[ $ROLE == main ]]; then
+      printf '\n  Paired Macs keep working. To add another: sudo vercelify pair\n'
     fi
     if [[ $ROLE == worker ]]; then
       if [[ -n "$ip" ]]; then
@@ -426,6 +449,8 @@ on_error() {
 main() {
   parse_args "$@"
   mkdir -p "$(dirname "$VERCELIFY_LOG")" 2>/dev/null || true
+  # The log holds the run's output (addresses, the pairing step): root only.
+  { touch "$VERCELIFY_LOG" && chmod 0600 "$VERCELIFY_LOG"; } 2>/dev/null || true
   trap on_error ERR
   load_previous_install
   preflight "$@"
@@ -446,8 +471,11 @@ main() {
   # The agent reads its role from install.env from its first start on.
   run_cmd mkdir -p "$VERCELIFY_ETC"
   printf 'role=%s\nversion=%s\nchannel=%s\nref=%s\nprofile=%s\ndomain=%s\ndomain_mode=%s\n' \
-    "$ROLE" "$VERSION" "${VERCELIFY_INSTALL_CHANNEL:-stable}" "${VERCELIFY_INSTALL_REF:-local}" "$HW_PROFILE" "$DOMAIN" "$(domain_mode)" |
+    "$ROLE" "$(build_version)" "${VERCELIFY_INSTALL_CHANNEL:-stable}" "${VERCELIFY_INSTALL_REF:-local}" "$HW_PROFILE" "$DOMAIN" "$(domain_mode)" |
     write_file "$VERCELIFY_ETC/install.env" 0644 || true
+  # $VERCELIFY_ETC is root's: `vercelify version` reads this one without sudo.
+  run_cmd mkdir -p "$VERCELIFY_LIB"
+  build_version | write_file "$VERCELIFY_LIB/VERSION" 0644 || true
   install_mesh_binary || die "could not install vercelify-mesh, Vercelify's private network"
   install_agent
   # The tunnel before the network: machines outside the LAN join through it.

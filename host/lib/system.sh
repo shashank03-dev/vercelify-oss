@@ -29,23 +29,47 @@ apt_get() {
   run_cmd env DEBIAN_FRONTEND=noninteractive apt-get -o "DPkg::Lock::Timeout=$APT_LOCK_WAIT" "$@"
 }
 
+# Package lists are refreshed only when something is missing: a re-run or an
+# update with everything installed doesn't touch the network for apt.
 apt_install() {
   local missing=() p
   for p in "$@"; do dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p"); done
   (( ${#missing[@]} )) || return 0
+  apt_update_once
   info "installing: ${missing[*]}"
   apt_get install -y -qq --no-install-recommends "${missing[@]}" >/dev/null
 }
 
+# A list that can't be fetched (a third-party repository without its key, a
+# mirror timing out) isn't fatal: apt keeps the lists it had, and an install
+# that really needs the missing one fails with its own message. The errors
+# go to the log, not the screen.
 apt_update_once() {
   [[ -n "${_APT_UPDATED:-}" ]] && return 0
-  retry 3 3 apt_get update -qq >/dev/null || die "apt-get update failed"
   _APT_UPDATED=1
+  local errs
+  apt_wait_idle   # its message on screen, not in the captured errors
+  info "refreshing package lists…"
+  errs=$(mktemp)
+  if ! retry 3 3 apt_get update -qq >/dev/null 2>"$errs"; then
+    warn "some package lists could not be refreshed (network, or a repository's key); using the ones already here — details in $VERCELIFY_LOG"
+  elif grep -q '^[WE]:' "$errs"; then
+    info "some package lists could not be refreshed; using the ones already here"
+  fi
+  _log_file "apt-get update: $(tr '\n' ' ' <"$errs")"
+  rm -f "$errs"
+  return 0
+}
+
+# apt_available PKG — the configured repositories offer PKG.
+apt_available() {
+  local c
+  c=$(apt-cache policy "$1" 2>/dev/null | sed -n 's/^ *Candidate: *//p' | head -1)
+  [[ -n "$c" && "$c" != "(none)" ]]
 }
 
 install_base_packages() {
   step "Base packages"
-  apt_update_once
   apt_install ca-certificates curl gnupg jq util-linux e2fsprogs parted iptables \
     openssh-server unattended-upgrades qrencode rsync git smartmontools
   # Security updates install automatically; nothing else changes underneath you.
@@ -56,10 +80,12 @@ EOF
   ok "base packages ready (unattended security upgrades on)"
 }
 
+: "${LOGIND_DROPIN:=/etc/systemd/logind.conf.d/90-vercelify.conf}"
+
 # A laptop server must not suspend when the lid closes or on idle.
 laptop_server_mode() {
   step "Laptop server mode"
-  if write_file /etc/systemd/logind.conf.d/90-vercelify.conf 0644 <<'EOF'
+  if write_file "$LOGIND_DROPIN" 0644 <<'EOF'
 # Vercelify: keep running with the lid closed and on idle.
 [Login]
 HandleLidSwitch=ignore
@@ -73,7 +99,12 @@ EOF
     # Restarting logind would kill a desktop session; reload is enough for lid handling.
     run_cmd systemctl kill -s HUP systemd-logind 2>/dev/null || true
   fi
+  # Uninstall unmasks them again, unless they were masked before Vercelify.
+  if [[ "$(systemctl is-enabled suspend.target 2>/dev/null || true)" == masked && ! -e "$VERCELIFY_ETC/sleep.vercelify" ]]; then
+    mkdir -p "$VERCELIFY_ETC" && : >"$VERCELIFY_ETC/sleep-masked-before"
+  fi
   run_cmd systemctl mask --quiet sleep.target suspend.target hibernate.target hybrid-sleep.target 2>/dev/null || true
+  { mkdir -p "$VERCELIFY_ETC" && : >"$VERCELIFY_ETC/sleep.vercelify"; } 2>/dev/null || true
   # Blank the console after 60s so the panel isn't lit 24/7 (mpv wakes it).
   { echo 60 >/sys/module/kernel/parameters/consoleblank; } 2>/dev/null || true
   ok "lid close / suspend disabled"

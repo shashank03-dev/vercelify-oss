@@ -46,6 +46,23 @@ struct StoredToken {
     /// Tokens from before roles existed are owners (they could do everything).
     #[serde(default)]
     role: Role,
+    /// A token minted inside a pairing code stops working if it's never used
+    /// by then, so a code left in a log or a scrollback goes stale.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unused_expires_at: Option<String>,
+}
+
+impl StoredToken {
+    /// Never used and past its first-use deadline.
+    fn stale(&self, used: bool, now: chrono::DateTime<chrono::Utc>) -> bool {
+        !used
+            && self.last_used_at.is_none()
+            && self
+                .unused_expires_at
+                .as_deref()
+                .and_then(|e| chrono::DateTime::parse_from_rfc3339(e).ok())
+                .is_some_and(|e| e < now)
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -108,13 +125,41 @@ fn write_file(cfg: &Config, f: &TokenFile) -> std::io::Result<()> {
     write_private(&cfg.tokens_file, &serde_json::to_vec_pretty(f).expect("serializable"))
 }
 
-/// Mint an owner token for a device (also used by `vercelify-agent pair`).
-/// Returns (record, secret).
+/// Mint an owner token for a device. Returns (record, secret). (Pairing
+/// codes use `create_for_pairing`.)
+#[cfg(test)]
 pub fn create(cfg: &Config, name: &str) -> std::io::Result<(DeviceToken, String)> {
     create_with_role(cfg, name, Role::Owner)
 }
 
 pub fn create_with_role(cfg: &Config, name: &str, role: Role) -> std::io::Result<(DeviceToken, String)> {
+    mint(cfg, name, role, None)
+}
+
+/// An owner token for a pairing code: it must be used within `unused_for`.
+pub fn create_for_pairing(
+    cfg: &Config,
+    name: &str,
+    unused_for: std::time::Duration,
+) -> std::io::Result<(DeviceToken, String)> {
+    // Stored to the second: rounded up, never shorter than asked.
+    let by = chrono::Utc::now()
+        + chrono::Duration::from_std(unused_for).unwrap_or(chrono::Duration::days(1))
+        + chrono::Duration::seconds(1);
+    mint(
+        cfg,
+        name,
+        Role::Owner,
+        Some(by.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)),
+    )
+}
+
+fn mint(
+    cfg: &Config,
+    name: &str,
+    role: Role,
+    unused_expires_at: Option<String>,
+) -> std::io::Result<(DeviceToken, String)> {
     let secret = format!("vfyd_{}", random_hex(32));
     let name: String = name.chars().filter(|c| !c.is_control()).take(80).collect();
     let t = StoredToken {
@@ -124,9 +169,13 @@ pub fn create_with_role(cfg: &Config, name: &str, role: Role) -> std::io::Result
         created_at: now(),
         last_used_at: None,
         role,
+        unused_expires_at,
     };
     let _lock = lock_file(cfg)?;
     let mut f = read_file(cfg)?;
+    // Codes nobody claimed in time: their tokens go.
+    let now = chrono::Utc::now();
+    f.tokens.retain(|t| !t.stale(false, now));
     f.tokens.push(t.clone());
     write_file(cfg, &f)?;
     Ok((public(&t, None), secret))
@@ -222,14 +271,19 @@ impl Tokens {
             c.tokens = read_file(cfg).unwrap_or_default().tokens;
             c.mtime = mtime;
         }
-        let (id, role) = c
+        let (id, role, first_use) = c
             .tokens
             .iter()
             .find(|t| bool::from(t.hash.as_bytes().ct_eq(hash.as_bytes())))
-            .map(|t| (t.id.clone(), t.role))?;
+            .filter(|t| !t.stale(c.used.contains_key(&t.id), chrono::Utc::now()))
+            .map(|t| {
+                let first = t.last_used_at.is_none() && !c.used.contains_key(&t.id);
+                (t.id.clone(), t.role, first)
+            })?;
         c.used.insert(id.clone(), now());
-        // Note last use on disk at most every 10 minutes.
-        if c.flushed.is_none_or(|t| t.elapsed().as_secs() > 600) {
+        // Note last use on disk at most every 10 minutes (the first use at
+        // once: it lifts a pairing token's deadline).
+        if first_use || c.flushed.is_none_or(|t| t.elapsed().as_secs() > 600) {
             if let Ok(_lock) = lock_file(cfg) {
                 if let Ok(mut f) = read_file(cfg) {
                     for t in &mut f.tokens {
@@ -402,6 +456,25 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_millis(20));
         let a = tokens.verify(&cfg, &s2).unwrap();
         assert_eq!((a.id.as_str(), a.role), (t.id.as_str(), Role::Deployer));
+    }
+
+    #[test]
+    fn a_pairing_token_never_used_in_time_stops_working_and_is_pruned() {
+        let d = tempfile::tempdir().unwrap();
+        let cfg = cfg(d.path());
+        let tokens = Tokens::new("admin-token-0123456789".into());
+        let (_, used) = create_for_pairing(&cfg, "used in time", std::time::Duration::from_secs(2)).unwrap();
+        let (_, late) = create_for_pairing(&cfg, "never used", std::time::Duration::from_secs(2)).unwrap();
+        let (_, plain) = create(&cfg, "plain").unwrap();
+        assert!(tokens.verify(&cfg, &used).is_some());
+        std::thread::sleep(std::time::Duration::from_millis(3100));
+        assert!(tokens.verify(&cfg, &late).is_none(), "an unclaimed code goes stale");
+        assert!(tokens.verify(&cfg, &used).is_some(), "used once: it stays");
+        assert!(tokens.verify(&cfg, &plain).is_some());
+        create(&cfg, "next").unwrap();
+        let names: Vec<String> = list(&cfg).iter().map(|t| t.line()).collect();
+        assert!(!names.iter().any(|l| l.contains("never used")), "{names:?}");
+        assert!(names.iter().any(|l| l.contains("used in time")));
     }
 
     #[test]

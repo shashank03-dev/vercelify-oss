@@ -96,7 +96,8 @@ File: `/var/lib/vercelify/platform.db` (main server only). Opened with
 `journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`, `busy_timeout=5000`.
 Migrations are embedded SQL files run in order inside one transaction each; the version is
 `PRAGMA user_version`. A database newer than the binary refuses to open (rollback safety:
-`vercelify rollback` restores the pre-update backup, see §15).
+`vercelify rollback` restores the copy taken when the update started, see §15; the error
+names `vercelify restore-state`).
 
 Access: one `Store` owning a write connection behind a mutex, used from
 `spawn_blocking`. Every query is a few rows on a few thousand-row tables; a pool would buy
@@ -897,7 +898,7 @@ the user chose to deploy.
 | Coordinator offline | Mesh keeps the last map; joins/revokes wait; certificates are valid for 10 more days at the earliest |
 | Relay offline | Direct paths unaffected; peers without a direct path are unreachable until it returns (doctor explains) |
 | Clock wrong | Certificates checked with 5 min skew; the existing clock-sync doctor check alerts |
-| Migration to a newer schema, then agent rollback | Newer `user_version` refuses to open; `vercelify rollback` restores the pre-update `platform.db.bak` |
+| Migration to a newer schema, then agent rollback | Newer `user_version` refuses to open. `vercelify update` takes a fresh consistent copy of the live database first (`vercelify-agent db-backup`, SQLite's backup API, no migration; an older agent is stopped for a plain copy), not the 5-minute `.bak`. `rollback` and a failed update's self-undo stop the agent (checkpointing the WAL), restore that copy when the live schema is newer, start the agent again and check the engine answers (`platform` in `/v1/health`); if it doesn't, they say `sudo vercelify restore-state …` |
 
 ## 16. Resource budgets
 

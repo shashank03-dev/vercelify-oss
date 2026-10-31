@@ -129,7 +129,7 @@ impl Store {
         if current > latest {
             return Err(Error::Internal(format!(
                 "the platform database is version {current}, newer than this agent understands ({latest}); \
-                 update the agent, or run `sudo vercelify rollback` to restore the matching database"
+                 update the agent, or put back the copy taken before the update: sudo vercelify restore-state"
             )));
         }
         for (version, sql) in MIGRATIONS.iter().filter(|(v, _)| *v > current) {
@@ -229,6 +229,28 @@ pub fn put_setting<T: Serialize>(c: &Connection, key: &str, value: &T) -> Result
         rusqlite::params![key, json, crate::now()],
     )?;
     Ok(())
+}
+
+/// Consistent copy of the database at `src` to `dest` without opening it as a
+/// [`Store`]: no migration runs, so the copy keeps the schema the running agent
+/// wrote (what an update snapshots before the new agent moves it on). Returns
+/// the copy's schema version.
+pub fn copy_without_migrating(src: &Path, dest: &Path) -> Result<u32> {
+    let conn = Connection::open_with_flags(src, OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX)?;
+    conn.busy_timeout(Duration::from_secs(10))?;
+    if let Some(dir) = dest.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = dest.with_extension("tmp");
+    let _ = std::fs::remove_file(&tmp);
+    {
+        let mut out = Connection::open(&tmp)?;
+        let backup = rusqlite::backup::Backup::new(&conn, &mut out)?;
+        backup.run_to_completion(256, Duration::from_millis(0), None)?;
+    }
+    restrict_permissions(&tmp);
+    std::fs::rename(&tmp, dest)?;
+    Ok(Connection::open(dest)?.query_row("PRAGMA user_version", [], |r| r.get(0))?)
 }
 
 pub fn backup_path(db: &Path) -> PathBuf {
@@ -442,6 +464,39 @@ mod tests {
         drop(s);
         let e = Store::open(&path).unwrap_err();
         assert!(e.message().contains("newer than this agent"), "{e}");
+        assert!(e.message().contains("vercelify restore-state"), "{e}");
+    }
+
+    // An update snapshots the live database while the old agent still runs:
+    // the copy must keep that agent's schema (field test F70), and an older
+    // schema must not be migrated by taking it.
+    #[test]
+    fn copy_without_migrating_keeps_the_schema() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("platform.db");
+        let s = Store::open(&path).unwrap();
+        s.with(project_and_env).unwrap();
+        s.with(|c| Ok(c.pragma_update(None, "user_version", 3)?)).unwrap();
+        // Written but not checkpointed: still in the WAL while the agent runs.
+        s.with(|c| {
+            c.execute(
+                "INSERT INTO settings (key, value, updated_at) VALUES ('k', '1', 'now')",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let dest = dir.path().join("rollback/platform.db");
+        assert_eq!(copy_without_migrating(&path, &dest).unwrap(), 3);
+        drop(s);
+        let copy = Connection::open(&dest).unwrap();
+        let v: u32 = copy.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 3, "not migrated");
+        let n: i64 = copy
+            .query_row("SELECT count(*) FROM settings WHERE key = 'k'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1, "rows still in the WAL are in the copy");
+        assert!(copy_without_migrating(&dir.path().join("missing.db"), &dest).is_err());
     }
 
     #[tokio::test]

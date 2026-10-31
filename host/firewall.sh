@@ -166,10 +166,33 @@ remove_family() {
   for c in "$FWD" "$INP" "$MESH" "$MESH_FWD" "$MESH_OUT"; do ipt -F "$c" 2>/dev/null || true; ipt -X "$c" 2>/dev/null || true; done
 }
 
+# One change at a time: the mesh runs `mesh` on every map update, and two
+# runs interleaving their flush and appends could put the DROP before the
+# allowed ports (F43).
+: "${FIREWALL_LOCK:=/run/vercelify/firewall.lock}"
+case "${1:-}" in
+  apply|mesh|remove)
+    mkdir -p "$(dirname "$FIREWALL_LOCK")" 2>/dev/null || true
+    if command -v flock >/dev/null && exec 9>>"$FIREWALL_LOCK"; then flock 9; fi
+    ;;
+esac
+
+apply_mesh() {
+  apply_mesh_family iptables
+  command -v ip6tables >/dev/null && apply_mesh_family ip6tables || true
+}
+
 case "${1:-}" in
   apply)
     apply_family iptables
     command -v ip6tables >/dev/null && apply_family ip6tables || true
+    # The mesh's chains go with the rest: a restart of this unit (Docker
+    # restarted, the installer re-run) must never leave devices unfiltered
+    # until the next map change.
+    if [[ -r "$MESH_ACL" ]] && command -v jq >/dev/null; then
+      apply_mesh
+      echo "vercelify firewall: mesh rules re-applied from $MESH_ACL"
+    fi
     echo "vercelify firewall: ports ${PRIVATE_TCP_PORTS// /,}/tcp and ${PRIVATE_UDP_RANGE/:/-}/udp limited to: $TRUSTED_IFACES"
     if [[ "$CONTAINER_MESH" == block ]]; then
       if [[ -n "${CONTAINER_MESH_ALLOW_TCP// /}" ]]; then
@@ -182,8 +205,7 @@ case "${1:-}" in
   mesh)
     [[ -r "$MESH_ACL" ]] || { echo "vercelify firewall: no $MESH_ACL (is vercelify-mesh running?)" >&2; exit 1; }
     command -v jq >/dev/null || { echo "vercelify firewall: jq is needed for the mesh rules" >&2; exit 1; }
-    apply_mesh_family iptables
-    command -v ip6tables >/dev/null && apply_mesh_family ip6tables || true
+    apply_mesh
     echo "vercelify firewall: mesh — servers on every port, $(jq '.devices | length' "$MESH_ACL") device(s) on their ports only"
     ;;
   rules)

@@ -62,7 +62,7 @@ impl AppState {
                     ..Default::default()
                 },
             },
-            env!("CARGO_PKG_VERSION"),
+            crate::VERSION,
         );
         let config = Arc::new(config);
         let events = Arc::new(crate::events::Events::default());
@@ -233,7 +233,7 @@ fn timeout(d: Duration) -> TimeoutLayer {
 async fn health(State(s): State<AppState>) -> Json<Health> {
     Json(Health {
         ok: true,
-        version: env!("CARGO_PKG_VERSION").into(),
+        version: crate::VERSION.into(),
         hostname: s.collector.host().hostname,
         role: s.config.role(),
         pairing_open: pairing::is_open(&s.config),
@@ -570,7 +570,7 @@ async fn update_start(State(s): State<AppState>) -> ApiResult<UpdateStatus> {
     let st = update::start(&s.config).await?;
     let id = s
         .jobs
-        .start("update", format!("Update from {}", env!("CARGO_PKG_VERSION")), None)
+        .start("update", format!("Update from {}", crate::VERSION), None)
         .detach();
     tokio::spawn(update::follow_unit(
         s.config.clone(),

@@ -62,7 +62,7 @@ pub async fn node_status(cfg: &Config, collector: &vercelify_core::collect::Coll
         thermal_paused: pg.is_some_and(|p| p.state.contains("thermal")),
         docker_ok,
         http_port: cfg.proxy_http_port,
-        agent_version: env!("CARGO_PKG_VERSION").into(),
+        agent_version: crate::VERSION.into(),
     }
 }
 

@@ -8,8 +8,12 @@ export function hasCap(health: Health | undefined, cap: string): boolean {
   return !!health?.capabilities?.includes(cap);
 }
 
-/** "0.2.10" > "0.2.9": numeric, part by part. Unparseable parts count as 0. */
+/**
+ * "0.2.10" > "0.2.9": numeric, part by part. Unparseable parts count as 0.
+ * Build metadata (`0.2.5+main.1a2b3c4`, a build from a branch) is ignored.
+ */
 export function compareVersions(a: string, b: string): number {
+  [a, b] = [a.split("+")[0] ?? a, b.split("+")[0] ?? b];
   const pa = a.split(/[.-]/).map((x) => Number.parseInt(x, 10) || 0);
   const pb = b.split(/[.-]/).map((x) => Number.parseInt(x, 10) || 0);
   for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
