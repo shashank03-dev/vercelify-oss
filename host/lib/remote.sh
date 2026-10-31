@@ -106,6 +106,10 @@ Wants=network-online.target
 
 [Service]
 ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate --metrics $QUICK_TUNNEL_METRICS --url http://127.0.0.1:$control
+# Every start is a new address: follow it now, not at the next renewal
+# (machines away from home are cut off until then). As root, despite
+# DynamicUser; no harm while the refresh unit doesn't exist yet.
+ExecStartPost=-+/usr/bin/systemctl start --no-block vercelify-remote.service
 Restart=always
 RestartSec=5
 DynamicUser=yes

@@ -122,6 +122,12 @@ teardown() { rm -rf "$T"; }
   grep -q '^method=tunnel' "$T/etc/remote.env"
 }
 
+@test "a tunnel that restarts (a new address) has it followed at once, not at the next renewal" {
+  PUBLIC_IP=100.72.1.9 run remote_apply
+  [ "$status" -eq 0 ]
+  grep -qx 'ExecStartPost=-+/usr/bin/systemctl start --no-block vercelify-remote.service' "$T/systemd/vercelify-quicktunnel.service"
+}
+
 @test "no UPnP or NAT-PMP: a quick tunnel, its signed address posted; it follows a new one" {
   export NO_UPNP=1 NO_NATPMP=1 NOTE=vfyb1.first.sig
   run remote_apply
