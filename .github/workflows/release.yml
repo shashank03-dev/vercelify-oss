@@ -47,7 +47,7 @@ jobs:
 
   mesh-macos:
     name: vercelify-mesh for macOS (universal)
-    runs-on: macos-14
+    runs-on: macos-15
     env:
       # Signed and notarised with the app's secrets (see the cockpit job), so
       # Gatekeeper and the firewall treat the daemon like the app.
@@ -108,7 +108,7 @@ jobs:
       matrix:
         include:
           - name: macOS (universal)
-            os: macos-14
+            os: macos-15
             args: --target universal-apple-darwin
           - name: Linux
             os: ubuntu-22.04
