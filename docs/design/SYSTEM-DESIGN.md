@@ -715,7 +715,11 @@ depends on re-serialising JSON (`vercelify-mesh::cert`).
   `SIOCSIFMTU`, `SIOCSIFFLAGS`) and IPv6 via `/proc/net/if_inet6`-compatible `ioctl(SIOCSIFADDR)` on an
   `AF_INET6` socket.
 - App mode (`up --userspace`, the Mac without root; works on Linux too, which is how it is
-  tested): no tun; a `smoltcp` stack (`netstack.rs`) is the engine's device. SOCKS5
+  tested): no tun; a `smoltcp` stack (`netstack.rs`) is the engine's device.
+  It advertises an internal MTU of 1276 so smoltcp 0.12 emits IPv4 fragment
+  payloads aligned to eight bytes; the WireGuard interface remains at 1280.
+  The egress test echoes a 1316-byte UDP payload's actual fragments and verifies
+  complete reassembly. SOCKS5
   (`--socks 127.0.0.1:7480`, CONNECT only, `*.vfy` and bare node names resolved from the
   map, anything off the mesh refused) and forwards (`[udp:]127.0.0.1:PORT=HOST:PORT`,
   loopback only): fixed ones from `--forward`, and the ones the app adds while the daemon
@@ -1010,7 +1014,8 @@ from the user service manager, drops to that user with runuser, and shares the X
 socket directory through the agent's private /tmp boundary. Explicit backend/env
 configuration overrides detection. Receiver lifecycle operations are serialized;
 stop and agent shutdown kill the receiver process group, including a runuser child.
-A private mpv IPC socket supplies playback confirmation (`playback_active`), separate
+A private mpv IPC socket supplies playback confirmation (`playback_active`) only
+when `vo-configured` is true and `core-idle` is false, separate
 from process liveness. The cockpit exposes a refresh/recovery step and establishes
 Moonlight forwards before opening Sunshine's setup page. Extended macOS desktops
 require an existing additional display; no private display-driver API is shipped.
@@ -1031,3 +1036,10 @@ and `vercelify desktop reset-login` (Sunshine stopped, its `username`/`salt`/`pa
 removed from `sunshine_state.json`, paired devices kept) lets the agent set its own.
 Agents advertise `sunshine-pair`; the cockpit keeps the manual steps for older ones
 and remembers per server that Moonlight is paired.
+
+Display senders use `pkt_size=1128`. ffmpeg reports output-byte progress on stderr;
+if it has produced no bytes after five seconds, the cockpit stops that process
+and shows the Screen Recording repair steps beside the stream controls. A watchdog
+checks the process identity so it cannot stop a replacement capture. `desktop on`
+refuses to restart the agent while its jobs API reports running work, naming the
+jobs to finish first; otherwise it announces the restart.

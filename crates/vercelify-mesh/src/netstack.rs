@@ -203,7 +203,10 @@ impl phy::Device for Phy {
     fn capabilities(&self) -> DeviceCapabilities {
         let mut c = DeviceCapabilities::default();
         c.medium = Medium::Ip;
-        c.max_transmission_unit = MTU;
+        // smoltcp 0.12 uses the full MTU for non-final IPv4 fragments.
+        // Their payload must be a multiple of 8, so leave four bytes of
+        // headroom under the WireGuard interface's 1280-byte MTU.
+        c.max_transmission_unit = MTU - (MTU - 20) % 8;
         c
     }
 }
@@ -607,6 +610,41 @@ mod tests {
         let d = udp(47998, local, &payload);
         dev.send(&ipv4(7, (true, 0), &d[..1200])).await.unwrap();
         dev.send(&ipv4(7, (false, 1200), &d[1200..])).await.unwrap();
+        assert_eq!(next(&mut conn).await, Some(payload));
+    }
+
+    #[tokio::test]
+    async fn oversized_udp_egress_is_fragmented_and_arrives_whole() {
+        let (mut conn, dev, _local, _stack) = open(5600).await;
+        let payload: Vec<u8> = (0..1316u32).map(|i| i as u8).collect();
+        conn.send(payload.clone()).await;
+        let mut buf = vec![0; 2048];
+        let mut fragments = 0;
+        loop {
+            let n = tokio::time::timeout(Duration::from_secs(3), dev.recv(&mut buf))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(n <= 1280, "packet exceeds the mesh MTU: {n}");
+            let flags = u16::from_be_bytes([buf[6], buf[7]]);
+            let offset = usize::from(flags & 0x1fff) * 8;
+            let header = usize::from(buf[0] & 15) * 4;
+            // Echo the peer's exact fragments back. Swapping IPs and UDP ports
+            // preserves both checksums (the pseudo-header sum is unchanged).
+            for i in 0..4 {
+                buf.swap(12 + i, 16 + i);
+            }
+            if offset == 0 {
+                buf.swap(header, header + 2);
+                buf.swap(header + 1, header + 3);
+            }
+            dev.send(&buf[..n]).await.unwrap();
+            fragments += 1;
+            if flags & 0x2000 == 0 {
+                break;
+            }
+        }
+        assert!(fragments > 1);
         assert_eq!(next(&mut conn).await, Some(payload));
     }
 

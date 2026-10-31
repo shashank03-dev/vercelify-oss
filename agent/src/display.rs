@@ -36,9 +36,9 @@ pub fn listen_url(cfg: &ReceiverConfig) -> String {
 /// URL the sender should push to, given this host's reachable address.
 pub fn sender_url(cfg: &ReceiverConfig, host: &str) -> String {
     match cfg.transport {
-        StreamTransport::Udp => format!("udp://{host}:{}?pkt_size=1316", cfg.port),
+        StreamTransport::Udp => format!("udp://{host}:{}?pkt_size=1128", cfg.port),
         StreamTransport::Srt => format!(
-            "srt://{host}:{}?mode=caller&latency={}&pkt_size=1316",
+            "srt://{host}:{}?mode=caller&latency={}&pkt_size=1128",
             cfg.port,
             u64::from(cfg.latency_ms.unwrap_or(120)) * 1000
         ),
@@ -328,16 +328,22 @@ async fn playback_at(path: &Path) -> bool {
     tokio::time::timeout(Duration::from_millis(150), async {
         let mut socket = UnixStream::connect(path).await.ok()?;
         socket
-            .write_all(b"{\"command\":[\"get_property\",\"time-pos\"],\"request_id\":1}\n")
+            .write_all(b"{\"command\":[\"get_property\",\"vo-configured\"],\"request_id\":1}\n{\"command\":[\"get_property\",\"core-idle\"],\"request_id\":2}\n")
             .await
             .ok()?;
         let mut lines = BufReader::new(socket).lines();
+        let mut video = None;
+        let mut idle = None;
         for _ in 0..8 {
             let line = lines.next_line().await.ok()??;
             let response: serde_json::Value = serde_json::from_str(&line).ok()?;
-            if response["request_id"] == 1 {
-                return Some(response["error"] == "success" && response["data"].is_number());
+            if response["error"] != "success" { continue; }
+            match response["request_id"].as_u64() {
+                Some(1) => video = response["data"].as_bool(),
+                Some(2) => idle = response["data"].as_bool(),
+                _ => {}
             }
+            if let (Some(video), Some(idle)) = (video, idle) { return Some(video && !idle); }
         }
         None
     })
@@ -352,23 +358,32 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn playback_needs_media_and_handles_unresponsive_receiver() {
-        for (response, expected) in [
-            ("{\"request_id\":1,\"error\":\"success\",\"data\":0.0}\n", true),
-            ("{\"request_id\":1,\"error\":\"property unavailable\"}\n", false),
-        ] {
+    async fn playback_requires_configured_video_and_an_active_decoder() {
+        for (video, idle, expected) in [(false, false, false), (true, true, false), (true, false, true)] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("mpv.sock");
             let listener = tokio::net::UnixListener::bind(&path).unwrap();
             let server = tokio::spawn(async move {
-                let (mut conn, _) = listener.accept().await.unwrap();
-                use tokio::io::AsyncReadExt;
-                let mut buffer = [0; 256];
-                assert!(conn.read(&mut buffer).await.unwrap() > 0);
-                conn.write_all(response.as_bytes()).await.unwrap();
+                let (conn, _) = listener.accept().await.unwrap();
+                let (rd, mut wr) = conn.into_split();
+                let mut lines = BufReader::new(rd).lines();
+                while let Ok(Some(line)) = lines.next_line().await {
+                    let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+                    let data = match request["command"][1].as_str().unwrap() {
+                        "vo-configured" => serde_json::json!(video),
+                        "core-idle" => serde_json::json!(idle),
+                        "time-pos" => serde_json::json!(0.0),
+                        other => panic!("unexpected mpv property: {other}"),
+                    };
+                    let reply =
+                        serde_json::json!({ "request_id": request["request_id"], "error": "success", "data": data });
+                    if wr.write_all(format!("{reply}\n").as_bytes()).await.is_err() {
+                        break;
+                    }
+                }
             });
-            assert_eq!(playback_at(&path).await, expected);
-            server.await.unwrap();
+            assert_eq!(playback_at(&path).await, expected, "video={video}, idle={idle}");
+            server.abort();
         }
         assert!(!playback_at(Path::new("/nonexistent/mpv.sock")).await);
     }
@@ -393,7 +408,7 @@ mod tests {
         );
         assert_eq!(
             sender_url(&rc(StreamTransport::Udp), "10.77.0.1"),
-            "udp://10.77.0.1:5600?pkt_size=1316"
+            "udp://10.77.0.1:5600?pkt_size=1128"
         );
     }
 

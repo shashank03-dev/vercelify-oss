@@ -97,7 +97,8 @@ teardown() { rm -rf "$T"; }
   grep -q 'systemctl --user -M ana@ restart app-dev.lizardbyte.app.Sunshine.service' "$CALLS"
   grep -qx 'desktop_user = "ana"' "$T/etc/agent.toml"
   grep -q 'systemctl restart vercelify-agent' "$CALLS"
-  [[ "$output" == *"Launch Moonlight"* ]]
+  [[ "$output" == *"Second screen → Launch Moonlight"* ]]
+  [[ "$output" == *"restarts the agent"* ]]
   # No tray (it aborts Sunshine as a service), written as ana.
   grep -qx 'runuser ana' "$CALLS"
   grep -qx 'system_tray = disabled' "$T/home/ana/.config/sunshine/sunshine.conf"
@@ -176,4 +177,12 @@ teardown() { rm -rf "$T"; }
   run desktop_reset_login
   [ "$status" -ne 0 ]
   [[ "$output" == *"desktop on"* ]]
+}
+
+@test "changing the desktop user refuses to interrupt running jobs" {
+  agent_api() { printf '[{"status":"running","title":"Downloading Ollama"}]'; }
+  run desktop_on
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Downloading Ollama"* ]]
+  run ! grep -q 'restart vercelify-agent' "$CALLS"
 }

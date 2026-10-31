@@ -78,9 +78,16 @@ pub fn sender_args(cfg: &SenderConfig) -> Result<Vec<String>, StreamError> {
         return Err(StreamError::BadParams("width must be 320-7680"));
     }
     let fps = cfg.fps.to_string();
-    let mut a: Vec<String> = ["-hide_banner", "-loglevel", "warning", "-nostats"]
-        .map(String::from)
-        .to_vec();
+    let mut a: Vec<String> = [
+        "-hide_banner",
+        "-loglevel",
+        "warning",
+        "-nostats",
+        "-progress",
+        "pipe:2",
+    ]
+    .map(String::from)
+    .to_vec();
     match cfg.source {
         CaptureSource::Avfoundation => {
             a.extend(
@@ -247,6 +254,12 @@ pub fn moonlight_pair_args(host: &str, pin: &str) -> Result<Vec<String>, StreamE
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn capture_reports_output_bytes_for_the_startup_watchdog() {
+        let args = sender_args(&cfg()).unwrap();
+        assert!(args.windows(2).any(|w| w == ["-progress", "pipe:2"]));
+    }
 
     #[test]
     fn moonlight_pairs_with_a_given_pin() {

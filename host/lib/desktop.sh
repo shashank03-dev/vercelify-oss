@@ -123,6 +123,15 @@ desktop_on() {
     info "Sunshine starts when $user logs in to the desktop"
   fi
   if [[ "$(_desktop_toml desktop_user)" != "$user" ]]; then
+    local running
+    if declare -F agent_api >/dev/null; then
+      running=$( (API_TIMEOUT=5 agent_api GET /v1/jobs) 2>/dev/null | jq -r '.[] | select(.status == "running") | .title' 2>/dev/null || true)
+      if [[ -n "$running" ]]; then
+        err "Cannot restart the agent while jobs are running: $running. Let them finish, then retry desktop on."
+        return 1
+      fi
+    fi
+    warn "Updating the desktop user restarts the agent; running downloads and backups will be interrupted. Wait for them to finish first."
     toml_set desktop_user "\"$user\"" "$AGENT_CONFIG"
     run_cmd systemctl restart vercelify-agent 2>/dev/null || true
   fi

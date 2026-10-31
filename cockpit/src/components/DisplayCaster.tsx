@@ -9,7 +9,7 @@ import { openExternal } from "../lib/open";
 import { inTauri } from "../lib/transport";
 import type { CaptureSource, StreamTransport, VideoEncoder } from "../types";
 import { useToast } from "./Toast";
-import { Button, Card, cx, Field, InlineCode, OrbitButton, PixelWave, Segmented, Select, ShimmerText, StatusDot, StatusText } from "./ui";
+import { Button, Callout, Card, cx, Field, InlineCode, OrbitButton, PixelWave, Segmented, Select, ShimmerText, StatusDot, StatusText } from "./ui";
 
 interface Quality {
   id: string;
@@ -85,6 +85,7 @@ export function DisplayCaster() {
   const senderOn = !!sender.data?.running;
   const streaming = receiverOn && senderOn;
   const live = streaming && display.data?.playback_active === true;
+  const captureError = !senderOn && sender.data?.exit_code ? sender.data.last_output.slice(-3).join(" ") : null;
 
   async function startExtend() {
     setBusy(true);
@@ -217,6 +218,7 @@ export function DisplayCaster() {
           )
         }
       >
+        {captureError && <div data-testid="capture-error" className="mb-4"><Callout tone="bad" title="Screen capture stopped">{captureError}</Callout></div>}
         <div className="dot-grid relative mb-5 flex items-center gap-4 rounded-xl border border-line bg-bg px-5 py-6">
           <Endpoint icon={<Laptop className="size-5" />} title="This computer" sub="Capture" on={senderOn} />
           <div className="relative h-px flex-1 overflow-hidden bg-line-strong">

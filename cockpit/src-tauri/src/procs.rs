@@ -6,6 +6,7 @@ use chrono::Utc;
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use vercelify_core::ProcessStatus;
 
@@ -33,7 +34,7 @@ impl Default for Slot {
 
 #[derive(Default)]
 pub struct Processes {
-    slots: Mutex<HashMap<&'static str, Slot>>,
+    slots: Arc<Mutex<HashMap<&'static str, Slot>>>,
 }
 
 impl Processes {
@@ -69,10 +70,20 @@ impl Processes {
         }
 
         let output = Arc::new(Mutex::new(VecDeque::new()));
+        let produced = Arc::new(AtomicBool::new(false));
+        let progress = produced.clone();
+        let pid = child.id();
         if let Some(stderr) = child.stderr.take() {
             let sink = output.clone();
             std::thread::spawn(move || {
                 for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                    if line
+                        .strip_prefix("total_size=")
+                        .and_then(|n| n.parse::<u64>().ok())
+                        .is_some_and(|n| n > 0)
+                    {
+                        progress.store(true, Ordering::Relaxed);
+                    }
                     let mut g = sink.lock().unwrap_or_else(|e| e.into_inner());
                     if g.len() >= OUTPUT_LINES {
                         g.pop_front();
@@ -92,6 +103,27 @@ impl Processes {
             },
         );
         drop(slots);
+        if name == "sender" {
+            let slots = self.slots.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(std::time::Duration::from_secs(5));
+                let mut slots = slots.lock().unwrap_or_else(|e| e.into_inner());
+                let Some(slot) = slots.get_mut(name) else {
+                    return;
+                };
+                if produced.load(Ordering::Relaxed) || slot.child.as_ref().is_none_or(|c| c.id() != pid) {
+                    return;
+                }
+                if let Some(mut child) = slot.child.take() {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    slot.exit_code = Some(-1);
+                    slot.output.lock().unwrap_or_else(|e| e.into_inner()).push_back(
+                        "Screen capture sent no bytes after 5 seconds. On a Mac, open System Settings → Privacy & Security → Screen & System Audio Recording, remove Vercelify, then add and allow it again.".into()
+                    );
+                }
+            });
+        }
         Ok(self.status(name))
     }
 
@@ -213,6 +245,40 @@ mod tests {
             let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
         }
         assert!(leaked.is_empty(), "untracked live processes: {leaked:?}");
+    }
+
+    #[test]
+    fn an_empty_capture_is_stopped_without_polling() {
+        let p = Processes::default();
+        let st = p
+            .start("sender", "/bin/sh", &["-c".into(), "exec sleep 30".into()], false)
+            .unwrap();
+        std::thread::sleep(Duration::from_millis(5500));
+        let stopped = !alive(st.pid.unwrap());
+        let state = p.status("sender");
+        p.stop_all();
+        assert!(stopped, "capture with no output was left running");
+        assert_eq!(state.exit_code, Some(-1));
+        assert!(state
+            .last_output
+            .iter()
+            .any(|line| line.contains("Screen & System Audio Recording")));
+    }
+
+    #[test]
+    fn capture_with_output_survives_the_startup_watchdog() {
+        let p = Processes::default();
+        p.start(
+            "sender",
+            "/bin/sh",
+            &["-c".into(), "echo total_size=1128 >&2; exec sleep 30".into()],
+            false,
+        )
+        .unwrap();
+        std::thread::sleep(Duration::from_millis(5500));
+        let state = p.status("sender");
+        p.stop_all();
+        assert!(state.running);
     }
 
     #[test]
