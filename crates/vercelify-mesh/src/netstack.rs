@@ -21,11 +21,11 @@ use tokio::sync::{mpsc, oneshot, Mutex, Notify};
 
 const MTU: usize = 1280;
 const TCP_BUFFER: usize = 64 * 1024;
-const UDP_PACKETS: usize = 64;
-/// What a UDP socket holds of what arrives: a burst of remote-desktop video
-/// (a keyframe is hundreds of ~1.4 kB packets) at once.
-const UDP_IN_PACKETS: usize = 1024;
-const UDP_IN_BUFFER: usize = UDP_IN_PACKETS * 1500;
+/// What a UDP socket holds each way: a burst of video (a keyframe is
+/// hundreds of ~1.1–1.4 kB packets) at once, from the server (remote
+/// desktop) or to it (Share screen).
+const UDP_PACKETS: usize = 1024;
+const UDP_BUFFER: usize = UDP_PACKETS * 1500;
 /// Chunks waiting on either side of a connection.
 const CHUNKS: usize = 16;
 /// TCP connections open at once at most.
@@ -228,6 +228,8 @@ struct UdpEntry {
     handle: SocketHandle,
     remote: IpEndpoint,
     out: mpsc::Receiver<Vec<u8>>,
+    /// Taken from `out` but refused by a full socket: goes first next time.
+    waiting: Option<Vec<u8>>,
     inbound: mpsc::Sender<Vec<u8>>,
     used: std::time::Instant,
 }
@@ -317,11 +319,8 @@ async fn run(
                 }
                 Cmd::Udp(to, reply) => {
                     let mut s = udp::Socket::new(
-                        udp::PacketBuffer::new(
-                            vec![udp::PacketMetadata::EMPTY; UDP_IN_PACKETS],
-                            vec![0; UDP_IN_BUFFER],
-                        ),
-                        udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; UDP_PACKETS], vec![0; 64 * 1024]),
+                        udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; UDP_PACKETS], vec![0; UDP_BUFFER]),
+                        udp::PacketBuffer::new(vec![udp::PacketMetadata::EMPTY; UDP_PACKETS], vec![0; UDP_BUFFER]),
                     );
                     if let Err(e) = s.bind(port()) {
                         let _ = reply.send(Err(std::io::Error::other(format!("bind: {e}"))));
@@ -329,11 +328,12 @@ async fn run(
                     }
                     let handle = sockets.add(s);
                     let (out_tx, out) = mpsc::channel(UDP_PACKETS);
-                    let (in_tx, in_rx) = mpsc::channel(UDP_IN_PACKETS);
+                    let (in_tx, in_rx) = mpsc::channel(UDP_PACKETS);
                     udps.push(UdpEntry {
                         handle,
                         remote: endpoint(to),
                         out,
+                        waiting: None,
                         inbound: in_tx,
                         used: std::time::Instant::now(),
                     });
@@ -353,8 +353,12 @@ async fn run(
             // What the sockets queued goes out now, not at the next wake.
             iface.poll(now(), &mut phy, &mut sockets);
         }
+        // Wait for the engine rather than drop: it never waits on the stack,
+        // and a dropped video packet spoils every frame until the next keyframe.
         for p in phy.tx.drain(..) {
-            let _ = to_engine.try_send(p);
+            if to_engine.send(p).await.is_err() {
+                return;
+            }
         }
         if !phy.rx.is_empty() {
             continue;
@@ -498,19 +502,21 @@ fn service_udp(udps: &mut Vec<UdpEntry>, sockets: &mut SocketSet<'_>) -> bool {
             if !s.can_send() {
                 break;
             }
-            match e.out.try_recv() {
-                Ok(d) => {
-                    if s.send_slice(&d, e.remote).is_ok() {
-                        queued = true;
-                        e.used = std::time::Instant::now();
-                    }
-                }
+            let d = match e.waiting.take().map(Ok).unwrap_or_else(|| e.out.try_recv()) {
+                Ok(d) => d,
                 Err(mpsc::error::TryRecvError::Empty) => break,
                 Err(mpsc::error::TryRecvError::Disconnected) => {
                     sockets.remove(e.handle);
                     return false;
                 }
+            };
+            // A free slot doesn't mean room for the payload: keep it, don't drop it.
+            if s.send_slice(&d, e.remote).is_err() {
+                e.waiting = Some(d);
+                break;
             }
+            queued = true;
+            e.used = std::time::Instant::now();
         }
         if e.used.elapsed() > UDP_IDLE || e.inbound.is_closed() {
             sockets.remove(e.handle);
@@ -646,6 +652,38 @@ mod tests {
         }
         assert!(fragments > 1);
         assert_eq!(next(&mut conn).await, Some(payload));
+    }
+
+    // Share screen: ffmpeg's keyframe, hundreds of 1128-byte datagrams in a
+    // few milliseconds, sent from this Mac to the server. All of it must leave.
+    #[tokio::test]
+    async fn an_outgoing_video_burst_leaves_whole() {
+        let (conn, dev, _local, _stack) = open(5600).await;
+        let burst = 1000u16;
+        let sender = async {
+            for i in 0..burst {
+                let mut payload = vec![0u8; 1128];
+                payload[..2].copy_from_slice(&i.to_be_bytes());
+                conn.send(payload).await;
+            }
+        };
+        let receiver = async {
+            let mut seen = std::collections::BTreeSet::new();
+            let mut buf = vec![0u8; 2048];
+            while let Ok(Ok(n)) = tokio::time::timeout(Duration::from_millis(500), dev.recv(&mut buf)).await {
+                if n >= 30 && buf[9] == 17 {
+                    seen.insert(u16::from_be_bytes([buf[28], buf[29]]));
+                }
+            }
+            seen
+        };
+        let ((), seen) = tokio::join!(sender, receiver);
+        assert_eq!(
+            seen.len(),
+            usize::from(burst),
+            "lost {} of {burst}",
+            usize::from(burst) - seen.len()
+        );
     }
 
     // A keyframe is a burst of such packets, sent faster than the reader drains them.
