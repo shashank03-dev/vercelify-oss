@@ -129,6 +129,14 @@ to the server and starts Moonlight on `127.0.0.1`; with `--mesh-system`, or on t
 LAN, Moonlight connects to the server's address directly. Your devices may reach these
 ports on the mesh; Sunshine's login and its pairing protect them.
 
+When the Mac doesn't reach the server over your own network (the relay, or "direct" to a
+public address, as through a phone hotspot that keeps its devices apart), the card says
+so and Moonlight starts at 720p, 30 fps and 3 Mbps instead of its default (~15 Mbps).
+Measured on such a hotspot: 71 % of packets lost at 15 Mbps, about 6 % at 3 Mbps. Sunshine
+still ends a session that hears nothing for several seconds ("Ping Timeout", Moonlight's
+error −1), which such a path also does; only a network where both machines see each other
+fixes that.
+
 The agent talks to Sunshine's HTTPS page through curl, pinned to the public key of
 Sunshine's own certificate, so nothing else listening on that port gets the login.
 

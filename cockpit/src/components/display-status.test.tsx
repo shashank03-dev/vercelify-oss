@@ -15,11 +15,16 @@ vi.mock("../lib/transport", async (original) => ({
   call: async (cmd: string, args?: Record<string, unknown>) => {
     sent.push({ cmd, args });
     if (cmd === "extend_display_start") return { index: 4, name: "Capture screen 1" };
+    if (cmd === "tools_status" && meshPath.endpoint)
+      return [{ name: "ffmpeg", installed: true, path: "/opt/homebrew/bin/ffmpeg", install_hint: "", features: ["srt"] }, { name: "moonlight", installed: true, path: "/Applications/Moonlight.app", install_hint: "", features: [] }];
+    if (cmd === "moonlight_start") return { running: true, pid: 3, command: "moonlight", started_at: null, exit_code: null, last_output: [] };
     if (cmd === "tools_status" && meshPath.noSrt)
       return [{ name: "ffmpeg", installed: true, path: "/opt/homebrew/bin/ffmpeg", install_hint: "brew install ffmpeg", features: [] }];
     if (cmd === "mesh_local" && meshPath.endpoint)
       return { installed: true, running: true, userspace: true, peers: [{ name: "laptop", addresses: ["10.77.0.1"], path: "direct", endpoint: meshPath.endpoint, rtt_ms: 212 }] };
     const path = (args?.request as { path?: string } | undefined)?.path;
+    if (cmd === "agent_request" && path === "/v1/display" && meshPath.endpoint)
+      return { receiver: { running: false, pid: null, command: null, started_at: null, last_output: [], exit_code: null }, receiver_config: null, receiver_url: null, mpv_installed: true, sunshine: { name: "sunshine", active_state: "active", enabled: true }, playback_active: false };
     if (cmd === "agent_request" && path === "/v1/display/receiver/start")
       return { receiver: { running: true, pid: 2, command: "mpv", started_at: null, last_output: [], exit_code: null }, receiver_config: null, receiver_url: "udp://10.77.0.1:5600", mpv_installed: true, sunshine: null, playback_active: false };
     if (cmd === "sender_start") return { running: true, pid: 1, command: "ffmpeg", started_at: null, exit_code: null, last_output: [] };
@@ -103,4 +108,24 @@ it("says when this Mac's ffmpeg can't send SRT, instead of failing to start", as
   ua.mockRestore();
   stopped.capture = true;
   meshPath.noSrt = false;
+});
+
+it("launches Moonlight light, and says why, when the server is reached over the internet", async () => {
+  const { fireEvent } = await import("@testing-library/react");
+  meshPath.endpoint = "49.43.246.18:51820";
+  sent.length = 0;
+  localStorage.setItem("vercelify.moonlight.paired", JSON.stringify(["http://10.77.0.1:7420"]));
+  const settings: CockpitSettings = { agent_url: "http://10.77.0.1:7420", agent_token: "test", hostname: "laptop" };
+  const session = { settings, servers: [settings], unpair: async () => {}, update: async () => {}, select: async () => {}, remove: async () => {}, addServer: () => {}, revision: 0 };
+  render(<ToastProvider><SessionProvider value={session}><DisplayCaster /></SessionProvider></ToastProvider>);
+  const card = await screen.findByTestId("moonlight-card");
+  await waitFor(() => expect(card.querySelector("[data-testid=moonlight-path-warning]")).not.toBeNull(), { timeout: 4000 });
+  const launch = await screen.findByTestId("moonlight-launch");
+  await waitFor(() => expect(launch).toBeEnabled(), { timeout: 4000 });
+  fireEvent.click(launch);
+  await waitFor(() => expect(sent.some((c) => c.cmd === "moonlight_start")).toBe(true), { timeout: 4000 });
+  const launched = sent.find((c) => c.cmd === "moonlight_start")?.args?.launch;
+  expect(launched).toMatchObject({ resolution: "1280x720", fps: 30, bitrate_kbps: 3000 });
+  localStorage.removeItem("vercelify.moonlight.paired");
+  meshPath.endpoint = "";
 });

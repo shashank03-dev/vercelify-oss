@@ -65,6 +65,8 @@ export function DisplayCaster() {
   const tools = usePoll(() => local.tools(), 0);
   const screens = usePoll(() => local.captureScreens(), 0);
   const peers = usePoll(() => mesh.local(), 5000);
+  const path = streamPath(peers.data?.peers ?? [], agentHost(settings));
+  const far = path.kind !== "local" && path.kind !== "unknown";
   // Unknown until the tools are read: don't hold SRT back on a guess.
   const srtOk = tools.data?.find((t) => t.name === "ffmpeg")?.features.includes("srt") ?? true;
 
@@ -225,7 +227,10 @@ export function DisplayCaster() {
       if (moon.data?.running) await local.moonlightStop();
       else {
         if (canPair && !pairedWith(settings.agent_url)) await pairMoonlight();
-        await local.moonlightStart({ host: agentHost(settings), app: moonApp, resolution: null, fps: null, bitrate_kbps: null });
+        // Off this network every packet is at risk: send a fifth as much.
+        await local.moonlightStart(far
+          ? { host: agentHost(settings), app: moonApp, resolution: "1280x720", fps: 30, bitrate_kbps: 3000 }
+          : { host: agentHost(settings), app: moonApp, resolution: null, fps: null, bitrate_kbps: null });
       }
       void moon.refresh();
     } catch (e) {
@@ -257,7 +262,7 @@ export function DisplayCaster() {
       >
         {captureError && <div data-testid="capture-error" className="mb-4"><Callout tone="bad" title="Screen capture stopped">{captureError}</Callout></div>}
         <PathWarning
-          path={streamPath(peers.data?.peers ?? [], agentHost(settings))}
+          path={path}
           light={qualityId === "light"}
           onLight={() => setQualityId("light")}
         />
@@ -386,6 +391,15 @@ export function DisplayCaster() {
       </Card>
 
       <Card title="Linux desktop on this computer" description="Low-latency remote desktop with Sunshine and Moonlight" icon={<MonitorPlay />} testId="moonlight-card">
+        {far && (
+          <div data-testid="moonlight-path-warning" className="mb-4">
+            <Callout tone="warn" title="Moonlight may disconnect">
+              This Mac reaches {path.name ?? "the server"} {pathHow(path)}. Moonlight starts at 720p, 30 fps and 3 Mbps to lose
+              less, and still ends the session when the connection stalls for several seconds. Put both on the same Wi-Fi (a phone
+              hotspot can keep its devices apart).
+            </Callout>
+          </div>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-4">
           <div className="space-y-2 text-[13px]">
             <div className="flex items-center gap-2">
@@ -428,6 +442,7 @@ export function DisplayCaster() {
               disabled={!moonlight?.installed || (sunshineOff && !moon.data?.running)}
               busy={moonBusy}
               onClick={() => void toggleMoonlight()}
+              data-testid="moonlight-launch"
             >
               {moon.data?.running ? "Close Moonlight" : "Launch Moonlight"}
             </Button>
@@ -469,14 +484,18 @@ function Prereq({ ok, label, hint }: { ok: boolean; label: string; hint: string 
 
 const NO_SRT = "This Mac's ffmpeg can't send SRT (Homebrew's is built without it): use UDP, or install an ffmpeg built with SRT.";
 
+/** How this Mac reaches the server, when it isn't over this network. */
+function pathHow(path: ReturnType<typeof streamPath>): string {
+  return path.kind === "internet" ? `over the internet${path.rtt !== undefined ? ` (${path.rtt} ms round trip)` : ""}, not over your own network`
+    : path.kind === "relay" ? "through the server's relay, not over your own network"
+    : "at the moment: there's no connection";
+}
+
 /** A stream that leaves this network loses packets, and a moving picture
  * breaks up: say so, and offer the lightest quality. */
 function PathWarning({ path, light, onLight }: { path: ReturnType<typeof streamPath>; light: boolean; onLight: () => void }) {
   if (path.kind === "local" || path.kind === "unknown") return null;
-  const how =
-    path.kind === "internet" ? `over the internet${path.rtt !== undefined ? ` (${path.rtt} ms round trip)` : ""}, not over your own network`
-    : path.kind === "relay" ? "through the server's relay, not over your own network"
-    : "at the moment: there's no connection";
+  const how = pathHow(path);
   return (
     <div data-testid="stream-path-warning" className="mb-4">
       <Callout tone="warn" title="The picture may break up">
