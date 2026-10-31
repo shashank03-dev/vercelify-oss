@@ -92,6 +92,9 @@ teardown() { rm -rf "$T"; }
   [[ "$output" == *"<string>--gateway</string><string>127.0.0.1:7481</string>"* ]]
   [[ "$output" == *"<string>/Users/me/Library/Application Support/Vercelify/mesh</string>"* ]]
   [[ "$output" == *"<key>KeepAlive</key><true/>"* ]]
+  # The daemon logs to stdout: both streams go to the log, or it's lost.
+  [[ "$output" == *"<key>StandardOutPath</key><string>/Users/me/Library/Application Support/Vercelify/run/mesh.log</string>"* ]]
+  [[ "$output" == *"<key>StandardErrorPath</key><string>/Users/me/Library/Application Support/Vercelify/run/mesh.log</string>"* ]]
   run mesh_plist /x/vercelify-mesh /L 1
   [[ "$output" != *"--userspace"* ]]
   # A real property list, with `up` where launchd will run it.

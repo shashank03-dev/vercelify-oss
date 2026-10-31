@@ -281,6 +281,7 @@ mesh_plist() {
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
   <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>$home/run/mesh.log</string>
   <key>StandardErrorPath</key><string>$home/run/mesh.log</string>
 </dict>
 </plist>
