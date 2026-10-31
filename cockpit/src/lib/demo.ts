@@ -562,6 +562,10 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
   if (p === "/v1/volumes" && req.method === "GET") return hostVolumes;
   if (p === "/v1/volumes") return { host_path: "/mnt/storage/volumes/demo/data", created: true };
   if (p === "/v1/display/sunshine/pair") return { outcome: "paired" };
+  if (p === "/v1/desktop/on") {
+    if (req.method === "POST") services[5] = { ...services[5]!, active_state: "active", enabled: true };
+    return { running: false, started_at: null, exit_code: services[5]!.active_state === "active" ? 0 : null, log_tail: ["  ✓ Sunshine runs on user's desktop"] };
+  }
   if (p === "/v1/display")
     return { receiver: idle, receiver_config: null, receiver_url: null, mpv_installed: true, sunshine: services[5] };
   return { ok: true };

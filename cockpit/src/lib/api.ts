@@ -183,6 +183,9 @@ function makeAgent(server?: string) {
     runCron: (appUuid: string, path: string) => req<Job>("POST", `/v1/projects/${q(appUuid)}/crons/run`, { path }),
     update: () => req<UpdateStatus>("GET", "/v1/update"),
     updateStart: (channel?: "edge" | "stable") => req<UpdateStatus>("POST", "/v1/update", channel ? { channel } : {}),
+    /** `vercelify desktop on` on the server (Sunshine for remote desktop). */
+    desktopOn: () => req<UpdateStatus>("POST", "/v1/desktop/on", {}),
+    desktopOnStatus: () => req<UpdateStatus>("GET", "/v1/desktop/on"),
   };
 }
 

@@ -14,17 +14,42 @@ use vercelify_core::UpdateStatus;
 pub const UNIT: &str = "vercelify-update";
 const LOG_LINES: usize = 40;
 
+/// A `vercelify` command run as its own transient unit: it may restart this
+/// agent, so its output and exit code go to files the agent reads back.
+pub struct CliTask {
+    pub unit: &'static str,
+    /// Prefix of its files in the state directory.
+    files: &'static str,
+    description: &'static str,
+    busy: &'static str,
+}
+
+pub const UPDATE: CliTask = CliTask {
+    unit: UNIT,
+    files: "update",
+    description: "Vercelify update (started from the cockpit)",
+    busy: "an update is already running on this server",
+};
+
+/// `vercelify desktop on`: Sunshine for remote desktop, from the app.
+pub const DESKTOP_ON: CliTask = CliTask {
+    unit: "vercelify-desktop",
+    files: "desktop",
+    description: "Vercelify remote desktop setup (started from the cockpit)",
+    busy: "remote desktop is already being set up on this server",
+};
+
 struct Files {
     started: PathBuf,
     exit: PathBuf,
     log: PathBuf,
 }
 
-fn files(cfg: &Config) -> Files {
+fn files(cfg: &Config, task: &CliTask) -> Files {
     Files {
-        started: cfg.state_dir.join("update.started"),
-        exit: cfg.state_dir.join("update.exit"),
-        log: cfg.state_dir.join("update.log"),
+        started: cfg.state_dir.join(format!("{}.started", task.files)),
+        exit: cfg.state_dir.join(format!("{}.exit", task.files)),
+        log: cfg.state_dir.join(format!("{}.log", task.files)),
     }
 }
 
@@ -69,10 +94,10 @@ fn reset_log(path: &std::path::Path) -> std::io::Result<()> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
 }
 
-async fn unit_active(cfg: &Config) -> bool {
+async fn unit_active(cfg: &Config, unit: &str) -> bool {
     run(
         &cfg.systemctl_bin,
-        &["is-active", "--quiet", UNIT],
+        &["is-active", "--quiet", unit],
         Duration::from_secs(10),
     )
     .await
@@ -80,9 +105,13 @@ async fn unit_active(cfg: &Config) -> bool {
 }
 
 pub async fn status(cfg: &Config) -> UpdateStatus {
-    let f = files(cfg);
+    task_status(cfg, &UPDATE).await
+}
+
+pub async fn task_status(cfg: &Config, task: &CliTask) -> UpdateStatus {
+    let f = files(cfg, task);
     UpdateStatus {
-        running: unit_active(cfg).await,
+        running: unit_active(cfg, task.unit).await,
         started_at: std::fs::read_to_string(&f.started).ok().map(|s| s.trim().to_string()),
         exit_code: std::fs::read_to_string(&f.exit)
             .ok()
@@ -97,8 +126,13 @@ pub async fn start(cfg: &Config, channel: Option<&str>) -> Result<UpdateStatus, 
     if !matches!(channel, "edge" | "stable") {
         return Err(AppError::bad_request("update channel must be edge or stable"));
     }
-    if unit_active(cfg).await {
-        return Err(AppError::conflict("an update is already running on this server"));
+    run_task(cfg, &UPDATE, &["update", &format!("--{channel}")]).await
+}
+
+/// Start `vercelify ARGS…` as `task`'s unit (refused while it runs).
+pub async fn run_task(cfg: &Config, task: &CliTask, args: &[&str]) -> Result<UpdateStatus, AppError> {
+    if unit_active(cfg, task.unit).await {
+        return Err(AppError::conflict(task.busy));
     }
     if crate::exec::find_on_path(&cfg.cli_bin).is_none() {
         return Err(AppError::unavailable(format!(
@@ -106,7 +140,7 @@ pub async fn start(cfg: &Config, channel: Option<&str>) -> Result<UpdateStatus, 
             cfg.cli_bin
         )));
     }
-    let f = files(cfg);
+    let f = files(cfg, task);
     std::fs::create_dir_all(&cfg.state_dir).map_err(|e| AppError::internal(e.to_string()))?;
     let _ = std::fs::remove_file(&f.exit);
     reset_log(&f.log).map_err(|e| AppError::internal(e.to_string()))?;
@@ -116,19 +150,26 @@ pub async fn start(cfg: &Config, channel: Option<&str>) -> Result<UpdateStatus, 
     )
     .map_err(|e| AppError::internal(e.to_string()))?;
     // A previous failed run would block the unit name.
-    let _ = run(&cfg.systemctl_bin, &["reset-failed", UNIT], Duration::from_secs(10)).await;
+    let _ = run(
+        &cfg.systemctl_bin,
+        &["reset-failed", task.unit],
+        Duration::from_secs(10),
+    )
+    .await;
     let script = format!(
-        "{cli} update --{channel} >>{log} 2>&1; echo $? >{exit}",
+        "{cli} {args} >>{log} 2>&1; echo $? >{exit}",
         cli = sh_quote(&cfg.cli_bin),
+        args = args.iter().map(|a| sh_quote(a)).collect::<Vec<_>>().join(" "),
         log = sh_quote(&f.log.to_string_lossy()),
         exit = sh_quote(&f.exit.to_string_lossy()),
     );
-    let unit = format!("--unit={UNIT}");
+    let unit = format!("--unit={}", task.unit);
+    let description = format!("--description={}", task.description);
     let out = run(
         &cfg.systemd_run_bin,
         &[
             &unit,
-            "--description=Vercelify update (started from the cockpit)",
+            &description,
             "--setenv=VERCELIFY_NONINTERACTIVE=1",
             "/bin/sh",
             "-c",
@@ -140,7 +181,7 @@ pub async fn start(cfg: &Config, channel: Option<&str>) -> Result<UpdateStatus, 
     if !out.success() {
         return Err(AppError::internal(format!("systemd-run failed: {}", out.stderr.trim())));
     }
-    Ok(status(cfg).await)
+    Ok(task_status(cfg, task).await)
 }
 
 pub const BACKUP_UNIT: &str = "vercelify-backup.service";
@@ -300,7 +341,7 @@ pub fn backup_result(cfg: &Config, started_at: &str) -> Result<String, String> {
 }
 
 pub fn update_result(cfg: &Config, _started_at: &str) -> Result<String, String> {
-    let f = files(cfg);
+    let f = files(cfg, &UPDATE);
     match std::fs::read_to_string(&f.exit)
         .ok()
         .and_then(|s| s.trim().parse::<i32>().ok())
@@ -314,8 +355,28 @@ pub fn update_result(cfg: &Config, _started_at: &str) -> Result<String, String> 
     }
 }
 
-/// An update restarts this agent; pick its job up again after the restart.
+pub fn desktop_result(cfg: &Config, _started_at: &str) -> Result<String, String> {
+    let f = files(cfg, &DESKTOP_ON);
+    match std::fs::read_to_string(&f.exit)
+        .ok()
+        .and_then(|s| s.trim().parse::<i32>().ok())
+    {
+        Some(0) => Ok("remote desktop is on".into()),
+        Some(_) => Err(tail(&std::fs::read_to_string(&f.log).unwrap_or_default(), 1)
+            .join("")
+            .trim_start_matches(['✗', ' '])
+            .to_string()),
+        None => Err("turning on remote desktop left no result".into()),
+    }
+}
+
+/// An update (or `desktop on`) restarts this agent; pick its job up again
+/// after the restart.
 pub async fn resume_update_job(cfg: std::sync::Arc<Config>, jobs: std::sync::Arc<crate::events::Jobs>) {
+    if let Some(j) = jobs.running("desktop", None) {
+        let (cfg, jobs) = (cfg.clone(), jobs.clone());
+        tokio::spawn(follow_unit(cfg, DESKTOP_ON.unit, j.id, jobs, desktop_result));
+    }
     if let Some(j) = jobs.running("update", None) {
         follow_unit(cfg, UNIT, j.id, jobs, update_result).await;
     }

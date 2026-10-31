@@ -147,6 +147,27 @@ export function DisplayCaster() {
     }
   }
 
+  const [desktopBusy, setDesktopBusy] = useState(false);
+  /** `vercelify desktop on` on the server, followed until it ends. */
+  async function turnOnDesktop() {
+    setDesktopBusy(true);
+    try {
+      let st = await agent.desktopOn();
+      for (let i = 0; st.running && i < 300; i++) {
+        await new Promise((r) => setTimeout(r, 2000));
+        // It may restart the agent: keep asking.
+        st = await agent.desktopOnStatus().catch(() => st);
+      }
+      if (st.exit_code === 0) toast.ok("Remote desktop is on");
+      else toast.bad(st.log_tail.at(-1)?.replace(/^\s*✗\s*/, "") || "Turning on remote desktop failed");
+      await display.refresh();
+    } catch (e) {
+      toast.bad((e as Error).message);
+    } finally {
+      setDesktopBusy(false);
+    }
+  }
+
   async function openSunshine() {
     setMoonBusy(true);
     try { await openExternal(await local.moonlightSetup(agentHost(settings))); }
@@ -199,6 +220,8 @@ export function DisplayCaster() {
   }
 
   const sunshine = display.data?.sunshine;
+  // Not set up on the server (`vercelify desktop on` never ran there).
+  const sunshineOff = sunshine?.active_state === "not-found";
 
   return (
     <div className="space-y-6">
@@ -335,7 +358,10 @@ export function DisplayCaster() {
             <div className="flex items-center gap-2">
               <StatusDot health={sunshine?.active_state === "active" ? "ok" : sunshine?.active_state === "not-found" ? "idle" : "bad"} />
               Sunshine on the host:{" "}
-              <span className="text-fg-muted">{sunshine ? (sunshine.active_state === "not-found" ? "not installed" : sunshine.active_state) : "…"}</span>
+              <span className="text-fg-muted">{sunshine ? (sunshine.active_state === "not-found" ? "off" : sunshine.active_state) : "…"}</span>
+              {sunshineOff && (
+                <Button variant="ghost" size="sm" busy={desktopBusy} onClick={() => void turnOnDesktop()} data-testid="desktop-on">Turn on remote desktop</Button>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <StatusDot health={moonlight?.installed ? "ok" : "idle"} />
@@ -366,7 +392,7 @@ export function DisplayCaster() {
             <Button
               variant={moon.data?.running ? "danger" : "primary"}
               icon={moon.data?.running ? <Square /> : <Play />}
-              disabled={!moonlight?.installed}
+              disabled={!moonlight?.installed || (sunshineOff && !moon.data?.running)}
               busy={moonBusy}
               onClick={() => void toggleMoonlight()}
             >

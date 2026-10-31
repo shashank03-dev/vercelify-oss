@@ -22,3 +22,15 @@ it("shows a stopped capture's permission repair outside diagnostic details", asy
   expect(await screen.findByTestId("capture-error")).toBeVisible();
   expect(screen.getByTestId("capture-error")).toHaveTextContent("Screen & System Audio Recording");
 });
+
+it("turns remote desktop on from the app when Sunshine isn't set up on the server", async () => {
+  const { fireEvent } = await import("@testing-library/react");
+  const settings: CockpitSettings = { agent_url: "http://10.77.0.1:7420", agent_token: "test", hostname: "laptop" };
+  const session = { settings, servers: [settings], unpair: async () => {}, update: async () => {}, select: async () => {}, remove: async () => {}, addServer: () => {}, revision: 0 };
+  render(<ToastProvider><SessionProvider value={session}><DisplayCaster /></SessionProvider></ToastProvider>);
+  const card = await screen.findByTestId("moonlight-card");
+  expect(await screen.findByText("off")).toBeInTheDocument();
+  expect(card).not.toHaveTextContent("not installed");
+  fireEvent.click(await screen.findByTestId("desktop-on"));
+  expect(await screen.findByText("Remote desktop is on", {}, { timeout: 4000 })).toBeInTheDocument();
+});

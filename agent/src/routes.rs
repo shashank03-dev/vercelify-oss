@@ -169,6 +169,7 @@ pub fn router(state: AppState) -> Router {
         .route("/backup/run", post(backup_run))
         .route("/backup/recovery-kit", post(backup_recovery_kit))
         .route("/update", get(update_status).post(update_start))
+        .route("/desktop/on", get(desktop_status).post(desktop_on))
         .route("/jobs", get(jobs_list))
         .route("/jobs/{id}", get(job_get).delete(job_cancel))
         .route("/sleep", get(sleep_status))
@@ -579,6 +580,25 @@ async fn update_status(State(s): State<AppState>) -> Json<UpdateStatus> {
 #[derive(Deserialize, Default)]
 struct UpdateRequest {
     channel: Option<String>,
+}
+
+async fn desktop_status(State(s): State<AppState>) -> Json<UpdateStatus> {
+    Json(update::task_status(&s.config, &update::DESKTOP_ON).await)
+}
+
+/// `vercelify desktop on` from the app: a Mac-only user has no terminal on
+/// the server.
+async fn desktop_on(State(s): State<AppState>) -> ApiResult<UpdateStatus> {
+    let st = update::run_task(&s.config, &update::DESKTOP_ON, &["desktop", "on"]).await?;
+    let id = s.jobs.start("desktop", "Turn on remote desktop", None).detach();
+    tokio::spawn(update::follow_unit(
+        s.config.clone(),
+        update::DESKTOP_ON.unit,
+        id,
+        s.jobs.clone(),
+        update::desktop_result,
+    ));
+    Ok(Json(st))
 }
 
 async fn update_start(State(s): State<AppState>, request: Option<Json<UpdateRequest>>) -> ApiResult<UpdateStatus> {

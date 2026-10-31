@@ -365,6 +365,8 @@ fn protected_routes_reject_missing_wrong_and_revoked_tokens() {
         ("GET", "/v1/uptime"),
         ("GET", "/v1/update"),
         ("POST", "/v1/update"),
+        ("GET", "/v1/desktop/on"),
+        ("POST", "/v1/desktop/on"),
         ("GET", "/v1/jobs"),
         ("GET", "/v1/jobs/id"),
         ("GET", "/v1/sleep"),
@@ -2409,6 +2411,24 @@ fn an_ai_install_stops_before_downloading_when_another_program_holds_the_port() 
     );
     let calls = std::fs::read_to_string(&a.log).unwrap_or_default();
     assert!(!calls.contains("pull"), "downloaded anyway: {calls}");
+}
+
+#[test]
+fn remote_desktop_can_be_turned_on_from_the_app() {
+    let a = start();
+    let (status, body) = post(&a, "/v1/desktop/on", json!({}));
+    assert_eq!(status, 200, "{body}");
+    let calls = std::fs::read_to_string(&a.log).unwrap();
+    assert!(calls.contains("systemd-run --unit=vercelify-desktop"), "{calls}");
+    assert!(calls.contains("vercelify desktop on"), "{calls}");
+    let (_, jobs) = get(&a, "/v1/jobs");
+    assert!(
+        jobs.as_array().unwrap().iter().any(|j| j["kind"] == "desktop"),
+        "{jobs}"
+    );
+    let (status, st) = get(&a, "/v1/desktop/on");
+    assert_eq!(status, 200);
+    assert!(st.get("running").is_some() && st.get("log_tail").is_some(), "{st}");
 }
 
 #[test]
