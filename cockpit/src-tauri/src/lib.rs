@@ -9,6 +9,8 @@ mod local;
 mod mesh;
 mod procs;
 mod tray;
+#[cfg(target_os = "macos")]
+mod vdisplay;
 
 use procs::Processes;
 use serde_json::Value;
@@ -40,6 +42,9 @@ struct AppState {
     collector: Collector,
     /// Said once: the settings file couldn't be read and was put aside.
     config_notice: Mutex<Option<String>>,
+    /// The extended desktop's display, while Share screen streams it.
+    #[cfg(target_os = "macos")]
+    extended: Mutex<Option<vdisplay::VirtualDisplay>>,
 }
 
 type CmdResult<T> = Result<T, String>;
@@ -550,7 +555,55 @@ async fn sender_start(state: State<'_, AppState>, mut config: SenderConfig) -> C
 fn sender_stop(state: State<'_, AppState>) -> ProcessStatus {
     state.procs.stop(SENDER);
     let _ = mesh::set_forwards("sender", &[]);
+    // The extended desktop goes with its stream; windows on it move back.
+    #[cfg(target_os = "macos")]
+    drop(state.extended.lock().unwrap().take());
     state.procs.status(SENDER)
+}
+
+/// A new display for an extended desktop (kept until the stream stops), and
+/// the screen ffmpeg captures it as.
+#[tauri::command]
+async fn extend_display_start(
+    state: State<'_, AppState>,
+    width: u32,
+    height: u32,
+    fps: u32,
+) -> CmdResult<CaptureScreen> {
+    #[cfg(target_os = "macos")]
+    {
+        drop(state.extended.lock().unwrap().take());
+        let before = tauri::async_runtime::spawn_blocking(local::capture_screens)
+            .await
+            .map_err(|e| e.to_string())??;
+        let display = vdisplay::create("Vercelify second screen", width, height, f64::from(fps))?;
+        *state.extended.lock().unwrap() = Some(display);
+        // macOS takes a moment to hand the new display to AVFoundation.
+        for _ in 0..20 {
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            let after = tauri::async_runtime::spawn_blocking(local::capture_screens)
+                .await
+                .map_err(|e| e.to_string())??;
+            if let Some(s) = vercelify_core::avfoundation::added_screen(&before, &after) {
+                return Ok(s);
+            }
+        }
+        drop(state.extended.lock().unwrap().take());
+        Err("the new display didn't show up for screen capture: check Screen Recording for Vercelify".into())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (state, width, height, fps);
+        Err("an extended desktop needs macOS".into())
+    }
+}
+
+#[tauri::command]
+fn extend_display_stop(state: State<'_, AppState>) {
+    #[cfg(target_os = "macos")]
+    drop(state.extended.lock().unwrap().take());
+    #[cfg(not(target_os = "macos"))]
+    let _ = state;
 }
 
 #[tauri::command]
@@ -662,6 +715,8 @@ pub fn run() {
                 http: http::client(),
                 mesh_http: http::mesh_client(),
                 procs: Processes::default(),
+                #[cfg(target_os = "macos")]
+                extended: Mutex::new(None),
                 collector: Collector::new(SysPaths::default(), env!("CARGO_PKG_VERSION")),
             });
             Ok(())
@@ -694,6 +749,8 @@ pub fn run() {
             sender_start,
             sender_stop,
             sender_status,
+            extend_display_start,
+            extend_display_stop,
             moonlight_start,
             moonlight_pair,
             moonlight_setup,

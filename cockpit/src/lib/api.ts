@@ -213,6 +213,9 @@ export const local = {
   captureScreens: () => call<CaptureScreen[]>("capture_screens"),
   senderStart: (config: SenderConfig) => call<ProcessStatus>("sender_start", { config }),
   senderStop: () => call<ProcessStatus>("sender_stop"),
+  /** A new display for an extended desktop (macOS); removed when the stream stops. */
+  extendDisplayStart: (width: number, height: number, fps: number) => call<CaptureScreen>("extend_display_start", { width, height, fps }),
+  extendDisplayStop: () => call<void>("extend_display_stop"),
   senderStatus: () => call<ProcessStatus>("sender_status"),
   moonlightSetup: (host: string) => call<string>("moonlight_setup", { host }),
   moonlightStart: (launch: MoonlightLaunch) => call<ProcessStatus>("moonlight_start", { launch }),

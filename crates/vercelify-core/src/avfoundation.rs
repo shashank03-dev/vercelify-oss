@@ -46,3 +46,28 @@ pub fn parse_screens(stderr: &str) -> Vec<CaptureScreen> {
     }
     out
 }
+
+/// The screen that appeared between two listings (a virtual display just
+/// made for an extended desktop), matched by name: AVFoundation renumbers.
+pub fn added_screen(before: &[CaptureScreen], after: &[CaptureScreen]) -> Option<CaptureScreen> {
+    after.iter().find(|s| !before.iter().any(|b| b.name == s.name)).cloned()
+}
+
+#[cfg(test)]
+mod added_screen_tests {
+    use super::*;
+
+    #[test]
+    fn the_screen_a_new_display_added_is_found_by_name() {
+        let screen = |index, n: u32| CaptureScreen {
+            index,
+            name: format!("Capture screen {n}"),
+        };
+        let before = vec![screen(2, 0)];
+        // The new display can take any position: AVFoundation renumbers.
+        let after = vec![screen(2, 0), screen(3, 1)];
+        assert_eq!(added_screen(&before, &after), Some(screen(3, 1)));
+        assert_eq!(added_screen(&after, &after), None);
+        assert_eq!(added_screen(&[], &[]), None);
+    }
+}

@@ -69,6 +69,9 @@ export function DisplayCaster() {
   const [encoder, setEncoder] = useState<VideoEncoder>(inTauri && isMac ? "hardware" : "software");
   const [screen, setScreen] = useState<number | null>(null);
   const [source, setSource] = useState<CaptureSource>(isMac ? "avfoundation" : "test_pattern");
+  /** Mirror a screen as it is, or give the laptop's panel a display of its own. */
+  const [mode, setMode] = useState<"mirror" | "extend">("mirror");
+  const extend = isMac && source === "avfoundation" && mode === "extend";
   const [busy, setBusy] = useState(false);
   const [moonBusy, setMoonBusy] = useState(false);
   const [moonApp, setMoonApp] = useState("Desktop");
@@ -101,6 +104,11 @@ export function DisplayCaster() {
       if (!receiver.mpv_installed) throw new Error("Install the Linux display receiver: sudo apt install mpv");
       if (source === "avfoundation" && !(screens.data ?? await local.captureScreens()).length) throw new Error("No screens are available. Allow Screen Recording for Vercelify in System Settings, restart the app, then retry.");
       receiverRequested = true;
+      let screenIndex = screen ?? 0;
+      if (extend) {
+        const width = quality.width ?? 1920;
+        screenIndex = (await local.extendDisplayStart(width, Math.round((width * 9) / 16), quality.fps)).index;
+      }
       const st = await agent.receiverStart({ transport, port: 5600, latency_ms: transport === "srt" ? 120 : null });
       if (!st.receiver.running) {
         throw new Error(`The display receiver on the host stopped: ${st.receiver.last_output.slice(-3).join(" ") || "no output"}`);
@@ -109,7 +117,7 @@ export function DisplayCaster() {
       const started = await local.senderStart({
         url: st.receiver_url,
         source,
-        screen_index: screen ?? 0,
+        screen_index: screenIndex,
         fps: quality.fps,
         bitrate_kbps: quality.kbps,
         width: quality.width,
@@ -227,7 +235,7 @@ export function DisplayCaster() {
     <div className="space-y-6">
       <Card
         title="Share a screen"
-        description={isMac ? "Mirror an existing screen. To extend your desktop, first create a virtual display or connect a display adapter." : "Send a test picture to verify the Linux receiver. Mac screen capture is available in the macOS app."}
+        description={isMac ? "Mirror a screen, or extend your desktop: the laptop becomes another monitor you can drag windows onto." : "Send a test picture to verify the Linux receiver. Mac screen capture is available in the macOS app."}
         icon={<MonitorUp />}
         testId="extend-card"
         actions={
@@ -256,8 +264,22 @@ export function DisplayCaster() {
         {(tools.error || screens.error || display.error) && <p role="alert" className="mb-4 text-sm text-warn">{display.error?.message || tools.error?.message || screens.error?.message}</p>}
         <Button variant="ghost" size="sm" onClick={() => { void tools.refresh(); void screens.refresh(); void display.refresh(); }} data-testid="refresh-display">Refresh setup</Button>
         <div className="grid grid-cols-2 gap-4">
-          <Field label="Screen" hint={screens.data?.length ? "Tip: a virtual display (e.g. BetterDisplay) makes it a true extended desktop" : undefined}>
-            {source === "avfoundation" ? (
+          <Field label="Screen" hint={extend ? "A new display appears while it streams: arrange it in System Settings → Displays" : undefined}>
+            {isMac && source === "avfoundation" && (
+              <div className="mb-2">
+                <Segmented
+                  label="screen mode"
+                  value={mode}
+                  onChange={setMode}
+                  options={[{ value: "mirror", label: "Mirror", testId: "mode-mirror" }, { value: "extend", label: "Extend", testId: "mode-extend" }]}
+                />
+              </div>
+            )}
+            {extend ? (
+              <Select value="new" disabled>
+                <option value="new">New display for {settings.hostname}</option>
+              </Select>
+            ) : source === "avfoundation" ? (
               <Select value={screen ?? ""} onChange={(e) => setScreen(Number(e.target.value))} disabled={!screens.data?.length} data-testid="screen">
                 {!screens.data?.length && <option value="">{inTauri ? "no screens found" : "desktop app only"}</option>}
                 {screens.data?.map((s) => (

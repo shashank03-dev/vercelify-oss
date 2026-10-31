@@ -25,3 +25,9 @@ tauri = { version = "2", features = ["tray-icon"] }
 tauri-plugin-opener = "2"
 tauri-plugin-notification = "2"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Virtual displays for an extended desktop (CGVirtualDisplay); already in the
+# tree through Tauri.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"

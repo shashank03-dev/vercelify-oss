@@ -623,6 +623,10 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
       ];
     case "capture_screens":
       return [{ index: 1, name: "Built-in Retina Display" }];
+    case "extend_display_start":
+      return { index: 2, name: "Capture screen 1" };
+    case "extend_display_stop":
+      return null;
     case "save_private_file":
       return `~/Downloads/${String(args?.filename ?? "vercelify.txt")}`;
     case "sender_status":

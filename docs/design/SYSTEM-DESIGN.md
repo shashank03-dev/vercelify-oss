@@ -1040,8 +1040,13 @@ stop and agent shutdown kill the receiver process group, including a runuser chi
 A private mpv IPC socket supplies playback confirmation (`playback_active`) only
 when `vo-configured` is true and `core-idle` is false, separate
 from process liveness. The cockpit exposes a refresh/recovery step and establishes
-Moonlight forwards before opening Sunshine's setup page. Extended macOS desktops
-require an existing additional display; no private display-driver API is shipped.
+Moonlight forwards before opening Sunshine's setup page. Share screen can mirror
+a screen or extend the desktop: in Extend mode the app makes a display with
+CoreGraphics' `CGVirtualDisplay` (macOS 11+, the API DeskPad and BetterDisplay
+use; not in Apple's public headers, so looked up at run time and refused with a
+message where it's missing), sized to the stream's quality (16:9), and streams the
+screen AVFoundation lists for it. Nothing is installed: the display exists while
+the app holds it and goes when the stream stops, its windows moving back.
 
 Pairing Moonlight with Sunshine needs no Sunshine login or PIN from the user. While
 Sunshine has no login it accepts a first one without authentication: on the first

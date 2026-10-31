@@ -25,11 +25,11 @@ because two processes exist.
   from before 0.2.4), run `tccutil reset ScreenCapture dev.vercelify.cockpit`,
   restart the app and allow it once more.
 - **Host:** the installer installs `mpv` (skip with `--no-display`).
-- **A real extended desktop:** macOS only lets ffmpeg capture screens that
-  exist. Create a virtual display with [BetterDisplay](https://github.com/waydabber/BetterDisplay)
-  (free tier) or plug in an HDMI dummy plug, arrange it in System Settings →
-  Displays, then choose that screen in the cockpit. Match its resolution to the
-  laptop panel (1920×1080 for most).
+- **A real extended desktop:** choose **Extend** next to Screen. While it
+  streams, the app adds a display of its own (1080p for Smooth, 720p for
+  Light): drag windows onto it like any monitor, and arrange it in System
+  Settings → Displays. Stopping the stream removes it and its windows come
+  back. **Mirror** shares a screen as it is.
 
 ### What happens when you press Start
 
@@ -83,8 +83,8 @@ An unavailable session produces a recovery message instead of silently choosing 
 
 Explicit `display_backend` and `display_env` values remain supported for unusual
 setups. They take precedence over automatic detection. Test/null video sinks also
-bypass desktop detection. A real extended Mac desktop still requires a virtual
-screen or display adapter; Vercelify does not install a private macOS display driver.
+bypass desktop detection. Extend mode makes its display with macOS's own
+`CGVirtualDisplay`; nothing is installed on the Mac.
 
 ## Linux desktop on the Mac (Moonlight + Sunshine)
 
