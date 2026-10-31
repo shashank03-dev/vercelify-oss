@@ -69,7 +69,10 @@ On macOS the host tests (bats) run in a Debian 12 container, so Docker (or
 Colima, started automatically) must be installed. The agent, platform and mesh
 tests need a real Linux machine: with Colima they run inside its VM (Rust is
 installed there on the first run, ~15 min once); with another Docker they run
-in a container and skip the one test that needs a real root disk. `./dev setup`
+in a container and skip the one test that needs a real root disk. With Colima,
+clippy also runs there over the whole workspace, the app included (its Linux
+libraries are installed on the first run): the app's macOS-only code leaves
+things unused on Linux that clippy on the Mac can't see. `./dev setup`
 installs `zig` for the static agent and mesh binaries, a large one-time
 Homebrew download.
 

@@ -200,7 +200,7 @@ installer_dry_run() {
 agent_linux_tests() {
   docker_ready || { echo "Docker is not running"; return 1; }
   local test='cargo test --locked -p vercelify-core -p vercelify-platform -p vercelify-mesh -p vercelify-agent --features vercelify-mesh/daemon'
-  if [[ "${DOCKER_CONTEXT:-}" == colima* ]] || docker context show 2>/dev/null | grep -q '^colima'; then
+  if using_colima; then
     colima ssh -- bash -lc "
       set -e
       command -v cc >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq build-essential pkg-config >/dev/null; }
@@ -215,6 +215,20 @@ agent_linux_tests() {
     -v vercelify-dev-cargo:/usr/local/cargo/registry -v vercelify-dev-target:/src/target \
     -e TS_RS_EXPORT_DIR=/tmp/ts rust:1-bookworm \
     $test -- --skip agent_end_to_end
+}
+
+# The app's Rust has macOS-only code (the virtual display, Screen Recording):
+# what it leaves unused elsewhere only shows up in clippy on Linux, as in CI.
+using_colima() {
+  [[ "${DOCKER_CONTEXT:-}" == colima* ]] || docker context show 2>/dev/null | grep -q '^colima'
+}
+
+linux_clippy() {
+  colima ssh -- bash -lc "
+    set -e
+    dpkg -s libwebkit2gtk-4.1-dev >/dev/null 2>&1 || { sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev >/dev/null; }
+    ~/.cargo/bin/rustup component add clippy >/dev/null 2>&1
+    cd '$ROOT' && CARGO_TARGET_DIR=~/vercelify-target TS_RS_EXPORT_DIR=/tmp/ts ~/.cargo/bin/cargo clippy --locked --workspace --all-targets -- -D warnings"
 }
 
 # Which parts the branch touches compared with main (committed or not).
@@ -263,6 +277,8 @@ cmd_check() {
       step "cargo test (+ TS types)" cargo test --workspace --all-features --no-fail-fast --lib --bins --test core
       if docker_ready; then step "agent, platform, mesh tests on Linux" agent_linux_tests
       else skip "agent, platform, mesh tests on Linux" "Docker not running"; fi
+      if docker_ready && using_colima; then step "cargo clippy on Linux (the app too)" linux_clippy
+      else skip "cargo clippy on Linux (the app too)" "needs Colima (CI runs it)"; fi
     fi
     step "generated TS types committed" generated_types_committed
     if ((full)); then
