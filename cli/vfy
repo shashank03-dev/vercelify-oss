@@ -451,7 +451,9 @@ platform_cmd() {
         pull)
           local file=${1:-.env} vars
           [[ ! -e "$file" ]] || [[ "${VFY_FORCE:-0}" == 1 ]] || die "$file exists — remove it or set VFY_FORCE=1"
-          vars=$(papi GET "/apps/$app/env?reveal=true")
+          # Every level the deployments merge (project < environment < app), not
+          # just the app's own.
+          vars=$(papi GET "/apps/$app/env?reveal=true&resolved=true")
           [[ ! -L "$file" && ( ! -e "$file" || -f "$file" ) ]] || die "$file must be a regular file, not a directory or symbolic link"
           local env_tmp
           env_tmp=$(umask 077; mktemp "$(dirname "$file")/.vercelify-env.XXXXXX") || die "cannot create a private export file"

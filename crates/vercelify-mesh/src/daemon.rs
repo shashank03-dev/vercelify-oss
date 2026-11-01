@@ -750,6 +750,14 @@ pub async fn up(opts: UpOptions) -> Result<()> {
             tracing::info!("{} is {} (userspace)", state.name, state.ipv4);
             "userspace".to_string()
         }
+        #[cfg(windows)]
+        None => {
+            return Err(std::io::Error::other(
+                "on Windows the mesh runs in userspace mode: pass --userspace (no network driver is installed)",
+            )
+            .into());
+        }
+        #[cfg(unix)]
         None => {
             #[cfg(target_os = "linux")]
             let dev = {
@@ -827,8 +835,7 @@ pub async fn up(opts: UpOptions) -> Result<()> {
         });
     }
     // Endpoints, renewal and status.
-    let mut sigusr1 = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::user_defined1())?;
-    let mut sigterm = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
+    let (mut sigusr1, mut sigterm) = signals()?;
     let mut every5 = tokio::time::interval(Duration::from_secs(5));
     let mut last_endpoints = vec![];
     let mut ticks: u64 = 0;
@@ -888,6 +895,51 @@ pub async fn up(opts: UpOptions) -> Result<()> {
                 return Ok(());
             }
             _ = tokio::signal::ctrl_c() => return Ok(()),
+        }
+    }
+}
+
+/// SIGUSR1 (rotate the key) and SIGTERM on Unix. Windows has neither: the
+/// service manager stops the daemon with a console close event, and key
+/// rotation happens at renewal.
+struct Rotate(#[cfg(unix)] tokio::signal::unix::Signal);
+struct Term(
+    #[cfg(unix)] tokio::signal::unix::Signal,
+    #[cfg(windows)] Option<tokio::signal::windows::CtrlClose>,
+);
+
+fn signals() -> std::io::Result<(Rotate, Term)> {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        Ok((
+            Rotate(signal(SignalKind::user_defined1())?),
+            Term(signal(SignalKind::terminate())?),
+        ))
+    }
+    #[cfg(windows)]
+    Ok((Rotate(), Term(tokio::signal::windows::ctrl_close().ok())))
+}
+
+impl Rotate {
+    async fn recv(&mut self) {
+        #[cfg(unix)]
+        self.0.recv().await;
+        #[cfg(windows)]
+        std::future::pending::<()>().await;
+    }
+}
+
+impl Term {
+    async fn recv(&mut self) {
+        #[cfg(unix)]
+        self.0.recv().await;
+        #[cfg(windows)]
+        match self.0.as_mut() {
+            Some(c) => {
+                c.recv().await;
+            }
+            None => std::future::pending::<()>().await,
         }
     }
 }

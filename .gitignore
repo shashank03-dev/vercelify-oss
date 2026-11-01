@@ -12,3 +12,4 @@ cockpit/src-tauri/gen/
 *.tsbuildinfo
 .vercel
 .env.local
+cockpit/src-tauri/windows-bin/

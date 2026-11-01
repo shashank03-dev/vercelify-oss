@@ -309,7 +309,8 @@ pub fn enroll(c: &Connection, e: &Enrollment) -> Result<(Node, String)> {
                 c.execute("UPDATE mesh_nodes SET role = ?2 WHERE id = ?1", params![n.id, role])?;
             }
             c.execute(
-                "UPDATE mesh_nodes SET token_hash = ?2, endpoints = ?3, last_seen_at = ?4 WHERE id = ?1",
+                "UPDATE mesh_nodes SET token_hash = ?2, endpoints = ?3, last_seen_at = ?4, hosting_removed_at = NULL
+                 WHERE id = ?1",
                 params![n.id, hash(&token), serde_json::to_string(&endpoints)?, now()],
             )?;
             c.execute(

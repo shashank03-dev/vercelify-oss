@@ -280,6 +280,9 @@ async function webCall<T>(cmd: string, args: Record<string, unknown>): Promise<T
     }
     case "mesh_local":
       return r({ installed: false, running: false, userspace: false, revoked: false, peers: [] });
+    // A browser has no host manager of its own.
+    case "host_local":
+      return r({ installed: false, running: false, environment: null, error: null });
     case "mesh_discover":
       return r([]);
     case "mesh_start":

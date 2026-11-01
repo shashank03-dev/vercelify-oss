@@ -261,10 +261,18 @@ fn main() {
                 .ok()
                 .and_then(|p| p.trim().parse::<i32>().ok())
                 .unwrap_or_else(|| fail("the daemon isn't running"));
-            if unsafe { libc::kill(pid, libc::SIGUSR1) } != 0 {
-                fail(std::io::Error::last_os_error());
+            #[cfg(unix)]
+            {
+                if unsafe { libc::kill(pid, libc::SIGUSR1) } != 0 {
+                    fail(std::io::Error::last_os_error());
+                }
+                println!("asked the daemon to rotate its key (see: vercelify-mesh status)");
             }
-            println!("asked the daemon to rotate its key (see: vercelify-mesh status)");
+            #[cfg(windows)]
+            {
+                let _ = pid;
+                fail("on Windows the key rotates at renewal (every few hours); restart the daemon to renew now");
+            }
         }
         Cmd::Pubkey => match NodeKey::load_or_create(&key_path(&cli.dir)) {
             Ok(k) => println!("{}", k.public()),

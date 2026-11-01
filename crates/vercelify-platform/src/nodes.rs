@@ -131,6 +131,22 @@ pub fn heartbeat(c: &Connection, key: &MasterKey, h: &Heartbeat) -> Result<Platf
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()?;
+    // Removed from hosting: stays removed until it pairs again, instead of
+    // coming back as a new worker on its next heartbeat.
+    let removed: Option<String> = c
+        .query_row(
+            "SELECT hosting_removed_at FROM mesh_nodes WHERE id = ?1",
+            [h.mesh_node_id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    if existing.is_none() && removed.is_some() {
+        return Err(Error::Conflict(format!(
+            "{} was removed from hosting: pair it again to add it back",
+            h.name
+        )));
+    }
     let url = format!("http://{}:{}", h.mesh_ip, h.agent_port);
     let status = serde_json::to_string(h.status)?;
     let t = now();
@@ -214,6 +230,14 @@ pub fn remove(c: &Connection, id_or_name: &str) -> Result<()> {
             "{} still runs {} instance(s): drain it and redeploy them first",
             n.name, n.instances
         )));
+    }
+    let mesh_node_id: Option<String> =
+        c.query_row("SELECT mesh_node_id FROM nodes WHERE id = ?1", [&n.id], |r| r.get(0))?;
+    if let Some(m) = mesh_node_id {
+        c.execute(
+            "UPDATE mesh_nodes SET hosting_removed_at = ?2 WHERE id = ?1",
+            params![m, now()],
+        )?;
     }
     c.execute("DELETE FROM nodes WHERE id = ?1", [&n.id])?;
     Ok(())
@@ -313,6 +337,54 @@ mod tests {
         assert!(s.with(|c| runtime_token(c, &key, &n.id)).unwrap().is_none());
         s.tx(|c| remove(c, "pi")).unwrap();
         assert!(s.with(|c| get(c, "pi")).is_err());
+    }
+
+    #[test]
+    fn a_removed_worker_stays_removed_until_it_pairs_again() {
+        let s = Store::open_in_memory().unwrap();
+        let key = MasterKey::from_bytes(&[7u8; 32]).unwrap();
+        s.tx(|c| {
+            c.execute(
+                "INSERT INTO mesh_nodes (id, name, kind, public_key, ip_index, token_hash, created_at)
+                 VALUES ('mn_1', 'pi', 'server', 'k', 5, 'h', 'x')",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let st = status(3000);
+        let token = "t".repeat(40);
+        let hb = || {
+            s.tx(|c| {
+                heartbeat(
+                    c,
+                    &key,
+                    &Heartbeat {
+                        mesh_node_id: "mn_1",
+                        name: "pi",
+                        mesh_ip: "10.77.0.5",
+                        agent_port: 7420,
+                        arch: "aarch64",
+                        runtime_token: &token,
+                        status: &st,
+                    },
+                )
+            })
+        };
+        hb().unwrap();
+        s.tx(|c| remove(c, "pi")).unwrap();
+        let err = hb().unwrap_err();
+        assert!(matches!(err, Error::Conflict(_)), "{err:?}");
+        assert!(s.with(|c| get(c, "pi")).is_err(), "not registered again");
+
+        // Pairing again clears the mark.
+        s.tx(|c| {
+            c.execute("UPDATE mesh_nodes SET hosting_removed_at = NULL WHERE id = 'mn_1'", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let back = hb().unwrap();
+        assert!(!back.drained);
     }
 
     #[test]

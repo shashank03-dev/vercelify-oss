@@ -4,6 +4,7 @@
 //! the filesystem or child processes happens here.
 
 mod discover;
+mod host;
 mod http;
 mod local;
 mod mesh;
@@ -347,6 +348,18 @@ async fn mesh_start() -> CmdResult<()> {
 }
 
 /// This computer on the mesh (the network panel).
+/// The Vercelify environment on this computer (`vercelify-host`).
+#[tauri::command]
+async fn host_local() -> vercelify_core::host::HostLocal {
+    host::local().await
+}
+
+/// A request to this computer's host manager (`/v1/host/…` only).
+#[tauri::command]
+async fn host_request(method: String, path: String, body: Option<serde_json::Value>) -> CmdResult<serde_json::Value> {
+    host::request(&method, &path, body).await
+}
+
 #[tauri::command]
 async fn mesh_local() -> MeshLocal {
     tauri::async_runtime::spawn_blocking(mesh::status)
@@ -738,6 +751,8 @@ pub fn run() {
             mesh_discover,
             mesh_pair,
             mesh_local,
+            host_local,
+            host_request,
             discover_servers,
             agent_request,
             agent_stream,

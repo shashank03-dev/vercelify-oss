@@ -5,7 +5,7 @@
 pub mod addr;
 pub mod beacon;
 pub mod cert;
-#[cfg(all(feature = "daemon", any(target_os = "linux", target_os = "macos")))]
+#[cfg(all(feature = "daemon", any(target_os = "linux", target_os = "macos", windows)))]
 pub mod daemon;
 pub mod disco;
 pub mod dns;
@@ -18,7 +18,7 @@ pub mod mdns;
 pub mod net;
 #[cfg(feature = "daemon")]
 pub mod netstack;
-#[cfg(all(feature = "daemon", any(target_os = "linux", target_os = "macos")))]
+#[cfg(all(feature = "daemon", any(target_os = "linux", target_os = "macos", windows)))]
 pub mod pair_client;
 pub mod pake;
 pub mod proto;

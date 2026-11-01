@@ -101,6 +101,51 @@ jobs:
         with:
           files: out/*
 
+  host-macos:
+    name: vercelify-host for macOS (universal)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - run: |
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked -p vercelify-host --target "$t"
+          done
+      - name: Package
+        run: |
+          mkdir -p out
+          lipo -create -output out/vercelify-host-universal-apple-darwin \
+            target/aarch64-apple-darwin/release/vercelify-host target/x86_64-apple-darwin/release/vercelify-host
+          cd out && shasum -a 256 vercelify-host-universal-apple-darwin > vercelify-host-universal-apple-darwin.sha256
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: out/*
+
+  windows-binaries:
+    name: vercelify-host and vercelify-mesh for Windows
+    runs-on: windows-2022
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --locked -p vercelify-host -p vercelify-mesh --features vercelify-mesh/daemon
+      - name: Package
+        run: |
+          mkdir -p out
+          for bin in vercelify-host vercelify-mesh; do
+            cp "target/release/$bin.exe" "out/$bin-x86_64-pc-windows-msvc.exe"
+            (cd out && sha256sum "$bin-x86_64-pc-windows-msvc.exe" > "$bin-x86_64-pc-windows-msvc.exe.sha256")
+          done
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: out/*
+
   cockpit:
     name: Cockpit ${{ matrix.name }}
     strategy:
@@ -112,6 +157,11 @@ jobs:
             args: --target universal-apple-darwin
           - name: Linux
             os: ubuntu-22.04
+            args: ""
+          # The installer carries vercelify-mesh.exe and vercelify-host.exe
+          # (tauri.windows.conf.json), built just before.
+          - name: Windows
+            os: windows-2022
             args: ""
     runs-on: ${{ matrix.os }}
     env:
@@ -157,6 +207,13 @@ jobs:
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev
       - run: npm ci
         working-directory: cockpit
+      - name: Windows companions
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cargo build --release --locked -p vercelify-host -p vercelify-mesh --features vercelify-mesh/daemon
+          mkdir -p cockpit/src-tauri/windows-bin
+          cp target/release/vercelify-host.exe target/release/vercelify-mesh.exe cockpit/src-tauri/windows-bin/
       - uses: tauri-apps/tauri-action@v0
         id: tauri
         env:
@@ -169,6 +226,7 @@ jobs:
           releaseBody: |
             **Host:** `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install.sh | sudo bash`
             **Mac:** download the `.dmg` below (or `curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/install-mac.sh | bash`). If this release isn't signed: right-click → Open the first time.
+            **Windows:** run the `-setup.exe` below. It manages your servers; to host on this PC too, see docs/CROSS-PLATFORM-HOSTING.md (Windows hosting is in qualification).
           releaseDraft: false
       # Without a Developer ID the linker's signature is all the app has, and
       # macOS can't keep Screen Recording allowed for it. MACOS_SELF_SIGNED_P12

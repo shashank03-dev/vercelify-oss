@@ -1,6 +1,7 @@
 import { ArrowRightLeft, ArrowUpCircle, Battery, BrainCircuit, Cpu, Layers, Plus, RefreshCw, Server, Thermometer, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { HealthChecks } from "../components/HealthChecks";
+import { HostEnvironment } from "../components/HostEnvironment";
 import { MeshNetwork } from "../components/MeshNetwork";
 import { PlatformServers } from "../components/PlatformServers";
 import { useToast } from "../components/Toast";
@@ -101,6 +102,7 @@ export function ServersView() {
         </button>
       </div>
 
+      <HostEnvironment />
       <PlatformServers />
       <MeshNetwork />
 

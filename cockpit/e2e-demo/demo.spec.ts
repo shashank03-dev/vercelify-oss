@@ -651,3 +651,60 @@ test("owners can save the backup recovery kit", async ({ page }) => {
   await page.getByTestId("backup-recovery-kit").click();
   await expect(page.getByText(/Recovery kit saved to .*vercelify-recovery-dell-e7450\.txt/)).toBeVisible();
 });
+
+test("Vercelify environment: recommend, create with progress, resize with consent, stop and delete", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "dell-e7450");
+  await page.getByTestId("nav-servers").click();
+  const env = page.getByTestId("host-environment");
+  await expect(env.getByTestId("host-env-state")).toContainText("Not set up");
+  await expect(env).toContainText("Recommended for this computer");
+  await expect(env).toContainText(/this computer is on battery/i);
+
+  // A worker needs a well-formed invite before anything is made.
+  await env.getByTestId("host-env-invite").fill("not-an-invite");
+  await expect(env.getByTestId("host-env-create")).toBeDisabled();
+  await env.getByTestId("host-env-mode-main").click();
+  await env.getByTestId("host-env-memory").fill("4");
+  await env.getByTestId("host-env-create").click();
+  await expect(env.getByTestId("host-env-progress")).toContainText("Checking computer");
+  await expect(env.getByTestId("host-env-state")).toContainText("Running", { timeout: 15_000 });
+  await expect(env.getByTestId("host-env-running")).toContainText("4.0 GB");
+
+  // A main server: another computer pairs with it through this one.
+  await env.getByTestId("host-env-code").click();
+  await expect(env.getByTestId("host-env-pairing")).toContainText("vfy1.");
+
+  // Resizing a running environment restarts it: Apply waits for consent.
+  await env.getByTestId("host-env-resize").click();
+  await env.getByTestId("host-env-cpus").fill("4");
+  await expect(env.getByTestId("host-env-apply")).toBeDisabled();
+  await env.getByTestId("host-env-restart-ok").check();
+  await env.getByTestId("host-env-apply").click();
+  await expect(env.getByTestId("host-env-state")).toContainText("Running", { timeout: 15_000 });
+  await expect(env.getByTestId("host-env-running")).toContainText("4 processors");
+
+  await env.getByTestId("host-env-stop").click();
+  await expect(env.getByTestId("host-env-state")).toContainText("Stopped", { timeout: 10_000 });
+
+  await env.getByTestId("host-env-delete").click();
+  await expect(env.getByTestId("host-env-delete-yes")).toBeDisabled();
+  await env.getByTestId("host-env-delete-confirm").fill("delete");
+  await env.getByTestId("host-env-delete-yes").click();
+  await expect(env.getByTestId("host-env-state")).toContainText("Not set up", { timeout: 10_000 });
+});
+
+test("an old deployment can be deleted; the live one can't", async ({ page }) => {
+  await page.goto("/");
+  await pairFound(page, "optiplex-7050");
+  await page.getByTestId("papp-api").getByRole("button", { name: /api/ }).first().click();
+  const rows = page.getByTestId("deployments");
+  await expect(rows).toBeVisible();
+  const live = rows.locator("[data-testid^=deployment-]").filter({ hasText: "Live" }).first();
+  await expect(live.locator("[data-testid^=delete-deployment-]")).toHaveCount(0);
+  const old = rows.locator("[data-testid^=deployment-]").filter({ hasNotText: "Live" }).last();
+  const number = (await old.getAttribute("data-testid"))!.replace("deployment-", "");
+  await old.getByTestId(`delete-deployment-${number}`).click();
+  await old.getByTestId(`delete-deployment-confirm-${number}`).click();
+  await expect(page.getByTestId(`deployment-${number}`)).toHaveCount(0);
+});

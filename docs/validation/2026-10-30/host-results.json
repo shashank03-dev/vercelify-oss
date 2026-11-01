@@ -1,0 +1,71 @@
+[
+  {
+    "finding": "F1",
+    "evidence": "real update endpoint + real installer summary; systemd launcher stubbed",
+    "observed": [
+      {
+        "preexisting_log": false,
+        "mode": "0o644",
+        "pairing_credential_accepted_by_real_agent": true
+      },
+      {
+        "preexisting_log": true,
+        "mode": "0o644",
+        "pairing_credential_accepted_by_real_agent": true
+      }
+    ],
+    "secret_values_saved": false
+  },
+  {
+    "finding": "F18",
+    "evidence": "real collector/doctor with synthetic sysfs battery",
+    "observed": {
+      "charge_pct": 100,
+      "health_pct": 3.5,
+      "battery_wear_warnings": []
+    },
+    "physical_power_loss_tested": false
+  },
+  {
+    "finding": "F10",
+    "evidence": "real volume creation endpoint, unmounted temp directory",
+    "observed": {
+      "status": 409,
+      "message": {
+        "error": "/var/folders/w3/rbmy46yn0szdtxttxmh17lhw0000gn/T/vercelify-findings-c85aulhx/storage is not mounted \u2014 attach the HDD and run `sudo vercelify doctor`"
+      }
+    }
+  },
+  {
+    "finding": "F10",
+    "evidence": "real database API/engine with Docker stubbed; unmounted storage directory",
+    "observed": {
+      "databaseCreationAccepted": true,
+      "recordedTier": "hdd",
+      "createdBindDirectoryOnParentFilesystem": true
+    },
+    "correction": "Volume assistant is protected by a mount guard; initial database creation is not. Actual database container was not run."
+  },
+  {
+    "finding": "F11",
+    "evidence": "real database deletion API/SQLite metadata; synthetic on-disk sentinel; Docker stubbed",
+    "observed": {
+      "dataKept": true,
+      "retainedDataStillOnDisk": true,
+      "retainedVolumeStillInPlatformList": false
+    }
+  },
+  {
+    "finding": "F7",
+    "evidence": "actual default_backup_repo function, no mounted storage disk",
+    "observed": {
+      "repository": "/var/backups/vercelify-restic"
+    },
+    "real_backup_or_restore_tested": false
+  },
+  {
+    "finding": "F13",
+    "evidence": "actual installer defaults/parse_args",
+    "observed": "remote= configure=0 storage=none"
+  }
+]

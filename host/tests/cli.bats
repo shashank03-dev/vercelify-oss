@@ -11,7 +11,7 @@ setup() {
   echo test-agent-token >"$T/etc/agent.token"
   printf 'role=main\nversion=test\n' >"$T/etc/install.env"
   export NO_COLOR=1 VERCELIFY_ETC="$T/etc" VERCELIFY_LOG="$T/log" LLM_POLL_SECS=0
-  export AGENT_LOCAL_URL="http://127.0.0.1:$(cat "$T/port")" STORAGE_MOUNT="$T/no-hdd"
+  export AGENT_LOCAL_URL="http://127.0.0.1:$(cat "$T/port")" STORAGE_MOUNT="$T/no-hdd" MESH_BIN="$T/vercelify-mesh" DOCKER_DAEMON_JSON="$T/daemon.json" LOGIND_DROPIN="$T/logind.conf"
   CLI="$BATS_TEST_DIRNAME/../vercelify"
 }
 

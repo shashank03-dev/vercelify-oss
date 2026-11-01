@@ -6,6 +6,26 @@ use std::net::Ipv4Addr;
 /// The node's own IPv4 addresses on other interfaces: what peers on the
 /// same networks can reach it at. Loopback, link-local, the mesh itself and
 /// container bridges are left out.
+#[cfg(windows)]
+pub fn local_ipv4s(skip_prefix: Option<Ipv4Addr>) -> Vec<Ipv4Addr> {
+    // The address of the interface the default route uses: a UDP socket
+    // "connected" to a public address learns it without sending anything.
+    // Enough for LAN endpoints; peers elsewhere are found by STUN.
+    let ip = std::net::UdpSocket::bind(("0.0.0.0", 0))
+        .and_then(|s| s.connect(("1.1.1.1", 53)).map(|_| s))
+        .and_then(|s| s.local_addr())
+        .ok()
+        .and_then(|a| match a.ip() {
+            std::net::IpAddr::V4(v) => Some(v),
+            _ => None,
+        });
+    ip.into_iter()
+        .filter(|ip| !(ip.is_loopback() || ip.is_link_local() || ip.is_unspecified()))
+        .filter(|ip| skip_prefix.is_none_or(|p| p.octets()[..2] != ip.octets()[..2]))
+        .collect()
+}
+
+#[cfg(unix)]
 pub fn local_ipv4s(skip_prefix: Option<Ipv4Addr>) -> Vec<Ipv4Addr> {
     let mut out = vec![];
     let mut head: *mut libc::ifaddrs = std::ptr::null_mut();

@@ -620,6 +620,15 @@ export function platformRoute(req: HttpRequest): unknown {
       return clone(d);
     }
     if (seg[2] === "logs") return clone(logs.get(d.id) ?? []);
+    if (!seg[2] && m === "DELETE") {
+      const list = deployments.get(d.app_id) ?? [];
+      if (d.current) throw new Error(`deployment #${d.number} is live: deploy or roll back to another one first`);
+      if (list.some((x) => ["queued", "building", "deploying"].includes(x.status))) throw new Error("this app has a deployment in progress: try again when it finishes");
+      list.splice(list.indexOf(d), 1);
+      logs.delete(d.id);
+      changed("deployments");
+      return { deleted: true };
+    }
     return clone(d);
   }
 

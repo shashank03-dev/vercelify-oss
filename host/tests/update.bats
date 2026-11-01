@@ -25,7 +25,7 @@ AGENT
   chmod +x "$T/bin/systemctl"
   echo '{"ok":true,"capabilities":["doctor","platform"]}' >"$T/www/v1/health"
   export PATH="$T/bin:$PATH" NO_COLOR=1 VERCELIFY_TEST=1 VERCELIFY_ETC="$T/etc" VERCELIFY_LIB="$T/lib"
-  export AGENT_BIN="$T/agent" SYSTEMD_DIR="$T/systemd" VERCELIFY_LOG="$T/log" UPDATE_HEALTH_SECS=1
+  export AGENT_BIN="$T/agent" MESH_BIN="$T/vercelify-mesh" SYSTEMD_DIR="$T/systemd" VERCELIFY_LOG="$T/log" UPDATE_HEALTH_SECS=1
   export PLATFORM_DB="$T/lib/platform.db" UPDATE_ENGINE_SECS=1
   # A fake installer: replaces the agent and the CLI, then exits with $FAKE_EXIT.
   cat >"$T/installer.sh" <<'INST'

@@ -1,0 +1,36 @@
+[package]
+name = "vercelify-host"
+description = "Vercelify host manager: the one Linux environment on a Mac or Windows computer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "vercelify-host"
+path = "src/main.rs"
+
+[dependencies]
+vercelify-core = { workspace = true, features = ["collect"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
+sha2 = "0.10"
+subtle = "2"
+getrandom = "0.3"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+sysinfo.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_System_Power", "Win32_System_Threading", "Win32_Storage_FileSystem", "Win32_Foundation"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+tower = { version = "0.5", features = ["util"] }

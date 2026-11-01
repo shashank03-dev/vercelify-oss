@@ -64,7 +64,10 @@ pub fn router() -> Router<AppState> {
         .route("/platform/apps/{app}/deploy", post(app_deploy))
         .route("/platform/apps/{app}/rollback", post(app_rollback))
         .route("/platform/apps/{app}/previews", get(app_previews))
-        .route("/platform/deployments/{id}", get(deployment_get))
+        .route(
+            "/platform/deployments/{id}",
+            get(deployment_get).delete(deployment_delete),
+        )
         .route("/platform/deployments/{id}/cancel", post(deployment_cancel))
         .route("/platform/deployments/{id}/logs", get(deployment_logs))
         .route("/platform/nodes", get(node_list))
@@ -214,6 +217,10 @@ struct EnvQuery {
     reveal: bool,
     #[serde(default)]
     preview_only: bool,
+    /// On an app: what its production deployments get, merged from the
+    /// project, environment and app (for `vfy env pull`), not the app's own.
+    #[serde(default)]
+    resolved: bool,
 }
 
 fn check_reveal(actor: &Actor, q: &EnvQuery) -> Result<(), AppError> {
@@ -307,6 +314,10 @@ async fn app_env(
 ) -> ApiResult<Vec<EnvVar>> {
     check_reveal(&actor, &q)?;
     let id = app_id(&s, app).await?;
+    if q.resolved {
+        let reveal = q.reveal;
+        return Ok(Json(tx(&s, move |c, k| env::effective(c, k, &id, reveal)).await?));
+    }
     list_vars(&s, VarScope::App, id, q.reveal).await
 }
 
@@ -784,6 +795,12 @@ async fn app_rollback(
     })
     .await?;
     Ok(Json(d))
+}
+
+/// An old deployment, gone from the history (owners: auth.rs).
+async fn deployment_delete(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Value> {
+    engine_call(&s, move |e| e.delete_deployment(&id)).await?;
+    Ok(Json(json!({ "deleted": true })))
 }
 
 async fn deployment_cancel(State(s): State<AppState>, Path(id): Path<String>) -> ApiResult<Deployment> {

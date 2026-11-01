@@ -146,6 +146,10 @@ Apps can **sleep** when idle to free memory (`sudo vercelify sleep on APP 30`, o
 - A database's URL is referenced as `${{db.<name>.url}}`, filled in at deploy time, so
   rotating its password needs only a redeploy.
 - From the terminal: `vfy env pull APP`, `vfy env set APP KEY=VALUE`, `vfy env push APP`.
+  `vfy env pull` writes what production deployments get: the project's, environment's
+  and app's variables merged (the app's win), without preview overrides; database
+  references stay as `${{db.…}}`. Deployer or owner tokens can change variables at every
+  level; creating or deleting projects and environments stays with owners.
 
 ## 5. Databases and storage on the HDD
 

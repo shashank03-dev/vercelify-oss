@@ -1,0 +1,13 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "targets": ["nsis"],
+    "resources": {
+      "windows-bin/vercelify-mesh.exe": "vercelify-mesh.exe",
+      "windows-bin/vercelify-host.exe": "vercelify-host.exe"
+    },
+    "windows": {
+      "nsis": { "installMode": "perMachine" }
+    }
+  }
+}

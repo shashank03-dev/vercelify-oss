@@ -24,6 +24,11 @@ pub struct Config {
     pub sys_class: PathBuf,
     pub sys_block: PathBuf,
     pub power_guard_state: PathBuf,
+    /// Inside a Vercelify environment on a Mac or Windows computer: where the
+    /// host manager publishes the real machine's battery and temperature
+    /// (a file path, or an `http://` URL on the guest's gateway). Unset on a
+    /// Linux server, which measures itself.
+    pub host_status: Option<String>,
     pub docker_bin: String,
     pub systemctl_bin: String,
     pub mpv_bin: String,
@@ -176,6 +181,7 @@ impl Default for Config {
             sys_class: "/sys/class".into(),
             sys_block: "/sys/block".into(),
             power_guard_state: "/run/vercelify/power-guard.state".into(),
+            host_status: None,
             docker_bin: "docker".into(),
             systemctl_bin: "systemctl".into(),
             mpv_bin: "mpv".into(),
@@ -389,6 +395,9 @@ impl Config {
         }
         if let Some(v) = var("VERCELIFY_POWER_GUARD_STATE") {
             self.power_guard_state = v.into();
+        }
+        if let Some(v) = var("VERCELIFY_HOST_STATUS") {
+            self.host_status = Some(v).filter(|v| !v.is_empty());
         }
         if let Some(v) = var("VERCELIFY_DOCKER_BIN") {
             self.docker_bin = v;

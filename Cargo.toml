@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/vercelify-core", "crates/vercelify-platform", "crates/vercelify-mesh", "agent", "cockpit/src-tauri"]
+members = ["crates/vercelify-core", "crates/vercelify-platform", "crates/vercelify-mesh", "crates/vercelify-host", "agent", "cockpit/src-tauri"]
 
 [workspace.package]
 version = "1.0.0"

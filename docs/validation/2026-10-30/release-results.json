@@ -1,0 +1,23 @@
+{
+  "finding": "F12",
+  "tag": "v0.2.5",
+  "published_at": "2026-10-27T18:16:40Z",
+  "url": "https://github.com/shashank03-dev/vercelify-oss/releases/tag/v0.2.5",
+  "assets": [
+    "vercelify-agent-aarch64-unknown-linux-musl",
+    "vercelify-agent-aarch64-unknown-linux-musl.sha256",
+    "vercelify-agent-x86_64-unknown-linux-musl",
+    "vercelify-agent-x86_64-unknown-linux-musl.sha256",
+    "vercelify-mesh-aarch64-unknown-linux-musl",
+    "vercelify-mesh-aarch64-unknown-linux-musl.sha256",
+    "vercelify-mesh-universal-apple-darwin",
+    "vercelify-mesh-universal-apple-darwin.sha256",
+    "vercelify-mesh-x86_64-unknown-linux-musl",
+    "vercelify-mesh-x86_64-unknown-linux-musl.sha256",
+    "Vercelify_0.2.5_amd64.AppImage",
+    "Vercelify_0.2.5_amd64.deb",
+    "Vercelify_0.2.5_universal.dmg",
+    "Vercelify_0.2.5_universal.dmg.sha256",
+    "Vercelify_universal.app.tar.gz"
+  ]
+}

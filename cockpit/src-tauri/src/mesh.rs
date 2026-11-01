@@ -20,6 +20,13 @@ pub fn home() -> PathBuf {
     if let Some(h) = std::env::var_os("VERCELIFY_MESH_HOME") {
         return h.into();
     }
+    // Windows: the user's own %LOCALAPPDATA%, whose ACL keeps the node key
+    // from other accounts (Unix gets 0600 files instead).
+    if cfg!(windows) {
+        if let Some(l) = std::env::var_os("LOCALAPPDATA") {
+            return PathBuf::from(l).join("Vercelify");
+        }
+    }
     let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     if cfg!(target_os = "macos") {
         home.join("Library/Application Support/Vercelify")
@@ -37,10 +44,21 @@ pub fn bin() -> Option<PathBuf> {
     if let Some(b) = std::env::var_os("VERCELIFY_MESH_BIN") {
         candidates.push(b.into());
     }
-    candidates.push(home().join("bin/vercelify-mesh"));
-    candidates.push("/usr/local/bin/vercelify-mesh".into());
+    let exe = if cfg!(windows) {
+        "vercelify-mesh.exe"
+    } else {
+        "vercelify-mesh"
+    };
+    // Next to the app (the Windows installer puts it there).
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(PathBuf::from)) {
+        candidates.push(dir.join(exe));
+    }
+    candidates.push(home().join("bin").join(exe));
+    if !cfg!(windows) {
+        candidates.push("/usr/local/bin/vercelify-mesh".into());
+    }
     if let Some(path) = std::env::var_os("PATH") {
-        candidates.extend(std::env::split_paths(&path).map(|d| d.join("vercelify-mesh")));
+        candidates.extend(std::env::split_paths(&path).map(|d| d.join(exe)));
     }
     candidates.into_iter().find(|p| p.is_file())
 }
@@ -132,7 +150,66 @@ pub fn start() -> Result<(), String> {
     ))
 }
 
-#[cfg(not(target_os = "macos"))]
+/// Windows: a logon task of this user runs the daemon in userspace mode
+/// (no network driver, nothing system-wide), like the Mac's LaunchAgent.
+#[cfg(windows)]
+pub const WINDOWS_TASK: &str = "Vercelify mesh";
+
+/// The task's command line (pure, for the test).
+#[cfg(any(windows, test))]
+pub fn windows_task_command(bin: &std::path::Path, home: &std::path::Path) -> String {
+    format!(
+        "\"{}\" --dir \"{}\" --run-dir \"{}\" up --userspace --port 0 --socks 127.0.0.1:7480 --gateway 127.0.0.1:7481",
+        bin.display(),
+        home.join("mesh").display(),
+        home.join("run").display()
+    )
+}
+
+#[cfg(windows)]
+pub fn start() -> Result<(), String> {
+    let bin = bin().ok_or("vercelify-mesh.exe isn't installed next to the app: reinstall Vercelify")?;
+    let schtasks = |args: &[&str]| Command::new("schtasks").args(args).output();
+    let run = schtasks(&["/Run", "/TN", WINDOWS_TASK])
+        .map(|o| o.status.success())
+        .unwrap_or(false);
+    if !run {
+        let tr = windows_task_command(&bin, &home());
+        let out = schtasks(&[
+            "/Create",
+            "/F",
+            "/TN",
+            WINDOWS_TASK,
+            "/SC",
+            "ONLOGON",
+            "/RL",
+            "LIMITED",
+            "/TR",
+            &tr,
+        ])
+        .map_err(|e| e.to_string())?;
+        if !out.status.success() {
+            return Err(format!(
+                "couldn't set up vercelify-mesh to start at sign-in: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        let _ = schtasks(&["/Run", "/TN", WINDOWS_TASK]);
+    }
+    let until = std::time::Instant::now() + Duration::from_secs(15);
+    while std::time::Instant::now() < until {
+        if status().running {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
+    Err(format!(
+        "vercelify-mesh started but isn't answering yet: see {}",
+        home().join("run").display()
+    ))
+}
+
+#[cfg(not(any(target_os = "macos", windows)))]
 pub fn start() -> Result<(), String> {
     Err("start it with: sudo systemctl start vercelify-mesh".into())
 }
@@ -200,8 +277,10 @@ fn stop(pid: u32) {
     let _ = Command::new("kill").arg(pid.to_string()).status();
 }
 
-#[cfg(not(unix))]
-fn stop(_pid: u32) {}
+#[cfg(windows)]
+fn stop(pid: u32) {
+    let _ = Command::new("taskkill").args(["/PID", &pid.to_string(), "/F"]).status();
+}
 
 /// Servers answering mDNS on this network.
 pub fn discover() -> Result<Vec<LanServer>, String> {
@@ -382,6 +461,16 @@ pub const SUNSHINE_PORTS: &[(bool, u16)] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn windows_task_runs_userspace_mode_with_quoted_paths() {
+        let c = windows_task_command(
+            std::path::Path::new("C:/Program Files/Vercelify/vercelify-mesh.exe"),
+            std::path::Path::new("C:/Users/Ana Li/AppData/Local/Vercelify"),
+        );
+        assert!(c.starts_with("\"C:/Program Files/Vercelify/vercelify-mesh.exe\" --dir \"C:/Users/Ana Li/"));
+        assert!(c.contains(" up --userspace --port 0 --socks 127.0.0.1:7480 --gateway 127.0.0.1:7481"));
+    }
 
     #[test]
     fn a_failed_run_says_what_happened() {

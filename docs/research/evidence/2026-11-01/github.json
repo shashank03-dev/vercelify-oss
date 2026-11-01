@@ -1,0 +1,820 @@
+{
+  "retrieved_at_utc": "2026-11-01T17:17:05.905324+00:00",
+  "results": {
+    "repo:coollabsio/coolify": {
+      "url": "https://api.github.com/repos/coollabsio/coolify",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify",
+        "full_name": "coollabsio/coolify",
+        "default_branch": "main",
+        "stargazers_count": 65496,
+        "license": {
+          "key": "apache-2.0",
+          "name": "Apache License 2.0",
+          "spdx_id": "Apache-2.0",
+          "url": "https://api.github.com/licenses/apache-2.0",
+          "node_id": "MDc6TGljZW5zZTI="
+        },
+        "updated_at": "2026-11-01T17:03:03Z",
+        "pushed_at": "2026-11-01T16:44:09Z"
+      }
+    },
+    "repo:Dokploy/dokploy": {
+      "url": "https://api.github.com/repos/Dokploy/dokploy",
+      "data": {
+        "html_url": "https://github.com/Dokploy/dokploy",
+        "full_name": "Dokploy/dokploy",
+        "default_branch": "canary",
+        "stargazers_count": 38173,
+        "license": {
+          "key": "other",
+          "name": "Other",
+          "spdx_id": "NOASSERTION",
+          "url": null,
+          "node_id": "MDc6TGljZW5zZTA="
+        },
+        "updated_at": "2026-11-01T14:59:06Z",
+        "pushed_at": "2026-10-31T13:16:36Z"
+      }
+    },
+    "repo:caprover/caprover": {
+      "url": "https://api.github.com/repos/caprover/caprover",
+      "data": {
+        "html_url": "https://github.com/caprover/caprover",
+        "full_name": "caprover/caprover",
+        "default_branch": "master",
+        "stargazers_count": 15195,
+        "license": {
+          "key": "other",
+          "name": "Other",
+          "spdx_id": "NOASSERTION",
+          "url": null,
+          "node_id": "MDc6TGljZW5zZTA="
+        },
+        "updated_at": "2026-11-01T13:55:03Z",
+        "pushed_at": "2026-10-31T15:58:15Z"
+      }
+    },
+    "repo:dokku/dokku": {
+      "url": "https://api.github.com/repos/dokku/dokku",
+      "data": {
+        "html_url": "https://github.com/dokku/dokku",
+        "full_name": "dokku/dokku",
+        "default_branch": "master",
+        "stargazers_count": 32217,
+        "license": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        },
+        "updated_at": "2026-11-01T12:37:30Z",
+        "pushed_at": "2026-10-31T18:42:19Z"
+      }
+    },
+    "repo:basecamp/kamal": {
+      "url": "https://api.github.com/repos/basecamp/kamal",
+      "data": {
+        "html_url": "https://github.com/basecamp/kamal",
+        "full_name": "basecamp/kamal",
+        "default_branch": "main",
+        "stargazers_count": 14699,
+        "license": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        },
+        "updated_at": "2026-11-01T13:12:02Z",
+        "pushed_at": "2026-10-21T08:34:44Z"
+      }
+    },
+    "issue:coollabsio/coolify#6656": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/6656",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/6656",
+        "number": 6656,
+        "title": "[Bug]: Next.js rebuild consumes all memory and crashes Coolify server",
+        "state": "open",
+        "state_reason": null,
+        "created_at": "2025-09-20T07:46:58Z",
+        "updated_at": "2026-07-21T09:29:14Z",
+        "closed_at": null,
+        "comments": 6,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/6656/reactions",
+          "total_count": 4,
+          "+1": 4,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Error Message and Logs\n\nWhen deploying a Next.js app on Coolify, a normal rebuild (with cache) consumes excessive CPU and memory, eventually crashing the server.\n\nRebuild (with cache): RAM usage spikes to 3\u20134 GB, CPU load average jumps above 70, and the entire Coolify instance becomes unresponsive (Gateway Timeout).\n\n\nHowever, when I use Force Deploy (without cache), the build completes successfully without killing the server.\n\n\n## Actual Behavior\n\n1. Node.js build process consumes ~3.6 GB RAM (with --max-old-space-size unset).\n2. Load average spikes beyond 70.\n3. Coolify dashboard becomes unreachable (Gateway Timeout).\n5. After killing the Node process, memory usage returns to normal.\n\n\n## Expected behavior\nA rebuild with cache should not consume excessive memory compared to a clean deploy.\n\n## Logs / Metrics\n\nServer: 8 GB RAM, no swap\n\ntop shows Node process using ~3.6 GB during rebuild (node --max-old-space-size not set).\n\nLoad average spikes > 70, Coolify dashboard becomes unreachable.\n\nAfter killing the Node process, memory returns to normal.\n\n## Workaround\n\nUsing Force Deploy (without cache) avoids the issue but is slower.\n\n\n### Steps to Reproduce\n\n\n1. Deploy a Next.js app in Coolify.\n2. Choose Rebuild (with cache enabled).\n3. Observe memory usage climbing until server becomes unresponsive.\n\n### Example Repository URL\n\n_No response_\n\n### Coolify Version\n\nv4.0.0-beta.420.6\n\n### Are you using Coolify Cloud?\n\nNo (self-hosted)\n\n### Operating System and Version (self-hosted)\n\nUbuntu 24.04.3 LTS\n\n### Additional Information\n\n_No response_"
+      }
+    },
+    "issue:Dokploy/dokploy#711": {
+      "url": "https://api.github.com/repos/Dokploy/dokploy/issues/711",
+      "data": {
+        "html_url": "https://github.com/Dokploy/dokploy/issues/711",
+        "number": 711,
+        "title": "Custom build server",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-11-17T15:17:23Z",
+        "updated_at": "2025-12-14T10:59:18Z",
+        "closed_at": "2025-11-30T05:54:17Z",
+        "comments": 20,
+        "reactions": {
+          "url": "https://api.github.com/repos/Dokploy/dokploy/issues/711/reactions",
+          "total_count": 50,
+          "+1": 45,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 5,
+          "eyes": 0
+        },
+        "body": "### What problem will this feature address?\n\nThe build process runs on the same server as my projects, which isn't ideal\n\n### Describe the solution you'd like\n\nUse a separate server to build the projects\n\n### Describe alternatives you've considered\n\nI can offload that build process to GitHub Actions, but it's extra effort, and it's not free\n\n### Additional context\n\nThis concept exists in Coolify https://coolify.io/docs/knowledge-base/server/build-server"
+      }
+    },
+    "issue:Dokploy/dokploy#2386": {
+      "url": "https://api.github.com/repos/Dokploy/dokploy/issues/2386",
+      "data": {
+        "html_url": "https://github.com/Dokploy/dokploy/issues/2386",
+        "number": 2386,
+        "title": "Support preview deployments from pre-built Docker images (built via CI/CD)",
+        "state": "open",
+        "state_reason": null,
+        "created_at": "2025-08-15T21:17:28Z",
+        "updated_at": "2025-12-12T21:22:20Z",
+        "closed_at": null,
+        "comments": 2,
+        "reactions": {
+          "url": "https://api.github.com/repos/Dokploy/dokploy/issues/2386/reactions",
+          "total_count": 24,
+          "+1": 24,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### What problem will this feature address?\n\nCurrently, preview deployments always trigger a build process on the production server, which can cause slowdowns and even downtime for other running services.\n\n### Describe the solution you'd like\n\nIt would be great if Dokploy supported deploying preview environments directly from a pre-built Docker image, which is built on CI/CD (e.g., GitHub Actions). Users could specify an image from a registry (such as DockerHub or GitHub Container Registry), and Dokploy would use that image for the preview deployment, skipping the build step on the production server entirely.\n\n### Describe alternatives you've considered\n\nDo not use preview deployments.\n\n### Additional context\n\n_No response_\n\n### Will you send a PR to implement it?\n\nMaybe, need help"
+      }
+    },
+    "issue:Dokploy/dokploy#2462": {
+      "url": "https://api.github.com/repos/Dokploy/dokploy/issues/2462",
+      "data": {
+        "html_url": "https://github.com/Dokploy/dokploy/issues/2462",
+        "number": 2462,
+        "title": "Preview Deployments - Also run database migrations only for each Preview Deployment",
+        "state": "open",
+        "state_reason": null,
+        "created_at": "2025-08-25T09:18:07Z",
+        "updated_at": "2026-04-01T10:45:56Z",
+        "closed_at": null,
+        "comments": 2,
+        "reactions": {
+          "url": "https://api.github.com/repos/Dokploy/dokploy/issues/2462/reactions",
+          "total_count": 29,
+          "+1": 29,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### What problem will this feature address?\n\nWhen using Preview Deployments with an application backed by Postgres, there\u2019s no built-in way to safely handle database migrations. Database migrations need to run in isolation for each preview, but currently all previews point to the same Postgres database. This creates conflicts when multiple branches introduce new migrations, as they attempt to modify the same schema. Ideally, Dokploy should provide a mechanism (or documented best practice) for preview deployments to use isolated schemas or databases (e.g., by leveraging DOKPLOY_DEPLOY_URL to generate unique identifiers) so that migrations can be applied automatically in each preview environment without affecting others or production.\n\n### Describe the solution you'd like\n\nIt would be helpful if Dokploy provided a mechanism (or documented pattern) to isolate databases or schemas per preview deployment. For example:\n\n- Allow environment variables like DOKPLOY_DEPLOY_URL (already available in previews) to be used in connection strings. This would let applications dynamically generate a unique schema or database name per preview.\n\n- Provide lifecycle hooks for Preview Deployments (e.g., \u201con create\u201d and \u201con delete\u201d) where a database or schema could be provisioned and later cleaned up automatically.\n\n- Document best practices for common stacks on how to integrate preview-specific migrations safely.\n\nThis would ensure each preview has its own isolated database state, allowing migrations to run without conflicts and making previews much closer to real production testing.\n\n### Describe alternatives you've considered\n\n- Running migrations only locally before pushing changes, but this doesn\u2019t validate them against the actual preview environment.\n\n- Manually creating separate databases/schemas for each branch in Postgres and wiring them up with custom connection strings, but this is error-prone and hard to automate within the Dokploy workflow.\n\n- Skipping migrations entirely in preview deployments and only applying them on staging/production, but this defeats the purpose of previews for testing schema changes.\n\nThese workarounds either add too much manual overhead or reduce confidence in preview deployments. Having a built-in or officially documented approach in Dokploy would make the process reliable and seamless.\n\n### Additional context\n\n_No response_\n\n### Will you send a PR to implement it?\n\nNo"
+      }
+    },
+    "issue:Dokploy/dokploy#319": {
+      "url": "https://api.github.com/repos/Dokploy/dokploy/issues/319",
+      "data": {
+        "html_url": "https://github.com/Dokploy/dokploy/issues/319",
+        "number": 319,
+        "title": "Ability to roll back service depoyments",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-08-04T03:28:27Z",
+        "updated_at": "2026-01-26T16:48:49Z",
+        "closed_at": "2025-06-22T05:35:37Z",
+        "comments": 15,
+        "reactions": {
+          "url": "https://api.github.com/repos/Dokploy/dokploy/issues/319/reactions",
+          "total_count": 69,
+          "+1": 62,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 3,
+          "confused": 0,
+          "heart": 2,
+          "rocket": 2,
+          "eyes": 0
+        },
+        "body": "### What problem will this feature address?\n\nAdd an ability to roll back service deployment such that one can if needed deploy the previous version of the service (say for a specific git hash or built image) on demand. \r\n\r\nThis will be necessary when the latest version introduced some bugs, and you want to roll back the service so as to work on it. The current system only allows for building container for the latest code changes. \n\n### Describe the solution you'd like\n\nAbility to roll back to a previous deployment or build for specific git hash.\r\n\r\nSomething like this:\r\n<img width=\"1349\" alt=\"Screenshot 2024-08-04 at 9 10 53\u202fAM\" src=\"https://github.com/user-attachments/assets/a9fc6368-e7df-4197-9e8c-bcc18e9cb079\">\n\n### Describe alternatives you've considered\n\n`docker service rollback`\n\n### Additional context\n\nHere is an example of how an alternative; coolify handles this\r\n<img width=\"1146\" alt=\"Screenshot 2024-08-04 at 9 11 46\u202fAM\" src=\"https://github.com/user-attachments/assets/6a8c9a65-3305-440b-9ea7-7440c6bc3b1c\">\r\n\r\nAnd here is an example of how the alternative Caprover handles this\r\n<img width=\"1111\" alt=\"Screenshot 2024-08-04 at 9 12 56\u202fAM\" src=\"https://github.com/user-attachments/assets/31bd2ba4-73d7-45a3-89e5-8878661b8c28\">"
+      }
+    },
+    "issue:Dokploy/dokploy#2154": {
+      "url": "https://api.github.com/repos/Dokploy/dokploy/issues/2154",
+      "data": {
+        "html_url": "https://github.com/Dokploy/dokploy/issues/2154",
+        "number": 2154,
+        "title": "Container auto sleep/scale to zero",
+        "state": "open",
+        "state_reason": null,
+        "created_at": "2025-07-08T15:03:54Z",
+        "updated_at": "2026-09-28T15:11:27Z",
+        "closed_at": null,
+        "comments": 2,
+        "reactions": {
+          "url": "https://api.github.com/repos/Dokploy/dokploy/issues/2154/reactions",
+          "total_count": 26,
+          "+1": 26,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### What problem will this feature address?\n\nI have a bunch of projects that are only visited once a month/year.\nRight now they are running 24/7 and consuming resources.\nIn some hosting providers they allow you to have auto sleep.\n\n### Describe the solution you'd like\n\nI would be very happy if i could to the following:\n- toggle scale to zero/auto sleep\n- provide the amount of time that the projectcontainers should be alive\n- (optional) provide a custom html template to display when its starting\n\n### Describe alternatives you've considered\n\nI have tried https://sablierapp.dev/#/ but i could not get it to work.\n\n### Additional context\n\nIf this stays open for a long time i might give it a shot myself. However i dont have time now and i dont know the internals of Dokploy.\n\n### Will you send a PR to implement it?\n\nNo"
+      }
+    },
+    "issue:coollabsio/coolify#2389": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/2389",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/2389",
+        "number": 2389,
+        "title": "[Feature]: Backup Manger in the UI",
+        "state": "open",
+        "state_reason": null,
+        "created_at": "2024-06-08T15:48:14Z",
+        "updated_at": "2026-10-23T20:38:23Z",
+        "closed_at": null,
+        "comments": 53,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/2389/reactions",
+          "total_count": 38,
+          "+1": 24,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 14
+        },
+        "body": "### General Idea\r\nCurrently only databases are backed up. Also, only some databases have a restore option. See: https://github.com/coollabsio/coolify/issues/2501. Streamline database backups and offer a one click restore option without having to manually download and upload the backup. Also there should be a second checkbox that allows us to set container backups -> a container backup is just a backup of all the persistent data (volumes) of the container.\r\n\r\n\r\n### Detailed Description\r\n\r\nI think it should be pretty straightforward for the pro @andrasbacsai. I thought about all the points and how I would implement it below, hope it helps (can not implement it myself for now as I am not experienced enough with Larvel):\r\n\r\n- [ ] 1. Let us backup the full coolify instance to the cloud and one click restore it -> all settings...\r\n_The settings are probably stored in the coolify database, so a coolify database backup would be sufficient._\r\n- [ ] 2. Add other remote storage type for example SFTP and WebDAV, is natively supported in Laravel: https://flysystem.thephpleague.com/docs/ \r\n- [ ] 3. Add WebDav as a remote storage type -> https://flysystem.thephpleague.com/docs/\r\n- [ ] 4. Set encryption password and encryption type -> the backups sent to remote storage should be fully encrypted if possible for security reasons\r\nEncryption is really important especially for databases. Could be done via AES-256 and a password to dycrypt\r\n- [ ] 5. View all backups in a list.\r\nDisplay all backups like with database backups\r\n- [ ] 6. One click service restore or database restore from the backup manger UI -> hit restore and it restores\r\nDownload backup form the cloud to the local machine as soon as we hit restore and then restores it -> overwrites the volume and or the database or the config\r\n- [ ] 7. Delete backups from the list manually\r\nDelete button, when hit deletes locally or on s3 or on SFTP via a remote find command\r\n- [ ] 8. set an expiration time -> for example, after 7 days, the oldest backup will be automatically deleted from the remote storage solution.\r\nCan be done via find with a line like this:\r\n```bash\r\nkeep_backups=10\r\n\r\n# delete old Backups with `find`\r\nssh \"${remote_target}\" \"find ${remote_dir} -type f -name '*-backup.tar.gz' -mtime +$keep_backups -exec rm {} \\;\"\r\n````\r\n- [ ] 9. set what to backup -> only database, only files or everything --> everything means full container, database and all configurations set in ccolify\r\nDatabase already works\r\nFiles would essentially be every volume of the docker container, since all other docker data is not persistent.\r\nBoth would just let us schedule a cron job to do both.\r\n-> As all services run in containers (even in the future when k8s is supported) there is essentially just the need to backup all volumes in the folder (but it is better to let us select backups on a container level/ service level -> just backup the WordPress volumes): \r\n```bash\r\n/var/lib/docker/volumes\r\n```\r\n-> At the Coolify level, we can select Backup All --> and with Backup All, it basically just backs up all the volumes in the Docker volumes directory.\r\n- [ ] 10. one click manual backup -> Let us click a button which triggers a full backup\r\n- [ ] 11. only store backups in remote -> so the backups are only stored in remote, not also on the coolify instance storage (secure storage) \r\n--> After the backup is uploaded to the remote storage/ sftp or s3 delete all local copies of the backup. with -rm\r\n- [ ] 12. button to download backup to localhost or my current device (for local backup) -> a simple download button to download the backup to my PC, for restoration of the backups wiche essential just replaces docker volumes it overwrites all fiels with the fiels of the backup\r\n- [ ] 13. Lock backups, these backups will not be deleted from remote storage automatically can only be deleted manually\r\n-> Not idea yet how to implement but maybe move to a differente folder on the remote storage called lock which is not cleaned every time a new backup is sent to remote\r\n- [ ] 14. Make sure to compress backups with gzip\r\n- [ ] 15. Also let us set a folder and a subfolder in the cloud bucket where the backups should be stored\r\n- [ ] 16. Scheduled backups -> Schedule to let us choose hourly, 12 hourly, 24 hourly...\r\n-> just use cron to schedule a backup task, like for database but for volume backup\r\n- [ ] 17. clone a resource and let us select a backup of a volume. So we can rollback to a resource without rolling back an actively running instance. Let us clone the resource and while cloning select a backup for the volumes that will be used so we can use an old state of the persistente data to check for example if the bug is still present there.\r\n- [ ] 18. Ability to backup all Database and all volumes in one click globally -> so basically backup everything on the server\r\n- [ ] 19. Backup Coolify settings and application settings and so on via coolify.json\r\n\r\nManual script as a demo (source: https://schroederdennis.de/docker/docker-volume-backup-script-sichern-mit-secure-copy-scp-nas/)\r\n```bash\r\n#!/bin/bash\r\n# # # # # # # # # # # # # # # # # # # # # # # #\r\n#                Configuration                #\r\n# # # # # # # # # # # # # # # # # # # # # # # #\r\n\r\n# Directory to be backed up\r\nsource_dir=\"/var/lib/docker/volumes\"\r\nc# Directory in which the backups are to be saved\r\nbackup_dir=\"/opt/docker_backups\"\r\n# Number of backups to be kept\r\nkeep_backups=10\r\n# Current date and time\r\ncurrent_datetime=$(date +\"%Y-%m-%d_%H-%M-%S\")\r\n# Name for the backup archive\r\nbackup_filename=\"${current_datetime}-backup.tar\"\r\n# Target server information -> SFTP location\r\nremote_user=\"root\"\r\nremote_server=\"192.168.40.50\"\r\nremote_dir=\"/opt/docker_backups\"\r\n# # # # # # # # # # # # # # # # # # # # # # # #\r\n#           End of configuration            #\r\n# # # # # # # # # # # # # # # # # # # # # # # #\r\n\r\nremote_target=\"${remote_user}@${remote_server}\"\r\nbackup_fullpath=\"${backup_dir}/${backup_filename}\"\r\n \r\n# Shut down Docker container -> Is recommended but probably not needed as it is bad to shot down production containers\r\ndocker stop $(docker ps -q)\r\n# Create the backup archive\r\ntar -cpf \"${backup_fullpath}\" \"${source_dir}\"\r\n# Restart the Docker container\r\ndocker start $(docker ps -a -q)\r\n# Compress the backup archive\r\ngzip \"${backup_fullpath}\"\r\nbackup_fullpath=\"${backup_fullpath}.gz\"\r\n# Copy the backup to the target server with SCP without password\r\nscp \"${backup_fullpath}\" \"${remote_target}:$remote_dir/\"\r\n# Delete older local backups with `find`.\r\nfind \"$backup_dir\" -type f -name \"*-backup.tar.gz\" -mtime +$keep_backups -exec rm {} \\;\r\n# Delete older remote backups with `find`.\r\nssh \"${remote_target}\" \"find ${remote_dir} -type f -name '*-backup.tar.gz' -mtime +$keep_backups -exec rm {} \\;\"\r\n \r\necho \"Backup has been created: ${backup_fullpath} and on ${remote_target} copied.\"\r\n```\r\n\r\n"
+      }
+    },
+    "issue:Dokploy/dokploy#416": {
+      "url": "https://api.github.com/repos/Dokploy/dokploy/issues/416",
+      "data": {
+        "html_url": "https://github.com/Dokploy/dokploy/issues/416",
+        "number": 416,
+        "title": "Ability to backup to more destination types",
+        "state": "open",
+        "state_reason": null,
+        "created_at": "2024-09-04T03:08:09Z",
+        "updated_at": "2026-10-24T11:14:07Z",
+        "closed_at": null,
+        "comments": 58,
+        "reactions": {
+          "url": "https://api.github.com/repos/Dokploy/dokploy/issues/416/reactions",
+          "total_count": 29,
+          "+1": 29,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### What problem will this feature address?\r\n\r\nCan not backup to FTP, SFTP, Google Drive other storage solutions.\r\n\r\n### Describe the solution you'd like\r\n\r\nAdd support for other destination types like Google Drive, One Drive, FTP, SFTP etc.\r\n\r\n### Describe alternatives you've considered\r\n\r\nDuring backup destination creation, we can select destination types and their credentials accordingly. This can later be used in upload phase of backup process. Following can be used for uploading the data:\r\n- [rclone](https://rclone.org/docs/) - supports a lot of destination. destination configuration can be given as argument. Using rclone will probably be easiest and fastest to add support for many providers.\r\n- https://github.com/duna-oss/flystorage - common api for services. adapter based. \r\n- Independent libraries - will require more effort but provides granular control over each api.\r\n\r\n\r\n### Additional context\r\n\r\n_No response_"
+      }
+    },
+    "issue:coollabsio/coolify#2378": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/2378",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/2378",
+        "number": 2378,
+        "title": "[Feature]: Add more granular permissions and user roles.",
+        "state": "open",
+        "state_reason": null,
+        "created_at": "2024-06-07T14:35:39Z",
+        "updated_at": "2026-10-25T07:41:47Z",
+        "closed_at": null,
+        "comments": 32,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/2378/reactions",
+          "total_count": 17,
+          "+1": 17,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Description\n\nCurrently, team members apply for the entire general system. I want to have a specific team member for each resource. So, imagine that each resource has a new menu called members / team / team members where the admin can invite people to specific resources.\r\n![image](https://github.com/coollabsio/coolify/assets/8052370/7cf25b76-bfef-4c4c-96f6-3304f7360741)\n\n### Minimal Reproduction (if possible, example repository)\n\nn/a\n\n### Exception or Error\n\n_No response_\n\n### Version\n\nn/a"
+      }
+    },
+    "license:coollabsio/coolify": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/license",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/blob/main/LICENSE",
+        "path": "LICENSE",
+        "sha": "e3cc59461d6f83676efd1eb85ae82384a10de2a5",
+        "download_url": "https://raw.githubusercontent.com/coollabsio/coolify/main/LICENSE",
+        "license": {
+          "key": "apache-2.0",
+          "name": "Apache License 2.0",
+          "spdx_id": "Apache-2.0",
+          "url": "https://api.github.com/licenses/apache-2.0",
+          "node_id": "MDc6TGljZW5zZTI="
+        },
+        "encoding": "base64",
+        "content": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICBBcGFjaGUgTGljZW5z\nZQogICAgICAgICAgICAgICAgICAgICAgICAgICBWZXJzaW9uIDIuMCwgSmFu\ndWFyeSAyMDA0CiAgICAgICAgICAgICAgICAgICAgICAgIGh0dHA6Ly93d3cu\nYXBhY2hlLm9yZy9saWNlbnNlcy8KCiAgIFRFUk1TIEFORCBDT05ESVRJT05T\nIEZPUiBVU0UsIFJFUFJPRFVDVElPTiwgQU5EIERJU1RSSUJVVElPTgoKICAg\nMS4gRGVmaW5pdGlvbnMuCgogICAgICAiTGljZW5zZSIgc2hhbGwgbWVhbiB0\naGUgdGVybXMgYW5kIGNvbmRpdGlvbnMgZm9yIHVzZSwgcmVwcm9kdWN0aW9u\nLAogICAgICBhbmQgZGlzdHJpYnV0aW9uIGFzIGRlZmluZWQgYnkgU2VjdGlv\nbnMgMSB0aHJvdWdoIDkgb2YgdGhpcyBkb2N1bWVudC4KCiAgICAgICJMaWNl\nbnNvciIgc2hhbGwgbWVhbiB0aGUgY29weXJpZ2h0IG93bmVyIG9yIGVudGl0\neSBhdXRob3JpemVkIGJ5CiAgICAgIHRoZSBjb3B5cmlnaHQgb3duZXIgdGhh\ndCBpcyBncmFudGluZyB0aGUgTGljZW5zZS4KCiAgICAgICJMZWdhbCBFbnRp\ndHkiIHNoYWxsIG1lYW4gdGhlIHVuaW9uIG9mIHRoZSBhY3RpbmcgZW50aXR5\nIGFuZCBhbGwKICAgICAgb3RoZXIgZW50aXRpZXMgdGhhdCBjb250cm9sLCBh\ncmUgY29udHJvbGxlZCBieSwgb3IgYXJlIHVuZGVyIGNvbW1vbgogICAgICBj\nb250cm9sIHdpdGggdGhhdCBlbnRpdHkuIEZvciB0aGUgcHVycG9zZXMgb2Yg\ndGhpcyBkZWZpbml0aW9uLAogICAgICAiY29udHJvbCIgbWVhbnMgKGkpIHRo\nZSBwb3dlciwgZGlyZWN0IG9yIGluZGlyZWN0LCB0byBjYXVzZSB0aGUKICAg\nICAgZGlyZWN0aW9uIG9yIG1hbmFnZW1lbnQgb2Ygc3VjaCBlbnRpdHksIHdo\nZXRoZXIgYnkgY29udHJhY3Qgb3IKICAgICAgb3RoZXJ3aXNlLCBvciAoaWkp\nIG93bmVyc2hpcCBvZiBmaWZ0eSBwZXJjZW50ICg1MCUpIG9yIG1vcmUgb2Yg\ndGhlCiAgICAgIG91dHN0YW5kaW5nIHNoYXJlcywgb3IgKGlpaSkgYmVuZWZp\nY2lhbCBvd25lcnNoaXAgb2Ygc3VjaCBlbnRpdHkuCgogICAgICAiWW91IiAo\nb3IgIllvdXIiKSBzaGFsbCBtZWFuIGFuIGluZGl2aWR1YWwgb3IgTGVnYWwg\nRW50aXR5CiAgICAgIGV4ZXJjaXNpbmcgcGVybWlzc2lvbnMgZ3JhbnRlZCBi\neSB0aGlzIExpY2Vuc2UuCgogICAgICAiU291cmNlIiBmb3JtIHNoYWxsIG1l\nYW4gdGhlIHByZWZlcnJlZCBmb3JtIGZvciBtYWtpbmcgbW9kaWZpY2F0aW9u\ncywKICAgICAgaW5jbHVkaW5nIGJ1dCBub3QgbGltaXRlZCB0byBzb2Z0d2Fy\nZSBzb3VyY2UgY29kZSwgZG9jdW1lbnRhdGlvbgogICAgICBzb3VyY2UsIGFu\nZCBjb25maWd1cmF0aW9uIGZpbGVzLgoKICAgICAgIk9iamVjdCIgZm9ybSBz\naGFsbCBtZWFuIGFueSBmb3JtIHJlc3VsdGluZyBmcm9tIG1lY2hhbmljYWwK\nICAgICAgdHJhbnNmb3JtYXRpb24gb3IgdHJhbnNsYXRpb24gb2YgYSBTb3Vy\nY2UgZm9ybSwgaW5jbHVkaW5nIGJ1dAogICAgICBub3QgbGltaXRlZCB0byBj\nb21waWxlZCBvYmplY3QgY29kZSwgZ2VuZXJhdGVkIGRvY3VtZW50YXRpb24s\nCiAgICAgIGFuZCBjb252ZXJzaW9ucyB0byBvdGhlciBtZWRpYSB0eXBlcy4K\nCiAgICAgICJXb3JrIiBzaGFsbCBtZWFuIHRoZSB3b3JrIG9mIGF1dGhvcnNo\naXAsIHdoZXRoZXIgaW4gU291cmNlIG9yCiAgICAgIE9iamVjdCBmb3JtLCBt\nYWRlIGF2YWlsYWJsZSB1bmRlciB0aGUgTGljZW5zZSwgYXMgaW5kaWNhdGVk\nIGJ5IGEKICAgICAgY29weXJpZ2h0IG5vdGljZSB0aGF0IGlzIGluY2x1ZGVk\nIGluIG9yIGF0dGFjaGVkIHRvIHRoZSB3b3JrCiAgICAgIChhbiBleGFtcGxl\nIGlzIHByb3ZpZGVkIGluIHRoZSBBcHBlbmRpeCBiZWxvdykuCgogICAgICAi\nRGVyaXZhdGl2ZSBXb3JrcyIgc2hhbGwgbWVhbiBhbnkgd29yaywgd2hldGhl\nciBpbiBTb3VyY2Ugb3IgT2JqZWN0CiAgICAgIGZvcm0sIHRoYXQgaXMgYmFz\nZWQgb24gKG9yIGRlcml2ZWQgZnJvbSkgdGhlIFdvcmsgYW5kIGZvciB3aGlj\naCB0aGUKICAgICAgZWRpdG9yaWFsIHJldmlzaW9ucywgYW5ub3RhdGlvbnMs\nIGVsYWJvcmF0aW9ucywgb3Igb3RoZXIgbW9kaWZpY2F0aW9ucwogICAgICBy\nZXByZXNlbnQsIGFzIGEgd2hvbGUsIGFuIG9yaWdpbmFsIHdvcmsgb2YgYXV0\naG9yc2hpcC4gRm9yIHRoZSBwdXJwb3NlcwogICAgICBvZiB0aGlzIExpY2Vu\nc2UsIERlcml2YXRpdmUgV29ya3Mgc2hhbGwgbm90IGluY2x1ZGUgd29ya3Mg\ndGhhdCByZW1haW4KICAgICAgc2VwYXJhYmxlIGZyb20sIG9yIG1lcmVseSBs\naW5rIChvciBiaW5kIGJ5IG5hbWUpIHRvIHRoZSBpbnRlcmZhY2VzIG9mLAog\nICAgICB0aGUgV29yayBhbmQgRGVyaXZhdGl2ZSBXb3JrcyB0aGVyZW9mLgoK\nICAgICAgIkNvbnRyaWJ1dGlvbiIgc2hhbGwgbWVhbiBhbnkgd29yayBvZiBh\ndXRob3JzaGlwLCBpbmNsdWRpbmcKICAgICAgdGhlIG9yaWdpbmFsIHZlcnNp\nb24gb2YgdGhlIFdvcmsgYW5kIGFueSBtb2RpZmljYXRpb25zIG9yIGFkZGl0\naW9ucwogICAgICB0byB0aGF0IFdvcmsgb3IgRGVyaXZhdGl2ZSBXb3JrcyB0\naGVyZW9mLCB0aGF0IGlzIGludGVudGlvbmFsbHkKICAgICAgc3VibWl0dGVk\nIHRvIExpY2Vuc29yIGZvciBpbmNsdXNpb24gaW4gdGhlIFdvcmsgYnkgdGhl\nIGNvcHlyaWdodCBvd25lcgogICAgICBvciBieSBhbiBpbmRpdmlkdWFsIG9y\nIExlZ2FsIEVudGl0eSBhdXRob3JpemVkIHRvIHN1Ym1pdCBvbiBiZWhhbGYg\nb2YKICAgICAgdGhlIGNvcHlyaWdodCBvd25lci4gRm9yIHRoZSBwdXJwb3Nl\ncyBvZiB0aGlzIGRlZmluaXRpb24sICJzdWJtaXR0ZWQiCiAgICAgIG1lYW5z\nIGFueSBmb3JtIG9mIGVsZWN0cm9uaWMsIHZlcmJhbCwgb3Igd3JpdHRlbiBj\nb21tdW5pY2F0aW9uIHNlbnQKICAgICAgdG8gdGhlIExpY2Vuc29yIG9yIGl0\ncyByZXByZXNlbnRhdGl2ZXMsIGluY2x1ZGluZyBidXQgbm90IGxpbWl0ZWQg\ndG8KICAgICAgY29tbXVuaWNhdGlvbiBvbiBlbGVjdHJvbmljIG1haWxpbmcg\nbGlzdHMsIHNvdXJjZSBjb2RlIGNvbnRyb2wgc3lzdGVtcywKICAgICAgYW5k\nIGlzc3VlIHRyYWNraW5nIHN5c3RlbXMgdGhhdCBhcmUgbWFuYWdlZCBieSwg\nb3Igb24gYmVoYWxmIG9mLCB0aGUKICAgICAgTGljZW5zb3IgZm9yIHRoZSBw\ndXJwb3NlIG9mIGRpc2N1c3NpbmcgYW5kIGltcHJvdmluZyB0aGUgV29yaywg\nYnV0CiAgICAgIGV4Y2x1ZGluZyBjb21tdW5pY2F0aW9uIHRoYXQgaXMgY29u\nc3BpY3VvdXNseSBtYXJrZWQgb3Igb3RoZXJ3aXNlCiAgICAgIGRlc2lnbmF0\nZWQgaW4gd3JpdGluZyBieSB0aGUgY29weXJpZ2h0IG93bmVyIGFzICJOb3Qg\nYSBDb250cmlidXRpb24uIgoKICAgICAgIkNvbnRyaWJ1dG9yIiBzaGFsbCBt\nZWFuIExpY2Vuc29yIGFuZCBhbnkgaW5kaXZpZHVhbCBvciBMZWdhbCBFbnRp\ndHkKICAgICAgb24gYmVoYWxmIG9mIHdob20gYSBDb250cmlidXRpb24gaGFz\nIGJlZW4gcmVjZWl2ZWQgYnkgTGljZW5zb3IgYW5kCiAgICAgIHN1YnNlcXVl\nbnRseSBpbmNvcnBvcmF0ZWQgd2l0aGluIHRoZSBXb3JrLgoKICAgMi4gR3Jh\nbnQgb2YgQ29weXJpZ2h0IExpY2Vuc2UuIFN1YmplY3QgdG8gdGhlIHRlcm1z\nIGFuZCBjb25kaXRpb25zIG9mCiAgICAgIHRoaXMgTGljZW5zZSwgZWFjaCBD\nb250cmlidXRvciBoZXJlYnkgZ3JhbnRzIHRvIFlvdSBhIHBlcnBldHVhbCwK\nICAgICAgd29ybGR3aWRlLCBub24tZXhjbHVzaXZlLCBuby1jaGFyZ2UsIHJv\neWFsdHktZnJlZSwgaXJyZXZvY2FibGUKICAgICAgY29weXJpZ2h0IGxpY2Vu\nc2UgdG8gcmVwcm9kdWNlLCBwcmVwYXJlIERlcml2YXRpdmUgV29ya3Mgb2Ys\nCiAgICAgIHB1YmxpY2x5IGRpc3BsYXksIHB1YmxpY2x5IHBlcmZvcm0sIHN1\nYmxpY2Vuc2UsIGFuZCBkaXN0cmlidXRlIHRoZQogICAgICBXb3JrIGFuZCBz\ndWNoIERlcml2YXRpdmUgV29ya3MgaW4gU291cmNlIG9yIE9iamVjdCBmb3Jt\nLgoKICAgMy4gR3JhbnQgb2YgUGF0ZW50IExpY2Vuc2UuIFN1YmplY3QgdG8g\ndGhlIHRlcm1zIGFuZCBjb25kaXRpb25zIG9mCiAgICAgIHRoaXMgTGljZW5z\nZSwgZWFjaCBDb250cmlidXRvciBoZXJlYnkgZ3JhbnRzIHRvIFlvdSBhIHBl\ncnBldHVhbCwKICAgICAgd29ybGR3aWRlLCBub24tZXhjbHVzaXZlLCBuby1j\naGFyZ2UsIHJveWFsdHktZnJlZSwgaXJyZXZvY2FibGUKICAgICAgKGV4Y2Vw\ndCBhcyBzdGF0ZWQgaW4gdGhpcyBzZWN0aW9uKSBwYXRlbnQgbGljZW5zZSB0\nbyBtYWtlLCBoYXZlIG1hZGUsCiAgICAgIHVzZSwgb2ZmZXIgdG8gc2VsbCwg\nc2VsbCwgaW1wb3J0LCBhbmQgb3RoZXJ3aXNlIHRyYW5zZmVyIHRoZSBXb3Jr\nLAogICAgICB3aGVyZSBzdWNoIGxpY2Vuc2UgYXBwbGllcyBvbmx5IHRvIHRo\nb3NlIHBhdGVudCBjbGFpbXMgbGljZW5zYWJsZQogICAgICBieSBzdWNoIENv\nbnRyaWJ1dG9yIHRoYXQgYXJlIG5lY2Vzc2FyaWx5IGluZnJpbmdlZCBieSB0\naGVpcgogICAgICBDb250cmlidXRpb24ocykgYWxvbmUgb3IgYnkgY29tYmlu\nYXRpb24gb2YgdGhlaXIgQ29udHJpYnV0aW9uKHMpCiAgICAgIHdpdGggdGhl\nIFdvcmsgdG8gd2hpY2ggc3VjaCBDb250cmlidXRpb24ocykgd2FzIHN1Ym1p\ndHRlZC4gSWYgWW91CiAgICAgIGluc3RpdHV0ZSBwYXRlbnQgbGl0aWdhdGlv\nbiBhZ2FpbnN0IGFueSBlbnRpdHkgKGluY2x1ZGluZyBhCiAgICAgIGNyb3Nz\nLWNsYWltIG9yIGNvdW50ZXJjbGFpbSBpbiBhIGxhd3N1aXQpIGFsbGVnaW5n\nIHRoYXQgdGhlIFdvcmsKICAgICAgb3IgYSBDb250cmlidXRpb24gaW5jb3Jw\nb3JhdGVkIHdpdGhpbiB0aGUgV29yayBjb25zdGl0dXRlcyBkaXJlY3QKICAg\nICAgb3IgY29udHJpYnV0b3J5IHBhdGVudCBpbmZyaW5nZW1lbnQsIHRoZW4g\nYW55IHBhdGVudCBsaWNlbnNlcwogICAgICBncmFudGVkIHRvIFlvdSB1bmRl\nciB0aGlzIExpY2Vuc2UgZm9yIHRoYXQgV29yayBzaGFsbCB0ZXJtaW5hdGUK\nICAgICAgYXMgb2YgdGhlIGRhdGUgc3VjaCBsaXRpZ2F0aW9uIGlzIGZpbGVk\nLgoKICAgNC4gUmVkaXN0cmlidXRpb24uIFlvdSBtYXkgcmVwcm9kdWNlIGFu\nZCBkaXN0cmlidXRlIGNvcGllcyBvZiB0aGUKICAgICAgV29yayBvciBEZXJp\ndmF0aXZlIFdvcmtzIHRoZXJlb2YgaW4gYW55IG1lZGl1bSwgd2l0aCBvciB3\naXRob3V0CiAgICAgIG1vZGlmaWNhdGlvbnMsIGFuZCBpbiBTb3VyY2Ugb3Ig\nT2JqZWN0IGZvcm0sIHByb3ZpZGVkIHRoYXQgWW91CiAgICAgIG1lZXQgdGhl\nIGZvbGxvd2luZyBjb25kaXRpb25zOgoKICAgICAgKGEpIFlvdSBtdXN0IGdp\ndmUgYW55IG90aGVyIHJlY2lwaWVudHMgb2YgdGhlIFdvcmsgb3IKICAgICAg\nICAgIERlcml2YXRpdmUgV29ya3MgYSBjb3B5IG9mIHRoaXMgTGljZW5zZTsg\nYW5kCgogICAgICAoYikgWW91IG11c3QgY2F1c2UgYW55IG1vZGlmaWVkIGZp\nbGVzIHRvIGNhcnJ5IHByb21pbmVudCBub3RpY2VzCiAgICAgICAgICBzdGF0\naW5nIHRoYXQgWW91IGNoYW5nZWQgdGhlIGZpbGVzOyBhbmQKCiAgICAgIChj\nKSBZb3UgbXVzdCByZXRhaW4sIGluIHRoZSBTb3VyY2UgZm9ybSBvZiBhbnkg\nRGVyaXZhdGl2ZSBXb3JrcwogICAgICAgICAgdGhhdCBZb3UgZGlzdHJpYnV0\nZSwgYWxsIGNvcHlyaWdodCwgcGF0ZW50LCB0cmFkZW1hcmssIGFuZAogICAg\nICAgICAgYXR0cmlidXRpb24gbm90aWNlcyBmcm9tIHRoZSBTb3VyY2UgZm9y\nbSBvZiB0aGUgV29yaywKICAgICAgICAgIGV4Y2x1ZGluZyB0aG9zZSBub3Rp\nY2VzIHRoYXQgZG8gbm90IHBlcnRhaW4gdG8gYW55IHBhcnQgb2YKICAgICAg\nICAgIHRoZSBEZXJpdmF0aXZlIFdvcmtzOyBhbmQKCiAgICAgIChkKSBJZiB0\naGUgV29yayBpbmNsdWRlcyBhICJOT1RJQ0UiIHRleHQgZmlsZSBhcyBwYXJ0\nIG9mIGl0cwogICAgICAgICAgZGlzdHJpYnV0aW9uLCB0aGVuIGFueSBEZXJp\ndmF0aXZlIFdvcmtzIHRoYXQgWW91IGRpc3RyaWJ1dGUgbXVzdAogICAgICAg\nICAgaW5jbHVkZSBhIHJlYWRhYmxlIGNvcHkgb2YgdGhlIGF0dHJpYnV0aW9u\nIG5vdGljZXMgY29udGFpbmVkCiAgICAgICAgICB3aXRoaW4gc3VjaCBOT1RJ\nQ0UgZmlsZSwgZXhjbHVkaW5nIHRob3NlIG5vdGljZXMgdGhhdCBkbyBub3QK\nICAgICAgICAgIHBlcnRhaW4gdG8gYW55IHBhcnQgb2YgdGhlIERlcml2YXRp\ndmUgV29ya3MsIGluIGF0IGxlYXN0IG9uZQogICAgICAgICAgb2YgdGhlIGZv\nbGxvd2luZyBwbGFjZXM6IHdpdGhpbiBhIE5PVElDRSB0ZXh0IGZpbGUgZGlz\ndHJpYnV0ZWQKICAgICAgICAgIGFzIHBhcnQgb2YgdGhlIERlcml2YXRpdmUg\nV29ya3M7IHdpdGhpbiB0aGUgU291cmNlIGZvcm0gb3IKICAgICAgICAgIGRv\nY3VtZW50YXRpb24sIGlmIHByb3ZpZGVkIGFsb25nIHdpdGggdGhlIERlcml2\nYXRpdmUgV29ya3M7IG9yLAogICAgICAgICAgd2l0aGluIGEgZGlzcGxheSBn\nZW5lcmF0ZWQgYnkgdGhlIERlcml2YXRpdmUgV29ya3MsIGlmIGFuZAogICAg\nICAgICAgd2hlcmV2ZXIgc3VjaCB0aGlyZC1wYXJ0eSBub3RpY2VzIG5vcm1h\nbGx5IGFwcGVhci4gVGhlIGNvbnRlbnRzCiAgICAgICAgICBvZiB0aGUgTk9U\nSUNFIGZpbGUgYXJlIGZvciBpbmZvcm1hdGlvbmFsIHB1cnBvc2VzIG9ubHkg\nYW5kCiAgICAgICAgICBkbyBub3QgbW9kaWZ5IHRoZSBMaWNlbnNlLiBZb3Ug\nbWF5IGFkZCBZb3VyIG93biBhdHRyaWJ1dGlvbgogICAgICAgICAgbm90aWNl\ncyB3aXRoaW4gRGVyaXZhdGl2ZSBXb3JrcyB0aGF0IFlvdSBkaXN0cmlidXRl\nLCBhbG9uZ3NpZGUKICAgICAgICAgIG9yIGFzIGFuIGFkZGVuZHVtIHRvIHRo\nZSBOT1RJQ0UgdGV4dCBmcm9tIHRoZSBXb3JrLCBwcm92aWRlZAogICAgICAg\nICAgdGhhdCBzdWNoIGFkZGl0aW9uYWwgYXR0cmlidXRpb24gbm90aWNlcyBj\nYW5ub3QgYmUgY29uc3RydWVkCiAgICAgICAgICBhcyBtb2RpZnlpbmcgdGhl\nIExpY2Vuc2UuCgogICAgICBZb3UgbWF5IGFkZCBZb3VyIG93biBjb3B5cmln\naHQgc3RhdGVtZW50IHRvIFlvdXIgbW9kaWZpY2F0aW9ucyBhbmQKICAgICAg\nbWF5IHByb3ZpZGUgYWRkaXRpb25hbCBvciBkaWZmZXJlbnQgbGljZW5zZSB0\nZXJtcyBhbmQgY29uZGl0aW9ucwogICAgICBmb3IgdXNlLCByZXByb2R1Y3Rp\nb24sIG9yIGRpc3RyaWJ1dGlvbiBvZiBZb3VyIG1vZGlmaWNhdGlvbnMsIG9y\nCiAgICAgIGZvciBhbnkgc3VjaCBEZXJpdmF0aXZlIFdvcmtzIGFzIGEgd2hv\nbGUsIHByb3ZpZGVkIFlvdXIgdXNlLAogICAgICByZXByb2R1Y3Rpb24sIGFu\nZCBkaXN0cmlidXRpb24gb2YgdGhlIFdvcmsgb3RoZXJ3aXNlIGNvbXBsaWVz\nIHdpdGgKICAgICAgdGhlIGNvbmRpdGlvbnMgc3RhdGVkIGluIHRoaXMgTGlj\nZW5zZS4KCiAgIDUuIFN1Ym1pc3Npb24gb2YgQ29udHJpYnV0aW9ucy4gVW5s\nZXNzIFlvdSBleHBsaWNpdGx5IHN0YXRlIG90aGVyd2lzZSwKICAgICAgYW55\nIENvbnRyaWJ1dGlvbiBpbnRlbnRpb25hbGx5IHN1Ym1pdHRlZCBmb3IgaW5j\nbHVzaW9uIGluIHRoZSBXb3JrCiAgICAgIGJ5IFlvdSB0byB0aGUgTGljZW5z\nb3Igc2hhbGwgYmUgdW5kZXIgdGhlIHRlcm1zIGFuZCBjb25kaXRpb25zIG9m\nCiAgICAgIHRoaXMgTGljZW5zZSwgd2l0aG91dCBhbnkgYWRkaXRpb25hbCB0\nZXJtcyBvciBjb25kaXRpb25zLgogICAgICBOb3R3aXRoc3RhbmRpbmcgdGhl\nIGFib3ZlLCBub3RoaW5nIGhlcmVpbiBzaGFsbCBzdXBlcnNlZGUgb3IgbW9k\naWZ5CiAgICAgIHRoZSB0ZXJtcyBvZiBhbnkgc2VwYXJhdGUgbGljZW5zZSBh\nZ3JlZW1lbnQgeW91IG1heSBoYXZlIGV4ZWN1dGVkCiAgICAgIHdpdGggTGlj\nZW5zb3IgcmVnYXJkaW5nIHN1Y2ggQ29udHJpYnV0aW9ucy4KCiAgIDYuIFRy\nYWRlbWFya3MuIFRoaXMgTGljZW5zZSBkb2VzIG5vdCBncmFudCBwZXJtaXNz\naW9uIHRvIHVzZSB0aGUgdHJhZGUKICAgICAgbmFtZXMsIHRyYWRlbWFya3Ms\nIHNlcnZpY2UgbWFya3MsIG9yIHByb2R1Y3QgbmFtZXMgb2YgdGhlIExpY2Vu\nc29yLAogICAgICBleGNlcHQgYXMgcmVxdWlyZWQgZm9yIHJlYXNvbmFibGUg\nYW5kIGN1c3RvbWFyeSB1c2UgaW4gZGVzY3JpYmluZyB0aGUKICAgICAgb3Jp\nZ2luIG9mIHRoZSBXb3JrIGFuZCByZXByb2R1Y2luZyB0aGUgY29udGVudCBv\nZiB0aGUgTk9USUNFIGZpbGUuCgogICA3LiBEaXNjbGFpbWVyIG9mIFdhcnJh\nbnR5LiBVbmxlc3MgcmVxdWlyZWQgYnkgYXBwbGljYWJsZSBsYXcgb3IKICAg\nICAgYWdyZWVkIHRvIGluIHdyaXRpbmcsIExpY2Vuc29yIHByb3ZpZGVzIHRo\nZSBXb3JrIChhbmQgZWFjaAogICAgICBDb250cmlidXRvciBwcm92aWRlcyBp\ndHMgQ29udHJpYnV0aW9ucykgb24gYW4gIkFTIElTIiBCQVNJUywKICAgICAg\nV0lUSE9VVCBXQVJSQU5USUVTIE9SIENPTkRJVElPTlMgT0YgQU5ZIEtJTkQs\nIGVpdGhlciBleHByZXNzIG9yCiAgICAgIGltcGxpZWQsIGluY2x1ZGluZywg\nd2l0aG91dCBsaW1pdGF0aW9uLCBhbnkgd2FycmFudGllcyBvciBjb25kaXRp\nb25zCiAgICAgIG9mIFRJVExFLCBOT04tSU5GUklOR0VNRU5ULCBNRVJDSEFO\nVEFCSUxJVFksIG9yIEZJVE5FU1MgRk9SIEEKICAgICAgUEFSVElDVUxBUiBQ\nVVJQT1NFLiBZb3UgYXJlIHNvbGVseSByZXNwb25zaWJsZSBmb3IgZGV0ZXJt\naW5pbmcgdGhlCiAgICAgIGFwcHJvcHJpYXRlbmVzcyBvZiB1c2luZyBvciBy\nZWRpc3RyaWJ1dGluZyB0aGUgV29yayBhbmQgYXNzdW1lIGFueQogICAgICBy\naXNrcyBhc3NvY2lhdGVkIHdpdGggWW91ciBleGVyY2lzZSBvZiBwZXJtaXNz\naW9ucyB1bmRlciB0aGlzIExpY2Vuc2UuCgogICA4LiBMaW1pdGF0aW9uIG9m\nIExpYWJpbGl0eS4gSW4gbm8gZXZlbnQgYW5kIHVuZGVyIG5vIGxlZ2FsIHRo\nZW9yeSwKICAgICAgd2hldGhlciBpbiB0b3J0IChpbmNsdWRpbmcgbmVnbGln\nZW5jZSksIGNvbnRyYWN0LCBvciBvdGhlcndpc2UsCiAgICAgIHVubGVzcyBy\nZXF1aXJlZCBieSBhcHBsaWNhYmxlIGxhdyAoc3VjaCBhcyBkZWxpYmVyYXRl\nIGFuZCBncm9zc2x5CiAgICAgIG5lZ2xpZ2VudCBhY3RzKSBvciBhZ3JlZWQg\ndG8gaW4gd3JpdGluZywgc2hhbGwgYW55IENvbnRyaWJ1dG9yIGJlCiAgICAg\nIGxpYWJsZSB0byBZb3UgZm9yIGRhbWFnZXMsIGluY2x1ZGluZyBhbnkgZGly\nZWN0LCBpbmRpcmVjdCwgc3BlY2lhbCwKICAgICAgaW5jaWRlbnRhbCwgb3Ig\nY29uc2VxdWVudGlhbCBkYW1hZ2VzIG9mIGFueSBjaGFyYWN0ZXIgYXJpc2lu\nZyBhcyBhCiAgICAgIHJlc3VsdCBvZiB0aGlzIExpY2Vuc2Ugb3Igb3V0IG9m\nIHRoZSB1c2Ugb3IgaW5hYmlsaXR5IHRvIHVzZSB0aGUKICAgICAgV29yayAo\naW5jbHVkaW5nIGJ1dCBub3QgbGltaXRlZCB0byBkYW1hZ2VzIGZvciBsb3Nz\nIG9mIGdvb2R3aWxsLAogICAgICB3b3JrIHN0b3BwYWdlLCBjb21wdXRlciBm\nYWlsdXJlIG9yIG1hbGZ1bmN0aW9uLCBvciBhbnkgYW5kIGFsbAogICAgICBv\ndGhlciBjb21tZXJjaWFsIGRhbWFnZXMgb3IgbG9zc2VzKSwgZXZlbiBpZiBz\ndWNoIENvbnRyaWJ1dG9yCiAgICAgIGhhcyBiZWVuIGFkdmlzZWQgb2YgdGhl\nIHBvc3NpYmlsaXR5IG9mIHN1Y2ggZGFtYWdlcy4KCiAgIDkuIEFjY2VwdGlu\nZyBXYXJyYW50eSBvciBBZGRpdGlvbmFsIExpYWJpbGl0eS4gV2hpbGUgcmVk\naXN0cmlidXRpbmcKICAgICAgdGhlIFdvcmsgb3IgRGVyaXZhdGl2ZSBXb3Jr\ncyB0aGVyZW9mLCBZb3UgbWF5IGNob29zZSB0byBvZmZlciwKICAgICAgYW5k\nIGNoYXJnZSBhIGZlZSBmb3IsIGFjY2VwdGFuY2Ugb2Ygc3VwcG9ydCwgd2Fy\ncmFudHksIGluZGVtbml0eSwKICAgICAgb3Igb3RoZXIgbGlhYmlsaXR5IG9i\nbGlnYXRpb25zIGFuZC9vciByaWdodHMgY29uc2lzdGVudCB3aXRoIHRoaXMK\nICAgICAgTGljZW5zZS4gSG93ZXZlciwgaW4gYWNjZXB0aW5nIHN1Y2ggb2Js\naWdhdGlvbnMsIFlvdSBtYXkgYWN0IG9ubHkKICAgICAgb24gWW91ciBvd24g\nYmVoYWxmIGFuZCBvbiBZb3VyIHNvbGUgcmVzcG9uc2liaWxpdHksIG5vdCBv\nbiBiZWhhbGYKICAgICAgb2YgYW55IG90aGVyIENvbnRyaWJ1dG9yLCBhbmQg\nb25seSBpZiBZb3UgYWdyZWUgdG8gaW5kZW1uaWZ5LAogICAgICBkZWZlbmQs\nIGFuZCBob2xkIGVhY2ggQ29udHJpYnV0b3IgaGFybWxlc3MgZm9yIGFueSBs\naWFiaWxpdHkKICAgICAgaW5jdXJyZWQgYnksIG9yIGNsYWltcyBhc3NlcnRl\nZCBhZ2FpbnN0LCBzdWNoIENvbnRyaWJ1dG9yIGJ5IHJlYXNvbgogICAgICBv\nZiB5b3VyIGFjY2VwdGluZyBhbnkgc3VjaCB3YXJyYW50eSBvciBhZGRpdGlv\nbmFsIGxpYWJpbGl0eS4KCiAgIEVORCBPRiBURVJNUyBBTkQgQ09ORElUSU9O\nUwoKICAgQVBQRU5ESVg6IEhvdyB0byBhcHBseSB0aGUgQXBhY2hlIExpY2Vu\nc2UgdG8geW91ciB3b3JrLgoKICAgICAgVG8gYXBwbHkgdGhlIEFwYWNoZSBM\naWNlbnNlIHRvIHlvdXIgd29yaywgYXR0YWNoIHRoZSBmb2xsb3dpbmcKICAg\nICAgYm9pbGVycGxhdGUgbm90aWNlLCB3aXRoIHRoZSBmaWVsZHMgZW5jbG9z\nZWQgYnkgYnJhY2tldHMgIltdIgogICAgICByZXBsYWNlZCB3aXRoIHlvdXIg\nb3duIGlkZW50aWZ5aW5nIGluZm9ybWF0aW9uLiAoRG9uJ3QgaW5jbHVkZQog\nICAgICB0aGUgYnJhY2tldHMhKSAgVGhlIHRleHQgc2hvdWxkIGJlIGVuY2xv\nc2VkIGluIHRoZSBhcHByb3ByaWF0ZQogICAgICBjb21tZW50IHN5bnRheCBm\nb3IgdGhlIGZpbGUgZm9ybWF0LiBXZSBhbHNvIHJlY29tbWVuZCB0aGF0IGEK\nICAgICAgZmlsZSBvciBjbGFzcyBuYW1lIGFuZCBkZXNjcmlwdGlvbiBvZiBw\ndXJwb3NlIGJlIGluY2x1ZGVkIG9uIHRoZQogICAgICBzYW1lICJwcmludGVk\nIHBhZ2UiIGFzIHRoZSBjb3B5cmlnaHQgbm90aWNlIGZvciBlYXNpZXIKICAg\nICAgaWRlbnRpZmljYXRpb24gd2l0aGluIHRoaXJkLXBhcnR5IGFyY2hpdmVz\nLgoKICAgQ29weXJpZ2h0IFsyMDI1XSBbQW5kcmFzIEJhY3NhaV0KCiAgIExp\nY2Vuc2VkIHVuZGVyIHRoZSBBcGFjaGUgTGljZW5zZSwgVmVyc2lvbiAyLjAg\nKHRoZSAiTGljZW5zZSIpOwogICB5b3UgbWF5IG5vdCB1c2UgdGhpcyBmaWxl\nIGV4Y2VwdCBpbiBjb21wbGlhbmNlIHdpdGggdGhlIExpY2Vuc2UuCiAgIFlv\ndSBtYXkgb2J0YWluIGEgY29weSBvZiB0aGUgTGljZW5zZSBhdAoKICAgICAg\nIGh0dHA6Ly93d3cuYXBhY2hlLm9yZy9saWNlbnNlcy9MSUNFTlNFLTIuMAoK\nICAgVW5sZXNzIHJlcXVpcmVkIGJ5IGFwcGxpY2FibGUgbGF3IG9yIGFncmVl\nZCB0byBpbiB3cml0aW5nLCBzb2Z0d2FyZQogICBkaXN0cmlidXRlZCB1bmRl\nciB0aGUgTGljZW5zZSBpcyBkaXN0cmlidXRlZCBvbiBhbiAiQVMgSVMiIEJB\nU0lTLAogICBXSVRIT1VUIFdBUlJBTlRJRVMgT1IgQ09ORElUSU9OUyBPRiBB\nTlkgS0lORCwgZWl0aGVyIGV4cHJlc3Mgb3IgaW1wbGllZC4KICAgU2VlIHRo\nZSBMaWNlbnNlIGZvciB0aGUgc3BlY2lmaWMgbGFuZ3VhZ2UgZ292ZXJuaW5n\nIHBlcm1pc3Npb25zIGFuZAogICBsaW1pdGF0aW9ucyB1bmRlciB0aGUgTGlj\nZW5zZS4=\n"
+      }
+    },
+    "license:Dokploy/dokploy": {
+      "url": "https://api.github.com/repos/Dokploy/dokploy/license",
+      "data": {
+        "html_url": "https://github.com/Dokploy/dokploy/blob/canary/LICENSE.MD",
+        "path": "LICENSE.MD",
+        "sha": "bcef8b36e7ba606844f3b9e268c832cc66391d09",
+        "download_url": "https://raw.githubusercontent.com/Dokploy/dokploy/canary/LICENSE.MD",
+        "license": {
+          "key": "other",
+          "name": "Other",
+          "spdx_id": "NOASSERTION",
+          "url": null,
+          "node_id": "MDc6TGljZW5zZTA="
+        },
+        "encoding": "base64",
+        "content": "Q29weXJpZ2h0IDIwMjYtcHJlc2VudCBEb2twbG95IFRlY2hub2xvZ3ksIElu\nYy4KClBvcnRpb25zIG9mIHRoaXMgc29mdHdhcmUgYXJlIGxpY2Vuc2VkIGFz\nIGZvbGxvd3M6CgoqIEFsbCBjb250ZW50IHRoYXQgcmVzaWRlcyB1bmRlciBh\nICIvcHJvcHJpZXRhcnkiIGRpcmVjdG9yeSBvZiB0aGlzIHJlcG9zaXRvcnks\nIGlmIHRoYXQgZGlyZWN0b3J5IGV4aXN0cywgaXMgbGljZW5zZWQgdW5kZXIg\ndGhlIGxpY2Vuc2UgZGVmaW5lZCBpbiAiTElDRU5TRV9QUk9QUklFVEFSWSIu\nCiogQ29udGVudCBvdXRzaWRlIG9mIHRoZSBhYm92ZSBtZW50aW9uZWQgZGly\nZWN0b3JpZXMgb3IgcmVzdHJpY3Rpb25zIGFib3ZlIGlzIGF2YWlsYWJsZSB1\nbmRlciB0aGUgIkFwYWNoZSBMaWNlbnNlIDIuMCIgbGljZW5zZSBhcyBkZWZp\nbmVkIGJlbG93LgoKIyMgQXBhY2hlIExpY2Vuc2UgMi4wCgpDb3B5cmlnaHQg\nMjAyNi1wcmVzZW50IERva3Bsb3kgVGVjaG5vbG9neSwgSW5jLgoKTGljZW5z\nZWQgdW5kZXIgdGhlIEFwYWNoZSBMaWNlbnNlLCBWZXJzaW9uIDIuMCAodGhl\nICJMaWNlbnNlIik7CnlvdSBtYXkgbm90IHVzZSB0aGlzIGZpbGUgZXhjZXB0\nIGluIGNvbXBsaWFuY2Ugd2l0aCB0aGUgTGljZW5zZS4KWW91IG1heSBvYnRh\naW4gYSBjb3B5IG9mIHRoZSBMaWNlbnNlIGF0CgogICAgaHR0cDovL3d3dy5h\ncGFjaGUub3JnL2xpY2Vuc2VzL0xJQ0VOU0UtMi4wCgpVbmxlc3MgcmVxdWly\nZWQgYnkgYXBwbGljYWJsZSBsYXcgb3IgYWdyZWVkIHRvIGluIHdyaXRpbmcs\nIHNvZnR3YXJlCmRpc3RyaWJ1dGVkIHVuZGVyIHRoZSBMaWNlbnNlIGlzIGRp\nc3RyaWJ1dGVkIG9uIGFuICJBUyBJUyIgQkFTSVMsCldJVEhPVVQgV0FSUkFO\nVElFUyBPUiBDT05ESVRJT05TIE9GIEFOWSBLSU5ELCBlaXRoZXIgZXhwcmVz\ncyBvciBpbXBsaWVkLgpTZWUgdGhlIExpY2Vuc2UgZm9yIHRoZSBzcGVjaWZp\nYyBsYW5ndWFnZSBnb3Zlcm5pbmcgcGVybWlzc2lvbnMgYW5kIGxpbWl0YXRp\nb25zIHVuZGVyIHRoZSBMaWNlbnNlLgoKCg==\n"
+      }
+    },
+    "license:caprover/caprover": {
+      "url": "https://api.github.com/repos/caprover/caprover/license",
+      "data": {
+        "html_url": "https://github.com/caprover/caprover/blob/master/LICENSE",
+        "path": "LICENSE",
+        "sha": "bb28cddc7cb051f692b105092a66064ba6226b45",
+        "download_url": "https://raw.githubusercontent.com/caprover/caprover/master/LICENSE",
+        "license": {
+          "key": "other",
+          "name": "Other",
+          "spdx_id": "NOASSERTION",
+          "url": null,
+          "node_id": "MDc6TGljZW5zZTA="
+        },
+        "encoding": "base64",
+        "content": "Q29weXJpZ2h0IDIwMTctMjAyNCBCaWdaZWUgVmVudHVyZXMgTExDCgpMaWNl\nbnNlZCB1bmRlciB0aGUgQXBhY2hlIExpY2Vuc2UsIFZlcnNpb24gMi4wICh0\naGUgIkxpY2Vuc2UiKTsKeW91IG1heSBub3QgdXNlIHRoaXMgZmlsZSBleGNl\ncHQgaW4gY29tcGxpYW5jZSB3aXRoIHRoZSBMaWNlbnNlLgpZb3UgbWF5IG9i\ndGFpbiBhIGNvcHkgb2YgdGhlIExpY2Vuc2UgYXQKCiAgICBodHRwOi8vd3d3\nLmFwYWNoZS5vcmcvbGljZW5zZXMvTElDRU5TRS0yLjAKClVubGVzcyByZXF1\naXJlZCBieSBhcHBsaWNhYmxlIGxhdyBvciBhZ3JlZWQgdG8gaW4gd3JpdGlu\nZywgc29mdHdhcmUKZGlzdHJpYnV0ZWQgdW5kZXIgdGhlIExpY2Vuc2UgaXMg\nZGlzdHJpYnV0ZWQgb24gYW4gIkFTIElTIiBCQVNJUywKV0lUSE9VVCBXQVJS\nQU5USUVTIE9SIENPTkRJVElPTlMgT0YgQU5ZIEtJTkQsIGVpdGhlciBleHBy\nZXNzIG9yIGltcGxpZWQuClNlZSB0aGUgTGljZW5zZSBmb3IgdGhlIHNwZWNp\nZmljIGxhbmd1YWdlIGdvdmVybmluZyBwZXJtaXNzaW9ucyBhbmQKbGltaXRh\ndGlvbnMgdW5kZXIgdGhlIExpY2Vuc2UuCgpBcHBlbmRpeDoKSW4gY2FzZSBv\nZiBhIGNvbmZsaWN0LCB0aGUgdGVybXMgb2YgdGhpcyBhcHBlbmRpeCBzdXBl\ncnNlZGUgdGhlIGdlbmVyYWwgYXBhY2hlIGxpY2Vuc2UuCgotICAgVW5sZXNz\nIHByb3ZpZGVkIHdpdGggYSB3cml0dGVuIGFncmVlbWVudCwgdGhlIHBhaWQg\nZmVhdHVyZXMgb2YgQ2FwUm92ZXIgKGFzIGEgc2VydmljZSkgY2Fubm90IGJl\nIG1vZGlmaWVkLgotICAgVW5sZXNzIHByb3ZpZGVkIHdpdGggYSB3cml0dGVu\nIGFncmVlbWVudCwgbm8gcGVyc29ucyBhcmUgcGVybWl0dGVkIHRvIHJlZGlz\ndHJpYnV0ZSBhbm90aGVyIHBhaWQgdmVyc2lvbiBvZiBDYXBSb3Zlci4KLSAg\nIEZ1cnRoZXJtb3JlLCBhbnkgbW9kaWZpY2F0aW9ucyBvZiBmcmVlIGZlYXR1\ncmVzIG9mIENhcFJvdmVyIHNob3VsZCBiZSBkaXN0cmlidXRlZCBhcyBmcmVl\nICYgb3BlbnNvdXJjZSBzb2Z0d2FyZS4KCklmIHlvdSBoYXZlIGFueSBxdWVz\ndGlvbnMsIHBsZWFzZSBmZWVsIGZyZWUgdG8gcmVhY2ggb3V0IHRvIHVzLgoK\nRm9yIHRlcm1zIGFuZCBjb25kaXRpb25zIG9mIHRoZSBzb2Z0d2FyZSBhbmQg\ndGhlIHNlcnZpY2UsIHBsZWFzZSBzZWUgVEVSTVNfQU5EX0NPTkRJVElPTlMu\nbWQK\n"
+      }
+    },
+    "license:dokku/dokku": {
+      "url": "https://api.github.com/repos/dokku/dokku/license",
+      "data": {
+        "html_url": "https://github.com/dokku/dokku/blob/master/LICENSE",
+        "path": "LICENSE",
+        "sha": "f600f8e8b30a8d9f794329822a392c6903bf53b4",
+        "download_url": "https://raw.githubusercontent.com/dokku/dokku/master/LICENSE",
+        "license": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        },
+        "encoding": "base64",
+        "content": "Q29weXJpZ2h0IChDKSAyMDE0IEplZmYgTGluZHNheQoKUGVybWlzc2lvbiBp\ncyBoZXJlYnkgZ3JhbnRlZCwgZnJlZSBvZiBjaGFyZ2UsIHRvIGFueSBwZXJz\nb24gb2J0YWluaW5nIGEgY29weSBvZiB0aGlzIHNvZnR3YXJlIGFuZCBhc3Nv\nY2lhdGVkIGRvY3VtZW50YXRpb24gZmlsZXMgKHRoZSAiU29mdHdhcmUiKSwg\ndG8gZGVhbCBpbiB0aGUgU29mdHdhcmUgd2l0aG91dCByZXN0cmljdGlvbiwg\naW5jbHVkaW5nIHdpdGhvdXQgbGltaXRhdGlvbiB0aGUgcmlnaHRzIHRvIHVz\nZSwgY29weSwgbW9kaWZ5LCBtZXJnZSwgcHVibGlzaCwgZGlzdHJpYnV0ZSwg\nc3VibGljZW5zZSwgYW5kL29yIHNlbGwgY29waWVzIG9mIHRoZSBTb2Z0d2Fy\nZSwgYW5kIHRvIHBlcm1pdCBwZXJzb25zIHRvIHdob20gdGhlIFNvZnR3YXJl\nIGlzIGZ1cm5pc2hlZCB0byBkbyBzbywgc3ViamVjdCB0byB0aGUgZm9sbG93\naW5nIGNvbmRpdGlvbnM6CgpUaGUgYWJvdmUgY29weXJpZ2h0IG5vdGljZSBh\nbmQgdGhpcyBwZXJtaXNzaW9uIG5vdGljZSBzaGFsbCBiZSBpbmNsdWRlZCBp\nbiBhbGwgY29waWVzIG9yIHN1YnN0YW50aWFsIHBvcnRpb25zIG9mIHRoZSBT\nb2Z0d2FyZS4KClRIRSBTT0ZUV0FSRSBJUyBQUk9WSURFRCAiQVMgSVMiLCBX\nSVRIT1VUIFdBUlJBTlRZIE9GIEFOWSBLSU5ELCBFWFBSRVNTIE9SIElNUExJ\nRUQsIElOQ0xVRElORyBCVVQgTk9UIExJTUlURUQgVE8gVEhFIFdBUlJBTlRJ\nRVMgT0YgTUVSQ0hBTlRBQklMSVRZLCBGSVRORVNTIEZPUiBBIFBBUlRJQ1VM\nQVIgUFVSUE9TRSBBTkQgTk9OSU5GUklOR0VNRU5ULiBJTiBOTyBFVkVOVCBT\nSEFMTCBUSEUgQVVUSE9SUyBPUiBDT1BZUklHSFQgSE9MREVSUyBCRSBMSUFC\nTEUgRk9SIEFOWSBDTEFJTSwgREFNQUdFUyBPUiBPVEhFUiBMSUFCSUxJVFks\nIFdIRVRIRVIgSU4gQU4gQUNUSU9OIE9GIENPTlRSQUNULCBUT1JUIE9SIE9U\nSEVSV0lTRSwgQVJJU0lORyBGUk9NLCBPVVQgT0YgT1IgSU4gQ09OTkVDVElP\nTiBXSVRIIFRIRSBTT0ZUV0FSRSBPUiBUSEUgVVNFIE9SIE9USEVSIERFQUxJ\nTkdTIElOIFRIRSBTT0ZUV0FSRS4K\n"
+      }
+    },
+    "license:basecamp/kamal": {
+      "url": "https://api.github.com/repos/basecamp/kamal/license",
+      "data": {
+        "html_url": "https://github.com/basecamp/kamal/blob/main/MIT-LICENSE",
+        "path": "MIT-LICENSE",
+        "sha": "a306f5572b0539c19921bfe10cbc53278dd6fff3",
+        "download_url": "https://raw.githubusercontent.com/basecamp/kamal/main/MIT-LICENSE",
+        "license": {
+          "key": "mit",
+          "name": "MIT License",
+          "spdx_id": "MIT",
+          "url": "https://api.github.com/licenses/mit",
+          "node_id": "MDc6TGljZW5zZTEz"
+        },
+        "encoding": "base64",
+        "content": "Q29weXJpZ2h0IChjKSAyMDIzIERhdmlkIEhlaW5lbWVpZXIgSGFuc3NvbgoK\nUGVybWlzc2lvbiBpcyBoZXJlYnkgZ3JhbnRlZCwgZnJlZSBvZiBjaGFyZ2Us\nIHRvIGFueSBwZXJzb24gb2J0YWluaW5nCmEgY29weSBvZiB0aGlzIHNvZnR3\nYXJlIGFuZCBhc3NvY2lhdGVkIGRvY3VtZW50YXRpb24gZmlsZXMgKHRoZQoi\nU29mdHdhcmUiKSwgdG8gZGVhbCBpbiB0aGUgU29mdHdhcmUgd2l0aG91dCBy\nZXN0cmljdGlvbiwgaW5jbHVkaW5nCndpdGhvdXQgbGltaXRhdGlvbiB0aGUg\ncmlnaHRzIHRvIHVzZSwgY29weSwgbW9kaWZ5LCBtZXJnZSwgcHVibGlzaCwK\nZGlzdHJpYnV0ZSwgc3VibGljZW5zZSwgYW5kL29yIHNlbGwgY29waWVzIG9m\nIHRoZSBTb2Z0d2FyZSwgYW5kIHRvCnBlcm1pdCBwZXJzb25zIHRvIHdob20g\ndGhlIFNvZnR3YXJlIGlzIGZ1cm5pc2hlZCB0byBkbyBzbywgc3ViamVjdCB0\nbwp0aGUgZm9sbG93aW5nIGNvbmRpdGlvbnM6CgpUaGUgYWJvdmUgY29weXJp\nZ2h0IG5vdGljZSBhbmQgdGhpcyBwZXJtaXNzaW9uIG5vdGljZSBzaGFsbCBi\nZQppbmNsdWRlZCBpbiBhbGwgY29waWVzIG9yIHN1YnN0YW50aWFsIHBvcnRp\nb25zIG9mIHRoZSBTb2Z0d2FyZS4KClRIRSBTT0ZUV0FSRSBJUyBQUk9WSURF\nRCAiQVMgSVMiLCBXSVRIT1VUIFdBUlJBTlRZIE9GIEFOWSBLSU5ELApFWFBS\nRVNTIE9SIElNUExJRUQsIElOQ0xVRElORyBCVVQgTk9UIExJTUlURUQgVE8g\nVEhFIFdBUlJBTlRJRVMgT0YKTUVSQ0hBTlRBQklMSVRZLCBGSVRORVNTIEZP\nUiBBIFBBUlRJQ1VMQVIgUFVSUE9TRSBBTkQKTk9OSU5GUklOR0VNRU5ULiBJ\nTiBOTyBFVkVOVCBTSEFMTCBUSEUgQVVUSE9SUyBPUiBDT1BZUklHSFQgSE9M\nREVSUyBCRQpMSUFCTEUgRk9SIEFOWSBDTEFJTSwgREFNQUdFUyBPUiBPVEhF\nUiBMSUFCSUxJVFksIFdIRVRIRVIgSU4gQU4gQUNUSU9OCk9GIENPTlRSQUNU\nLCBUT1JUIE9SIE9USEVSV0lTRSwgQVJJU0lORyBGUk9NLCBPVVQgT0YgT1Ig\nSU4gQ09OTkVDVElPTgpXSVRIIFRIRSBTT0ZUV0FSRSBPUiBUSEUgVVNFIE9S\nIE9USEVSIERFQUxJTkdTIElOIFRIRSBTT0ZUV0FSRS4K\n"
+      }
+    },
+    "issue:coollabsio/coolify#1996": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/1996",
+      "retrieved_at_utc": "2026-11-01T17:28:22.002576+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/1996",
+        "number": 1996,
+        "title": "[Bug]: Docker-compose deployments from repositories don't work if they need additional files",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-04-15T09:27:21Z",
+        "updated_at": "2024-10-01T01:29:52Z",
+        "closed_at": "2024-07-19T11:45:52Z",
+        "comments": 33,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/1996/reactions",
+          "total_count": 18,
+          "+1": 10,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 8
+        },
+        "body": "### Description\n\nSame as in issue #1805 \r\nIf you make a source from a repository and use Docker Compose build pack, it does not copy any files from the repository to the application folder besides docker-compose file.\r\nUsing Beta 258\r\nLooks like there were some fixes done in Beta 233, but that only started creating the directories referred to in the docker-compose file. It does not actually copy the files in the repository to the applications folder.\n\n### Minimal Reproduction (if possible, example repository)\n\nCreate new resource\r\nChoose Public Repository\r\nRepository URL: https://github.com/authelia/authelia/\r\nUse the following in general config:\r\na. Build Pack: Docker compose\r\nb. Raw Compose Deployment: True (Though I've tried that this behavior remains same even for raw compose deployment being false)\r\nc. Base Directory: /examples/compose/local/\r\nd. Docker Compose Location: /docker-compose.yml\r\nGo to the install location on disk: /data/coolify/applications/{YOUR_FOLDER}\r\nSee that only README and docker-compose.yml exists, not any other configuration needed. After beta 233, it creates the additional folders (e.g. traefik and authelia) in the application folder, but does not copy the files inside them from the source repository.\n\n### Exception or Error\n\n_No response_\n\n### Version\n\nv4.0.0-beta258"
+      }
+    },
+    "issue:coollabsio/coolify#2073": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/2073",
+      "retrieved_at_utc": "2026-11-01T17:28:21.991558+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/2073",
+        "number": 2073,
+        "title": "[Bug]: Healthcheck not working as expected",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-04-26T09:19:26Z",
+        "updated_at": "2024-11-26T01:28:27Z",
+        "closed_at": "2024-05-06T12:03:17Z",
+        "comments": 32,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/2073/reactions",
+          "total_count": 2,
+          "+1": 2,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Description\n\nAfter a longer email conversation with andras about health checks i want to track the last bugs around health-checks i have here. Thanks for all the help so far \ud83d\udc4d\ud83c\udffc\r\n\r\nBefore i had this configuration in my dockerfile:\r\n```\r\nHEALTHCHECK --interval=10s --timeout=3s --start-period=30s \\\r\n CMD curl -f http://localhost/healthz || exit 1\r\n```\r\n\r\nNow i have this configuration:\r\n\r\n![Bildschirmfoto 2024-04-26 um 11 01 05](https://github.com/coollabsio/coolify/assets/20899975/9cf4d73b-2eb7-4fa0-b866-e0746c53b693)\r\n\r\nThe two problems i have are:\r\n- It looks like the provided route is not called. When i look into the logs, i don't see any logs about that route. When i had the healthcheck in my dockerfile i could the the logs of the healthz route being called every 10 seconds\r\n- I'm unsure about the `start period`, because in my deployment logs the health check is performed immediately and the attempts are counted up. Is this value used?\r\n\r\nIn my health check i check the database connection. As a test i shut down the database. 5 minutes later the backend resource was still marked as \"healthy\" so i think the health check is not really executing \r\n\n\n### Minimal Reproduction (if possible, example repository)\n\nPlease let me know if you need a reproduction and what this should contain\n\n### Exception or Error\n\n_No response_\n\n### Version\n\nv4.0.0-beta.266"
+      }
+    },
+    "issue:coollabsio/coolify#2107": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/2107",
+      "retrieved_at_utc": "2026-11-01T17:28:22.003279+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/2107",
+        "number": 2107,
+        "title": "[Bug]: Docker deployment not considering environment variables",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-05-01T19:25:13Z",
+        "updated_at": "2026-01-07T01:30:03Z",
+        "closed_at": "2025-12-07T18:03:54Z",
+        "comments": 33,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/2107/reactions",
+          "total_count": 16,
+          "+1": 16,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Description\r\n\r\nI was using Dockerfile and Docker based deployment for one project. It worked properly as I expected when I first tried. Not exactly sure what happened, when I try the same thing after 2 days, it is failing health checks. I checked and it is failing to get the environment variables. Not sure what happened or if I m doing something. Please let me know if I m doing something wrong here. Quick response is appreciated. Thanks.\r\n\r\n### Minimal Reproduction (if possible, example repository)\r\n\r\n1. Add some environment variables in Coolify dashboard.\r\n2. Use a Dockerfile to deploy an app which uses these environment variables.\r\n3. Try to see if the deployment's health status becomes healthy and accesses the variables properly.\r\n\r\n### Exception or Error\r\n\r\nHealth check of the deployment is failed.\r\n\r\n### Version\r\n\r\nv4.0.0-beta.271"
+      }
+    },
+    "issue:coollabsio/coolify#2110": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/2110",
+      "retrieved_at_utc": "2026-11-01T17:28:21.984585+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/2110",
+        "number": 2110,
+        "title": "[Bug]: Unexplained High CPU Usage Spike in Coolify Following Deployment Attempt",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-05-02T03:27:28Z",
+        "updated_at": "2026-09-23T01:14:31Z",
+        "closed_at": "2026-08-13T12:42:02Z",
+        "comments": 160,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/2110/reactions",
+          "total_count": 30,
+          "+1": 30,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Description\r\nI have been running Coolify for 8 days with various services, encountering no prior issues. However, on the night of April 30th EST, I experienced a significant CPU usage spike starting around 11 PM, shortly after an unsuccessful attempt to deploy a React application. It is unclear whether this issue was directly related to the deployment failure, a potential attack, or another problem.\r\n\r\n### Expected Behavior\r\nCPU usage should remain stable, without significant spikes, particularly when no active deployments or heavy tasks are underway.\r\n\r\n### Actual Behavior\r\nCPU usage unexpectedly spiked to over 300% and remained high throughout the night, which was unusual and concerning, given the context.\r\n\r\n\r\n### Environment\r\n- Coolify version: 4.0.0-beta.271\r\n- Docker version: Docker version 24.0.9, build 2936816\r\n- Operating System: Ubuntu 22.04.4 LTS\r\n- Hardware: VPS with 4 CPUs and 16GB RAM\r\n\r\n### Additional Context\r\nThe sudden surge in CPU usage occurred post the deployment failure, but it is uncertain if the spike was a direct result of this event, a security issue, or another underlying problem. This incident warrants further investigation to prevent future occurrences.\r\n\r\nI already tried to restart my VPS 2 times, but the problem still insisted. \r\n\r\nI would appreciate any insights or troubleshooting steps you could recommend to help identify and resolve the root cause of this spike. Thank you for your assistance.\r\n\r\n### Minimal Reproduction (if possible, example repository)\r\n\r\n### Steps to Reproduce\r\n1. Set up and run Coolify with multiple services for over a week.\r\n2. Attempt to deploy a React app, which fails.\r\n3. Monitor CPU usage and observe an unexpected spike starting around 11 PM EST, continuing without additional user actions.\r\n\r\n### Exception or Error\r\n\r\n### Screenshots\r\n<img width=\"1028\" alt=\"Screenshot 2024-05-01 at 23 11 05\" src=\"https://github.com/coollabsio/coolify/assets/13715145/e8769d65-e523-46b6-8b78-323f2abaebb3\">\r\n<img width=\"1104\" alt=\"Screenshot 2024-05-01 at 23 11 33\" src=\"https://github.com/coollabsio/coolify/assets/13715145/0bfff713-22e7-4f5a-b14f-f306f49ef018\">\r\n\r\n### Version\r\n\r\n4.0.0-beta.271"
+      }
+    },
+    "issue:coollabsio/coolify#2679": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/2679",
+      "retrieved_at_utc": "2026-11-01T17:28:22.538718+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/2679",
+        "number": 2679,
+        "title": "[Bug]: Preview deployment of closed pull request still active",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-06-25T12:27:55Z",
+        "updated_at": "2026-03-14T01:29:49Z",
+        "closed_at": "2026-02-11T09:55:03Z",
+        "comments": 9,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/2679/reactions",
+          "total_count": 14,
+          "+1": 14,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Description\n\nPull request at times do not get deleted automatically when the PR gets closed.\n\n### Minimal Reproduction (if possible, example repository)\n\nNo reproduction method known\n\n### Exception or Error\n\n_No response_\n\n### Version\n\n~~v4.0.0-beta.304~~\nv4.0.0-beta.402"
+      }
+    },
+    "issue:coollabsio/coolify#3079": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/3079",
+      "retrieved_at_utc": "2026-11-01T17:28:22.542030+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/3079",
+        "number": 3079,
+        "title": "[Bug]: Environment (secrets) variables for Preview Deployments not working",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-08-14T09:02:41Z",
+        "updated_at": "2025-10-16T01:28:52Z",
+        "closed_at": "2025-09-15T10:48:27Z",
+        "comments": 72,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/3079/reactions",
+          "total_count": 9,
+          "+1": 9,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Description\n\n*No response*\n\n### Minimal Reproduction (if possible, example repository)\n\nConfigure Environment Variables:\n\nDefine the necessary environment variables (secrets) in your deployment settings for both production and preview environments.\nEnsure that these variables are correctly referenced in your code (e.g., process.env.SECRET_KEY).\n\nSet Up Preview Deployment:\n\ncreate preview deployments for branches other than main or master.\n\nTrigger a Preview Deployment:\n\nPush changes to a branch that will trigger a preview deployment.\n\nObserve the Issue:\n\nAccess the preview deployment and observe that the environment variables are either missing or not being correctly applied.\nExpected Behavior:\n\nThe preview deployment should correctly utilize the environment variables set for that environment.\n\nActual Behavior:\n Environment (secrets) variables for Preview Deployments not working\n\n### Exception or Error\n\n*No response*\n\n### Version\n\nv4.0.0-beta.323\n\n### Cloud?\n\n- [ ] Yes\n- [X] No"
+      }
+    },
+    "issue:coollabsio/coolify#3395": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/3395",
+      "retrieved_at_utc": "2026-11-01T17:28:22.544953+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/3395",
+        "number": 3395,
+        "title": "[Bug]: PullHelperImageJob failed with: Error response from daemon: toomanyrequests",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-09-11T18:30:29Z",
+        "updated_at": "2025-12-12T01:29:14Z",
+        "closed_at": "2025-11-11T11:26:32Z",
+        "comments": 40,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/3395/reactions",
+          "total_count": 4,
+          "+1": 4,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Description\r\n\r\nAfter upgrading Coolify, I'm receiving repeated error messages in my Discord notif channel. These errors indicate issues with pulling Docker images due to rate limiting. The errors specifically mention the PullHelperImageJob failing due to too many requests.\r\n\r\n### Minimal Reproduction (if possible, example repository)\r\n\r\nCan't tell exactly what is needed to get this error, but there are other mentions in Discord\r\n\r\n### Exception or Error\r\n\r\nPullHelperImageJob failed with: Error response from daemon: toomanyrequests: retry-after: 244.706\u00b5s, allowed: 44000/minute\r\nPullHelperImageJob failed with: Error response from daemon: toomanyrequests: retry-after: 385.552\u00b5s, allowed: 44000/minute\r\n\r\n### Version\r\n\r\nv4.0.0-beta.333\r\n\r\n### Cloud?\r\n\r\n- [ ] Yes\r\n- [X] No"
+      }
+    },
+    "issue:coollabsio/coolify#4483": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/4483",
+      "retrieved_at_utc": "2026-11-01T17:28:22.620062+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/4483",
+        "number": 4483,
+        "title": "[Bug]: constant Gateway Timeout errors after deploy",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-12-04T20:08:11Z",
+        "updated_at": "2025-12-11T01:29:05Z",
+        "closed_at": "2025-11-10T13:43:54Z",
+        "comments": 28,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/4483/reactions",
+          "total_count": 12,
+          "+1": 12,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Error Message and Logs\n\nI love the idea of Coolify, but I've been struggling with constant issues, I believe with the proxy. I have a fairly simple project consisting of:\n\n- Docker Compose app, pulled from Github\n  - Worker service (Node.js)\n  - Web service (Remix)\n- Redis\n- Trigger.dev\n\nWhenever I update the docker compose app, the proxy breaks and I get a \"Gateway Timeout\" when accessing the web service or the Trigger.dev web service. This also happens randomly, without a deploy. During the build process, there is relatively high CPU/RAM usage (80%), but the dashboard is still responsive.\n\nI'm pretty sure the issue is related to the proxy, as even when receiving timeout errors, if I connect to the Redis service I can see activity in the worker, and there are no errors reported in the logs for the webapps. I've checked several other reports and attempted suggested fixes (e.g swap file), but to no avail. \n\nIn the proxy logs, I get an error about traefik middleware but it seems to fix itself after some time. If I restart the proxy via the dashboard it fixes the issue and the app works again.\n\n<details>\n\n<summary>Traefik logs</summary>\n\n```\n2024-12-04T19:20:12.965534110Z time=\"2024-12-04T19:20:12Z\" level=info msg=\"Configuration loaded from flags.\"\n2024-12-04T19:20:16.799885382Z time=\"2024-12-04T19:20:16Z\" level=error msg=\"middleware \\\"traefik-basic-auth@file\\\" does not exist\" entryPointName=http routerName=traefik@docker\n2024-12-04T19:20:53.882862985Z time=\"2024-12-04T19:20:53Z\" level=error msg=\"middleware \\\"traefik-basic-auth@file\\\" does not exist\" entryPointName=http routerName=traefik@docker\n2024-12-04T19:20:59.056757628Z time=\"2024-12-04T19:20:59Z\" level=error msg=\"middleware \\\"traefik-basic-auth@file\\\" does not exist\" entryPointName=http routerName=traefik@docker\n2024-12-04T19:21:52.495695467Z time=\"2024-12-04T19:21:52Z\" level=error msg=\"middleware \\\"traefik-basic-auth@file\\\" does not exist\" entryPointName=http routerName=traefik@docker\n2024-12-04T19:33:49.057232866Z time=\"2024-12-04T19:33:49Z\" level=error msg=\"middleware \\\"traefik-basic-auth@file\\\" does not exist\" routerName=traefik@docker entryPointName=http\n2024-12-04T19:36:55.930408487Z time=\"2024-12-04T19:36:55Z\" level=error msg=\"middleware \\\"traefik-basic-auth@file\\\" does not exist\" entryPointName=http routerName=traefik@docker\n```\n\n</details>\n\nI'm using a wildcard SSL certificate with Cloudflare. This is my config:\n\n\n<details>\n\n<summary>Traefik config</summary>\n\n```yaml\nversion: '3.8'\nnetworks:\n  coolify:\n    external: true\nservices:\n  traefik:\n    container_name: coolify-proxy\n    image: 'traefik:v2.11'\n    restart: unless-stopped\n    environment:\n      - CF_DNS_API_TOKEN=<redacted>\n    extra_hosts:\n      - 'host.docker.internal:host-gateway'\n    networks:\n      - coolify\n    ports:\n      - '80:80'\n      - '443:443'\n      - '8080:8080'\n    healthcheck:\n      test: 'wget -qO- http://localhost:80/ping || exit 1'\n      interval: 4s\n      timeout: 2s\n      retries: 5\n    volumes:\n      - '/var/run/docker.sock:/var/run/docker.sock:ro'\n      - '/data/coolify/proxy:/traefik'\n    command:\n      - '--ping=true'\n      - '--ping.entrypoint=http'\n      - '--api.dashboard=true'\n      - '--api.insecure=false'\n      - '--entrypoints.http.address=:80'\n      - '--entrypoints.https.address=:443'\n      - '--entrypoints.http.http.encodequerysemicolons=true'\n      - '--entrypoints.https.http.encodequerysemicolons=true'\n      - '--providers.docker.exposedbydefault=false'\n      - '--providers.file.directory=/traefik/dynamic/'\n      - '--providers.file.watch=true'\n      - '--certificatesresolvers.letsencrypt.acme.httpchallenge=true'\n      - '--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http'\n      - '--certificatesresolvers.letsencrypt.acme.dnschallenge.provider=cloudflare'\n      - '--certificatesresolvers.letsencrypt.acme.dnschallenge.delaybeforecheck=0'\n      - '--certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json'\n      - '--providers.docker=true'\n    labels:\n      - traefik.enable=true\n      - traefik.http.routers.traefik.entrypoints=http\n      - traefik.http.routers.traefik.middlewares=traefik-basic-auth@file\n      - traefik.http.routers.traefik.service=api@internal\n      - traefik.http.routers.traefik.tls.certresolver=letsencrypt\n      - traefik.http.routers.traefik.tls.domains[0].main=my.domain.com\n      - traefik.http.routers.traefik.tls.domains[0].sans=*.my.domain.com\n      - traefik.http.services.traefik.loadbalancer.server.port=8080\n      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https\n      - traefik.http.middlewares.gzip.compress=true\n```\n\n</details>\n\nsyslog is also constantly spammed with logs, which appear to be related to networking but I don't know enough about docker internals to make much sense of them. \n\n\n<details>\n\n<summary>syslog</summary>\n\n```log\n2024-12-04T19:18:28.226388+00:00 vps-7e5e2926 systemd[1]: docker-4ec2401dc4bc7cd8a52587adc3bfcd21b0e0f5beedd1dfd7960f62e86ddb8ae2.scope: Consumed 6.899s CPU time.\n2024-12-04T19:18:28.231819+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:18:28.231047529Z\" level=error msg=\"collecting stats for container /isksgosk0sgcgk0o8cgscsw8: no metrics received\"\n2024-12-04T19:18:28.251238+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:18:28.250766522Z\" level=info msg=\"shim disconnected\" id=4ec2401dc4bc7cd8a52587adc3bfcd21b0e0f5beedd1dfd7960f62e86ddb8ae2 namespace=moby\n2024-12-04T19:18:28.251445+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:18:28.250825639Z\" level=warning msg=\"cleaning up after shim disconnected\" id=4ec2401dc4bc7cd8a52587adc3bfcd21b0e0f5beedd1dfd7960f62e86ddb8ae2 namespace=moby\n2024-12-04T19:18:28.251580+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:18:28.250837958Z\" level=info msg=\"cleaning up dead shim\" namespace=moby\n2024-12-04T19:18:28.251999+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:18:28.250762171Z\" level=info msg=\"ignoring event\" container=4ec2401dc4bc7cd8a52587adc3bfcd21b0e0f5beedd1dfd7960f62e86ddb8ae2 module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2024-12-04T19:18:28.270486+00:00 vps-7e5e2926 systemd-networkd[731]: veth9d9f407: Gained IPv6LL\n2024-12-04T19:18:28.294994+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 8(veth7199654) entered disabled state\n2024-12-04T19:18:28.295020+00:00 vps-7e5e2926 kernel: vetha5dd815: renamed from eth0\n2024-12-04T19:18:28.296228+00:00 vps-7e5e2926 systemd-networkd[731]: veth7199654: Lost carrier\n2024-12-04T19:18:28.324343+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 8(veth7199654) entered disabled state\n2024-12-04T19:18:28.324599+00:00 vps-7e5e2926 systemd-networkd[731]: veth7199654: Link DOWN\n2024-12-04T19:18:28.324971+00:00 vps-7e5e2926 kernel: veth7199654 (unregistering): left allmulticast mode\n2024-12-04T19:18:28.324981+00:00 vps-7e5e2926 kernel: veth7199654 (unregistering): left promiscuous mode\n2024-12-04T19:18:28.324983+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 8(veth7199654) entered disabled state\n2024-12-04T19:18:28.357286+00:00 vps-7e5e2926 systemd[1]: var-lib-docker-overlay2-a2ddb666a622a9921080ddb96cf0b088d2a8f8d8ecf63a967a4b56d772ff00a4-merged.mount: Deactivated successfully.\n2024-12-04T19:18:28.376557+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:18:28.376261707Z\" level=error msg=\"error removing container\" container=4ec2401dc4bc7cd8a52587adc3bfcd21b0e0f5beedd1dfd7960f62e86ddb8ae2 error=\"removal of container 4ec2401dc4bc7cd8a52587adc3bfcd21b0e0f5beedd1dfd7960f62e86ddb8ae2 is already in progress\"\n2024-12-04T19:18:44.577291+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:18:44 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:18:44.790026+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:18:44 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:19:22.319212+00:00 vps-7e5e2926 systemd[1]: docker-e9ffbcaa5bb20de8c7eacc6aec1ace0077e180a45e9cd8bee0f4e78aa1a96299.scope: Deactivated successfully.\n2024-12-04T19:19:22.319649+00:00 vps-7e5e2926 systemd[1]: docker-e9ffbcaa5bb20de8c7eacc6aec1ace0077e180a45e9cd8bee0f4e78aa1a96299.scope: Consumed 3min 23.212s CPU time.\n2024-12-04T19:19:22.346909+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:19:22.346167138Z\" level=info msg=\"shim disconnected\" id=e9ffbcaa5bb20de8c7eacc6aec1ace0077e180a45e9cd8bee0f4e78aa1a96299 namespace=moby\n2024-12-04T19:19:22.347202+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:19:22.346274385Z\" level=warning msg=\"cleaning up after shim disconnected\" id=e9ffbcaa5bb20de8c7eacc6aec1ace0077e180a45e9cd8bee0f4e78aa1a96299 namespace=moby\n2024-12-04T19:19:22.347335+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:19:22.346295232Z\" level=info msg=\"cleaning up dead shim\" namespace=moby\n2024-12-04T19:19:22.347747+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:19:22.346849692Z\" level=info msg=\"ignoring event\" container=e9ffbcaa5bb20de8c7eacc6aec1ace0077e180a45e9cd8bee0f4e78aa1a96299 module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2024-12-04T19:19:22.370704+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:19:22.370534899Z\" level=warning msg=\"ShouldRestart failed, container will not be restarted\" container=e9ffbcaa5bb20de8c7eacc6aec1ace0077e180a45e9cd8bee0f4e78aa1a96299 daemonShuttingDown=false error=\"restart canceled\" execDuration=3h27m6.136644066s exitStatus=\"{137 2024-12-04 19:19:22.324762765 +0000 UTC}\" hasBeenManuallyStopped=true restartCount=0\n2024-12-04T19:19:22.611026+00:00 vps-7e5e2926 kernel: veth8b23585: renamed from eth0\n2024-12-04T19:19:22.630019+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth7290253) entered disabled state\n2024-12-04T19:19:22.631822+00:00 vps-7e5e2926 systemd-networkd[731]: veth7290253: Lost carrier\n2024-12-04T19:19:22.720143+00:00 vps-7e5e2926 systemd-networkd[731]: veth7290253: Link DOWN\n2024-12-04T19:19:22.719973+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth7290253) entered disabled state\n2024-12-04T19:19:22.720971+00:00 vps-7e5e2926 kernel: veth7290253 (unregistering): left allmulticast mode\n2024-12-04T19:19:22.720984+00:00 vps-7e5e2926 kernel: veth7290253 (unregistering): left promiscuous mode\n2024-12-04T19:19:22.720986+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth7290253) entered disabled state\n2024-12-04T19:19:22.929554+00:00 vps-7e5e2926 systemd-networkd[731]: vethd994b7c: Lost carrier\n2024-12-04T19:19:22.929983+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethd994b7c) entered disabled state\n2024-12-04T19:19:22.930003+00:00 vps-7e5e2926 kernel: veth3018fd2: renamed from eth3\n2024-12-04T19:19:23.044566+00:00 vps-7e5e2926 systemd-networkd[731]: vethd994b7c: Link DOWN\n2024-12-04T19:19:23.044964+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethd994b7c) entered disabled state\n2024-12-04T19:19:23.046008+00:00 vps-7e5e2926 kernel: vethd994b7c (unregistering): left allmulticast mode\n2024-12-04T19:19:23.046025+00:00 vps-7e5e2926 kernel: vethd994b7c (unregistering): left promiscuous mode\n2024-12-04T19:19:23.046028+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethd994b7c) entered disabled state\n2024-12-04T19:19:23.247861+00:00 vps-7e5e2926 systemd-networkd[731]: vethcbc78fc: Lost carrier\n2024-12-04T19:19:23.248039+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(vethcbc78fc) entered disabled state\n2024-12-04T19:19:23.248045+00:00 vps-7e5e2926 kernel: vethb00bb76: renamed from eth2\n2024-12-04T19:19:23.362125+00:00 vps-7e5e2926 systemd-networkd[731]: vethcbc78fc: Link DOWN\n2024-12-04T19:19:23.362964+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(vethcbc78fc) entered disabled state\n2024-12-04T19:19:23.364020+00:00 vps-7e5e2926 kernel: vethcbc78fc (unregistering): left allmulticast mode\n2024-12-04T19:19:23.364035+00:00 vps-7e5e2926 kernel: vethcbc78fc (unregistering): left promiscuous mode\n2024-12-04T19:19:23.364037+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(vethcbc78fc) entered disabled state\n2024-12-04T19:19:23.600981+00:00 vps-7e5e2926 kernel: vethf635925: renamed from eth6\n2024-12-04T19:19:23.618979+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(veth657aa98) entered disabled state\n2024-12-04T19:19:23.620168+00:00 vps-7e5e2926 systemd-networkd[731]: veth657aa98: Lost carrier\n2024-12-04T19:19:23.704812+00:00 vps-7e5e2926 systemd-networkd[731]: veth657aa98: Link DOWN\n2024-12-04T19:19:23.705987+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(veth657aa98) entered disabled state\n2024-12-04T19:19:23.706990+00:00 vps-7e5e2926 kernel: veth657aa98 (unregistering): left allmulticast mode\n2024-12-04T19:19:23.707007+00:00 vps-7e5e2926 kernel: veth657aa98 (unregistering): left promiscuous mode\n2024-12-04T19:19:23.707009+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(veth657aa98) entered disabled state\n2024-12-04T19:19:23.919986+00:00 vps-7e5e2926 kernel: veth60a1158: renamed from eth5\n2024-12-04T19:19:23.941985+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(veth0cf4c60) entered disabled state\n2024-12-04T19:19:23.942025+00:00 vps-7e5e2926 systemd-networkd[731]: veth0cf4c60: Lost carrier\n2024-12-04T19:19:24.035219+00:00 vps-7e5e2926 systemd-networkd[731]: veth0cf4c60: Link DOWN\n2024-12-04T19:19:24.036042+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(veth0cf4c60) entered disabled state\n2024-12-04T19:19:24.036978+00:00 vps-7e5e2926 kernel: veth0cf4c60 (unregistering): left allmulticast mode\n2024-12-04T19:19:24.036991+00:00 vps-7e5e2926 kernel: veth0cf4c60 (unregistering): left promiscuous mode\n2024-12-04T19:19:24.036992+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(veth0cf4c60) entered disabled state\n2024-12-04T19:19:24.265996+00:00 vps-7e5e2926 kernel: veth54dc68e: renamed from eth1\n2024-12-04T19:19:24.275688+00:00 vps-7e5e2926 systemd-networkd[731]: vethcc2b892: Lost carrier\n2024-12-04T19:19:24.275986+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethcc2b892) entered disabled state\n2024-12-04T19:19:24.365319+00:00 vps-7e5e2926 systemd-networkd[731]: vethcc2b892: Link DOWN\n2024-12-04T19:19:24.366645+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethcc2b892) entered disabled state\n2024-12-04T19:19:24.368029+00:00 vps-7e5e2926 kernel: vethcc2b892 (unregistering): left allmulticast mode\n2024-12-04T19:19:24.368038+00:00 vps-7e5e2926 kernel: vethcc2b892 (unregistering): left promiscuous mode\n2024-12-04T19:19:24.368040+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethcc2b892) entered disabled state\n2024-12-04T19:19:24.599067+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(vethfa886ea) entered disabled state\n2024-12-04T19:19:24.599092+00:00 vps-7e5e2926 kernel: vethf4ee088: renamed from eth4\n2024-12-04T19:19:24.599183+00:00 vps-7e5e2926 systemd-networkd[731]: vethfa886ea: Lost carrier\n2024-12-04T19:19:24.616234+00:00 vps-7e5e2926 systemd-networkd[731]: vethfa886ea: Link DOWN\n2024-12-04T19:19:24.617027+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(vethfa886ea) entered disabled state\n2024-12-04T19:19:24.618112+00:00 vps-7e5e2926 kernel: vethfa886ea (unregistering): left allmulticast mode\n2024-12-04T19:19:24.618133+00:00 vps-7e5e2926 kernel: vethfa886ea (unregistering): left promiscuous mode\n2024-12-04T19:19:24.618136+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(vethfa886ea) entered disabled state\n2024-12-04T19:19:24.631371+00:00 vps-7e5e2926 systemd-networkd[731]: br-f3e8025ee8f6: Lost carrier\n2024-12-04T19:19:24.646038+00:00 vps-7e5e2926 systemd[1]: var-lib-docker-overlay2-899bdb16ae1d1fb4fd55e9e1dc041940efaadbf322689d2f2f3981de10451ddf-merged.mount: Deactivated successfully.\n2024-12-04T19:19:49.927255+00:00 vps-7e5e2926 systemd[1]: docker-65d74b6718c1601a4f8befe9afef863dcc81e851f55ebf274a932d1e27385e67.scope: Deactivated successfully.\n2024-12-04T19:19:49.927505+00:00 vps-7e5e2926 systemd[1]: docker-65d74b6718c1601a4f8befe9afef863dcc81e851f55ebf274a932d1e27385e67.scope: Consumed 5.657s CPU time.\n2024-12-04T19:19:49.955315+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:19:49.954792396Z\" level=info msg=\"shim disconnected\" id=65d74b6718c1601a4f8befe9afef863dcc81e851f55ebf274a932d1e27385e67 namespace=moby\n2024-12-04T19:19:49.955550+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:19:49.954880763Z\" level=warning msg=\"cleaning up after shim disconnected\" id=65d74b6718c1601a4f8befe9afef863dcc81e851f55ebf274a932d1e27385e67 namespace=moby\n2024-12-04T19:19:49.955655+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:19:49.954908285Z\" level=info msg=\"cleaning up dead shim\" namespace=moby\n2024-12-04T19:19:49.956112+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:19:49.955301762Z\" level=info msg=\"ignoring event\" container=65d74b6718c1601a4f8befe9afef863dcc81e851f55ebf274a932d1e27385e67 module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2024-12-04T19:19:49.988072+00:00 vps-7e5e2926 systemd[1]: var-lib-docker-overlay2-da3581541e013b309eab38c1fcc85fb31326d9c78f63171d1d72615e54e3f7f3-merged.mount: Deactivated successfully.\n2024-12-04T19:20:00.164162+00:00 vps-7e5e2926 systemd[1]: Starting sysstat-collect.service - system activity accounting tool...\n2024-12-04T19:20:00.200618+00:00 vps-7e5e2926 systemd[1]: sysstat-collect.service: Deactivated successfully.\n2024-12-04T19:20:00.201035+00:00 vps-7e5e2926 systemd[1]: Finished sysstat-collect.service - system activity accounting tool.\n2024-12-04T19:20:11.742428+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:20:11.741712998Z\" level=info msg=\"Container failed to exit within 10s of signal 3 - using the force\" container=1abc638d864b9d3ec1feca54c0a8e69ec608c636cffdc97feed13c4f7fc61c2d spanID=150bfef29317b2f7 traceID=cd6368e1880ddd26e164b7f893af1309\n2024-12-04T19:20:11.792232+00:00 vps-7e5e2926 systemd[1]: docker-1abc638d864b9d3ec1feca54c0a8e69ec608c636cffdc97feed13c4f7fc61c2d.scope: Deactivated successfully.\n2024-12-04T19:20:11.792575+00:00 vps-7e5e2926 systemd[1]: docker-1abc638d864b9d3ec1feca54c0a8e69ec608c636cffdc97feed13c4f7fc61c2d.scope: Consumed 1min 50.348s CPU time.\n2024-12-04T19:20:11.814459+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:11.813097656Z\" level=info msg=\"shim disconnected\" id=1abc638d864b9d3ec1feca54c0a8e69ec608c636cffdc97feed13c4f7fc61c2d namespace=moby\n2024-12-04T19:20:11.814591+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:11.813207096Z\" level=warning msg=\"cleaning up after shim disconnected\" id=1abc638d864b9d3ec1feca54c0a8e69ec608c636cffdc97feed13c4f7fc61c2d namespace=moby\n2024-12-04T19:20:11.814671+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:11.813225794Z\" level=info msg=\"cleaning up dead shim\" namespace=moby\n2024-12-04T19:20:11.814744+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:20:11.813887948Z\" level=info msg=\"ignoring event\" container=1abc638d864b9d3ec1feca54c0a8e69ec608c636cffdc97feed13c4f7fc61c2d module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2024-12-04T19:20:11.837261+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:20:11.837123828Z\" level=warning msg=\"ShouldRestart failed, container will not be restarted\" container=1abc638d864b9d3ec1feca54c0a8e69ec608c636cffdc97feed13c4f7fc61c2d daemonShuttingDown=false error=\"restart canceled\" execDuration=3h27m9.67880209s exitStatus=\"{137 2024-12-04 19:20:11.796562843 +0000 UTC}\" hasBeenManuallyStopped=true restartCount=0\n2024-12-04T19:20:11.927547+00:00 vps-7e5e2926 kernel: vetha7712c1: renamed from eth0\n2024-12-04T19:20:11.944970+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(veth26bffcd) entered disabled state\n2024-12-04T19:20:11.945145+00:00 vps-7e5e2926 systemd-networkd[731]: veth26bffcd: Lost carrier\n2024-12-04T19:20:11.963005+00:00 vps-7e5e2926 systemd-networkd[731]: veth26bffcd: Link DOWN\n2024-12-04T19:20:11.964037+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(veth26bffcd) entered disabled state\n2024-12-04T19:20:11.965014+00:00 vps-7e5e2926 kernel: veth26bffcd (unregistering): left allmulticast mode\n2024-12-04T19:20:11.965034+00:00 vps-7e5e2926 kernel: veth26bffcd (unregistering): left promiscuous mode\n2024-12-04T19:20:11.965037+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(veth26bffcd) entered disabled state\n2024-12-04T19:20:12.072988+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth8bb1559) entered blocking state\n2024-12-04T19:20:12.073007+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth8bb1559) entered disabled state\n2024-12-04T19:20:12.073008+00:00 vps-7e5e2926 kernel: veth8bb1559: entered allmulticast mode\n2024-12-04T19:20:12.075816+00:00 vps-7e5e2926 systemd-networkd[731]: veth8bb1559: Link UP\n2024-12-04T19:20:12.075973+00:00 vps-7e5e2926 kernel: veth8bb1559: entered promiscuous mode\n2024-12-04T19:20:12.084887+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:20:12.084763918Z\" level=info msg=\"No non-localhost DNS nameservers are left in resolv.conf. Using default external servers\"\n2024-12-04T19:20:12.089797+00:00 vps-7e5e2926 systemd[1]: var-lib-docker-overlay2-096b350214b67bbfc5c25956e30f6af1f5b5a6adac201aa48738b97871b9026f-merged.mount: Deactivated successfully.\n2024-12-04T19:20:12.202309+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:12.201852803Z\" level=info msg=\"loading plugin \\\"io.containerd.event.v1.publisher\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.event.v1\n2024-12-04T19:20:12.202419+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:12.201961523Z\" level=info msg=\"loading plugin \\\"io.containerd.internal.v1.shutdown\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.internal.v1\n2024-12-04T19:20:12.202455+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:12.201984433Z\" level=info msg=\"loading plugin \\\"io.containerd.ttrpc.v1.task\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.ttrpc.v1\n2024-12-04T19:20:12.202484+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:12.202118120Z\" level=info msg=\"loading plugin \\\"io.containerd.ttrpc.v1.pause\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.ttrpc.v1\n2024-12-04T19:20:12.221740+00:00 vps-7e5e2926 systemd[1]: Started docker-6b27b200841420b56d0f2dec0695c051c2c5d94b313a1dd4399715511cef1a14.scope - libcontainer container 6b27b200841420b56d0f2dec0695c051c2c5d94b313a1dd4399715511cef1a14.\n2024-12-04T19:20:12.336979+00:00 vps-7e5e2926 kernel: eth0: renamed from veth7b8892f\n2024-12-04T19:20:12.348662+00:00 vps-7e5e2926 systemd-networkd[731]: veth8bb1559: Gained carrier\n2024-12-04T19:20:12.348975+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth8bb1559) entered blocking state\n2024-12-04T19:20:12.348988+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth8bb1559) entered forwarding state\n2024-12-04T19:20:12.510032+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethe82cf32) entered blocking state\n2024-12-04T19:20:12.510049+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethe82cf32) entered disabled state\n2024-12-04T19:20:12.510050+00:00 vps-7e5e2926 kernel: vethe82cf32: entered allmulticast mode\n2024-12-04T19:20:12.510964+00:00 vps-7e5e2926 kernel: vethe82cf32: entered promiscuous mode\n2024-12-04T19:20:12.511248+00:00 vps-7e5e2926 systemd-networkd[731]: vethe82cf32: Link UP\n2024-12-04T19:20:12.532312+00:00 vps-7e5e2926 kernel: eth1: renamed from veth6f1abdd\n2024-12-04T19:20:12.544021+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethe82cf32) entered blocking state\n2024-12-04T19:20:12.544054+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethe82cf32) entered forwarding state\n2024-12-04T19:20:12.544284+00:00 vps-7e5e2926 systemd-networkd[731]: vethe82cf32: Gained carrier\n2024-12-04T19:20:12.609596+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth76536bc) entered blocking state\n2024-12-04T19:20:12.609613+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth76536bc) entered disabled state\n2024-12-04T19:20:12.609614+00:00 vps-7e5e2926 kernel: veth76536bc: entered allmulticast mode\n2024-12-04T19:20:12.609615+00:00 vps-7e5e2926 kernel: veth76536bc: entered promiscuous mode\n2024-12-04T19:20:12.609995+00:00 vps-7e5e2926 systemd-networkd[731]: veth76536bc: Link UP\n2024-12-04T19:20:12.621024+00:00 vps-7e5e2926 kernel: eth2: renamed from veth25546ef\n2024-12-04T19:20:12.627968+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth76536bc) entered blocking state\n2024-12-04T19:20:12.627997+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth76536bc) entered forwarding state\n2024-12-04T19:20:12.627867+00:00 vps-7e5e2926 systemd-networkd[731]: veth76536bc: Gained carrier\n2024-12-04T19:20:12.684050+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethc67f8f2) entered blocking state\n2024-12-04T19:20:12.684079+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethc67f8f2) entered disabled state\n2024-12-04T19:20:12.684082+00:00 vps-7e5e2926 kernel: vethc67f8f2: entered allmulticast mode\n2024-12-04T19:20:12.684084+00:00 vps-7e5e2926 kernel: vethc67f8f2: entered promiscuous mode\n2024-12-04T19:20:12.684334+00:00 vps-7e5e2926 systemd-networkd[731]: vethc67f8f2: Link UP\n2024-12-04T19:20:12.704013+00:00 vps-7e5e2926 kernel: eth3: renamed from veth132c020\n2024-12-04T19:20:12.712028+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethc67f8f2) entered blocking state\n2024-12-04T19:20:12.712043+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethc67f8f2) entered forwarding state\n2024-12-04T19:20:12.712256+00:00 vps-7e5e2926 systemd-networkd[731]: vethc67f8f2: Gained carrier\n2024-12-04T19:20:12.767012+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(veth3242f57) entered blocking state\n2024-12-04T19:20:12.767033+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(veth3242f57) entered disabled state\n2024-12-04T19:20:12.767035+00:00 vps-7e5e2926 kernel: veth3242f57: entered allmulticast mode\n2024-12-04T19:20:12.767037+00:00 vps-7e5e2926 kernel: veth3242f57: entered promiscuous mode\n2024-12-04T19:20:12.768573+00:00 vps-7e5e2926 systemd-networkd[731]: veth3242f57: Link UP\n2024-12-04T19:20:12.782976+00:00 vps-7e5e2926 kernel: eth4: renamed from vethb1093ad\n2024-12-04T19:20:12.791297+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(veth3242f57) entered blocking state\n2024-12-04T19:20:12.791315+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(veth3242f57) entered forwarding state\n2024-12-04T19:20:12.791490+00:00 vps-7e5e2926 systemd-networkd[731]: veth3242f57: Gained carrier\n2024-12-04T19:20:12.792232+00:00 vps-7e5e2926 systemd-networkd[731]: br-f3e8025ee8f6: Gained carrier\n2024-12-04T19:20:12.856977+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vetha6cc000) entered blocking state\n2024-12-04T19:20:12.856999+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vetha6cc000) entered disabled state\n2024-12-04T19:20:12.857001+00:00 vps-7e5e2926 kernel: vetha6cc000: entered allmulticast mode\n2024-12-04T19:20:12.857003+00:00 vps-7e5e2926 kernel: vetha6cc000: entered promiscuous mode\n2024-12-04T19:20:12.859739+00:00 vps-7e5e2926 systemd-networkd[731]: vetha6cc000: Link UP\n2024-12-04T19:20:12.872964+00:00 vps-7e5e2926 kernel: eth5: renamed from veth9a470ec\n2024-12-04T19:20:12.885992+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vetha6cc000) entered blocking state\n2024-12-04T19:20:12.886013+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vetha6cc000) entered forwarding state\n2024-12-04T19:20:12.887229+00:00 vps-7e5e2926 systemd-networkd[731]: vetha6cc000: Gained carrier\n2024-12-04T19:20:12.957121+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(veth203346b) entered blocking state\n2024-12-04T19:20:12.957143+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(veth203346b) entered disabled state\n2024-12-04T19:20:12.957145+00:00 vps-7e5e2926 kernel: veth203346b: entered allmulticast mode\n2024-12-04T19:20:12.957147+00:00 vps-7e5e2926 kernel: veth203346b: entered promiscuous mode\n2024-12-04T19:20:12.960656+00:00 vps-7e5e2926 systemd-networkd[731]: veth203346b: Link UP\n2024-12-04T19:20:12.974051+00:00 vps-7e5e2926 kernel: eth6: renamed from veth7a83b12\n2024-12-04T19:20:12.985007+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(veth203346b) entered blocking state\n2024-12-04T19:20:12.985029+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(veth203346b) entered forwarding state\n2024-12-04T19:20:12.986391+00:00 vps-7e5e2926 systemd-networkd[731]: veth203346b: Gained carrier\n2024-12-04T19:20:13.144552+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:20:13 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:20:13.807089+00:00 vps-7e5e2926 systemd-networkd[731]: vethe82cf32: Gained IPv6LL\n2024-12-04T19:20:13.935706+00:00 vps-7e5e2926 systemd-networkd[731]: veth76536bc: Gained IPv6LL\n2024-12-04T19:20:14.190711+00:00 vps-7e5e2926 systemd-networkd[731]: veth8bb1559: Gained IPv6LL\n2024-12-04T19:20:14.382706+00:00 vps-7e5e2926 systemd-networkd[731]: veth3242f57: Gained IPv6LL\n2024-12-04T19:20:14.574517+00:00 vps-7e5e2926 systemd-networkd[731]: vethc67f8f2: Gained IPv6LL\n2024-12-04T19:20:14.575215+00:00 vps-7e5e2926 systemd-networkd[731]: vetha6cc000: Gained IPv6LL\n2024-12-04T19:20:14.638391+00:00 vps-7e5e2926 systemd-networkd[731]: veth203346b: Gained IPv6LL\n2024-12-04T19:20:53.380924+00:00 vps-7e5e2926 systemd[1]: var-lib-docker-overlay2-89988271a8048acbcd55c33c83bc49d6d5d31c88551c4c64575157d93507a390\\x2dinit-merged.mount: Deactivated successfully.\n2024-12-04T19:20:53.399566+00:00 vps-7e5e2926 systemd-networkd[731]: vethea95bd9: Link UP\n2024-12-04T19:20:53.399996+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(vethea95bd9) entered blocking state\n2024-12-04T19:20:53.400011+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(vethea95bd9) entered disabled state\n2024-12-04T19:20:53.400013+00:00 vps-7e5e2926 kernel: vethea95bd9: entered allmulticast mode\n2024-12-04T19:20:53.400015+00:00 vps-7e5e2926 kernel: vethea95bd9: entered promiscuous mode\n2024-12-04T19:20:53.405975+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:20:53.405609436Z\" level=info msg=\"No non-localhost DNS nameservers are left in resolv.conf. Using default external servers\"\n2024-12-04T19:20:53.470185+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:53.469609504Z\" level=info msg=\"loading plugin \\\"io.containerd.event.v1.publisher\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.event.v1\n2024-12-04T19:20:53.470312+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:53.469685844Z\" level=info msg=\"loading plugin \\\"io.containerd.internal.v1.shutdown\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.internal.v1\n2024-12-04T19:20:53.470353+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:53.469701655Z\" level=info msg=\"loading plugin \\\"io.containerd.ttrpc.v1.task\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.ttrpc.v1\n2024-12-04T19:20:53.470399+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:20:53.469812523Z\" level=info msg=\"loading plugin \\\"io.containerd.ttrpc.v1.pause\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.ttrpc.v1\n2024-12-04T19:20:53.489919+00:00 vps-7e5e2926 systemd[1]: Started docker-c12c670e8bb8eb45118a4af854dddbd36203b055561b478631d0ed24a4655cb7.scope - libcontainer container c12c670e8bb8eb45118a4af854dddbd36203b055561b478631d0ed24a4655cb7.\n2024-12-04T19:20:53.622985+00:00 vps-7e5e2926 kernel: eth0: renamed from veth6c39aae\n2024-12-04T19:20:53.633987+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(vethea95bd9) entered blocking state\n2024-12-04T19:20:53.634012+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(vethea95bd9) entered forwarding state\n2024-12-04T19:20:53.634397+00:00 vps-7e5e2926 systemd-networkd[731]: vethea95bd9: Gained carrier\n2024-12-04T19:20:54.766854+00:00 vps-7e5e2926 systemd-networkd[731]: vethea95bd9: Gained IPv6LL\n2024-12-04T19:21:52.223210+00:00 vps-7e5e2926 systemd[1]: docker-c93ad616e8c7c8fb4a9e6eff0df2a343d04530572fb519833211ded79bef7c09.scope: Deactivated successfully.\n2024-12-04T19:21:52.223615+00:00 vps-7e5e2926 systemd[1]: docker-c93ad616e8c7c8fb4a9e6eff0df2a343d04530572fb519833211ded79bef7c09.scope: Consumed 10.890s CPU time.\n2024-12-04T19:21:52.253836+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:21:52.253195755Z\" level=info msg=\"shim disconnected\" id=c93ad616e8c7c8fb4a9e6eff0df2a343d04530572fb519833211ded79bef7c09 namespace=moby\n2024-12-04T19:21:52.254267+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:21:52.253282896Z\" level=warning msg=\"cleaning up after shim disconnected\" id=c93ad616e8c7c8fb4a9e6eff0df2a343d04530572fb519833211ded79bef7c09 namespace=moby\n2024-12-04T19:21:52.254597+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:21:52.253302384Z\" level=info msg=\"cleaning up dead shim\" namespace=moby\n2024-12-04T19:21:52.255059+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:21:52.254405218Z\" level=info msg=\"ignoring event\" container=c93ad616e8c7c8fb4a9e6eff0df2a343d04530572fb519833211ded79bef7c09 module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2024-12-04T19:21:52.290787+00:00 vps-7e5e2926 systemd[1]: var-lib-docker-overlay2-782926c1a7b0df98fef6e9b2b5121f84b76b9a96f5e4cac1fe7c0fb4f57b6fc8-merged.mount: Deactivated successfully.\n2024-12-04T19:25:01.529645+00:00 vps-7e5e2926 CRON[2200460]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)\n2024-12-04T19:30:00.599711+00:00 vps-7e5e2926 systemd[1]: Starting sysstat-collect.service - system activity accounting tool...\n2024-12-04T19:30:00.617996+00:00 vps-7e5e2926 systemd[1]: sysstat-collect.service: Deactivated successfully.\n2024-12-04T19:30:00.618311+00:00 vps-7e5e2926 systemd[1]: Finished sysstat-collect.service - system activity accounting tool.\n2024-12-04T19:33:48.670136+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:33:48.669405930Z\" level=info msg=\"loading plugin \\\"io.containerd.event.v1.publisher\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.event.v1\n2024-12-04T19:33:48.670578+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:33:48.670393301Z\" level=info msg=\"loading plugin \\\"io.containerd.internal.v1.shutdown\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.internal.v1\n2024-12-04T19:33:48.670727+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:33:48.670451827Z\" level=info msg=\"loading plugin \\\"io.containerd.ttrpc.v1.task\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.ttrpc.v1\n2024-12-04T19:33:48.670879+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:33:48.670641251Z\" level=info msg=\"loading plugin \\\"io.containerd.ttrpc.v1.pause\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.ttrpc.v1\n2024-12-04T19:33:48.689581+00:00 vps-7e5e2926 systemd[1]: Started docker-8fe500c075db79749b43e378a5ade8ab45b49560191ba20a12bcfb6e83dc285c.scope - libcontainer container 8fe500c075db79749b43e378a5ade8ab45b49560191ba20a12bcfb6e83dc285c.\n2024-12-04T19:35:01.543015+00:00 vps-7e5e2926 CRON[2261634]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)\n2024-12-04T19:36:55.449475+00:00 vps-7e5e2926 systemd[1]: docker-8fe500c075db79749b43e378a5ade8ab45b49560191ba20a12bcfb6e83dc285c.scope: Deactivated successfully.\n2024-12-04T19:36:55.449641+00:00 vps-7e5e2926 systemd[1]: docker-8fe500c075db79749b43e378a5ade8ab45b49560191ba20a12bcfb6e83dc285c.scope: Consumed 8.844s CPU time.\n2024-12-04T19:36:55.467633+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:36:55.467092310Z\" level=info msg=\"shim disconnected\" id=8fe500c075db79749b43e378a5ade8ab45b49560191ba20a12bcfb6e83dc285c namespace=moby\n2024-12-04T19:36:55.467730+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:36:55.467191180Z\" level=warning msg=\"cleaning up after shim disconnected\" id=8fe500c075db79749b43e378a5ade8ab45b49560191ba20a12bcfb6e83dc285c namespace=moby\n2024-12-04T19:36:55.467761+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:36:55.467213829Z\" level=info msg=\"cleaning up dead shim\" namespace=moby\n2024-12-04T19:36:55.468077+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:36:55.467182506Z\" level=info msg=\"ignoring event\" container=8fe500c075db79749b43e378a5ade8ab45b49560191ba20a12bcfb6e83dc285c module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2024-12-04T19:36:55.501782+00:00 vps-7e5e2926 systemd[1]: var-lib-docker-overlay2-63ee351e65a825b177c36609b46b3a4d2cf968152d0d07b980eac664f4b20660-merged.mount: Deactivated successfully.\n2024-12-04T19:40:00.180136+00:00 vps-7e5e2926 systemd[1]: Starting sysstat-collect.service - system activity accounting tool...\n2024-12-04T19:40:00.203152+00:00 vps-7e5e2926 systemd[1]: sysstat-collect.service: Deactivated successfully.\n2024-12-04T19:40:00.203534+00:00 vps-7e5e2926 systemd[1]: Finished sysstat-collect.service - system activity accounting tool.\n2024-12-04T19:45:01.554603+00:00 vps-7e5e2926 CRON[2323151]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)\n2024-12-04T19:47:49.567360+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:47:49 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:47:50.127351+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:47:50 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:47:56.937142+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:47:56 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:50:00.216086+00:00 vps-7e5e2926 systemd[1]: Starting sysstat-collect.service - system activity accounting tool...\n2024-12-04T19:50:00.225856+00:00 vps-7e5e2926 systemd[1]: sysstat-collect.service: Deactivated successfully.\n2024-12-04T19:50:00.226202+00:00 vps-7e5e2926 systemd[1]: Finished sysstat-collect.service - system activity accounting tool.\n2024-12-04T19:51:44.223272+00:00 vps-7e5e2926 systemd[1]: Starting fwupd-refresh.service - Refresh fwupd metadata and update motd...\n2024-12-04T19:51:44.389911+00:00 vps-7e5e2926 dbus-daemon[781]: [system] Activating via systemd: service name='org.freedesktop.fwupd' unit='fwupd.service' requested by ':1.242' (uid=990 pid=2364390 comm=\"/usr/bin/fwupdmgr refresh\" label=\"unconfined\")\n2024-12-04T19:51:44.417548+00:00 vps-7e5e2926 systemd[1]: Starting fwupd.service - Firmware update daemon...\n2024-12-04T19:51:44.704369+00:00 vps-7e5e2926 fwupd[2364397]: 19:51:44.703 FuMain               Daemon ready for requests (locale C.UTF-8)\n2024-12-04T19:51:44.705640+00:00 vps-7e5e2926 dbus-daemon[781]: [system] Successfully activated service 'org.freedesktop.fwupd'\n2024-12-04T19:51:44.706003+00:00 vps-7e5e2926 systemd[1]: Started fwupd.service - Firmware update daemon.\n2024-12-04T19:51:44.765729+00:00 vps-7e5e2926 systemd[1]: fwupd-refresh.service: Deactivated successfully.\n2024-12-04T19:51:44.766089+00:00 vps-7e5e2926 systemd[1]: Finished fwupd-refresh.service - Refresh fwupd metadata and update motd.\n2024-12-04T19:54:15.673355+00:00 vps-7e5e2926 systemd[1]: docker-6b27b200841420b56d0f2dec0695c051c2c5d94b313a1dd4399715511cef1a14.scope: Deactivated successfully.\n2024-12-04T19:54:15.674017+00:00 vps-7e5e2926 systemd[1]: docker-6b27b200841420b56d0f2dec0695c051c2c5d94b313a1dd4399715511cef1a14.scope: Consumed 33.086s CPU time.\n2024-12-04T19:54:15.699116+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:54:15.698559586Z\" level=info msg=\"ignoring event\" container=6b27b200841420b56d0f2dec0695c051c2c5d94b313a1dd4399715511cef1a14 module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2024-12-04T19:54:15.699646+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:54:15.698780623Z\" level=info msg=\"shim disconnected\" id=6b27b200841420b56d0f2dec0695c051c2c5d94b313a1dd4399715511cef1a14 namespace=moby\n2024-12-04T19:54:15.699713+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:54:15.699273467Z\" level=warning msg=\"cleaning up after shim disconnected\" id=6b27b200841420b56d0f2dec0695c051c2c5d94b313a1dd4399715511cef1a14 namespace=moby\n2024-12-04T19:54:15.699774+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:54:15.699292070Z\" level=info msg=\"cleaning up dead shim\" namespace=moby\n2024-12-04T19:54:15.720534+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:54:15.720371980Z\" level=warning msg=\"ShouldRestart failed, container will not be restarted\" container=6b27b200841420b56d0f2dec0695c051c2c5d94b313a1dd4399715511cef1a14 daemonShuttingDown=false error=\"restart canceled\" execDuration=34m3.314111446s exitStatus=\"{137 2024-12-04 19:54:15.675066652 +0000 UTC}\" hasBeenManuallyStopped=true restartCount=0\n2024-12-04T19:54:15.929056+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth8bb1559) entered disabled state\n2024-12-04T19:54:15.929084+00:00 vps-7e5e2926 kernel: veth7b8892f: renamed from eth0\n2024-12-04T19:54:15.929850+00:00 vps-7e5e2926 systemd-networkd[731]: veth8bb1559: Lost carrier\n2024-12-04T19:54:16.038813+00:00 vps-7e5e2926 systemd-networkd[731]: veth8bb1559: Link DOWN\n2024-12-04T19:54:16.040967+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth8bb1559) entered disabled state\n2024-12-04T19:54:16.041989+00:00 vps-7e5e2926 kernel: veth8bb1559 (unregistering): left allmulticast mode\n2024-12-04T19:54:16.042003+00:00 vps-7e5e2926 kernel: veth8bb1559 (unregistering): left promiscuous mode\n2024-12-04T19:54:16.042006+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth8bb1559) entered disabled state\n2024-12-04T19:54:16.225971+00:00 vps-7e5e2926 kernel: veth132c020: renamed from eth3\n2024-12-04T19:54:16.248013+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethc67f8f2) entered disabled state\n2024-12-04T19:54:16.249160+00:00 vps-7e5e2926 systemd-networkd[731]: vethc67f8f2: Lost carrier\n2024-12-04T19:54:16.338319+00:00 vps-7e5e2926 systemd-networkd[731]: vethc67f8f2: Link DOWN\n2024-12-04T19:54:16.338973+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethc67f8f2) entered disabled state\n2024-12-04T19:54:16.340975+00:00 vps-7e5e2926 kernel: vethc67f8f2 (unregistering): left allmulticast mode\n2024-12-04T19:54:16.340990+00:00 vps-7e5e2926 kernel: vethc67f8f2 (unregistering): left promiscuous mode\n2024-12-04T19:54:16.340992+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethc67f8f2) entered disabled state\n2024-12-04T19:54:16.542995+00:00 vps-7e5e2926 kernel: veth25546ef: renamed from eth2\n2024-12-04T19:54:16.553711+00:00 vps-7e5e2926 systemd-networkd[731]: veth76536bc: Lost carrier\n2024-12-04T19:54:16.553987+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth76536bc) entered disabled state\n2024-12-04T19:54:16.656649+00:00 vps-7e5e2926 systemd-networkd[731]: veth76536bc: Link DOWN\n2024-12-04T19:54:16.656997+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth76536bc) entered disabled state\n2024-12-04T19:54:16.658976+00:00 vps-7e5e2926 kernel: veth76536bc (unregistering): left allmulticast mode\n2024-12-04T19:54:16.658996+00:00 vps-7e5e2926 kernel: veth76536bc (unregistering): left promiscuous mode\n2024-12-04T19:54:16.658998+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth76536bc) entered disabled state\n2024-12-04T19:54:16.865974+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(veth203346b) entered disabled state\n2024-12-04T19:54:16.865990+00:00 vps-7e5e2926 kernel: veth7a83b12: renamed from eth6\n2024-12-04T19:54:16.866219+00:00 vps-7e5e2926 systemd-networkd[731]: veth203346b: Lost carrier\n2024-12-04T19:54:16.966831+00:00 vps-7e5e2926 systemd-networkd[731]: veth203346b: Link DOWN\n2024-12-04T19:54:16.967982+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(veth203346b) entered disabled state\n2024-12-04T19:54:16.967996+00:00 vps-7e5e2926 kernel: veth203346b (unregistering): left allmulticast mode\n2024-12-04T19:54:16.967999+00:00 vps-7e5e2926 kernel: veth203346b (unregistering): left promiscuous mode\n2024-12-04T19:54:16.968001+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(veth203346b) entered disabled state\n2024-12-04T19:54:17.164977+00:00 vps-7e5e2926 kernel: veth9a470ec: renamed from eth5\n2024-12-04T19:54:17.192989+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vetha6cc000) entered disabled state\n2024-12-04T19:54:17.193219+00:00 vps-7e5e2926 systemd-networkd[731]: vetha6cc000: Lost carrier\n2024-12-04T19:54:17.282591+00:00 vps-7e5e2926 systemd-networkd[731]: vetha6cc000: Link DOWN\n2024-12-04T19:54:17.282960+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vetha6cc000) entered disabled state\n2024-12-04T19:54:17.283980+00:00 vps-7e5e2926 kernel: vetha6cc000 (unregistering): left allmulticast mode\n2024-12-04T19:54:17.283995+00:00 vps-7e5e2926 kernel: vetha6cc000 (unregistering): left promiscuous mode\n2024-12-04T19:54:17.283997+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vetha6cc000) entered disabled state\n2024-12-04T19:54:17.481986+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethe82cf32) entered disabled state\n2024-12-04T19:54:17.482297+00:00 vps-7e5e2926 systemd-networkd[731]: vethe82cf32: Lost carrier\n2024-12-04T19:54:17.482987+00:00 vps-7e5e2926 kernel: veth6f1abdd: renamed from eth1\n2024-12-04T19:54:17.597640+00:00 vps-7e5e2926 systemd-networkd[731]: vethe82cf32: Link DOWN\n2024-12-04T19:54:17.598979+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethe82cf32) entered disabled state\n2024-12-04T19:54:17.598998+00:00 vps-7e5e2926 kernel: vethe82cf32 (unregistering): left allmulticast mode\n2024-12-04T19:54:17.599001+00:00 vps-7e5e2926 kernel: vethe82cf32 (unregistering): left promiscuous mode\n2024-12-04T19:54:17.599003+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethe82cf32) entered disabled state\n2024-12-04T19:54:17.785018+00:00 vps-7e5e2926 kernel: vethb1093ad: renamed from eth4\n2024-12-04T19:54:17.794684+00:00 vps-7e5e2926 systemd-networkd[731]: veth3242f57: Lost carrier\n2024-12-04T19:54:17.794998+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(veth3242f57) entered disabled state\n2024-12-04T19:54:17.812571+00:00 vps-7e5e2926 systemd-networkd[731]: veth3242f57: Link DOWN\n2024-12-04T19:54:17.812002+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(veth3242f57) entered disabled state\n2024-12-04T19:54:17.815001+00:00 vps-7e5e2926 kernel: veth3242f57 (unregistering): left allmulticast mode\n2024-12-04T19:54:17.815011+00:00 vps-7e5e2926 kernel: veth3242f57 (unregistering): left promiscuous mode\n2024-12-04T19:54:17.815012+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(veth3242f57) entered disabled state\n2024-12-04T19:54:17.942789+00:00 vps-7e5e2926 systemd-networkd[731]: br-f3e8025ee8f6: Lost carrier\n2024-12-04T19:54:18.632176+00:00 vps-7e5e2926 systemd[1]: var-lib-docker-overlay2-437f3e159ebed1276280a55b1d499491c67873e1aa7f68974e62ae3e49109dfe-merged.mount: Deactivated successfully.\n2024-12-04T19:55:01.572658+00:00 vps-7e5e2926 CRON[2384992]: (root) CMD (command -v debian-sa1 > /dev/null && debian-sa1 1 1)\n2024-12-04T19:55:11.501719+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:55:11.500493686Z\" level=info msg=\"Container failed to exit within 10s of signal 3 - using the force\" container=c12c670e8bb8eb45118a4af854dddbd36203b055561b478631d0ed24a4655cb7 spanID=6c91048801839c07 traceID=3ab4634552cec985ab3009b1d0ac313c\n2024-12-04T19:55:11.545414+00:00 vps-7e5e2926 systemd[1]: docker-c12c670e8bb8eb45118a4af854dddbd36203b055561b478631d0ed24a4655cb7.scope: Deactivated successfully.\n2024-12-04T19:55:11.545707+00:00 vps-7e5e2926 systemd[1]: docker-c12c670e8bb8eb45118a4af854dddbd36203b055561b478631d0ed24a4655cb7.scope: Consumed 17.705s CPU time.\n2024-12-04T19:55:11.570349+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:55:11.570191607Z\" level=info msg=\"ignoring event\" container=c12c670e8bb8eb45118a4af854dddbd36203b055561b478631d0ed24a4655cb7 module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2024-12-04T19:55:11.571467+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:55:11.570949605Z\" level=info msg=\"shim disconnected\" id=c12c670e8bb8eb45118a4af854dddbd36203b055561b478631d0ed24a4655cb7 namespace=moby\n2024-12-04T19:55:11.571549+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:55:11.571030750Z\" level=warning msg=\"cleaning up after shim disconnected\" id=c12c670e8bb8eb45118a4af854dddbd36203b055561b478631d0ed24a4655cb7 namespace=moby\n2024-12-04T19:55:11.571622+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:55:11.571047654Z\" level=info msg=\"cleaning up dead shim\" namespace=moby\n2024-12-04T19:55:11.592069+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:55:11.591910253Z\" level=warning msg=\"ShouldRestart failed, container will not be restarted\" container=c12c670e8bb8eb45118a4af854dddbd36203b055561b478631d0ed24a4655cb7 daemonShuttingDown=false error=\"restart canceled\" execDuration=34m17.904283006s exitStatus=\"{137 2024-12-04 19:55:11.547423551 +0000 UTC}\" hasBeenManuallyStopped=true restartCount=0\n2024-12-04T19:55:11.657971+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(vethea95bd9) entered disabled state\n2024-12-04T19:55:11.657997+00:00 vps-7e5e2926 kernel: veth6c39aae: renamed from eth0\n2024-12-04T19:55:11.658019+00:00 vps-7e5e2926 systemd-networkd[731]: vethea95bd9: Lost carrier\n2024-12-04T19:55:11.679244+00:00 vps-7e5e2926 systemd-networkd[731]: vethea95bd9: Link DOWN\n2024-12-04T19:55:11.680005+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(vethea95bd9) entered disabled state\n2024-12-04T19:55:11.680989+00:00 vps-7e5e2926 kernel: vethea95bd9 (unregistering): left allmulticast mode\n2024-12-04T19:55:11.681007+00:00 vps-7e5e2926 kernel: vethea95bd9 (unregistering): left promiscuous mode\n2024-12-04T19:55:11.681009+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(vethea95bd9) entered disabled state\n2024-12-04T19:55:11.786983+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth398b230) entered blocking state\n2024-12-04T19:55:11.787005+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth398b230) entered disabled state\n2024-12-04T19:55:11.787007+00:00 vps-7e5e2926 kernel: veth398b230: entered allmulticast mode\n2024-12-04T19:55:11.787008+00:00 vps-7e5e2926 kernel: veth398b230: entered promiscuous mode\n2024-12-04T19:55:11.791868+00:00 vps-7e5e2926 systemd-networkd[731]: veth398b230: Link UP\n2024-12-04T19:55:11.794286+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:55:11.793906068Z\" level=info msg=\"No non-localhost DNS nameservers are left in resolv.conf. Using default external servers\"\n2024-12-04T19:55:11.906499+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:55:11.905972913Z\" level=info msg=\"loading plugin \\\"io.containerd.event.v1.publisher\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.event.v1\n2024-12-04T19:55:11.906633+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:55:11.906129963Z\" level=info msg=\"loading plugin \\\"io.containerd.internal.v1.shutdown\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.internal.v1\n2024-12-04T19:55:11.906673+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:55:11.906156043Z\" level=info msg=\"loading plugin \\\"io.containerd.ttrpc.v1.task\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.ttrpc.v1\n2024-12-04T19:55:11.906717+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:55:11.906348102Z\" level=info msg=\"loading plugin \\\"io.containerd.ttrpc.v1.pause\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.ttrpc.v1\n2024-12-04T19:55:11.936249+00:00 vps-7e5e2926 systemd[1]: Started docker-5793726cf2505faa165727e54f6096f5cc2d1244f2ecb6fd0a3fbf9472d6d095.scope - libcontainer container 5793726cf2505faa165727e54f6096f5cc2d1244f2ecb6fd0a3fbf9472d6d095.\n2024-12-04T19:55:12.073013+00:00 vps-7e5e2926 kernel: eth0: renamed from veth99f4502\n2024-12-04T19:55:12.084749+00:00 vps-7e5e2926 systemd-networkd[731]: veth398b230: Gained carrier\n2024-12-04T19:55:12.084978+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth398b230) entered blocking state\n2024-12-04T19:55:12.084983+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 2(veth398b230) entered forwarding state\n2024-12-04T19:55:12.257970+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethda4f90f) entered blocking state\n2024-12-04T19:55:12.258002+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethda4f90f) entered disabled state\n2024-12-04T19:55:12.258005+00:00 vps-7e5e2926 kernel: vethda4f90f: entered allmulticast mode\n2024-12-04T19:55:12.258766+00:00 vps-7e5e2926 systemd-networkd[731]: vethda4f90f: Link UP\n2024-12-04T19:55:12.258984+00:00 vps-7e5e2926 kernel: vethda4f90f: entered promiscuous mode\n2024-12-04T19:55:12.276978+00:00 vps-7e5e2926 kernel: eth1: renamed from veth07fcbb4\n2024-12-04T19:55:12.285554+00:00 vps-7e5e2926 systemd-networkd[731]: vethda4f90f: Gained carrier\n2024-12-04T19:55:12.285983+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethda4f90f) entered blocking state\n2024-12-04T19:55:12.285997+00:00 vps-7e5e2926 kernel: br-a169fb4ecb2d: port 2(vethda4f90f) entered forwarding state\n2024-12-04T19:55:12.286640+00:00 vps-7e5e2926 systemd[1]: var-lib-docker-overlay2-89988271a8048acbcd55c33c83bc49d6d5d31c88551c4c64575157d93507a390-merged.mount: Deactivated successfully.\n2024-12-04T19:55:12.346998+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth48d06fb) entered blocking state\n2024-12-04T19:55:12.347024+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth48d06fb) entered disabled state\n2024-12-04T19:55:12.347027+00:00 vps-7e5e2926 kernel: veth48d06fb: entered allmulticast mode\n2024-12-04T19:55:12.347030+00:00 vps-7e5e2926 kernel: veth48d06fb: entered promiscuous mode\n2024-12-04T19:55:12.349634+00:00 vps-7e5e2926 systemd-networkd[731]: veth48d06fb: Link UP\n2024-12-04T19:55:12.358982+00:00 vps-7e5e2926 kernel: eth2: renamed from veth187ae5b\n2024-12-04T19:55:12.371886+00:00 vps-7e5e2926 systemd-networkd[731]: veth48d06fb: Gained carrier\n2024-12-04T19:55:12.372174+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth48d06fb) entered blocking state\n2024-12-04T19:55:12.372190+00:00 vps-7e5e2926 kernel: br-271e27166569: port 3(veth48d06fb) entered forwarding state\n2024-12-04T19:55:12.433242+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethe477cc2) entered blocking state\n2024-12-04T19:55:12.433261+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethe477cc2) entered disabled state\n2024-12-04T19:55:12.433263+00:00 vps-7e5e2926 kernel: vethe477cc2: entered allmulticast mode\n2024-12-04T19:55:12.433264+00:00 vps-7e5e2926 kernel: vethe477cc2: entered promiscuous mode\n2024-12-04T19:55:12.436427+00:00 vps-7e5e2926 systemd-networkd[731]: vethe477cc2: Link UP\n2024-12-04T19:55:12.449983+00:00 vps-7e5e2926 kernel: eth3: renamed from veth1ba48cc\n2024-12-04T19:55:12.460088+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethe477cc2) entered blocking state\n2024-12-04T19:55:12.460108+00:00 vps-7e5e2926 kernel: br-a647de2fc3a6: port 1(vethe477cc2) entered forwarding state\n2024-12-04T19:55:12.460342+00:00 vps-7e5e2926 systemd-networkd[731]: vethe477cc2: Gained carrier\n2024-12-04T19:55:12.464076+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:55:12 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:55:12.531981+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(vetha860ba1) entered blocking state\n2024-12-04T19:55:12.532002+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(vetha860ba1) entered disabled state\n2024-12-04T19:55:12.532004+00:00 vps-7e5e2926 kernel: vetha860ba1: entered allmulticast mode\n2024-12-04T19:55:12.532005+00:00 vps-7e5e2926 kernel: vetha860ba1: entered promiscuous mode\n2024-12-04T19:55:12.532703+00:00 vps-7e5e2926 systemd-networkd[731]: vetha860ba1: Link UP\n2024-12-04T19:55:12.551992+00:00 vps-7e5e2926 kernel: eth4: renamed from veth1ad1cc8\n2024-12-04T19:55:12.559457+00:00 vps-7e5e2926 systemd-networkd[731]: vetha860ba1: Gained carrier\n2024-12-04T19:55:12.559998+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(vetha860ba1) entered blocking state\n2024-12-04T19:55:12.560010+00:00 vps-7e5e2926 kernel: br-f3e8025ee8f6: port 1(vetha860ba1) entered forwarding state\n2024-12-04T19:55:12.560150+00:00 vps-7e5e2926 systemd-networkd[731]: br-f3e8025ee8f6: Gained carrier\n2024-12-04T19:55:12.618973+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vethcf10c7a) entered blocking state\n2024-12-04T19:55:12.618995+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vethcf10c7a) entered disabled state\n2024-12-04T19:55:12.618997+00:00 vps-7e5e2926 kernel: vethcf10c7a: entered allmulticast mode\n2024-12-04T19:55:12.618999+00:00 vps-7e5e2926 kernel: vethcf10c7a: entered promiscuous mode\n2024-12-04T19:55:12.620218+00:00 vps-7e5e2926 systemd-networkd[731]: vethcf10c7a: Link UP\n2024-12-04T19:55:12.634021+00:00 vps-7e5e2926 kernel: eth5: renamed from veth8997d0e\n2024-12-04T19:55:12.640964+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vethcf10c7a) entered blocking state\n2024-12-04T19:55:12.640980+00:00 vps-7e5e2926 kernel: br-5293f7445041: port 7(vethcf10c7a) entered forwarding state\n2024-12-04T19:55:12.642258+00:00 vps-7e5e2926 systemd-networkd[731]: vethcf10c7a: Gained carrier\n2024-12-04T19:55:12.705973+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(vethf99acb2) entered blocking state\n2024-12-04T19:55:12.705993+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(vethf99acb2) entered disabled state\n2024-12-04T19:55:12.705995+00:00 vps-7e5e2926 kernel: vethf99acb2: entered allmulticast mode\n2024-12-04T19:55:12.705997+00:00 vps-7e5e2926 kernel: vethf99acb2: entered promiscuous mode\n2024-12-04T19:55:12.706742+00:00 vps-7e5e2926 systemd-networkd[731]: vethf99acb2: Link UP\n2024-12-04T19:55:12.719728+00:00 vps-7e5e2926 kernel: eth6: renamed from veth77ad597\n2024-12-04T19:55:12.724976+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(vethf99acb2) entered blocking state\n2024-12-04T19:55:12.725000+00:00 vps-7e5e2926 kernel: br-5aa5d649d8aa: port 3(vethf99acb2) entered forwarding state\n2024-12-04T19:55:12.725778+00:00 vps-7e5e2926 systemd-networkd[731]: vethf99acb2: Gained carrier\n2024-12-04T19:55:13.583081+00:00 vps-7e5e2926 systemd-networkd[731]: veth48d06fb: Gained IPv6LL\n2024-12-04T19:55:13.646424+00:00 vps-7e5e2926 systemd-networkd[731]: vetha860ba1: Gained IPv6LL\n2024-12-04T19:55:13.774529+00:00 vps-7e5e2926 systemd-networkd[731]: vethda4f90f: Gained IPv6LL\n2024-12-04T19:55:13.966250+00:00 vps-7e5e2926 systemd-networkd[731]: vethe477cc2: Gained IPv6LL\n2024-12-04T19:55:13.966585+00:00 vps-7e5e2926 systemd-networkd[731]: veth398b230: Gained IPv6LL\n2024-12-04T19:55:14.286339+00:00 vps-7e5e2926 systemd-networkd[731]: vethf99acb2: Gained IPv6LL\n2024-12-04T19:55:14.350167+00:00 vps-7e5e2926 systemd-networkd[731]: vethcf10c7a: Gained IPv6LL\n2024-12-04T19:55:14.508157+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:55:14 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:55:17.015591+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:55:17 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:55:17.883783+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:55:17 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:55:18.694554+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:55:18 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:55:19.455642+00:00 vps-7e5e2926 dockerd[929]: 2024/12/04 19:55:19 http: superfluous response.WriteHeader call from go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp.(*respWriterWrapper).WriteHeader (wrap.go:98)\n2024-12-04T19:56:01.176267+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(veth106fa48) entered blocking state\n2024-12-04T19:56:01.176323+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(veth106fa48) entered disabled state\n2024-12-04T19:56:01.176327+00:00 vps-7e5e2926 kernel: veth106fa48: entered allmulticast mode\n2024-12-04T19:56:01.176330+00:00 vps-7e5e2926 kernel: veth106fa48: entered promiscuous mode\n2024-12-04T19:56:01.176735+00:00 vps-7e5e2926 systemd-networkd[731]: veth106fa48: Link UP\n2024-12-04T19:56:01.189444+00:00 vps-7e5e2926 dockerd[929]: time=\"2024-12-04T19:56:01.185528742Z\" level=info msg=\"No non-localhost DNS nameservers are left in resolv.conf. Using default external servers\"\n2024-12-04T19:56:01.255233+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:56:01.254618219Z\" level=info msg=\"loading plugin \\\"io.containerd.event.v1.publisher\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.event.v1\n2024-12-04T19:56:01.255422+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:56:01.254723525Z\" level=info msg=\"loading plugin \\\"io.containerd.internal.v1.shutdown\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.internal.v1\n2024-12-04T19:56:01.255508+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:56:01.254783520Z\" level=info msg=\"loading plugin \\\"io.containerd.ttrpc.v1.task\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.ttrpc.v1\n2024-12-04T19:56:01.255558+00:00 vps-7e5e2926 containerd[813]: time=\"2024-12-04T19:56:01.255062291Z\" level=info msg=\"loading plugin \\\"io.containerd.ttrpc.v1.pause\\\"...\" runtime=io.containerd.runc.v2 type=io.containerd.ttrpc.v1\n2024-12-04T19:56:01.291751+00:00 vps-7e5e2926 systemd[1]: Started docker-bff285fec4d6d8fa43a152795223e813c52f50c11ed5d25ed3f45487da126bbd.scope - libcontainer container bff285fec4d6d8fa43a152795223e813c52f50c11ed5d25ed3f45487da126bbd.\n2024-12-04T19:56:01.431311+00:00 vps-7e5e2926 kernel: eth0: renamed from veth81d4a7a\n2024-12-04T19:56:01.444119+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(veth106fa48) entered blocking state\n2024-12-04T19:56:01.444139+00:00 vps-7e5e2926 kernel: br-7c57080edda4: port 7(veth106fa48) entered forwarding state\n2024-12-04T19:56:01.445438+00:00 vps-7e5e2926 systemd-networkd[731]: veth106fa48: Gained carrier\n2024-12-04T19:56:02.478655+00:00 vps-7e5e2926 systemd-networkd[731]: veth106fa48: Gained IPv6LL\n2024-12-04T19:56:44.650999+00:00 vps-7e5e2926 systemd[1]: fwupd.service: Deactivated successfully.\n```\n\n</details>\n\nI've tried several of the 1-click applications, and they all have the same problem after a while. \n\nI'm not really sure where to debug from here. Where should I start?\n\n\n### Steps to Reproduce\n\nThis happens for me with any application.\n\n### Example Repository URL\n\n_No response_\n\n### Coolify Version\n\nv4.0.0-beta.373\n\n### Are you using Coolify Cloud?\n\nNo (self-hosted)\n\n### Operating System and Version (self-hosted)\n\nUbuntu 24.04 LTS\n\n### Additional Information\n\nKernel: 6.8.0-49-generic\nDocker: v26.0.2, build 3c863ff"
+      }
+    },
+    "issue:coollabsio/coolify#4539": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/4539",
+      "retrieved_at_utc": "2026-11-01T17:28:23.550718+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/4539",
+        "number": 4539,
+        "title": "[Bug]: Scheduled tasks not executing on schedule all of a sudden",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2024-12-10T21:38:35Z",
+        "updated_at": "2026-01-04T01:29:56Z",
+        "closed_at": "2025-11-13T14:36:52Z",
+        "comments": 37,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/4539/reactions",
+          "total_count": 1,
+          "+1": 1,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Error Message and Logs\n\nVery similar to this issue: https://github.com/coollabsio/coolify/issues/2191\n\nI setup scheduled job and it was working for 1-2 month but since 5 days ago it just suddenly stops working.\n\n![Image](https://github.com/user-attachments/assets/eaeafa5c-3a14-4d88-af0c-46dc63d91b58)\n\nI want to know why it stops working but I don't know where to look for any logs or something.\n\n### Steps to Reproduce\n\n1. Setup scheduled jobs\n2. Wait until it stops working\n3. It stops working\n4.\n\n\n### Example Repository URL\n\n_No response_\n\n### Coolify Version\n\nv4.0.0-beta.370\n\n### Are you using Coolify Cloud?\n\nNo (self-hosted)\n\n### Operating System and Version (self-hosted)\n\nCentOS Stream 9\n\n### Additional Information\n\n_No response_"
+      }
+    },
+    "issue:coollabsio/coolify#5074": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/5074",
+      "retrieved_at_utc": "2026-11-01T17:28:23.551767+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/5074",
+        "number": 5074,
+        "title": "[Bug]: Docker Cleanup stuck on \"In Progress\"",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2025-02-06T00:12:05Z",
+        "updated_at": "2025-07-27T01:29:33Z",
+        "closed_at": "2025-04-18T08:39:58Z",
+        "comments": 36,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/5074/reactions",
+          "total_count": 11,
+          "+1": 11,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Error Message and Logs\n\nDocker Cleanup process is stuck on \"In Progress\" with the output message as \"Waiting for execution output...\". I thought that it would take a bit of time, but 2 days is crazy haha\nHere's a screenshot of the panel, I have also set up the discord webhook, and it doesn't seem to be running the automatic cleanups either.\n\n![Image](https://github.com/user-attachments/assets/d41b3b74-f5dc-43a5-b678-3d6209f45710)\n\nThere's anything I can do to fix this issue? \n\n### Steps to Reproduce\n\n1. Login into the panel\n2. Go to server -> configuration -> docker cleanup\n3. Trigger a manual cleanup\n\nHonestly I don't think it would be possible to replicate the issue as it's working fine for everyone else lol\n\n\n### Example Repository URL\n\n_No response_\n\n### Coolify Version\n\nv4.0.0-beta.390\n\n### Are you using Coolify Cloud?\n\nNo (self-hosted)\n\n### Operating System and Version (self-hosted)\n\nOracle Linux Server 8.10\n\n### Additional Information\n\nI've tried restarting the proxy, but I ran into the #4605 issue. \nI've tried restarting all of the docker containers with coollabs/coolify in it, didn't work either.\nI've tried also running the install script but it's stuck still.\nLet me know if any additional steps or information are needed\u2014I'd be happy to provide them."
+      }
+    },
+    "issue:coollabsio/coolify#5450": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/5450",
+      "retrieved_at_utc": "2026-11-01T17:28:23.562677+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/5450",
+        "number": 5450,
+        "title": "[BUG] SSL Postgres: FATAL: could not load private key file ",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2025-03-27T20:03:35Z",
+        "updated_at": "2026-09-14T01:19:29Z",
+        "closed_at": "2026-08-14T18:44:07Z",
+        "comments": 37,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/5450/reactions",
+          "total_count": 13,
+          "+1": 13,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "I am happy to see this being released. I am running into an error still on version 4.0.0-beta.400.\r\n\r\n FATAL:  could not load private key file \"/var/lib/postgresql/certs/server.key\": Permission denied\r\n2025-03-27 19:55:19.728 UTC [1] LOG:  database system is shut down\r\n2025-03-27 19:55:32.860 UTC [1] FATAL:  could not load private key file \"/var/lib/postgresql/certs/server.key\": Permission denied\r\n2025-03-27 19:55:32.860 UTC [1] LOG:  database system is shut down\r\n\r\nSteps are: \r\nMake publicly available on the normal port of 5432. \r\nOnce it is started, I stop it, and click enable SSL:\r\n![image](https://github.com/user-attachments/assets/3e0ab495-a344-4cee-b279-d6366157950c)\r\nI get an empty Proxy Logs which showed the first weird thing. I have to hard refresh CTRL + SHIFT + R to get this page to work because it freezes my client.\r\nAfter hard refresh, I start the postgres server:\r\n FATAL:  could not load private key file \"/var/lib/postgresql/certs/server.key\": Permission denied\r\n2025-03-27 19:55:19.728 UTC [1] LOG:  database system is shut down\r\n2025-03-27 19:55:32.860 UTC [1] FATAL:  could not load private key file \"/var/lib/postgresql/certs/server.key\": Permission denied\r\n2025-03-27 19:55:32.860 UTC [1] LOG:  database system is shut down\r\n\r\nThis is in spite that the persistent storage states that the destination path is \r\n![image](https://github.com/user-attachments/assets/a897f20e-8179-42d6-b2be-6834180a102f)\r\n![image](https://github.com/user-attachments/assets/6eaeb056-0d6c-45d8-8928-2fa1b69e6844)\r\n\r\n_Originally posted by @Tmmcmasters in https://github.com/coollabsio/coolify/discussions/3976#discussioncomment-12645665_"
+      }
+    },
+    "issue:coollabsio/coolify#5685": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/5685",
+      "retrieved_at_utc": "2026-11-01T17:28:23.563399+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/5685",
+        "number": 5685,
+        "title": "Coolify v5.x",
+        "state": "open",
+        "state_reason": null,
+        "created_at": "2025-04-24T08:34:05Z",
+        "updated_at": "2026-08-10T13:03:26Z",
+        "closed_at": null,
+        "comments": 177,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/5685/reactions",
+          "total_count": 691,
+          "+1": 65,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 300,
+          "confused": 0,
+          "heart": 191,
+          "rocket": 135,
+          "eyes": 0
+        },
+        "body": "# \ud83d\udd25 Big news for Coolify and self-hosters!\n\nAfter 2 years and 400+ v4 releases, we're preparing for a stable release in 2025! \n\nHowever, there's one small problem.\n\nI developed version 4 pretty quickly - the first usable release was completed in a month - while I was learning Laravel as well.\n\nSo the codebase is lacking; it has few tests, lacks strict rules, and lacks proper structure.\n\nIt's slowing down the integration of new features, and sometimes updates break existing functionality - which is a no-go.\n\nLearning from lessons of 400+ releases and valuable feedback from the community, GitHub discussions, and Discord, we decided it was time for a complete overhaul.\n\nThe past few months have been dedicated to detailed research and planning for this overhaul.\n\nBut now we have time to think because:\n\n- We are profitable and growing.\n- I have @peaklabs-dev on my side - he has done most of the planning. \ud83d\udc9c\n\n\ud83c\udf89 Today, we\u2019re excited to announce that the first commit to the `v5.x` branch has been made!\n\nWhat will be included? A lot.\n\n- A fully automated migration from v4 to v5. This is crucial. Without this, version 5 wouldn't be possible.\n- A total codebase refactor focused on strict PHP coding standards, maintainability, high-quality code, and a test-first approach.\nYou might argue that I should have focused on best practices from the start, but my priority was YOLO programming to create something useful quickly. Bad practices in the codebase are the consequences.\n- A brand new UI/UX for a simpler, smoother, and more modern experience, based on Vue/Inertia.\n- A focus on simple production scalability as a core part of Coolify.\nThis is crucial. We aim to enhance Coolify's core with scalability in mind, while still supporting current workflows. Our goal is to avoid complex configurations. It should be as simple as a click, requiring no brain to scale.\n- And hundreds of other features, fixes, enhancements, and more.\n\nIf we can achieve what we planned, Coolify will be THE self-hosting solution without doubt.\n\nI am so excited and afraid at the same time. Is it a good idea? Will I lose users? What will happen? What, where, how?!\n\nWhat I am sure about is that this will be a unique experiment and I could not do without you, all the users, sponsors, and @peaklabs-dev. \ud83d\udc9c\n\nIn the meantime, nothing will change. We will do regular v4 releases, make other apps (announcement soon), etc.\n\nWe know you now have questions and feedback - please drop it here."
+      }
+    },
+    "issue:coollabsio/coolify#5933": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/5933",
+      "retrieved_at_utc": "2026-11-01T17:28:24.062760+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/5933",
+        "number": 5933,
+        "title": "[Bug]: coolify does not start correctly when the machine/host restart",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2025-06-03T16:29:37Z",
+        "updated_at": "2025-07-15T01:29:21Z",
+        "closed_at": "2025-06-14T06:54:39Z",
+        "comments": 40,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/5933/reactions",
+          "total_count": 0,
+          "+1": 0,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 0,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Error Message and Logs\n\nSomething that has been happening to me after upgrading to version 4-beta.418 is that the coolify container does not start correctly after the machine reboots. \n\nAlthough the container is unhealthy, the services and webs already deployed work correctly. However, it is not possible to access the panel from both the domain and the Ip.\n\nthe command I use to reboot is: `sudo shutdown -r`. \n\nso looking at some issues and looking at coolify I discovered a way to fix it temporarily and that is to stop docker, and delete the coolify-redis data. And finally reboot the machine.\n\n`sudo systemctl stop docker.socket && sudo systemctl stop docker && sudo rm -f /var/lib/docker/volumes/coolify-redis/_data/* && sudo shutdown -r `\n\n### Steps to Reproduce\n\n1. use  sudo shutdown -r\n2. docker ps --format \"table {{.Names}}\\t{{.Status}}\"\n3.\n4.\n\n\n### Example Repository URL\n\n_No response_\n\n### Coolify Version\n\nv4.0.0-beta.418\n\n### Are you using Coolify Cloud?\n\nNo (self-hosted)\n\n### Operating System and Version (self-hosted)\n\nUbuntu 24.04.2 LTS\n\n### Additional Information\n\n## Normal reboot without deleting \u201ccoolify-redis/_data/\u201d\n\nCoolify dashboard\n\n![Image](https://github.com/user-attachments/assets/d90be3fa-e2b8-4293-9955-3b3a9fbb6ec3)\n\n![Image](https://github.com/user-attachments/assets/734d98bf-a20e-46cf-b7ba-ce8f7f75fe48)\n\n## Stoping docker & Cleaning the coolify-redis data folder\n\n![Image](https://github.com/user-attachments/assets/4cd609c7-9eeb-4605-8d4c-8ea5629e08a5)\n\nNote: all sites, services work correctly, only the dashboard don't work.\n\n**Extra Note:** sometimes deleting /coolify-redis/_data/ doesn't seem to work, but repeating the process works and the dashboard is available again.\n\n**Extra Note:** sometimes, just by restarting docker, the container becomes healthy again. But this is very rare to happen according to my tests."
+      }
+    },
+    "issue:coollabsio/coolify#7193": {
+      "url": "https://api.github.com/repos/coollabsio/coolify/issues/7193",
+      "retrieved_at_utc": "2026-11-01T17:28:24.034832+00:00",
+      "data": {
+        "html_url": "https://github.com/coollabsio/coolify/issues/7193",
+        "number": 7193,
+        "title": "[Bug]: Coolify Traefik Proxy No Longer Working After Recent Update",
+        "state": "closed",
+        "state_reason": "completed",
+        "created_at": "2025-11-11T01:39:04Z",
+        "updated_at": "2026-03-23T01:30:26Z",
+        "closed_at": "2025-11-15T00:35:47Z",
+        "comments": 51,
+        "reactions": {
+          "url": "https://api.github.com/repos/coollabsio/coolify/issues/7193/reactions",
+          "total_count": 73,
+          "+1": 68,
+          "-1": 0,
+          "laugh": 0,
+          "hooray": 0,
+          "confused": 5,
+          "heart": 0,
+          "rocket": 0,
+          "eyes": 0
+        },
+        "body": "### Error Message and Logs\n\nI am getting an odd issue ever since updating packages and rebooting my server. The coolify proxy is no longer working and when I try to access a page for one of my applications, I get `no available server`. Coolify still works but not other apps.\n\nWhen checking the traefik proxy logs, all I see is:\n\n```\n2025-11-11T01:30:45.152362608Z 2025-11-11T01:30:45Z ERR Provider error, retrying in 3.147624984s error=\"Error response from daemon: client version 1.24 is too old. Minimum supported API version is 1.44, please upgrade your client to a newer version\" providerName=docker\n```\n\n\nFor reference here is my traefik proxy config:\n\n```\nname: coolify-proxy\nnetworks:\n  coolify:\n    external: true\nservices:\n  traefik:\n    container_name: coolify-proxy\n    image: 'traefik:v3.1'\n    restart: unless-stopped\n    extra_hosts:\n      - 'host.docker.internal:host-gateway'\n    networks:\n      - coolify\n    ports:\n      - '80:80'\n      - '443:443'\n      - '443:443/udp'\n      - '8080:8080'\n    healthcheck:\n      test: 'wget -qO- http://localhost:80/ping || exit 1'\n      interval: 4s\n      timeout: 2s\n      retries: 5\n    volumes:\n      - '/var/run/docker.sock:/var/run/docker.sock:ro'\n      - '/data/coolify/proxy/:/traefik'\n    command:\n      - '--ping=true'\n      - '--ping.entrypoint=http'\n      - '--api.dashboard=true'\n      - '--entrypoints.http.address=:80'\n      - '--entrypoints.https.address=:443'\n      - '--entrypoints.http.http.encodequerysemicolons=true'\n      - '--entryPoints.http.http2.maxConcurrentStreams=250'\n      - '--entrypoints.https.http.encodequerysemicolons=true'\n      - '--entryPoints.https.http2.maxConcurrentStreams=250'\n      - '--entrypoints.https.http3'\n      - '--providers.file.directory=/traefik/dynamic/'\n      - '--providers.file.watch=true'\n      - '--certificatesresolvers.letsencrypt.acme.httpchallenge=true'\n      - '--certificatesresolvers.letsencrypt.acme.httpchallenge.entrypoint=http'\n      - '--certificatesresolvers.letsencrypt.acme.storage=/traefik/acme.json'\n      - '--api.insecure=false'\n      - '--providers.docker=true'\n      - '--providers.docker.exposedbydefault=false'\n    labels:\n      - traefik.enable=true\n      - traefik.http.routers.traefik.entrypoints=http\n      - traefik.http.routers.traefik.service=api@internal\n      - traefik.http.services.traefik.loadbalancer.server.port=8080\n      - coolify.managed=true\n      - coolify.proxy=true\n```\n\nI have tried switching to Caddy, which works for some of my applications but not others. \n\nNot sure what the issue is and what I can do to fix this, so if anyone has any suggestions I would greatly appreciate it!\n\n### Steps to Reproduce\n\n1. Updated ubuntu packages\n2. Rebooted server\n3. Traefik Proxy no longer working\n\n### Coolify Version\n\nv4.0.0-beta.442\n\n### Are you using Coolify Cloud?\n\nNo (self-hosted)\n\n### Operating System and Version (self-hosted)\n\nUbuntu 24.04.3 LTS"
+      }
+    }
+  }
+}

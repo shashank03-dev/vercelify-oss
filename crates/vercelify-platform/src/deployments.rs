@@ -263,6 +263,64 @@ pub fn fail_interrupted(c: &Connection) -> Result<usize> {
     Ok(n)
 }
 
+/// Forget an old deployment: its row and (by the caller) its log. Refused
+/// for what serves or may serve traffic: the app's live deployment, an open
+/// preview's, one with containers, or any while the app has a deployment in
+/// progress (a queued rollback may need it). Its image is left to the
+/// per-app pruning, which keeps what other deployments still use.
+pub fn delete(c: &Connection, id: &str) -> Result<Deployment> {
+    let d = get(c, id)?;
+    if d.current {
+        return Err(Error::Conflict(format!(
+            "deployment #{} is live: deploy or roll back to another one first",
+            d.number
+        )));
+    }
+    if matches!(
+        d.status,
+        DeploymentStatus::Queued | DeploymentStatus::Building | DeploymentStatus::Deploying
+    ) {
+        return Err(Error::Conflict(format!(
+            "deployment #{} is in progress: cancel it first",
+            d.number
+        )));
+    }
+    let busy: i64 = c.query_row(
+        "SELECT count(*) FROM deployments WHERE app_id = ?1 AND status IN ('queued', 'building', 'deploying')",
+        [&d.app_id],
+        |r| r.get(0),
+    )?;
+    if busy > 0 {
+        return Err(Error::Conflict(
+            "this app has a deployment in progress: try again when it finishes".into(),
+        ));
+    }
+    let preview: Option<u32> = c
+        .query_row(
+            "SELECT pr_number FROM previews WHERE deployment_id = ?1 AND status = 'active'",
+            [id],
+            |r| r.get(0),
+        )
+        .optional()?;
+    if let Some(pr) = preview {
+        return Err(Error::Conflict(format!(
+            "deployment #{} is the preview of pull request #{pr}: close the preview first",
+            d.number
+        )));
+    }
+    let running: i64 = c.query_row("SELECT count(*) FROM instances WHERE deployment_id = ?1", [id], |r| {
+        r.get(0)
+    })?;
+    if running > 0 {
+        return Err(Error::Conflict(format!(
+            "deployment #{} still has {running} container(s): wait for them to retire",
+            d.number
+        )));
+    }
+    c.execute("DELETE FROM deployments WHERE id = ?1", [id])?;
+    Ok(d)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -348,6 +406,77 @@ mod tests {
             s.tx(|c| transition(c, &d3.id, Healthy, None)).is_err(),
             "no resurrection"
         );
+    }
+
+    #[test]
+    fn only_old_unused_deployments_can_be_deleted() {
+        let s = Store::open_in_memory().unwrap();
+        let a = s.tx(|c| apps::create(c, &apps::tests::git_app("blog"))).unwrap();
+        let healthy = |s: &Store, pr: Option<u32>| {
+            let d = s.tx(|c| create(c, &new(&a.id, pr))).unwrap();
+            s.tx(|c| transition(c, &d.id, Deploying, None)).unwrap();
+            s.tx(|c| transition(c, &d.id, Healthy, None)).unwrap()
+        };
+        let d1 = healthy(&s, None);
+        s.tx(|c| promote(c, &a.id, &d1.id)).unwrap();
+        assert!(matches!(s.tx(|c| delete(c, &d1.id)), Err(Error::Conflict(_))), "live");
+
+        let d2 = healthy(&s, None);
+        s.tx(|c| promote(c, &a.id, &d2.id)).unwrap();
+
+        // A deployment in progress blocks deleting any of the app's.
+        let q = s.tx(|c| create(c, &new(&a.id, None))).unwrap();
+        assert!(
+            matches!(s.tx(|c| delete(c, &d1.id)), Err(Error::Conflict(_))),
+            "busy app"
+        );
+        assert!(
+            matches!(s.tx(|c| delete(c, &q.id)), Err(Error::Conflict(_))),
+            "in progress"
+        );
+        s.tx(|c| transition(c, &q.id, Cancelled, None)).unwrap();
+
+        // Containers still running for it.
+        s.tx(|c| {
+            c.execute(
+                "INSERT INTO nodes (id, name, role, agent_url, arch, builds, created_at)
+                 VALUES ('node_1', 'laptop', 'main', 'http://127.0.0.1:7420', 'x86_64', 1, 'x')",
+                [],
+            )?;
+            c.execute(
+                "INSERT INTO instances (id, deployment_id, node_id, container, created_at)
+                 VALUES ('ins_1', ?1, 'node_1', 'vfy-blog-1', 'x')",
+                [&d1.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            matches!(s.tx(|c| delete(c, &d1.id)), Err(Error::Conflict(_))),
+            "containers"
+        );
+        s.tx(|c| {
+            c.execute("DELETE FROM instances", [])?;
+            Ok(())
+        })
+        .unwrap();
+
+        // An open preview's deployment.
+        let p = healthy(&s, Some(4));
+        s.tx(|c| {
+            c.execute(
+                "INSERT INTO previews (id, app_id, pr_number, deployment_id, created_at) VALUES ('pv_1', ?1, 4, ?2, 'x')",
+                params![a.id, p.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(matches!(s.tx(|c| delete(c, &p.id)), Err(Error::Conflict(_))), "preview");
+
+        assert_eq!(s.tx(|c| delete(c, &d1.id)).unwrap().id, d1.id);
+        assert!(s.with(|c| get(c, &d1.id)).is_err());
+        assert!(s.with(|c| get(c, &d2.id)).unwrap().current, "the live one stays");
+        assert!(s.tx(|c| delete(c, &q.id)).is_ok(), "a cancelled one goes");
     }
 
     #[test]

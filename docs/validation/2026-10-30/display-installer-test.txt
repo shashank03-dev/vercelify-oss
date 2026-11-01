@@ -1,0 +1,4 @@
+Command: bats --filter 'display' host/tests/install-mac.bats
+
+1..1
+ok 1 optional display tool failures do not abort installation or claim success

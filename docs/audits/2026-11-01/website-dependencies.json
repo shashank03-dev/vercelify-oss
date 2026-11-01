@@ -1,0 +1,124 @@
+{
+  "auditReportVersion": 2,
+  "vulnerabilities": {
+    "@modelcontextprotocol/server": {
+      "name": "@modelcontextprotocol/server",
+      "severity": "high",
+      "isDirect": false,
+      "via": [
+        {
+          "source": 1242647,
+          "name": "@modelcontextprotocol/server",
+          "dependency": "@modelcontextprotocol/server",
+          "title": "MCP  TypeScript server SDK: Shared transport or server instances delivered one HTTP client's messages to another",
+          "url": "https://github.com/advisories/GHSA-jm63-cq47-j5jp",
+          "severity": "high",
+          "cwe": [
+            "CWE-362"
+          ],
+          "cvss": {
+            "score": 7.7,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:N/UI:N/S:U/C:H/I:L/A:H"
+          },
+          "range": ">=2.0.0 <2.3.0"
+        },
+        {
+          "source": 1242648,
+          "name": "@modelcontextprotocol/server",
+          "dependency": "@modelcontextprotocol/server",
+          "title": "MCP TypeScript SDK: One HTTP request within the default size limit could exhaust server memory during validation",
+          "url": "https://github.com/advisories/GHSA-46jr-4wx8-v453",
+          "severity": "high",
+          "cwe": [
+            "CWE-770"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=2.0.0 <2.3.0"
+        },
+        {
+          "source": 1242666,
+          "name": "@modelcontextprotocol/server",
+          "dependency": "@modelcontextprotocol/server",
+          "title": "MCP TypeScript SDK: Server bearer authentication accepted tokens issued for another service",
+          "url": "https://github.com/advisories/GHSA-rvq5-wwqv-78pq",
+          "severity": "moderate",
+          "cwe": [
+            "CWE-863"
+          ],
+          "cvss": {
+            "score": 6.8,
+            "vectorString": "CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:N"
+          },
+          "range": ">=2.0.0 <2.3.0"
+        },
+        {
+          "source": 1243487,
+          "name": "@modelcontextprotocol/server",
+          "dependency": "@modelcontextprotocol/server",
+          "title": "MCP TypeScript SDK: HTTP server transports and handlers did not limit request body size or JSON-RPC batch length",
+          "url": "https://github.com/advisories/GHSA-f897-62hf-6gxq",
+          "severity": "high",
+          "cwe": [
+            "CWE-770"
+          ],
+          "cvss": {
+            "score": 7.5,
+            "vectorString": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"
+          },
+          "range": ">=2.0.0 <2.1.0"
+        }
+      ],
+      "effects": [
+        "vgpu"
+      ],
+      "range": "2.0.0 - 2.2.0",
+      "nodes": [
+        "node_modules/@modelcontextprotocol/server"
+      ],
+      "fixAvailable": {
+        "name": "vgpu",
+        "version": "0.3.0",
+        "isSemVerMajor": true
+      }
+    },
+    "vgpu": {
+      "name": "vgpu",
+      "severity": "high",
+      "isDirect": true,
+      "via": [
+        "@modelcontextprotocol/server"
+      ],
+      "effects": [],
+      "range": ">=0.3.1-rc.0",
+      "nodes": [
+        "node_modules/vgpu"
+      ],
+      "fixAvailable": {
+        "name": "vgpu",
+        "version": "0.3.0",
+        "isSemVerMajor": true
+      }
+    }
+  },
+  "metadata": {
+    "vulnerabilities": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 2,
+      "critical": 0,
+      "total": 2
+    },
+    "dependencies": {
+      "prod": 30,
+      "dev": 81,
+      "optional": 50,
+      "peer": 0,
+      "peerOptional": 0,
+      "total": 110
+    }
+  }
+}

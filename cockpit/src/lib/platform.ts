@@ -102,6 +102,8 @@ export function platformOn(server?: string) {
     deployments: (app: string, limit = 30) => req<Deployment[]>("GET", `/apps/${q(app)}/deployments?limit=${limit}`),
     deployment: (id: string) => req<Deployment>("GET", `/deployments/${q(id)}`),
     cancel: (id: string) => req<Deployment>("POST", `/deployments/${q(id)}/cancel`, {}),
+    /** An old deployment and its log; refused for live or in-use ones (owners). */
+    deleteDeployment: (id: string) => req<unknown>("DELETE", `/deployments/${q(id)}`),
     /** The log so far (one request). */
     logs: async (id: string, tail?: number): Promise<LogLine[]> => {
       const raw = await req<unknown>("GET", `/deployments/${q(id)}/logs${tail ? `?tail=${tail}` : ""}`);

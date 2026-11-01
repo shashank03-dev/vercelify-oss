@@ -1,0 +1,33 @@
+{
+  "retrieved_at_utc": "2026-11-01T17:18:53.073894+00:00",
+  "searches": [
+    {
+      "query": "repo:coollabsio/coolify is:issue \"build server\"",
+      "url": "https://api.github.com/search/issues?q=repo%3Acoollabsio%2Fcoolify+is%3Aissue+%22build+server%22&per_page=1",
+      "total_count": 172,
+      "incomplete_results": false
+    },
+    {
+      "query": "repo:Dokploy/dokploy is:issue \"build server\"",
+      "url": "https://api.github.com/search/issues?q=repo%3ADokploy%2Fdokploy+is%3Aissue+%22build+server%22&per_page=1",
+      "total_count": 80,
+      "incomplete_results": false
+    },
+    {
+      "query": "repo:coollabsio/coolify is:issue \"preview database\"",
+      "url": "https://api.github.com/search/issues?q=repo%3Acoollabsio%2Fcoolify+is%3Aissue+%22preview+database%22&per_page=1",
+      "total_count": 13,
+      "incomplete_results": false
+    },
+    {
+      "query": "repo:coollabsio/coolify is:issue \"restore test\"",
+      "url": "https://api.github.com/search/issues?q=repo%3Acoollabsio%2Fcoolify+is%3Aissue+%22restore+test%22&per_page=1",
+      "error": "HTTP Error 403: rate limit exceeded"
+    },
+    {
+      "query": "repo:Dokploy/dokploy is:issue \"restore test\"",
+      "url": "https://api.github.com/search/issues?q=repo%3ADokploy%2Fdokploy+is%3Aissue+%22restore+test%22&per_page=1",
+      "error": "HTTP Error 403: rate limit exceeded"
+    }
+  ]
+}

@@ -720,6 +720,9 @@ function Deployments({
   // The log shown: the one picked, else the newest deployment's.
   const [picked, setPicked] = useState<string>();
   const shown = list.find((d) => d.id === picked) ?? list[0];
+  // Deleting asks twice: the row's bin, then "Delete #n".
+  const [confirming, setConfirming] = useState<string>();
+  const appBusy = list.some(isRunning);
 
   if (loading && !deps) return <Loading rows={5} />;
   return (
@@ -780,6 +783,31 @@ function Deployments({
                       Roll back
                     </Button>
                   )}
+                  {!d.current && !isRunning(d) && !appBusy &&
+                    (confirming === d.id ? (
+                      <Button
+                        size="sm"
+                        variant="danger"
+                        icon={<Trash2 />}
+                        busy={busy === `del-${d.id}`}
+                        data-testid={`delete-deployment-confirm-${d.number}`}
+                        onClick={() =>
+                          void act(`del-${d.id}`, () => client.deleteDeployment(d.id), `Deleted #${d.number}`).then((ok) => {
+                            setConfirming(undefined);
+                            if (ok) {
+                              if (picked === d.id) setPicked(undefined);
+                              void refresh();
+                            }
+                          })
+                        }
+                      >
+                        Delete #{d.number}
+                      </Button>
+                    ) : (
+                      <IconButton label={`Delete deployment #${d.number}`} data-testid={`delete-deployment-${d.number}`} onClick={() => setConfirming(d.id)}>
+                        <Trash2 />
+                      </IconButton>
+                    ))}
                 </div>
               );
             })}

@@ -1,5 +1,8 @@
 # Product and installation audit — 29 October 2026
 
+Follow-up: [Installation and feature-journey review — 30 October 2026](INSTALLATION-AND-FEATURE-REVIEW-2026-10-30.md)
+maps the current features, remaining setup hurdles and fresh verification results.
+
 This audit follows the server installer, pairing/linking, desktop application,
 platform/runtime and display flows. Fixes use the existing stack and keep the
 normal path to install → select server → enter code.

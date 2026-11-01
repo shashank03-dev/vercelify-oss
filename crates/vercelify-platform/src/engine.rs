@@ -61,6 +61,10 @@ pub struct Engine {
     running: Mutex<HashMap<String, CancelHandle>>,
     busy: Mutex<HashSet<String>>,
     pub(crate) app_runtime: tokio::sync::Mutex<()>,
+    /// A preview's publication (check it is open, route, record) and its
+    /// closing don't interleave: a deployment of a closed pull request
+    /// never goes live after `remove_preview` closed it.
+    preview_commit: tokio::sync::Mutex<()>,
     database_ops: Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
     listener: Mutex<Option<Listener>>,
     /// This server's private address (mesh): where databases'
@@ -70,6 +74,8 @@ pub struct Engine {
     /// published on (the mesh one): set once there are other servers.
     registry: Mutex<Option<(PathBuf, Vec<String>)>>,
     minter: Mutex<Option<TokenMinter>>,
+    /// Memory held for deployments being placed (placement.rs).
+    pub reservations: placement::Reservations,
 }
 
 pub(crate) struct AppOperation<'a> {
@@ -128,10 +134,12 @@ impl Engine {
             busy: Mutex::default(),
             database_ops: Mutex::default(),
             app_runtime: tokio::sync::Mutex::new(()),
+            preview_commit: tokio::sync::Mutex::new(()),
             listener: Mutex::default(),
             private_ip: Mutex::default(),
             registry: Mutex::default(),
             minter: Mutex::default(),
+            reservations: placement::Reservations::default(),
         })
     }
 
@@ -305,6 +313,21 @@ impl Engine {
         Ok(d)
     }
 
+    /// Delete an old deployment and its log (see [`deployments::delete`]).
+    pub fn delete_deployment(&self, id: &str) -> Result<Deployment> {
+        if lock(&self.running).contains_key(id) {
+            return Err(Error::Conflict("this deployment is running: cancel it first".into()));
+        }
+        let (d, app) = self.store.tx(|c| {
+            let d = deployments::delete(c, id)?;
+            let app: String = c.query_row("SELECT name FROM apps WHERE id = ?1", [&d.app_id], |r| r.get(0))?;
+            Ok((d, app))
+        })?;
+        let _ = std::fs::remove_file(self.logs.path(&app, &d.id));
+        self.emit(EngineEvent::Changed);
+        Ok(d)
+    }
+
     /// The dispatcher: start every queued deployment whose app is free.
     pub async fn run(self: Arc<Self>) {
         loop {
@@ -354,6 +377,12 @@ impl Engine {
         ));
         let res = self.steps(&app, &d, cancel, &mut log).await;
         lock(&self.running).remove(&d.id);
+        let started = self
+            .store
+            .with(|c| instances::of(c, &d.id))
+            .map(|i| !i.is_empty())
+            .unwrap_or(false);
+        self.reservations.finish(&d.id, started);
         match res {
             Ok((done, url, previous)) => {
                 log.info(&format!(
@@ -463,7 +492,7 @@ impl Engine {
                 one_node: !vols.is_empty(),
                 failover: app.runtime.failover,
             };
-            let slots = placement::place(&all, &need)?;
+            let slots = self.reservations.place(&d.id, &all, &need)?;
             let targets = slots
                 .into_iter()
                 .filter_map(|s| all.iter().find(|n| n.id == s.node_id).map(|n| (n.clone(), s.replica)))
@@ -571,7 +600,13 @@ impl Engine {
             self.store
                 .tx(|c| deployments::transition(c, &d.id, DeploymentStatus::Building, None))?;
             self.emit(EngineEvent::Changed);
-            let _permit = self.gate.acquire(&mut |m| log.info(m)).await;
+            // Cancelling doesn't wait for the power guard or a free slot.
+            let mut cancelled = cancel.clone();
+            let mut waiting = |m: &str| log.info(m);
+            let _permit = tokio::select! {
+                p = self.gate.acquire(&mut waiting) => p,
+                () = cancelled.cancelled() => return Err(Error::Conflict("cancelled".into())),
+            };
             if cancel.is_cancelled() {
                 return Err(Error::Conflict("cancelled".into()));
             }
@@ -754,16 +789,18 @@ impl Engine {
                             log,
                         )
                         .await;
+                    // An instance started as the cancel came is removed with
+                    // the others: it is in `started` before the check.
+                    if let Ok(p) = &res {
+                        started.push(p.clone());
+                    }
                     let res = match res {
                         Ok(_) if cancel.is_cancelled() => Err(Error::Conflict("cancelled".into())),
                         other => other,
                     };
-                    match res {
-                        Ok(p) => started.push(p),
-                        Err(e) => {
-                            self.remove_placed(&started).await;
-                            return Err(e);
-                        }
+                    if let Err(e) = res {
+                        self.remove_placed(&started).await;
+                        return Err(e);
                     }
                 }
                 started
@@ -773,6 +810,23 @@ impl Engine {
             self.remove_placed(&started).await;
             return Err(Error::Conflict("cancelled".into()));
         }
+        // A preview publishes only while its pull request is open, and
+        // `remove_preview` can't close it halfway through (see preview_commit).
+        let _commit = match d.pr_number {
+            Some(n) => {
+                let guard = self.preview_commit.lock().await;
+                let open = self
+                    .store
+                    .with(|c| previews::get(c, &app.id, n))?
+                    .is_some_and(|p| p.status == "active");
+                if !open || cancel.is_cancelled() {
+                    self.remove_placed(&started).await;
+                    return Err(Error::Conflict("cancelled".into()));
+                }
+                Some(guard)
+            }
+            None => None,
+        };
         // Commit point: route, then record. A crash in between leaves the
         // route on healthy containers; the reconciler adopts them.
         let base = RouteBase {
@@ -1170,15 +1224,86 @@ impl Engine {
     }
 
     /// Take a preview down: container(s), route, its own volumes, and the
-    /// preview record (closed).
+    /// preview record (closed). It is closed first, so its deployments still
+    /// under way are cancelled and can't go live; the teardown waits for
+    /// them, so nothing of theirs appears after it. If the teardown fails the
+    /// preview is open again, for the next check to retry.
     pub async fn remove_preview(&self, app_id: &str, pr: u32) -> Result<()> {
-        let (app, preview, vols) = self.store.with(|c| {
-            Ok((
-                apps::get(c, app_id)?,
-                previews::get(c, app_id, pr)?,
-                volumes::list_for_preview(c, app_id, pr)?,
-            ))
-        })?;
+        let app = self.store.with(|c| apps::get(c, app_id))?;
+        let (was_open, in_flight) = {
+            let _commit = self.preview_commit.lock().await;
+            self.store.tx(|c| {
+                let was_open = previews::close(c, app_id, pr)?.is_some_and(|p| p.status == "active");
+                let mut running = vec![];
+                for d in deployments::active(c)? {
+                    if d.app_id != app_id || d.pr_number != Some(pr) {
+                        continue;
+                    }
+                    if d.status == DeploymentStatus::Queued {
+                        // Queued deployments of a closed preview won't run.
+                        deployments::transition(
+                            c,
+                            &d.id,
+                            DeploymentStatus::Cancelled,
+                            Some("the pull request closed"),
+                        )?;
+                    } else {
+                        running.push(d.id);
+                    }
+                }
+                Ok((was_open, running))
+            })?
+        };
+        for id in &in_flight {
+            if let Some(h) = lock(&self.running).get(id) {
+                h.cancel();
+            }
+        }
+        let wait = Duration::from_secs(u64::from(app.runtime.health_timeout_secs) + 300);
+        if !self.wait_finished(&in_flight, wait).await {
+            tracing::warn!(
+                "{} #{pr}: a deployment didn't stop in time; removing the preview anyway",
+                app.name
+            );
+        }
+        if let Err(e) = self.teardown_preview(&app, pr).await {
+            if was_open {
+                self.store.tx(|c| previews::reopen(c, app_id, pr))?;
+            }
+            self.emit(EngineEvent::Changed);
+            return Err(e);
+        }
+        self.emit(EngineEvent::Changed);
+        Ok(())
+    }
+
+    /// Whether the deployments `ids` all ended within `timeout`.
+    async fn wait_finished(&self, ids: &[String], timeout: Duration) -> bool {
+        let deadline = tokio::time::Instant::now() + timeout;
+        loop {
+            let busy = {
+                let running = lock(&self.running);
+                ids.iter().any(|id| running.contains_key(id))
+            } || self
+                .store
+                .with(deployments::active)
+                .map(|a| a.iter().any(|d| ids.contains(&d.id)))
+                .unwrap_or(false);
+            if !busy {
+                return true;
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    async fn teardown_preview(&self, app: &App, pr: u32) -> Result<()> {
+        let app_id = app.id.as_str();
+        let (preview, vols) = self
+            .store
+            .with(|c| Ok((previews::get(c, app_id, pr)?, volumes::list_for_preview(c, app_id, pr)?)))?;
         let docker = &self.deployer.docker;
         let key = deploy::route_key(&app.name, Some(pr));
         let vol_names: Vec<String> = vols
@@ -1201,23 +1326,13 @@ impl Engine {
         }
         if app.kind == AppKind::Compose {
             compose::down(docker, &compose::project_name(&app.name, Some(pr))).await?;
+            compose::remove_preview_volumes(docker, &app.id, pr).await?;
         }
         crate::proxy::remove_route(&self.deployer.proxy, &key)?;
         for name in &vol_names {
             let _ = docker.volume_remove(name).await;
             let _ = std::fs::remove_dir_all(self.deployer.hdd_root.join(name));
         }
-        self.store.tx(|c| {
-            previews::close(c, app_id, pr)?;
-            // Queued deployments of a closed preview won't run.
-            for d in deployments::active(c)? {
-                if d.app_id == app_id && d.pr_number == Some(pr) && d.status == DeploymentStatus::Queued {
-                    deployments::transition(c, &d.id, DeploymentStatus::Cancelled, Some("the pull request closed"))?;
-                }
-            }
-            Ok(())
-        })?;
-        self.emit(EngineEvent::Changed);
         Ok(())
     }
 
@@ -1361,4 +1476,279 @@ fn pin(c: &rusqlite::Connection, a: &App, source: AppSource) -> Result<()> {
         },
     )
     .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{apps::DomainSettings, build::Driver, docker::Docker, proxy::ProxyConfig};
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::Path;
+
+    /// A Docker that answers everything and keeps track of containers
+    /// (`<dir>/containers/<name>`): `create --name N` waits while
+    /// `hold-create` exists in `dir` (after touching `created`), then makes
+    /// N, running on the proxy network; `rm` removes it.
+    fn stub_docker(dir: &Path) -> String {
+        let bin = dir.join("docker");
+        let d = dir.display();
+        std::fs::create_dir_all(dir.join("containers")).unwrap();
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> {d}/calls\nfor a; do last=$a; done\ncase \"$1\" in\n  \
+                 create) touch {d}/created; while [ -f {d}/hold-create ]; do sleep 0.02; done; \
+                 touch {d}/containers/$3; echo cid ;;\n  \
+                 rm) rm -f {d}/containers/$last ;;\n  \
+                 container) [ -f {d}/containers/$last ] || {{ echo \"Error: No such container: $last\" >&2; exit 1; }}; \
+                 echo '{{\"State\":{{\"Running\":true,\"Status\":\"running\"}},\"NetworkSettings\":\
+                 {{\"Networks\":{{\"vfy-proxy\":{{\"IPAddress\":\"127.0.0.1\"}}}}}}}}' ;;\nesac\nexit 0\n"
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        bin.display().to_string()
+    }
+
+    fn engine(dir: &Path, concurrency: usize) -> Arc<Engine> {
+        let store = Arc::new(Store::open_in_memory().unwrap());
+        store
+            .with(|c| nodes::ensure_main(c, "main", "http://127.0.0.1:7420", "x86_64"))
+            .unwrap();
+        store
+            .with(|c| {
+                crate::store::put_setting(
+                    c,
+                    crate::apps::DOMAIN_SETTING,
+                    &DomainSettings {
+                        wildcard: Some("example.test".into()),
+                        https: false,
+                        edge_tls: false,
+                    },
+                )
+            })
+            .unwrap();
+        let docker = stub_docker(dir);
+        Engine::new(
+            store,
+            Arc::new(MasterKey::from_bytes(&[4; 32]).unwrap()),
+            Builder {
+                docker: docker.clone(),
+                git: "/nonexistent/git".into(),
+                work_dir: dir.join("work"),
+                driver: Driver::Docker,
+                memory: None,
+                timeout: Duration::from_secs(10),
+            },
+            Deployer {
+                docker: Docker { bin: docker },
+                proxy: ProxyConfig {
+                    dir: dir.join("proxy"),
+                    // Nothing listens: the first-route wait returns at once.
+                    http_port: 1,
+                    https_port: 2,
+                    metrics_port: 3,
+                    acme_email: None,
+                    dns_challenge: false,
+                    image: crate::proxy::TRAEFIK_IMAGE.into(),
+                },
+                hdd_root: dir.join("hdd"),
+                cgroup_parent: None,
+                health_interval: Duration::from_millis(10),
+            },
+            BuildGate::new(concurrency, dir.join("power")).with_poll(Duration::from_millis(20)),
+            LogHub::new(dir.join("logs")),
+        )
+    }
+
+    fn image_app(e: &Engine) -> App {
+        let mut req = apps::tests::git_app("shop");
+        req.kind = AppKind::Image;
+        req.source.image = Some("nginx:1.27".into());
+        req.runtime = Some(vercelify_core::platform::AppRuntime {
+            health: Some(vercelify_core::platform::HealthCheck {
+                path: None,
+                command: Some(vec!["true".into()]),
+            }),
+            ..Default::default()
+        });
+        e.store.tx(|c| apps::create(c, &req)).unwrap()
+    }
+
+    async fn until(what: &str, mut f: impl FnMut() -> bool) {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+        while !f() {
+            assert!(tokio::time::Instant::now() < deadline, "timed out waiting for {what}");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    /// The containers the stub Docker has, of the preview of PR `n`.
+    fn containers_of(dir: &Path, n: u32) -> Vec<String> {
+        std::fs::read_dir(dir.join("containers"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|c| c.starts_with(&format!("vfy-shop-pr{n}")))
+            .collect()
+    }
+
+    fn status(e: &Engine, id: &str) -> DeploymentStatus {
+        e.store.with(|c| deployments::get(c, id)).unwrap().status
+    }
+
+    fn preview(n: u32) -> Enqueue {
+        Enqueue {
+            pr_number: Some(n),
+            branch: Some("feature".into()),
+            pr_title: Some("A change".into()),
+            ..Enqueue::default()
+        }
+    }
+
+    /// Closing a pull request while its preview deployment is creating its
+    /// container: the deployment never goes live, and nothing of it is left.
+    #[tokio::test]
+    async fn a_closed_preview_never_goes_live() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let app = image_app(&e);
+        tokio::spawn(e.clone().run());
+
+        // Without a close, the stub deploys a preview: the test can tell.
+        let first = e.enqueue(&app.id, preview(1)).unwrap();
+        until("the first preview", || {
+            status(&e, &first.id) == DeploymentStatus::Healthy
+        })
+        .await;
+        let route = e
+            .deployer
+            .proxy
+            .dynamic_dir()
+            .join(crate::proxy::base_file(&deploy::route_key("shop", Some(1))));
+        assert!(route.exists(), "a live preview has a route");
+        assert_eq!(containers_of(dir.path(), 1).len(), 1, "the stub keeps what was made");
+
+        let hold = dir.path().join("hold-create");
+        let created = dir.path().join("created");
+        std::fs::write(&hold, "").unwrap();
+        let _ = std::fs::remove_file(&created);
+        let d = e.enqueue(&app.id, preview(2)).unwrap();
+        until("container creation", || created.exists()).await;
+        assert_eq!(status(&e, &d.id), DeploymentStatus::Deploying);
+
+        let closing = {
+            let e = e.clone();
+            let id = app.id.clone();
+            tokio::spawn(async move { e.remove_preview(&id, 2).await })
+        };
+        // The close waits for the deployment under way instead of racing it.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!closing.is_finished(), "the teardown waits for the deployment");
+        std::fs::remove_file(&hold).unwrap();
+        closing.await.unwrap().unwrap();
+
+        assert_eq!(status(&e, &d.id), DeploymentStatus::Cancelled);
+        let p = e.store.with(|c| previews::get(c, &app.id, 2)).unwrap().unwrap();
+        assert_eq!(p.status, "closed");
+        assert_eq!(p.deployment_id, None, "it never served");
+        let route2 = e
+            .deployer
+            .proxy
+            .dynamic_dir()
+            .join(crate::proxy::base_file(&deploy::route_key("shop", Some(2))));
+        assert!(!route2.exists(), "no route after the close");
+        assert!(e.store.with(|c| instances::of(c, &d.id)).unwrap().is_empty());
+        // The container made while it closed is gone, not only one before it.
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert_eq!(containers_of(dir.path(), 2), Vec::<String>::new(), "{calls}");
+        assert_eq!(
+            containers_of(dir.path(), 1).len(),
+            1,
+            "the open preview keeps its container"
+        );
+        // Still nothing later.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(!route2.exists());
+        assert_eq!(status(&e, &d.id), DeploymentStatus::Cancelled);
+    }
+
+    /// The commit point checks the pull request itself: closed by any path
+    /// (here, without a cancel reaching the deployment), it doesn't publish.
+    #[tokio::test]
+    async fn the_commit_point_checks_the_preview_is_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let app = image_app(&e);
+        tokio::spawn(e.clone().run());
+        let hold = dir.path().join("hold-create");
+        let created = dir.path().join("created");
+        std::fs::write(&hold, "").unwrap();
+        let d = e.enqueue(&app.id, preview(3)).unwrap();
+        until("container creation", || created.exists()).await;
+        e.store.tx(|c| previews::close(c, &app.id, 3)).unwrap();
+        std::fs::remove_file(&hold).unwrap();
+        until("the end", || status(&e, &d.id) != DeploymentStatus::Deploying).await;
+        assert_eq!(status(&e, &d.id), DeploymentStatus::Cancelled);
+        let route = e
+            .deployer
+            .proxy
+            .dynamic_dir()
+            .join(crate::proxy::base_file(&deploy::route_key("shop", Some(3))));
+        assert!(!route.exists());
+        assert_eq!(
+            e.store
+                .with(|c| previews::get(c, &app.id, 3))
+                .unwrap()
+                .unwrap()
+                .deployment_id,
+            None
+        );
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert_eq!(containers_of(dir.path(), 3), Vec::<String>::new(), "{calls}");
+    }
+
+    /// Cancelling a build that waits for the power guard, or for the only
+    /// build slot, ends it at once and frees the app for the next one.
+    #[tokio::test]
+    async fn cancel_does_not_wait_for_the_build_gate() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let app = e.store.tx(|c| apps::create(c, &apps::tests::git_app("blog"))).unwrap();
+        tokio::spawn(e.clone().run());
+
+        // Too hot to build.
+        std::fs::write(dir.path().join("power"), r#"{"state":"thermal_paused"}"#).unwrap();
+        let d = e.enqueue(&app.id, Enqueue::default()).unwrap();
+        until("building", || status(&e, &d.id) == DeploymentStatus::Building).await;
+        e.cancel(&d.id).unwrap();
+        until("cancelled while hot", || {
+            status(&e, &d.id) == DeploymentStatus::Cancelled
+        })
+        .await;
+        assert!(e.gate.held().is_some(), "still hot: the cancel didn't wait for it");
+
+        // Cool, but the only slot is taken.
+        std::fs::write(dir.path().join("power"), r#"{"state":"ok"}"#).unwrap();
+        let slot = e.gate.acquire(&mut |_| {}).await;
+        let d = e.enqueue(&app.id, Enqueue::default()).unwrap();
+        until("building", || status(&e, &d.id) == DeploymentStatus::Building).await;
+        e.cancel(&d.id).unwrap();
+        until("cancelled while queued for a slot", || {
+            status(&e, &d.id) == DeploymentStatus::Cancelled
+        })
+        .await;
+        // The app is free: the next deployment starts (and waits its turn).
+        let next = e.enqueue(&app.id, Enqueue::default()).unwrap();
+        until("the next one starts", || {
+            status(&e, &next.id) == DeploymentStatus::Building
+        })
+        .await;
+        drop(slot);
+        e.cancel(&next.id).unwrap();
+        until("the next one ends", || {
+            status(&e, &next.id) != DeploymentStatus::Building
+        })
+        .await;
+    }
 }

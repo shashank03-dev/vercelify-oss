@@ -14,6 +14,7 @@
 //! and a trailing slash is optional.
 
 use serde_json::{Map, Value};
+use std::collections::HashMap;
 use std::net::IpAddr;
 
 /// Files read from the app's root directory; later ones override earlier ones.
@@ -118,8 +119,14 @@ pub enum RewriteTo {
     /// Serve this path when the app has nothing at the requested one (404),
     /// like Vercel, which applies rewrites after its file system.
     Fallback(String),
-    /// Proxy to another site.
-    External { origin: String, path: String },
+    /// Proxy to another site. `addrs`: the public addresses its name resolved
+    /// to, which the proxy connects to instead of looking the name up itself
+    /// (empty: the origin is an IP literal, or private targets are allowed).
+    External {
+        origin: String,
+        path: String,
+        addrs: Vec<IpAddr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -755,6 +762,7 @@ fn rewrite(rule: &Value, label: &str, warnings: &mut Vec<String>) -> Result<Rewr
         RewriteTo::External {
             origin,
             path: path.to_string(),
+            addrs: vec![],
         }
     } else if dest.starts_with('/') {
         let templ = destination(dest, &pattern)?;
@@ -915,39 +923,118 @@ fn firewall(v: &Value, warnings: &mut Vec<String>) -> Firewall {
 /// something meant to stay private (Ollama, the agent, a database) on the
 /// app's public domain.
 pub fn private_origin(origin: &str) -> bool {
-    let rest = origin.split("://").nth(1).unwrap_or(origin);
-    let host = if let Some(v6) = rest.strip_prefix('[') {
-        v6.split(']').next().unwrap_or("")
-    } else {
-        rest.split(':').next().unwrap_or("")
-    }
-    .to_ascii_lowercase();
+    let host = origin_target(origin).0;
     if let Ok(ip) = host.parse::<IpAddr>() {
-        return match ip {
-            IpAddr::V4(a) => {
-                let o = a.octets();
-                a.is_loopback()
-                    || a.is_private()
-                    || a.is_link_local()
-                    || a.is_unspecified()
-                    || a.is_broadcast()
-                    || (o[0] == 100 && (64..128).contains(&o[1]))
-            }
-            IpAddr::V6(a) => {
-                let s = a.segments();
-                a.is_loopback()
-                    || a.is_unspecified()
-                    || (s[0] & 0xfe00) == 0xfc00
-                    || (s[0] & 0xffc0) == 0xfe80
-                    || a.to_ipv4_mapped()
-                        .is_some_and(|v4| private_origin(&format!("http://{v4}")))
-            }
-        };
+        return private_ip(ip);
     }
     !host.contains('.')
         || [".localhost", ".local", ".internal", ".lan", ".home.arpa"]
             .iter()
             .any(|s| host.ends_with(s))
+}
+
+/// The host (lowercase, IPv6 without brackets), port and whether it is
+/// HTTPS, of an origin `http(s)://host[:port]`.
+pub fn origin_target(origin: &str) -> (String, u16, bool) {
+    let tls = origin.starts_with("https://");
+    let rest = origin.split("://").nth(1).unwrap_or(origin);
+    let (host, port) = if let Some(v6) = rest.strip_prefix('[') {
+        let (h, after) = v6.split_once(']').unwrap_or((v6, ""));
+        (h, after.strip_prefix(':'))
+    } else {
+        let (h, p) = rest.split_once(':').map_or((rest, None), |(h, p)| (h, Some(p)));
+        (h, p)
+    };
+    let port = port.and_then(|p| p.parse().ok()).unwrap_or(if tls { 443 } else { 80 });
+    (host.to_ascii_lowercase(), port, tls)
+}
+
+/// An address on this machine or a private, shared (CGNAT, the mesh),
+/// link-local or unique-local network.
+pub fn private_ip(ip: IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(a) => {
+            let o = a.octets();
+            a.is_loopback()
+                || a.is_private()
+                || a.is_link_local()
+                || a.is_unspecified()
+                || a.is_broadcast()
+                || o[0] == 0
+                || (o[0] == 100 && (64..128).contains(&o[1]))
+        }
+        IpAddr::V6(a) => {
+            let s = a.segments();
+            a.is_loopback()
+                || a.is_unspecified()
+                || (s[0] & 0xfe00) == 0xfc00
+                || (s[0] & 0xffc0) == 0xfe80
+                || a.to_ipv4_mapped().is_some_and(|v4| private_ip(IpAddr::V4(v4)))
+        }
+    }
+}
+
+/// The (host, port) of every external rewrite that is reached by a DNS
+/// name, to look up before [`pin_rewrites`].
+pub fn dns_origins(plan: &Plan) -> Vec<(String, u16)> {
+    let mut out: Vec<(String, u16)> = plan
+        .rewrites
+        .iter()
+        .filter_map(|r| match &r.to {
+            RewriteTo::External { origin, .. } => {
+                let (host, port, _) = origin_target(origin);
+                host.parse::<IpAddr>().is_err().then_some((host, port))
+            }
+            _ => None,
+        })
+        .collect();
+    out.sort();
+    out.dedup();
+    out
+}
+
+/// Pin every external rewrite reached by a DNS name to the addresses the
+/// name resolved to (`resolved`, from [`dns_origins`]), so the proxy only
+/// ever connects to addresses checked here: a name can't be pointed at a
+/// private address later (DNS rebinding) without the next check seeing it.
+/// A name that didn't resolve, or resolved to any private address, is
+/// dropped; the notes say which. Run after [`drop_private_rewrites`].
+pub fn pin_rewrites(plan: &mut Plan, resolved: &HashMap<(String, u16), Vec<IpAddr>>) -> Vec<String> {
+    let mut notes = Vec::new();
+    plan.rewrites.retain_mut(|r| {
+        let RewriteTo::External { origin, addrs, .. } = &mut r.to else {
+            return true;
+        };
+        let (host, port, _) = origin_target(origin);
+        if host.parse::<IpAddr>().is_ok() {
+            return true;
+        }
+        match resolved.get(&(host, port)).filter(|a| !a.is_empty()) {
+            None => {
+                notes.push(format!(
+                    "{}: {origin} could not be looked up; skipped until it resolves",
+                    r.label
+                ));
+                false
+            }
+            Some(found) if found.iter().any(|ip| private_ip(*ip)) => {
+                notes.push(format!(
+                    "{}: {origin} resolves to an address on this machine or a private network; \
+                     proxying to it would make it public — skipped",
+                    r.label
+                ));
+                false
+            }
+            Some(found) => {
+                let mut found = found.clone();
+                found.sort();
+                found.dedup();
+                *addrs = found;
+                true
+            }
+        }
+    });
+    notes
 }
 
 /// Drop rewrites that proxy to a private origin (see `private_origin`).
@@ -1273,7 +1360,8 @@ mod tests {
             plan.rewrites[0].to,
             RewriteTo::External {
                 origin: "https://api.example.com".into(),
-                path: "/v1/${p1}".into()
+                path: "/v1/${p1}".into(),
+                addrs: vec![],
             }
         );
         assert_eq!(plan.rewrites[1].to, RewriteTo::Path("/posts/${slug}".into()));
@@ -1380,6 +1468,89 @@ mod tests {
         assert_eq!(parse_net("192.168.1.77/24").unwrap().to_string(), "192.168.1.0/24");
         assert!(parse_net("1.2.3.4/33").is_err());
         assert!(parse_net("example.com").is_err());
+    }
+
+    #[test]
+    fn rewrites_by_name_are_pinned_to_public_addresses() {
+        let mut plan = parse(&[(
+            "vercel.json",
+            r#"{"rewrites": [
+                {"source": "/ai/:path*", "destination": "http://10.77.0.1.sslip.io:11434/:path*"},
+                {"source": "/loop/(.*)", "destination": "https://loop.example.com/$1"},
+                {"source": "/v6/(.*)", "destination": "https://v6.example.com/$1"},
+                {"source": "/gone/(.*)", "destination": "https://gone.example.com/$1"},
+                {"source": "/api/(.*)", "destination": "https://api.example.com:8443/$1"},
+                {"source": "/ip/(.*)", "destination": "http://8.8.8.8/$1"}
+            ]}"#,
+        )])
+        .unwrap();
+        drop_private_rewrites(&mut plan);
+        assert_eq!(plan.rewrites.len(), 6, "names pass the spelling check");
+        assert_eq!(
+            dns_origins(&plan),
+            [
+                ("10.77.0.1.sslip.io".to_string(), 11434),
+                ("api.example.com".into(), 8443),
+                ("gone.example.com".into(), 443),
+                ("loop.example.com".into(), 443),
+                ("v6.example.com".into(), 443),
+            ]
+        );
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        let resolved = HashMap::from([
+            (("10.77.0.1.sslip.io".to_string(), 11434), vec![ip("10.77.0.1")]),
+            // One private answer among public ones is enough to refuse.
+            (
+                ("loop.example.com".into(), 443),
+                vec![ip("93.184.216.34"), ip("127.0.0.1")],
+            ),
+            (("v6.example.com".into(), 443), vec![ip("::ffff:192.168.1.1")]),
+            (
+                ("api.example.com".into(), 8443),
+                vec![ip("93.184.216.35"), ip("93.184.216.34")],
+            ),
+        ]);
+        let notes = pin_rewrites(&mut plan, &resolved);
+        assert_eq!(notes.len(), 4, "{notes:?}");
+        assert!(notes[0].contains("10.77.0.1.sslip.io") && notes[0].contains("private network"));
+        assert!(notes[3].contains("gone.example.com") && notes[3].contains("could not be looked up"));
+        assert_eq!(plan.rewrites.len(), 2);
+        assert_eq!(
+            plan.rewrites[0].to,
+            RewriteTo::External {
+                origin: "https://api.example.com:8443".into(),
+                path: "/${p1}".into(),
+                addrs: vec![ip("93.184.216.34"), ip("93.184.216.35")],
+            }
+        );
+        // IP literals were checked by spelling; nothing to pin.
+        assert!(matches!(&plan.rewrites[1].to, RewriteTo::External { addrs, .. } if addrs.is_empty()));
+        // A name that later answers with a private address is refused then.
+        let mut again = parse(&[(
+            "vercel.json",
+            r#"{"rewrites": [{"source": "/api/(.*)", "destination": "https://api.example.com:8443/$1"}]}"#,
+        )])
+        .unwrap();
+        let rebound = HashMap::from([(("api.example.com".to_string(), 8443), vec![ip("10.0.0.5")])]);
+        assert_eq!(pin_rewrites(&mut again, &rebound).len(), 1);
+        assert!(again.rewrites.is_empty());
+    }
+
+    #[test]
+    fn origin_targets() {
+        assert_eq!(
+            origin_target("https://a.example.com"),
+            ("a.example.com".into(), 443, true)
+        );
+        assert_eq!(
+            origin_target("http://A.example.com:8080"),
+            ("a.example.com".into(), 8080, false)
+        );
+        assert_eq!(
+            origin_target("https://[2001:db8::1]:8443"),
+            ("2001:db8::1".into(), 8443, true)
+        );
+        assert_eq!(origin_target("http://[::1]"), ("::1".into(), 80, false));
     }
 
     #[test]

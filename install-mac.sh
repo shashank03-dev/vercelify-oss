@@ -11,6 +11,9 @@
 #   --mesh-system    run vercelify-mesh as root with a real interface (*.vfy for every app;
 #                    asks for your password) instead of in the app's user session
 #   --pair CODE      pair with a server right away (the full code its installer printed)
+#   --host           also let this Mac host apps: the host manager (vercelify-host) and a
+#                    pinned Lima, kept running by launchd; the app then offers to create
+#                    the Vercelify environment (one Linux VM shared by all apps)
 #   --dest DIR       install the app into DIR (default: /Applications, else ~/Applications)
 #   -y, --yes        never ask
 #
@@ -35,6 +38,12 @@ MESH_LABEL=dev.vercelify.mesh
 DEST=''
 PAIR_CODE=''
 ASSUME_YES=0
+WITH_HOST=0
+HOST_LABEL=dev.vercelify.host
+# Lima, pinned: the release and its published checksums (lima-vm/lima).
+LIMA_VERSION=2.2.1
+LIMA_SHA256_ARM64=9e9eacce88f37e185c346bad73aa6136f738d8cdf8c3bb23cd42b071824bc66e
+LIMA_SHA256_X86_64=6b776e4bc41f358e6ee01fefcc78e2eb26f11635a0fcff632234af77a566c6c4
 
 if [[ -t 2 && -z "${NO_COLOR:-}" ]]; then
   B=$'\e[1m'; D=$'\e[2m'; G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; C=$'\e[36m'; N=$'\e[0m'
@@ -80,6 +89,7 @@ parse_args() {
       --mesh-system) MESH_SYSTEM=1 ;;
       --dest) DEST=${2:?--dest needs a directory}; shift ;;
       --pair) PAIR_CODE=${2:?--pair needs the code the server printed}; shift ;;
+      --host) WITH_HOST=1 ;;
       -y|--yes) ASSUME_YES=1 ;;
       -h|--help) usage; exit 0 ;;
       *) die "unknown option: $1 (see --help)" ;;
@@ -384,6 +394,119 @@ install_mesh() {
   fi
 }
 
+# host_asset RELEASE_JSON_FILE — the vercelify-host binary for macOS.
+host_asset() {
+  grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$1" | sed 's/.*"\(https[^"]*\)"$/\1/' |
+    { grep -E '/vercelify-host-universal-apple-darwin$' || true; } | head -1
+}
+
+obtain_host_binary() {
+  local out=$1 json url src="${XDG_CACHE_HOME:-$HOME/Library/Caches}/vercelify-src"
+  if [[ -n "${VERCELIFY_HOST_BINARY:-}" ]]; then cp "$VERCELIFY_HOST_BINARY" "$out"; return; fi
+  if [[ -n "${SOURCE_DIR:-}" ]]; then
+    info "building vercelify-host from the same source as the app"
+    (cd "$SOURCE_DIR" && ${CARGO:-cargo} build --release -q -p vercelify-host) >&2 || return 1
+    cp "$SOURCE_DIR/target/release/vercelify-host" "$out"
+    return 0
+  fi
+  json="${WORK:-$(mktemp -d)}/release.json"
+  if [[ -s "$json" ]] || curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' -o "$json" "$GITHUB_API/repos/$REPO/releases/latest" 2>/dev/null; then
+    url=$(host_asset "$json")
+    if [[ -n "$url" ]] && curl -fsSL --retry 3 -o "$out" "$url" && curl -fsSL --retry 3 -o "$out.sha256" "$url.sha256"; then
+      [[ "$(shasum -a 256 "$out" | cut -d' ' -f1)" == "$(cut -d' ' -f1 "$out.sha256")" ]] || die "vercelify-host: checksum mismatch"
+      rm -f "$out.sha256"
+      return 0
+    fi
+  fi
+  have cargo || return 1
+  [[ -d "$src/.git" ]] || git clone --depth 1 -q "https://github.com/$REPO" "$src" || return 1
+  (cd "$src" && cargo build --release -q -p vercelify-host) >&2 || return 1
+  cp "$src/target/release/vercelify-host" "$out"
+}
+
+# install_lima DIR — the pinned Lima into DIR (bin/limactl, share/lima),
+# checked against its published checksum. Vercelify's own copy: a Lima or
+# Colima the owner installed is left alone, and so are their VMs.
+install_lima() {
+  local dir=$1 arch want tgz
+  case "$(uname -m)" in
+    arm64) arch=arm64; want=$LIMA_SHA256_ARM64 ;;
+    *) arch=x86_64; want=$LIMA_SHA256_X86_64 ;;
+  esac
+  if [[ -x "$dir/bin/limactl" ]] && "$dir/bin/limactl" --version 2>/dev/null | grep -q " $LIMA_VERSION\$"; then
+    ok "Lima $LIMA_VERSION already here"
+    return 0
+  fi
+  tgz="${WORK:-$(mktemp -d)}/lima.tar.gz"
+  curl -fsSL --retry 3 -o "$tgz" "https://github.com/lima-vm/lima/releases/download/v$LIMA_VERSION/lima-$LIMA_VERSION-Darwin-$arch.tar.gz" ||
+    { err "couldn't download Lima $LIMA_VERSION"; return 1; }
+  [[ "$(shasum -a 256 "$tgz" | cut -d' ' -f1)" == "$want" ]] || { err "Lima: checksum mismatch"; rm -f "$tgz"; return 1; }
+  rm -rf "$dir.new"
+  mkdir -p "$dir.new"
+  tar -xzf "$tgz" -C "$dir.new"
+  rm -rf "$dir"
+  mv "$dir.new" "$dir"
+  rm -f "$tgz"
+  ok "Lima $LIMA_VERSION"
+}
+
+# host_plist BIN HOME — the host manager's launchd job, in the user's
+# session: Apple's Virtualization framework is meant for a logged-in user,
+# not a root daemon (and with FileVault nothing runs before a login anyway).
+host_plist() {
+  local bin=$1 home=$2
+  cat <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$HOST_LABEL</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$bin</string>
+    <string>serve</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict><key>RUST_LOG</key><string>info</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>$home/run/host.log</string>
+  <key>StandardErrorPath</key><string>$home/run/host.log</string>
+</dict>
+</plist>
+PLIST
+}
+
+install_host() {
+  step "Hosting on this Mac (vercelify-host and Lima)"
+  local home="${VERCELIFY_MESH_HOME:-$HOME/Library/Application Support/Vercelify}" bin plist domain tmp
+  bin="$home/bin/vercelify-host"
+  plist="${VERCELIFY_LAUNCH_AGENTS:-$HOME/Library/LaunchAgents}/$HOST_LABEL.plist"
+  domain="gui/$(id -u)"
+  mkdir -p "$home/bin" "$home/run" "$(dirname "$plist")"
+  install_lima "$home/lima" || return 1
+  tmp=$(mktemp)
+  if ! obtain_host_binary "$tmp"; then
+    rm -f "$tmp"
+    err "no vercelify-host build for this Mac yet (re-run with --from-source to build it)"
+    return 1
+  fi
+  install -m 0755 "$tmp" "$bin"
+  rm -f "$tmp"
+  host_plist "$bin" "$home" >"$plist"
+  if [[ "${VERCELIFY_NO_LAUNCHCTL:-0}" != 1 ]]; then
+    "$LAUNCHCTL" bootout "$domain/$HOST_LABEL" 2>/dev/null || true
+    sleep 1
+    "$LAUNCHCTL" bootstrap "$domain" "$plist" 2>/dev/null || { err "launchd didn't start vercelify-host: see $home/run/host.log"; return 1; }
+  fi
+  ok "vercelify-host runs in your session: create the Vercelify environment from the app (Servers)"
+  info "it keeps running when the app is closed; a sleeping or switched-off Mac serves nothing"
+  if fdesetup isactive >/dev/null 2>&1; then
+    warn "FileVault is on: after a restart, log in once before your apps come back"
+  fi
+}
+
 # The app reads this once at start (and removes it): only this user can read it.
 leave_pairing() {
   local dir="${VERCELIFY_APP_CONFIG:-$HOME/Library/Application Support/dev.vercelify.cockpit}"
@@ -427,6 +550,7 @@ main() {
   fi
 
   (( WITH_MESH )) && { install_mesh || MESH_FAILED=1; }
+  (( WITH_HOST )) && { install_host || MESH_FAILED=1; }
   (( WITH_DISPLAY )) && install_display_tools
   install_cli
 

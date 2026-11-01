@@ -6,6 +6,7 @@ use crate::cert::NodeKind;
 use crate::proto::CoordinatorInfo;
 use serde::{Deserialize, Serialize};
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -44,12 +45,11 @@ pub fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
     }
     let tmp = path.with_extension("tmp");
     {
-        let mut f = std::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&tmp)?;
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create(true).truncate(true);
+        #[cfg(unix)]
+        o.mode(0o600);
+        let mut f = o.open(&tmp)?;
         f.write_all(data)?;
         f.sync_all()?;
     }
@@ -78,6 +78,7 @@ impl State {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -104,7 +105,10 @@ mod tests {
         };
         s.save(d.path()).unwrap();
         assert_eq!(State::load(d.path()).unwrap(), Some(s));
-        let mode = std::fs::metadata(state_path(d.path())).unwrap().permissions().mode();
-        assert_eq!(mode & 0o777, 0o600);
+        #[cfg(unix)]
+        {
+            let mode = std::fs::metadata(state_path(d.path())).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 }

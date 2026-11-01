@@ -9,6 +9,7 @@ use crate::config::Config;
 use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use vercelify_core::host::HostStatus;
 use vercelify_core::platform::{NodeHeartbeat, NodeHeartbeatReply, NodeStatus};
 use vercelify_mesh::addr::{Addressing, COORDINATOR_INDEX};
 use vercelify_mesh::state::State as NodeState;
@@ -53,7 +54,7 @@ pub async fn node_status(cfg: &Config, collector: &vercelify_core::collect::Coll
         .status()
         .await
         .is_ok_and(|s| s.success());
-    NodeStatus {
+    let own = NodeStatus {
         cpus: cpu.cores,
         memory_total_mb: mem.total_bytes / 1_048_576,
         memory_available_mb: mem.available_bytes / 1_048_576,
@@ -63,6 +64,91 @@ pub async fn node_status(cfg: &Config, collector: &vercelify_core::collect::Coll
         docker_ok,
         http_port: cfg.proxy_http_port,
         agent_version: crate::VERSION.into(),
+    };
+    match &cfg.host_status {
+        Some(src) => with_host(
+            own,
+            read_host_status(src).await.as_ref(),
+            chrono::Utc::now().timestamp(),
+        ),
+        None => own,
+    }
+}
+
+/// The host manager's view of the physical computer (see `Config::host_status`).
+async fn read_host_status(src: &str) -> Option<HostStatus> {
+    let raw: Vec<u8> = if src.starts_with("http://") {
+        let (code, body) = crate::http::call(crate::http::Req::get(src).timeout(Duration::from_secs(3)))
+            .await
+            .ok()?;
+        if !code.is_success() {
+            return None;
+        }
+        body.to_vec()
+    } else {
+        tokio::fs::read(src).await.ok()?
+    };
+    serde_json::from_slice(&raw).ok()
+}
+
+/// Inside a VM the battery and thermal readings are of virtual hardware:
+/// the computer's own (fresh) ones replace them. Memory and processors stay
+/// the guest's, which is what apps here can use. A missing or stale report
+/// (the host manager stopped) leaves the guest's own view.
+fn with_host(mut own: NodeStatus, host: Option<&HostStatus>, now: i64) -> NodeStatus {
+    match host.filter(|h| h.fresh(now)) {
+        Some(h) => {
+            own.on_battery = h.on_battery;
+            own.battery_percent = h.battery_percent;
+            own.thermal_paused |= h.thermal_pressure;
+        }
+        None => tracing::debug!("no fresh report from the host manager"),
+    }
+    own
+}
+
+#[cfg(test)]
+mod host_tests {
+    use super::*;
+
+    #[test]
+    fn the_real_computers_battery_and_heat_win() {
+        let own = NodeStatus {
+            cpus: 4,
+            memory_available_mb: 3000,
+            ..NodeStatus::default()
+        };
+        let host = HostStatus {
+            measured_at: 1_000,
+            on_battery: true,
+            battery_percent: Some(40),
+            thermal_pressure: true,
+            ..HostStatus::default()
+        };
+        let s = with_host(own.clone(), Some(&host), 1_010);
+        assert!(s.on_battery && s.thermal_paused);
+        assert_eq!(s.battery_percent, Some(40));
+        assert_eq!(s.memory_available_mb, 3000, "the guest's memory stays");
+        // Placement now refuses it: on battery below 50 %.
+        let node = vercelify_core::platform::PlatformNode {
+            id: "node_1".into(),
+            name: "mac".into(),
+            role: "worker".into(),
+            agent_url: String::new(),
+            arch: "aarch64".into(),
+            builds: false,
+            online: true,
+            last_seen_at: None,
+            created_at: String::new(),
+            mesh_ip: String::new(),
+            drained: false,
+            status: NodeStatus { docker_ok: true, ..s },
+            instances: 0,
+        };
+        assert!(vercelify_platform::placement::unusable(&node).is_some());
+
+        assert_eq!(with_host(own.clone(), Some(&host), 2_000), own, "stale: ignored");
+        assert_eq!(with_host(own.clone(), None, 1_010), own);
     }
 }
 
@@ -139,7 +225,15 @@ impl Worker {
                         failing = 0;
                         60
                     }
-                    Err(e) => {
+                    // Refused for good (removed from hosting): ask rarely.
+                    Err(Beat::Refused(e)) => {
+                        if failing == 0 {
+                            tracing::warn!("worker heartbeat: {e}");
+                        }
+                        failing = 1;
+                        600
+                    }
+                    Err(Beat::Failed(e)) => {
                         failing += 1;
                         if failing > 1 {
                             tracing::warn!("worker heartbeat: {e}");
@@ -153,10 +247,10 @@ impl Worker {
         tokio::spawn(forward_registry(cfg));
     }
 
-    async fn heartbeat(&self, cfg: &Config, collector: &vercelify_core::collect::Collector) -> Result<(), String> {
+    async fn heartbeat(&self, cfg: &Config, collector: &vercelify_core::collect::Collector) -> Result<(), Beat> {
         let st = NodeState::load(&cfg.mesh_dir)
             .map_err(|e| e.to_string())?
-            .ok_or("not on the mesh yet (sudo vercelify mesh join …)")?;
+            .ok_or_else(|| "not on the mesh yet (sudo vercelify mesh join …)".to_string())?;
         let status = node_status(cfg, collector).await;
         let hb = NodeHeartbeat {
             arch: std::env::consts::ARCH.into(),
@@ -173,12 +267,29 @@ impl Worker {
         )
         .await
         .map_err(|e| e.to_string())?;
+        if code == hyper::StatusCode::CONFLICT {
+            return Err(Beat::Refused(crate::http::error_text(code, &bytes)));
+        }
         if !code.is_success() {
-            return Err(crate::http::error_text(code, &bytes));
+            return Err(crate::http::error_text(code, &bytes).into());
         }
         let reply: NodeHeartbeatReply = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
         tracing::debug!("heartbeat: {} (registry {})", reply.node_id, reply.registry);
         Ok(())
+    }
+}
+
+/// Why a heartbeat didn't land.
+enum Beat {
+    /// Try again soon (the main server restarting, the mesh coming up).
+    Failed(String),
+    /// The main server said no for good (this server was removed).
+    Refused(String),
+}
+
+impl From<String> for Beat {
+    fn from(e: String) -> Self {
+        Beat::Failed(e)
     }
 }
 

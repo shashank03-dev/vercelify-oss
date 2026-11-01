@@ -9,9 +9,109 @@
 //! - Replicas spread over usable servers, the app's own first; apps with
 //!   volumes keep every replica on their server (the data is there).
 //! - Compose apps run on the main server (their checkout is there).
+//! - Servers report every minute, so two deploys close together would both
+//!   see the same free memory: [`Reservations`] holds what each placed
+//!   deployment needs until the servers' reports can include it.
 
 use crate::{Error, Result};
+use std::collections::HashMap;
+use std::sync::Mutex;
+use std::time::{Duration, Instant};
 use vercelify_core::platform::PlatformNode;
+
+/// How long a finished deployment's reservation outlives it: past the next
+/// report from its servers (every minute), which then counts it.
+pub const RESERVATION_GRACE: Duration = Duration::from_secs(90);
+
+/// Memory promised to deployments being placed or just started, by server.
+/// In memory on purpose: after a restart nothing is mid-placement and the
+/// servers' reports are the truth again.
+#[derive(Default)]
+pub struct Reservations {
+    held: Mutex<HashMap<String, Held>>,
+}
+
+struct Held {
+    /// (server, MB) per instance.
+    slots: Vec<(String, u64)>,
+    /// None while the deployment runs.
+    until: Option<Instant>,
+}
+
+impl Reservations {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Held>> {
+        self.held.lock().unwrap_or_else(|p| p.into_inner())
+    }
+
+    /// Place `deployment` against the servers' reports minus what others
+    /// hold, and hold its share, in one step: a second deploy placed at the
+    /// same moment sees it.
+    pub fn place(&self, deployment: &str, nodes: &[PlatformNode], need: &Need) -> Result<Vec<Slot>> {
+        self.place_at(deployment, nodes, need, Instant::now())
+    }
+
+    fn place_at(&self, deployment: &str, nodes: &[PlatformNode], need: &Need, now: Instant) -> Result<Vec<Slot>> {
+        let mut held = self.lock();
+        held.retain(|_, h| h.until.is_none_or(|u| u > now));
+        let mut by_node: HashMap<&str, u64> = HashMap::new();
+        for (id, h) in held.iter() {
+            if id == deployment {
+                continue;
+            }
+            for (n, mb) in &h.slots {
+                *by_node.entry(n.as_str()).or_default() += mb;
+            }
+        }
+        let adjusted: Vec<PlatformNode> = nodes
+            .iter()
+            .map(|n| {
+                let mut n = n.clone();
+                let r = by_node.get(n.id.as_str()).copied().unwrap_or(0);
+                n.status.memory_available_mb = n.status.memory_available_mb.saturating_sub(r);
+                n
+            })
+            .collect();
+        let slots = place(&adjusted, need)?;
+        let mb = need.memory_mb.map(u64::from).unwrap_or(DEFAULT_MEMORY_MB);
+        held.insert(
+            deployment.to_string(),
+            Held {
+                slots: slots.iter().map(|s| (s.node_id.clone(), mb)).collect(),
+                until: None,
+            },
+        );
+        Ok(slots)
+    }
+
+    /// The deployment finished (any outcome): keep its share a little longer
+    /// if it started containers, else drop it now.
+    pub fn finish(&self, deployment: &str, started: bool) {
+        self.finish_at(deployment, started, Instant::now())
+    }
+
+    fn finish_at(&self, deployment: &str, started: bool, now: Instant) {
+        let mut held = self.lock();
+        if started {
+            if let Some(h) = held.get_mut(deployment) {
+                h.until = Some(now + RESERVATION_GRACE);
+            }
+        } else {
+            held.remove(deployment);
+        }
+    }
+
+    /// MB held on a server now (for tests and diagnostics).
+    pub fn on(&self, node_id: &str) -> u64 {
+        let now = Instant::now();
+        self.lock()
+            .values()
+            .filter(|h| h.until.is_none_or(|u| u > now))
+            .flat_map(|h| h.slots.iter())
+            .filter(|(n, _)| n == node_id)
+            .map(|(_, mb)| mb)
+            .sum()
+    }
+}
 
 /// Memory an app is assumed to need when it sets no limit.
 pub const DEFAULT_MEMORY_MB: u64 = 256;
@@ -156,6 +256,37 @@ mod tests {
             },
             instances: 0,
         }
+    }
+
+    #[test]
+    fn concurrent_deploys_do_not_spend_the_same_memory() {
+        // main has 1000 MB free, pi 900: the first 512 MB app goes to main;
+        // without the reservation the second would too (main still reports
+        // 1000), with it main has 488 left and pi wins.
+        let nodes = vec![node("main", "main", 1000), node("pi", "worker", 900)];
+        let need = Need {
+            replicas: 1,
+            memory_mb: Some(512),
+            ..Need::default()
+        };
+        let r = Reservations::default();
+        let t0 = Instant::now();
+        assert_eq!(ids(&r.place_at("d1", &nodes, &need, t0).unwrap()), ["main"]);
+        assert_eq!(ids(&r.place_at("d2", &nodes, &need, t0).unwrap()), ["pi"]);
+        assert_eq!(r.on("main"), 512);
+
+        // Placing the same deployment again doesn't count itself.
+        assert_eq!(ids(&r.place_at("d1", &nodes, &need, t0).unwrap()), ["main"]);
+
+        // A failed deploy frees its share at once; a started one after the
+        // grace period (by then the servers' reports include it).
+        r.finish_at("d2", false, t0);
+        assert_eq!(r.on("pi"), 0);
+        r.finish_at("d1", true, t0);
+        assert_eq!(ids(&r.place_at("d3", &nodes, &need, t0).unwrap()), ["pi"]);
+        r.finish_at("d3", false, t0);
+        let later = t0 + RESERVATION_GRACE + Duration::from_secs(1);
+        assert_eq!(ids(&r.place_at("d4", &nodes, &need, later).unwrap()), ["main"]);
     }
 
     fn ids(s: &[Slot]) -> Vec<&str> {

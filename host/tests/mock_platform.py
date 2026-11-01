@@ -41,6 +41,12 @@ ENV = [{"id": "env_1", "key": "DATABASE_URL", "value": "postgres://u:p@db/x", "b
         "secret": True, "scope": "app", "updated_at": "t"},
        {"id": "env_2", "key": "PREVIEW_ONLY", "value": "x", "build": False, "preview_only": True,
         "secret": False, "scope": "app", "updated_at": "t"}]
+# What production gets: the app's own value plus the inherited ones.
+RESOLVED_ENV = [dict(ENV[0]),
+                {"id": "env_3", "key": "API_URL", "value": "https://api.example.com", "build": False,
+                 "preview_only": False, "secret": True, "scope": "environment", "updated_at": "t"},
+                {"id": "env_4", "key": "REGION", "value": "home", "build": False, "preview_only": False,
+                 "secret": False, "scope": "project", "updated_at": "t"}]
 TEMPLATES = [{"id": "umami", "name": "Umami", "description": "Website analytics.", "category": "analytics",
               "website": "https://umami.is", "min_memory_mb": 512, "compose": "services:\n"},
              {"id": "plausible", "name": "Plausible", "description": "Analytics with ClickHouse.", "category": "analytics",
@@ -118,6 +124,8 @@ class H(BaseHTTPRequestHandler):
                 return self.reply(200, {"saved": n})
             if sub == "env" and method == "PUT":
                 return self.reply(200, {"saved": len(body["vars"])})
+            if sub == "env" and "resolved=true" in query:
+                return self.reply(200, RESOLVED_ENV)
             if sub == "env":
                 if "reveal=true" not in query:
                     return self.reply(200, [dict(v, value=None if v["secret"] else v["value"]) for v in ENV])

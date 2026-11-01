@@ -5,6 +5,7 @@
 pub mod avfoundation;
 pub mod disks;
 pub mod hardware;
+pub mod host;
 pub mod model;
 pub mod pairing;
 pub mod platform;

@@ -7,6 +7,7 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 use zeroize::Zeroizing;
@@ -42,7 +43,13 @@ fn load_or_create_32(path: &Path) -> std::io::Result<Zeroizing<[u8; 32]>> {
                 fs::create_dir_all(d)?;
             }
             let key = Zeroizing::new(random32());
-            match OpenOptions::new().write(true).create_new(true).mode(0o600).open(path) {
+            let mut o = OpenOptions::new();
+            o.write(true).create_new(true);
+            // Owner-only. On Windows the directory's ACL does this: the
+            // daemon there keeps its key under the user's %LOCALAPPDATA%.
+            #[cfg(unix)]
+            o.mode(0o600);
+            match o.open(path) {
                 Ok(mut f) => {
                     f.write_all(&*key)?;
                     f.sync_all()?;
@@ -186,6 +193,7 @@ impl VerifyingKey {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
 
     #[test]
@@ -193,6 +201,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("mesh/node.key");
         let a = NodeKey::load_or_create(&p).unwrap();
+        #[cfg(unix)]
         assert_eq!(fs::metadata(&p).unwrap().permissions().mode() & 0o777, 0o600);
         let again = NodeKey::load_or_create(&p).unwrap();
         assert_eq!(a.public(), again.public());

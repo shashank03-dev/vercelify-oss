@@ -1,0 +1,14 @@
+{
+  "head": "17547d68f0a778856042a5d145db6d096e4354f1",
+  "working_tree": "dirty; hashes identify inspected contents, not released behavior",
+  "sha256": {
+    "crates/vercelify-platform/src/engine.rs": "88846d330194aad4e914b00231c5c06789b49d0a08dcaf60b1cd8f00274f9d2e",
+    "crates/vercelify-platform/src/placement.rs": "3bece031d3f024daf0faeba6829c14eb345b000c9d8ad3c2e26fc7ae115e6167",
+    "crates/vercelify-platform/src/env.rs": "c6b14fa7ed46bdb39bdeab15db95234561bb0d3a06a3ce95da0fb4d8932b9e5d",
+    "crates/vercelify-platform/src/proxy.rs": "2cea646d642f15fb7d0cfe3c9c10ed7a821c8410d72c9a8095e2ab8b48ea61fc",
+    "crates/vercelify-platform/src/registry.rs": "4ad8ae4ccd4fb54457d3620650015677b88c3f07369a70cbf95634c9b72d833a",
+    "host/lib/backup.sh": "97d85106c0106d5912fe3ed62ae2467e2e1acb0bc8eaaf74ad96f8c4c4c6ec23",
+    "host/power-guard.sh": "b9a6dc7f60b1e697ca569690a0854cbf05bdc25b1de5020e2e9894afdf04f0be",
+    "install-mac.sh": "077a93ca4a800d1e266f2e55329d64a70f77d7bf8d3532462304dddee2ad5b0f"
+  }
+}

@@ -25,6 +25,7 @@ pub const MIGRATIONS: &[(u32, &str)] = &[
     (3, include_str!("../migrations/0003_git_webhooks.sql")),
     (4, include_str!("../migrations/0004_git_waiting.sql")),
     (5, include_str!("../migrations/0005_volume_identity.sql")),
+    (6, include_str!("../migrations/0006_node_removal.sql")),
 ];
 
 pub fn latest_version() -> u32 {

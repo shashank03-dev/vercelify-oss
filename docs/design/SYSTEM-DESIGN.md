@@ -176,6 +176,8 @@ the volumes, and starts the agent, whose reconciler brings apps and databases ba
 - Thermal pause: before starting a build and every 5 s during one, read
   `/run/vercelify/power-guard.state`. `thermal_paused` → `docker pause` the BuildKit
   container (`buildx_buildkit_vercelify0`), resume when it clears. `shutting_down` → cancel.
+  Cancelling a deployment that waits for the power guard or a build slot ends it at once
+  (the wait is raced against the cancel) and frees the app for its next deployment.
 
 ### 6.2 Pipeline
 
@@ -195,7 +197,14 @@ logs per app are kept.
 
 Order: explicit `build.pack` → `Dockerfile` at `build.dockerfile` (default `Dockerfile`) →
 compose file → language detection. Detection reads only files (never runs code from the
-repository on the host).
+repository on the host), and only the checkout's own: the context, Dockerfile, Compose
+file, output directory and every file read are resolved with symbolic links followed and
+refused (or ignored) when they lead outside it; BuildKit gets the resolved context, checked
+again where the build uses it. Every pack runs the install and build commands it is given
+(the app's over `vercel.json`'s): Node and Static as their steps, the other languages after
+`COPY . .` (Go and Rust then compile unless the build command left the binary, `/out/app`
+/ `/app`). What a plan can't use (commands with a Dockerfile, an output directory for a
+server) is a note in the build log.
 
 | Detected by | Generated image |
 | --- | --- |
@@ -257,7 +266,25 @@ the previous healthy one.
 
 Compose apps: `docker compose -p vfy-<app> -f <file> -f <generated override> up -d --wait`,
 where the override adds our labels, networks, limits and the env file. The routed service is
-`runtime.service`. Zero downtime is best effort (compose recreates in place).
+`runtime.service`. Zero downtime is best effort (compose recreates in place). A preview's
+override also renames every top-level volume to `vfy-<app>-pr<n>_<key>` (not external,
+labelled with the app and PR), even one the file names explicitly; the merged
+`docker compose config` is checked before `up` and the preview is refused when storage
+could still be shared (a bind mount resolving outside the checkout, driver options, another
+container's volumes) or it would read the server's files (an env file, secret or config
+file, or SSH key outside the checkout; external secrets). `config` runs with
+`--no-env-resolution`, so env files are read only by `up`, after the check; a Compose too old
+for the flag gets no compose previews. What Compose reads while resolving (each project
+directory's `.env` for `${…}`, `include` paths, env files and project directories,
+`extends.file`, recursively) is found in the YAML itself (`compose::implicit_reads`,
+yaml-rust2, ~95 KiB of the agent) and must be in the checkout before Compose runs at all.
+`<<` merges are resolved throughout each document first, every `extends.file` anywhere in it
+counts (a superset of Compose's reads), a path Compose would interpolate is refused, and a
+file over 1 MiB or 100,000 nodes with its aliases expanded (counted from parser events,
+before anything is built) is refused. Closing the PR removes those labelled volumes. Every
+compose app's builds read only the checkout: a `build.context`, Dockerfile or
+`additional_contexts` path outside it is refused (production may still mount server files
+at run time).
 
 ### 7.3 Rollback
 
@@ -266,6 +293,17 @@ where the override adds our labels, networks, limits and the env file. The route
 (or in the registry) it skips the build ("instant"), otherwise it rebuilds that commit
 ("rebuild"). Rollback pins: `apps.source.pinned_sha` is set so auto-deploy does not
 immediately redeploy the branch head; deploying again clears it.
+
+### 7.4 Deleting an old deployment
+
+`DELETE /v1/platform/deployments/{id}` (owners) removes the row and its log. It is
+refused (409) for the app's live deployment, one in progress, an open preview's, one
+with containers (`instances`), and for any deployment while the app has one in
+progress (a queued rollback may need it). It runs in one SQLite transaction, so it is
+serialized with deploys and rollbacks. Its image is not removed: the per-app pruning
+(keep the 5 newest, plus what other deployments use) collects it, so a digest shared
+with another deployment, replica or preview is never deleted early. `rollback_of`
+pointing at it becomes NULL.
 
 ## 8. Reconciler and runtime
 
@@ -372,7 +410,21 @@ not on battery below 50 %. Placement is decided once per app (sticky: the first 
 records `node_id`), so volumes stay put; changing `node_id` of an app with volumes
 that has run is refused. A drained server keeps what is pinned to it and takes nothing
 new (`PATCH /v1/platform/nodes/{id} {drained}`); a server with instances can't be
-removed (`DELETE`). Compose apps run on the main server; previews run one instance on
+removed (`DELETE`). Removing a worker marks its mesh identity
+(`mesh_nodes.hosting_removed_at`): its next heartbeat is refused (409, the worker then
+asks every 10 minutes) instead of registering it again as a new, undrained worker.
+Pairing the machine again clears the mark; revoking it on the mesh is separate.
+
+Servers report every minute, so two deploys close together would both see the same
+free memory. `placement::Reservations` places each deployment against the reports
+minus what other deployments hold, and holds its own share in the same step: released
+at once if the deploy started nothing, else 90 s after it ends (past the next report,
+which counts it). It lives in memory: after a restart nothing is mid-placement.
+
+Inside a Vercelify environment (§19) the agent's own battery and thermal readings are
+of virtual hardware. With `VERCELIFY_HOST_STATUS` set, the agent replaces them with the
+host manager's fresh (≤ 60 s) report of the physical computer; memory and processors
+stay the guest's. Compose apps run on the main server; previews run one instance on
 the app's server.
 
 Replicas (`runtime.replicas`, 1–32): spread over usable servers, the app's own
@@ -455,7 +507,12 @@ main server, and the old one stepping down.
     (`Host(...)`, priority 100, TLS when `https`), service with the container's address on
     `vfy-proxy`, Basic Auth middleware when set, HTTPS redirect middleware.
   - `vercelify-routes-<key>.yaml`: the existing `vercel.json` layer from `routing.rs`,
-    priorities 5000–50000 (unchanged), copying our base routers.
+    priorities 5000–50000 (unchanged), copying our base routers. Redirects keep their array
+    order across `has`/`missing`: a conditional redirect's router runs only the unconditional
+    ones listed before it. A rewrite to another site by name is pinned: looked up each
+    reconcile (every minute), refused if any address is private, and served from those
+    addresses with the name as `Host` and TLS server name (`serversTransports`), so Traefik
+    never resolves it itself (no DNS rebinding).
   - `vercelify-wake.yaml`: priority 1 catch-all to the wake listener (unchanged).
 - Router naming keeps today's `http-0-<app>` / `…-pr-<n>` pattern so `sleep.rs` reads the
   same Prometheus series.
@@ -531,7 +588,10 @@ needs, so the cockpit can say "about 2 GB" for Plausible before it is created.
   become our apps; deploy = `deployer.enqueue(app, sha, trigger = push)`.
 - Previews: the existing logic (forks never built, per-app cap, GitHub status + comment)
   calls `deployer.enqueue_preview(app, pr, sha)`; closing a PR deletes the preview's
-  container, route and row.
+  container, route and row. The row is closed first, under the lock a preview's commit
+  point takes (check open → route → record), so a deployment of it under way can't go
+  live afterwards; its running deployments are cancelled and the teardown waits for them.
+  A failed teardown opens the row again for the next check to retry.
 - Webhooks (M9): `POST /v1/webhooks/{github|gitlab|gitea}[/{source}]` on the control
   listener, reachable through the tunnel's public URL (`mesh_public_url`) or on the LAN
   (a self-hosted Gitea). `POST /v1/platform/git-sources/{id}/webhook` (`vercelify
@@ -566,9 +626,13 @@ Conventions: JSON, `snake_case`, lists return arrays, errors `{ "error": "…" }
 long operations return a `Job` and progress on `/v1/events` (topics `apps`, `deployments`,
 `databases`, `mesh`). New capabilities in `/v1/health`: `platform`, `mesh`.
 
-Roles: **viewer** = GET; **deployer** = apps, deployments, env, domains, previews,
-databases (not delete), logs, terminal; **owner** = everything incl. tokens, mesh, nodes,
-settings, deletes. The host token (`agent.token`) is owner.
+Roles: **viewer** = GET; **deployer** = apps, deployments, env (at app, environment and
+project level; creating or deleting projects and environments is an owner's), domains,
+previews, databases (not delete), logs, terminal; **owner** = everything incl. tokens, mesh, nodes,
+settings, deletes. The host token (`agent.token`) is owner. `GET …/apps/{id}/env?resolved=true` lists what production
+deployments of the app get (project < environment < app, no preview overrides, database
+references unexpanded; `vfy env pull`), each with the scope it comes from; `reveal=true`
+needs a deployer.
 
 The platform routes live under `/v1/platform/` (`/v1/projects` is already the
 `vercel.json` rules API): `/v1/platform/projects`, `/v1/platform/apps`,
@@ -983,6 +1047,7 @@ webpki roots for `wss://` and `https://` through a tunnel, 0.3 MiB the userspace
 | D8 | Single main + warm standby | Raft cluster (needs 3 always-on machines) |
 | D9 | Enrollment sealed to the coordinator's WireGuard key, everything else inside the mesh (changed in M7) | Self-signed TLS pinned by fingerprint (a second key and certificate to rotate, a TLS stack in a 6 MB daemon), plain HTTP (tokens in the clear), ACME (needs a public name) |
 | D10 | Workers pull images from the main server's registry as `127.0.0.1:5055`, forwarded by their agent over the mesh (M9) | An insecure registry in every `daemon.json` (a Docker restart per server, trust in a plain-HTTP registry on the network), `docker save`/`load` per deploy (no layer sharing, full images over the relay) |
+| D11 | Mac and Windows computers host through one Vercelify-owned Linux VM each (Lima: `vz`, or QEMU with HVF on macOS < 13; QEMU with WHPX on Windows), run by `vercelify-host`, with the unchanged agent inside (§19) | Native per-project execution (a second hosting engine), a VM per project (repeated overhead), Docker Desktop (licence terms for larger organisations; its VM and limits aren't ours), OrbStack (proprietary), WSL2 (`memory`, `processors` and `instanceIdleTimeout` are global `.wslconfig` settings shared with the owner's distributions, and instances stop after their last process) |
 
 ## 18. Setup and reaching the main server
 
@@ -1111,3 +1176,60 @@ interrupts their pending command/HTTP future; child commands use kill-on-drop,
 and the job/task finishes with “cancelled by user”. Finished jobs and operations
 that cannot be safely interrupted return 409. `vercelify llm --cancel` cancels the
 server's running AI jobs. Normal model-download completion also closes its job.
+
+## 19. Hosting on a Mac or Windows computer
+
+`crates/vercelify-host` (`vercelify-host`, ~1 MB) runs on the computer itself, before
+and without Desktop. It owns exactly one Linux guest, the **Vercelify environment**,
+shared by every app, database and build placed there; the guest runs the unchanged
+agent and mesh (`install.sh` at the host manager's release), so hosting has one engine.
+Linux servers don't use it.
+
+- **Providers** (`provider::Provider`): `lima::Lima` with its own `LIMA_HOME` (the
+  owner's Lima/Colima instances are never seen) and `qemu::Qemu`. Both boot the same
+  pinned Debian 12 genericcloud image, checked by SHA-512. The guest mounts nothing
+  from the computer. A worker forwards no ports; a main server forwards only the mesh
+  control (7443/tcp) and WireGuard (51820/udp) ports, as a Linux main server exposes
+  them on its LAN. Every provider step has a time limit (a stalled download fails as
+  retry-safe instead of hanging).
+- **Resources** (`vercelify_core::host::recommend`, policy v1): from physical
+  measurements only (a missing one is a blocker, never a zero). It leaves the OS
+  max(4 GiB, ⅓ of RAM) on macOS/Windows, 2 CPUs or a quarter, and max(10 GiB, 10 %)
+  of free disk; it adds a 256 MiB hypervisor allowance; it refuses below 2 GiB /
+  1 CPU / 20 GiB and says a computer under 3 GiB to spare is better used as a desktop.
+  The owner may change it within `max`; the grant is validated again against fresh
+  measurements when submitted.
+- **Lifecycle** (`manager.rs`): `not_created → preparing → starting → verifying →
+  ready`, `ready → stopping → stopped`, `updating`, `removing`, `blocked`, `failed`.
+  Every change is an operation journaled (atomic JSON, 0600 / restricted ACL) before
+  it acts, replayed by idempotency key, refused while another runs, and checked
+  against the revision the owner saw (stop, resize, delete). Resizing a running
+  environment restarts it and needs `restart_ok`; the disk only grows. Delete needs
+  `acknowledged` (Desktop shows what is lost) and gives the next environment a new
+  id; revisions only go up. A machine-wide lock (`/Users/Shared/Vercelify/host.lock`,
+  `%ProgramData%`) makes a second host manager refuse.
+- **Ready** means the health script passed inside the guest: Docker and the agent
+  active, `/v1/health` answering, the isolation rule present, and the guest clock
+  within 10 s of the host's (chrony steps after any jump: mesh certificates and ACME
+  are time-bound).
+- **Recovery**: every 20 s the manager compares the recorded state with the provider:
+  a ready environment whose VM is down is started again; a stopped one is kept
+  stopped; an operation the last process left running is reported failed, retry
+  safe. On macOS the job is a LaunchAgent (Apple's Virtualization framework is meant
+  for a logged-in user); with FileVault nothing starts before a login, and the
+  installer says so. On Windows it is a SYSTEM task at startup. While ready it holds
+  an idle-sleep assertion (`caffeinate -is`, `SetThreadExecutionState`); a closed
+  laptop on battery still sleeps, and the UI says a sleeping computer serves nothing.
+- **Isolation**: in the guest a `DOCKER-USER` rule drops container traffic to the
+  host's address (behind which are the computer's loopback services and the host
+  manager), except DNS (Lima's resolver is on that address).
+- **API**: management on `127.0.0.1:7425`, every route behind the owner token
+  (`owner.token`, readable by the owner only; 20 bad tokens a minute and the rest
+  wait); the guest's read-only listener on `127.0.0.1:7426` (`/v1/host/status`,
+  cloud-init seed). Desktop reaches the first through `host_request` (paths under
+  `/v1/host/` only).
+
+Not yet: a remote Desktop managing another computer's host manager (it is local to
+the computer; the environment's agent is managed over the mesh as usual), Windows
+hosting before real-hardware qualification, automatic database failover between
+computers.

@@ -1,0 +1,159 @@
+{
+  "results": [
+    {
+      "finding": "F2",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "rawPrivateUrlPassedToBrowser": "http://shop.10.77.0.1.sslip.io",
+        "note": "Browser transport forwarding is not provided by openExternal; actual Mac mesh reachability not exercised here."
+      }
+    },
+    {
+      "finding": "F3",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "exportsPrivateEndpoint": true,
+        "snippetContainsProxyOrLocalForwardSetup": false
+      }
+    },
+    {
+      "finding": "F5",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "initialBranch": "main",
+        "labels": [
+          "Repositoryhttps://github.com/you/app, or git@github.com:you/app.git for a private one",
+          "Branch",
+          "BuildDetect automaticallyDockerfileStatic siteNode.jsBunDenoPythonGoRustRubyPHP",
+          "NameLowercase letters, digits and dashes",
+          "PortLeave empty to detect it"
+        ],
+        "initialVariablesOrDatabaseStep": false
+      }
+    },
+    {
+      "finding": "F9",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "sourceChoices": [
+          " Git repository",
+          " Docker image",
+          " Service"
+        ],
+        "noComposeOrEnvironmentControlInCreateDialog": true
+      }
+    },
+    {
+      "finding": "F14",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "keyboardFocusEscapedOpenDialog": true
+      }
+    },
+    {
+      "finding": "F4",
+      "scope": "frontend callback completion simulated; no live GitHub account used",
+      "observed": {
+        "backend": {
+          "sourceId": "git_demo00000000000v",
+          "gitSources": 1
+        },
+        "gitSourcesChangeEventSent": true,
+        "observedAfterMs": 11000,
+        "dialogStillOpen": true,
+        "newCredentialSelectorPresent": false
+      }
+    },
+    {
+      "finding": "F6",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "domainInstructions": "Point a DNS A record at this server, add the name here, and HTTPS follows.",
+        "fixtureServerMode": "cloudflare"
+      }
+    },
+    {
+      "finding": "F7",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "displaysSuccessfulLocalBackup": true,
+        "backupCardText": "Backups\n\nThe engine's state and secrets, databases and volumes, encrypted\n\nBack up now\n\nLast backup 7h ago\n\n/var/backups/vercelify-restic\n==> Backup 2026-10-20T03:22:41Z\n  • dumped 3 database(s)\n  ✓ snapshot 7c1e9a42 in /mnt/storage/backups/restic\n  ✓ backup complete",
+        "note": "Same-disk default is tested separately using the real installer function."
+      }
+    },
+    {
+      "finding": "F15",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "serverDomainChangeUsesCLIInstruction": true,
+        "note": "This is a workflow limitation, not evidence users cannot understand the instruction."
+      }
+    },
+    {
+      "finding": "F18",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "healthPageAlreadyDisplaysBatteryHealth": "3.5%",
+        "correction": "The missing part is a doctor wear warning; health telemetry is already displayed."
+      }
+    },
+    {
+      "finding": "F10",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "singleDiskFixture": true,
+        "databaseHddOptionEnabled": true,
+        "databaseCreateEnabledAfterHddSelection": true
+      }
+    },
+    {
+      "finding": "F10",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "volumeAssistantConfirmsNoHdd": true,
+        "createFolderButtonStillEnabled": true
+      }
+    },
+    {
+      "finding": "F11",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "storagePageHasDeleteOrPurgeButton": false
+      }
+    },
+    {
+      "finding": "F8",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "restoreRequestIssuedByFirstClick": true,
+        "newReviewDialog": false,
+        "nativeConfirmations": 0
+      }
+    },
+    {
+      "finding": "F11",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "deletionHint": "Removes the container. Its data volume is kept unless you delete it on the Storage page."
+      }
+    },
+    {
+      "finding": "F13",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "onboardingRequiresRemoteReadinessBeforeAnywhereElseClaim": false,
+        "note": "README separately includes the prerequisite; onboarding does not."
+      }
+    },
+    {
+      "finding": "F17",
+      "scope": "actual UI using controlled demo fixtures",
+      "observed": {
+        "corruptBrowserConfigShowsOnboarding": true,
+        "originalCorruptValuePreservedUntilSave": true,
+        "correction": "Browser loader catches corruption; native read_config also defaults on read/parse failure. Shell rejection handler is not the primary cause."
+      }
+    }
+  ],
+  "harnessErrors": []
+}

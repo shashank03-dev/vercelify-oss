@@ -119,6 +119,43 @@ jobs:
           echo "vercelify-mesh (macOS arm64): $((size / 1024)) KiB"
           [ "$size" -le $((6 * 1024 * 1024)) ] || { echo "::error::vercelify-mesh is over the 6 MiB budget"; exit 1; }
 
+  host-macos:
+    name: vercelify-host on macOS (Lima provider)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p vercelify-host --all-targets -- -D warnings
+      - run: cargo test -p vercelify-host
+      - run: cargo build --release -p vercelify-host
+      - name: Size budget
+        run: |
+          size=$(stat -f %z target/release/vercelify-host)
+          echo "vercelify-host (macOS arm64): $((size / 1024)) KiB"
+          [ "$size" -le $((4 * 1024 * 1024)) ] || { echo "::error::vercelify-host is over the 4 MiB budget"; exit 1; }
+
+  windows:
+    name: Windows (host manager, userspace mesh)
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy -p vercelify-host -p vercelify-mesh --all-targets --features vercelify-mesh/daemon -- -D warnings
+      - run: cargo test -p vercelify-host -p vercelify-mesh --features vercelify-mesh/daemon
+      - run: cargo build --release -p vercelify-host -p vercelify-mesh --features vercelify-mesh/daemon
+      - name: install-windows.ps1 parses
+        shell: pwsh
+        run: |
+          $errs = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile("$PWD/install-windows.ps1", [ref]$null, [ref]$errs)
+          if ($errs) { $errs; exit 1 }
+
   cockpit:
     name: Cockpit frontend
     runs-on: ubuntu-24.04

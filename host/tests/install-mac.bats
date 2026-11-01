@@ -249,3 +249,35 @@ STUB
   install_from_release "$T/apps" || true
   [[ "$RELEASE_WHY" == *"v0.2.0"*"no Mac app"* ]]
 }
+
+@test "--host: the host manager's launchd job runs serve in the user's session" {
+  parse_args --host
+  [ "$WITH_HOST" = 1 ]
+  run host_plist "/Users/x/bin/vercelify-host" "/Users/x/home"
+  [[ "$output" == *"<string>dev.vercelify.host</string>"* ]]
+  [[ "$output" == *"<string>/Users/x/bin/vercelify-host</string>"*"<string>serve</string>"* ]]
+  [[ "$output" == *"<key>KeepAlive</key><true/>"* ]]
+  [[ "$output" == *"/Users/x/home/run/host.log"* ]]
+}
+
+@test "--host: a Lima download with the wrong checksum is refused and not installed" {
+  curl() { while (( $# )); do [ "$1" = -o ] && { echo tampered >"$2"; }; shift; done; }
+  export -f curl
+  WORK=$T
+  run install_lima "$T/lima"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"checksum mismatch"* ]]
+  [ ! -e "$T/lima/bin/limactl" ]
+}
+
+@test "--host installs vercelify-host, Lima and the LaunchAgent" {
+  printf '#!/bin/sh\necho host\n' >"$T/vh"; chmod +x "$T/vh"
+  mkdir -p "$T/lima/bin"
+  printf '#!/bin/sh\necho "limactl version %s"\n' "$LIMA_VERSION" >"$T/lima/bin/limactl"; chmod +x "$T/lima/bin/limactl"
+  export VERCELIFY_HOST_BINARY="$T/vh" VERCELIFY_MESH_HOME="$T" VERCELIFY_LAUNCH_AGENTS="$T/agents" VERCELIFY_NO_LAUNCHCTL=1
+  run install_host
+  [ "$status" -eq 0 ]
+  [ -x "$T/bin/vercelify-host" ]
+  [[ "$output" == *"Lima $LIMA_VERSION already here"* ]]
+  grep -q "<string>$T/bin/vercelify-host</string>" "$T/agents/dev.vercelify.host.plist"
+}

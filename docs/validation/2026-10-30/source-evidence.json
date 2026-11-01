@@ -1,0 +1,610 @@
+[
+  {
+    "finding": "F2",
+    "file": "install-mac.sh",
+    "sha256": "5dd0966994de42da309a9b6522e8c27fa718dc809e92ae022a8e728ce9bdd166",
+    "evidence": [
+      {
+        "pattern": "MESH_SYSTEM=0",
+        "matches": [
+          {
+            "line": 30,
+            "text": "MESH_SYSTEM=0"
+          }
+        ]
+      },
+      {
+        "pattern": "127.0.0.1:7480",
+        "matches": [
+          {
+            "line": 228,
+            "text": "# interface; the app reaches servers through SOCKS on 127.0.0.1:7480."
+          },
+          {
+            "line": 235,
+            "text": "mode='<string>--userspace</string><string>--port</string><string>0</string><string>--socks</string><string>127.0.0.1:7480</string>'"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F2",
+    "file": "cockpit/src/lib/open.ts",
+    "sha256": "8f50b232fa06d7e1c2e8f10e08e9391755f1420249041e84ee7cf064584a6b3c",
+    "evidence": [
+      {
+        "pattern": "export async function openExternal",
+        "matches": [
+          {
+            "line": 4,
+            "text": "export async function openExternal(url: string): Promise<void> {"
+          }
+        ]
+      },
+      {
+        "pattern": "await openUrl(url)",
+        "matches": [
+          {
+            "line": 8,
+            "text": "await openUrl(url);"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F2",
+    "file": "cockpit/src-tauri/src/lib.rs",
+    "sha256": "d36030887b915cc7b1d83c086f6ea89d6dc320e20c1b4440f3909969b1dd4854",
+    "evidence": [
+      {
+        "pattern": "fn client_for",
+        "matches": [
+          {
+            "line": 49,
+            "text": "fn client_for(&self, url: &str) -> &reqwest::Client {"
+          }
+        ]
+      },
+      {
+        "pattern": "mesh::status().userspace",
+        "matches": [
+          {
+            "line": 50,
+            "text": "if mesh::on_mesh(url) && mesh::status().userspace {"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F3",
+    "file": "cockpit/src/views/AiView.tsx",
+    "sha256": "498df6693d7444892081c0c1043fb09a83b5902ebec3cfa548421d69f1c33f06",
+    "evidence": [
+      {
+        "pattern": "function UseFromMac",
+        "matches": [
+          {
+            "line": 483,
+            "text": "function UseFromMac({ s, host }: { s: LlmStatus; host: string }) {"
+          }
+        ]
+      },
+      {
+        "pattern": "const base = s.endpoints",
+        "matches": [
+          {
+            "line": 485,
+            "text": "const base = s.endpoints[0] ?? `http://${host}:${s.port}`;"
+          }
+        ]
+      },
+      {
+        "pattern": "OpenAI(base_url",
+        "matches": [
+          {
+            "line": 491,
+            "text": "client = OpenAI(base_url=\"${base}/v1\", api_key=\"ollama\")  # key is ignored"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F3",
+    "file": "agent/src/llm.rs",
+    "sha256": "40d81e982108bf60bccfc9f6332e9fe3e0d71219709a856d32b9df28f6ef987c",
+    "evidence": [
+      {
+        "pattern": "let endpoints: Vec<String>",
+        "matches": [
+          {
+            "line": 276,
+            "text": "let endpoints: Vec<String> = crate::mesh::private_ipv4(&self.cfg)"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F9",
+    "file": "cockpit/src/views/PlatformAppsView.tsx",
+    "sha256": "fbad09d00ffc1d522b6ad42430f7a471aab3e675a48a9a08985b07b5aa5c9513",
+    "evidence": [
+      {
+        "pattern": "compose_file: null",
+        "matches": [
+          {
+            "line": 416,
+            "text": "compose_file: null,"
+          }
+        ]
+      },
+      {
+        "pattern": "environment_id",
+        "matches": []
+      },
+      {
+        "pattern": "memory_mb: null",
+        "matches": [
+          {
+            "line": 425,
+            "text": "? { port: portNum, command: null, replicas: 1, memory_mb: null, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, service: null, failover: false }"
+          }
+        ]
+      },
+      {
+        "pattern": "install_command: null",
+        "matches": [
+          {
+            "line": 422,
+            "text": "? { pack, dockerfile: null, context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] }"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F9",
+    "file": "agent/src/platform_api.rs",
+    "sha256": "c419546461d4c66ee1d00de98d8cf301f86f3b7662ceb8fbbd4908a3b7d85067",
+    "evidence": [
+      {
+        "pattern": "/platform/projects",
+        "matches": [
+          {
+            "line": 40,
+            "text": ".route(\"/platform/projects\", get(project_list).post(project_create))"
+          },
+          {
+            "line": 42,
+            "text": "\"/platform/projects/{id}\","
+          },
+          {
+            "line": 45,
+            "text": ".route(\"/platform/projects/{id}/environments\", post(environment_create))"
+          },
+          {
+            "line": 46,
+            "text": ".route(\"/platform/projects/{id}/env\", get(project_env).put(project_env_put))"
+          },
+          {
+            "line": 47,
+            "text": ".route(\"/platform/projects/{id}/env/{key}\", delete(project_env_delete))"
+          }
+        ]
+      },
+      {
+        "pattern": "/platform/environments",
+        "matches": [
+          {
+            "line": 48,
+            "text": ".route(\"/platform/environments/{id}\", delete(environment_delete))"
+          },
+          {
+            "line": 50,
+            "text": "\"/platform/environments/{id}/env\","
+          },
+          {
+            "line": 53,
+            "text": ".route(\"/platform/environments/{id}/env/{key}\", delete(environment_env_delete))"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F12",
+    "file": "README.md",
+    "sha256": "53fc7c57c99831bdf07a0eeaf2704330d933853954744518e7d77790cab1e65f",
+    "evidence": [
+      {
+        "pattern": "While there's no ready-made",
+        "matches": [
+          {
+            "line": 274,
+            "text": "1. **The Vercelify app**, into your Applications folder. While there's no ready-made"
+          }
+        ]
+      },
+      {
+        "pattern": "Add any environment variables",
+        "matches": [
+          {
+            "line": 311,
+            "text": "4. Add any environment variables your app needs (API keys, database URLs)."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F12",
+    "file": "website/src/components/Steps.tsx",
+    "sha256": "b3a9625108654c9112281ba2f07c683b99e49723b6339c0b8286c55eeb8e18af",
+    "evidence": [
+      {
+        "pattern": "Install the Mac app",
+        "matches": [
+          {
+            "line": 13,
+            "text": "title: \"Install the Mac app\","
+          }
+        ]
+      },
+      {
+        "pattern": "Type the pairing code",
+        "matches": [
+          {
+            "line": 20,
+            "text": "title: \"Type the pairing code\","
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F13",
+    "file": "host/setup-host.sh",
+    "sha256": "578803fb0cbfe14c28fbcb22a06f93151af28670ac7e0aa9f152eb0582a436e9",
+    "evidence": [
+      {
+        "pattern": "REMOTE=''",
+        "matches": [
+          {
+            "line": 109,
+            "text": "REMOTE=''"
+          }
+        ]
+      },
+      {
+        "pattern": "if [[ \"$CONFIGURE\" != 1 ]]",
+        "matches": [
+          {
+            "line": 200,
+            "text": "if [[ \"$CONFIGURE\" != 1 ]]; then"
+          }
+        ]
+      },
+      {
+        "pattern": "if [[ $ROLE == main && \"$REMOTE\" == 1",
+        "matches": [
+          {
+            "line": 458,
+            "text": "if [[ $ROLE == main && \"$REMOTE\" == 1 && \"$VERCELIFY_DRY_RUN\" != 1 ]]; then"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F13",
+    "file": "cockpit/src/views/Onboarding.tsx",
+    "sha256": "719929aa960bf3a934b4c53ef92f8c6cddbda7bd48573548aadcdc8e8d438ae3",
+    "evidence": [
+      {
+        "pattern": "Anywhere else, paste",
+        "matches": [
+          {
+            "line": 79,
+            "text": "On the same Wi-Fi the server shows up below: type its code and this computer joins its private network. Anywhere else, paste"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F15",
+    "file": "cockpit/src/components/HealthChecks.tsx",
+    "sha256": "3c4d94ecfbdd8ba71cc5c50a121da701e7bcb35ee685278bfbe69caff8d45b27",
+    "evidence": [
+      {
+        "pattern": "Fix: <InlineCode>",
+        "matches": [
+          {
+            "line": 60,
+            "text": "Fix: <InlineCode>{c.fix}</InlineCode>"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F15",
+    "file": "cockpit/src/components/ServerCare.tsx",
+    "sha256": "a179947d1cdecdcb9f6ab1bc09b1b1f7a165bd56649ecf25ad4f0f69524a916d",
+    "evidence": [
+      {
+        "pattern": "On the server:",
+        "matches": [
+          {
+            "line": 259,
+            "text": "On the server: <InlineCode>sudo vercelify backup setup</InlineCode>. Add another server in your pool as an off-site copy with{\" \"}"
+          }
+        ]
+      },
+      {
+        "pattern": "Change it on the server:",
+        "matches": [
+          {
+            "line": 448,
+            "text": "Change it on the server: <InlineCode>sudo vercelify domain example.com --cloudflare-token \u2026</InlineCode>. Give one app its own domain"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F15",
+    "file": "cockpit/src/views/AppsView.tsx",
+    "sha256": "5a2cbe6526af4090fec5d942b914fa25e1cc135ec6836e2e820362384300f26d",
+    "evidence": [
+      {
+        "pattern": "More detail on the server:",
+        "matches": [
+          {
+            "line": 58,
+            "text": "<span>More detail on the server:</span>"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F16",
+    "file": "install-mac.sh",
+    "sha256": "5dd0966994de42da309a9b6522e8c27fa718dc809e92ae022a8e728ce9bdd166",
+    "evidence": [
+      {
+        "pattern": "WITH_DISPLAY=0",
+        "matches": [
+          {
+            "line": 27,
+            "text": "WITH_DISPLAY=0"
+          }
+        ]
+      },
+      {
+        "pattern": "--with-display) WITH_DISPLAY=1",
+        "matches": [
+          {
+            "line": 73,
+            "text": "--with-display) WITH_DISPLAY=1 ;;"
+          }
+        ]
+      },
+      {
+        "pattern": "install_display_tools()",
+        "matches": [
+          {
+            "line": 324,
+            "text": "install_display_tools() {"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F16",
+    "file": "host/setup-host.sh",
+    "sha256": "578803fb0cbfe14c28fbcb22a06f93151af28670ac7e0aa9f152eb0582a436e9",
+    "evidence": [
+      {
+        "pattern": "WITH_DISPLAY=1",
+        "matches": [
+          {
+            "line": 115,
+            "text": "WITH_DISPLAY=1"
+          }
+        ]
+      },
+      {
+        "pattern": "apt_install mpv",
+        "matches": [
+          {
+            "line": 444,
+            "text": "(( WITH_DISPLAY )) && { apt_install mpv || warn \"could not install mpv\"; }"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F16",
+    "file": "cockpit/src/components/DisplayCaster.tsx",
+    "sha256": "0a570ae459fc3428cee47d0917030eb9b3c34c4c292b2a23069fc9cd7ec970cb",
+    "evidence": [
+      {
+        "pattern": "Mirror an existing screen",
+        "matches": [
+          {
+            "line": 206,
+            "text": "description={isMac ? \"Mirror an existing screen. To extend your desktop, first create a virtual display or connect a display adapter.\" : \"Send a test picture to verify the Linux receiver. Mac screen capture is available in the macOS app.\"}"
+          }
+        ]
+      },
+      {
+        "pattern": "Refresh setup",
+        "matches": [
+          {
+            "line": 232,
+            "text": "<Button variant=\"ghost\" size=\"sm\" onClick={() => { void tools.refresh(); void screens.refresh(); void display.refresh(); }} data-testid=\"refresh-display\">Refresh setup</Button>"
+          }
+        ]
+      },
+      {
+        "pattern": "Prereq ok=",
+        "matches": [
+          {
+            "line": 295,
+            "text": "<Prereq ok={!!ffmpeg?.installed} label=\"ffmpeg on this computer\" hint={ffmpeg?.install_hint ?? (inTauri ? \"\" : \"desktop app only\")} />"
+          },
+          {
+            "line": 296,
+            "text": "<Prereq ok={!!display.data?.mpv_installed} label=\"mpv on the host\" hint=\"sudo apt install mpv\" />"
+          }
+        ]
+      },
+      {
+        "pattern": "sunshine-setup",
+        "matches": [
+          {
+            "line": 359,
+            "text": "<Button variant=\"ghost\" icon={<ExternalLink />} busy={moonBusy} onClick={() => void openSunshine()} data-testid=\"sunshine-setup\">Open Sunshine setup</Button>"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F17",
+    "file": "cockpit/src-tauri/src/lib.rs",
+    "sha256": "d36030887b915cc7b1d83c086f6ea89d6dc320e20c1b4440f3909969b1dd4854",
+    "evidence": [
+      {
+        "pattern": "fn read_config",
+        "matches": [
+          {
+            "line": 66,
+            "text": "fn read_config(app: &AppHandle) -> CockpitConfig {"
+          }
+        ]
+      },
+      {
+        "pattern": "std::fs::read_to_string(p).ok()",
+        "matches": [
+          {
+            "line": 69,
+            "text": ".and_then(|p| std::fs::read_to_string(p).ok())"
+          }
+        ]
+      },
+      {
+        "pattern": ".unwrap_or_default()",
+        "matches": [
+          {
+            "line": 71,
+            "text": ".unwrap_or_default()"
+          },
+          {
+            "line": 261,
+            "text": ".unwrap_or_default()"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F17",
+    "file": "cockpit/src/lib/transport.ts",
+    "sha256": "e1e26b4b7b7c3bbf26be2a87c80e8330952a88c5507d6d2badc9819de5c1ca29",
+    "evidence": [
+      {
+        "pattern": "function loadWebConfig",
+        "matches": [
+          {
+            "line": 124,
+            "text": "function loadWebConfig(): CockpitConfig {"
+          }
+        ]
+      },
+      {
+        "pattern": "corrupt or private mode",
+        "matches": [
+          {
+            "line": 134,
+            "text": "/* corrupt or private mode */"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F18",
+    "file": "agent/src/doctor.rs",
+    "sha256": "56377de0cc2e8c323c5c741b286ab0f56a94bb4b58fa4f1db24b55fedbed14d8",
+    "evidence": [
+      {
+        "pattern": "pub battery_pct",
+        "matches": [
+          {
+            "line": 77,
+            "text": "pub battery_pct: Option<u8>,"
+          }
+        ]
+      },
+      {
+        "pattern": "on_battery: snap",
+        "matches": [
+          {
+            "line": 768,
+            "text": "on_battery: snap.as_ref().is_some_and(|s| s.power.on_battery),"
+          }
+        ]
+      },
+      {
+        "pattern": "battery_pct: snap",
+        "matches": [
+          {
+            "line": 769,
+            "text": "battery_pct: snap.as_ref().and_then(|s| s.power.lowest_capacity_pct),"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F18",
+    "file": "cockpit/src/views/HealthView.tsx",
+    "sha256": "a02153d03997572afcfab879353d4a34dad6a521d9e73e8e97f0bd56700b7257",
+    "evidence": [
+      {
+        "pattern": "bat.health_pct",
+        "matches": [
+          {
+            "line": 254,
+            "text": "{bat ? `${bat.capacity_pct ?? \"?\"}% \u00b7 ${bat.status}${bat.health_pct ? ` \u00b7 health ${bat.health_pct}%` : \"\"}` : \"desktop / Raspberry Pi\"}"
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "finding": "F18",
+    "file": "website/src/components/Closing.tsx",
+    "sha256": "0840070a7fa6ac6e5ed749c7b9684b28f885c885aeb2dc06a3a9e33a54fa3668",
+    "evidence": [
+      {
+        "pattern": "brings your apps back when power returns",
+        "matches": [
+          {
+            "line": 78,
+            "text": "\"On a laptop, the battery covers short cuts. If it runs low, Vercelify shuts down cleanly and brings your apps back when power returns.\","
+          }
+        ]
+      }
+    ]
+  }
+]

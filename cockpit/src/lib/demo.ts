@@ -34,6 +34,7 @@ import type { HttpRequest } from "./transport";
 import { isExplainChat } from "./explain";
 import { decodePairing } from "./pairing";
 import { demoApps, followPlatformLogs, platformRoute, wirePlatformDemo } from "./demo-platform";
+import { demoHostLocal, demoHostRequest } from "./demo-host";
 
 const GB = 1024 ** 3;
 const now = Date.now();
@@ -600,6 +601,10 @@ export async function demoCall(cmd: string, args: Record<string, unknown>): Prom
       return decodePairing(String(args.code ?? ""));
     case "mesh_local":
       return meshLocal();
+    case "host_local":
+      return demoHostLocal();
+    case "host_request":
+      return demoHostRequest(String(args.method), String(args.path), (args.body as Record<string, unknown> | null) ?? null);
     case "mesh_discover":
       return [{ name: "hp-elitebook", control: ["192.168.1.40:7443"], pairing_open: true }];
     case "mesh_pair": {
