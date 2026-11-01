@@ -212,19 +212,6 @@ pub fn implicit_reads(dir: &Path, file: &str) -> Result<Vec<PathBuf>> {
             p.display()
         ))
     };
-    // `<<` merges, which Compose applies, before looking up a key.
-    fn lookup<'a>(m: &'a Yaml, key: &str, out: &mut Vec<&'a Yaml>) {
-        if let Some(h) = m.as_hash() {
-            if let Some(v) = h.get(&Yaml::String(key.into())) {
-                out.push(v);
-            }
-            match h.get(&Yaml::String("<<".into())) {
-                Some(Yaml::Array(a)) => a.iter().for_each(|m| lookup(m, key, out)),
-                Some(m) => lookup(m, key, out),
-                None => {}
-            }
-        }
-    }
     fn strings(y: &Yaml) -> Vec<&str> {
         match y {
             Yaml::String(s) => vec![s.as_str()],
@@ -250,6 +237,14 @@ pub fn implicit_reads(dir: &Path, file: &str) -> Result<Vec<PathBuf>> {
             return Err(outside("the compose file", &f));
         }
         let text = std::fs::read_to_string(&f).map_err(|e| Error::Invalid(format!("{}: {e}", f.display())))?;
+        // The loader copies what an alias names: bound what that comes to
+        // before building it (a few nested aliases are billions of nodes).
+        if text.len() > MAX_COMPOSE_TEXT || expanded_nodes(&text) > MAX_COMPOSE_NODES {
+            return Err(Error::Invalid(format!(
+                "{} is too large once its aliases are expanded for a preview",
+                f.display()
+            )));
+        }
         let docs = YamlLoader::load_from_str(&text).map_err(|e| Error::Invalid(format!("{}: {e}", f.display())))?;
         let base = f.parent().unwrap_or(dir).to_path_buf();
         let at = |p: &str| -> Result<PathBuf> {
@@ -261,13 +256,13 @@ pub fn implicit_reads(dir: &Path, file: &str) -> Result<Vec<PathBuf>> {
             }
             Ok(base.join(p))
         };
-        for doc in &docs {
-            let mut includes = vec![];
-            lookup(doc, "include", &mut includes);
-            for inc in includes.iter().flat_map(|i| match i {
+        for doc in docs.iter().map(resolve_merges) {
+            let includes = match &doc["include"] {
                 Yaml::Array(a) => a.iter().collect::<Vec<_>>(),
-                other => vec![*other],
-            }) {
+                Yaml::BadValue | Yaml::Null => vec![],
+                other => vec![other],
+            };
+            for inc in includes {
                 // `- path` or `{path, env_file, project_directory}`.
                 let (paths, env_files, project) = match inc {
                     Yaml::String(_) => (strings(inc), vec![], None),
@@ -296,18 +291,12 @@ pub fn implicit_reads(dir: &Path, file: &str) -> Result<Vec<PathBuf>> {
                     dotenv(&pd, &mut reads);
                 }
             }
-            let mut services = vec![];
-            lookup(doc, "services", &mut services);
-            for svc in services.iter().filter_map(|s| s.as_hash()).flat_map(|h| h.values()) {
-                let mut extends = vec![];
-                lookup(svc, "extends", &mut extends);
-                for e in extends {
-                    let mut files = vec![];
-                    lookup(e, "file", &mut files);
-                    for file in files.into_iter().filter_map(Yaml::as_str) {
-                        queue.push(at(file)?);
-                    }
-                }
+            // Every `extends.file` anywhere, not only under `services`: a
+            // superset of what Compose reads, so no spelling hides one.
+            let mut files = vec![];
+            extends_files(&doc, &mut files);
+            for file in files {
+                queue.push(at(&file)?);
             }
         }
     }
@@ -317,6 +306,115 @@ pub fn implicit_reads(dir: &Path, file: &str) -> Result<Vec<PathBuf>> {
         }
     }
     Ok(reads)
+}
+
+const MAX_COMPOSE_TEXT: usize = 1024 * 1024;
+const MAX_COMPOSE_NODES: u64 = 100_000;
+
+/// How many nodes `text` comes to with every alias expanded (all documents),
+/// from the parser's events: nothing is built. A text that doesn't parse
+/// counts 0 (the loader reports the error).
+fn expanded_nodes(text: &str) -> u64 {
+    use yaml_rust2::parser::{Event, EventReceiver, Parser};
+    #[derive(Default)]
+    struct Count {
+        /// Open collections: (anchor id, nodes so far).
+        open: Vec<(usize, u64)>,
+        anchors: std::collections::HashMap<usize, u64>,
+        total: u64,
+    }
+    impl Count {
+        fn add(&mut self, n: u64) {
+            match self.open.last_mut() {
+                Some((_, c)) => *c = c.saturating_add(n),
+                None => self.total = self.total.saturating_add(n),
+            }
+        }
+    }
+    impl EventReceiver for Count {
+        fn on_event(&mut self, ev: Event) {
+            match ev {
+                Event::Scalar(_, _, anchor, _) => {
+                    if anchor > 0 {
+                        self.anchors.insert(anchor, 1);
+                    }
+                    self.add(1);
+                }
+                Event::SequenceStart(anchor, _) | Event::MappingStart(anchor, _) => self.open.push((anchor, 1)),
+                Event::SequenceEnd | Event::MappingEnd => {
+                    if let Some((anchor, n)) = self.open.pop() {
+                        if anchor > 0 {
+                            self.anchors.insert(anchor, n);
+                        }
+                        self.add(n);
+                    }
+                }
+                Event::Alias(id) => {
+                    let n = self.anchors.get(&id).copied().unwrap_or(1);
+                    self.add(n);
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut count = Count::default();
+    if Parser::new_from_str(text).load(&mut count, true).is_err() {
+        return 0;
+    }
+    // Collections still open (a parse cut short) count too.
+    count.open.iter().fold(count.total, |t, (_, n)| t.saturating_add(*n))
+}
+
+/// `y` with YAML merge keys (`<<`) applied throughout, as Compose applies
+/// them: a map's own keys win over merged ones, and an earlier map in a
+/// `<<` list over a later one.
+fn resolve_merges(y: &yaml_rust2::Yaml) -> yaml_rust2::Yaml {
+    use yaml_rust2::Yaml;
+    match y {
+        Yaml::Hash(h) => {
+            let merge = Yaml::String("<<".into());
+            let mut out = yaml_rust2::yaml::Hash::new();
+            for (k, v) in h.iter().filter(|(k, _)| **k != merge) {
+                out.insert(k.clone(), resolve_merges(v));
+            }
+            let sources = match h.get(&merge) {
+                Some(Yaml::Array(a)) => a.iter().collect(),
+                Some(m) => vec![m],
+                None => vec![],
+            };
+            for src in sources {
+                if let Yaml::Hash(m) = resolve_merges(src) {
+                    for (k, v) in m {
+                        if !out.contains_key(&k) {
+                            out.insert(k, v);
+                        }
+                    }
+                }
+            }
+            Yaml::Hash(out)
+        }
+        Yaml::Array(a) => Yaml::Array(a.iter().map(resolve_merges).collect()),
+        other => other.clone(),
+    }
+}
+
+/// The `file` of every `extends` map in `y` (merges resolved).
+fn extends_files(y: &yaml_rust2::Yaml, out: &mut Vec<String>) {
+    use yaml_rust2::Yaml;
+    match y {
+        Yaml::Hash(h) => {
+            for (k, v) in h {
+                if k.as_str() == Some("extends") {
+                    if let Some(f) = v["file"].as_str() {
+                        out.push(f.to_string());
+                    }
+                }
+                extends_files(v, out);
+            }
+        }
+        Yaml::Array(a) => a.iter().for_each(|v| extends_files(v, out)),
+        _ => {}
+    }
 }
 
 /// The merged configuration a preview runs with (`docker compose config`
@@ -976,6 +1074,37 @@ mod tests {
                 format!("services:\n  web:\n    \"ext\\x65nds\":\n      file: {s}/base.yml\n      service: b\n"),
             ),
             ("interpolated", "include:\n  - ${LIB}/x.yml\nservices: {}\n".to_string()),
+            // The second review's case: a merge at the services level.
+            (
+                "services merged in",
+                format!("x-s: &s\n  web:\n    extends: {{file: {s}/base.yml, service: b}}\nservices:\n  <<: *s\n"),
+            ),
+            (
+                "services merged from a list",
+                format!(
+                    "x-a: &a\n  api: {{image: alpine}}\nx-b: &b\n  web:\n    extends: {{file: {s}/base.yml, service: b}}\n\
+                     services:\n  <<: [*a, *b]\n"
+                ),
+            ),
+            (
+                "a merge in a merge",
+                format!(
+                    "x-e: &e {{extends: {{file: {s}/base.yml, service: b}}}}\nx-s: &s\n  web:\n    <<: *e\n\
+                     services:\n  <<: *s\n"
+                ),
+            ),
+            (
+                "include merged at the top",
+                format!("x-i: &i\n  include: [{s}/base.yml]\n<<: *i\nservices: {{}}\n"),
+            ),
+            (
+                "an include entry merged",
+                format!("x-i: &i {{path: {s}/base.yml}}\ninclude:\n  - <<: *i\nservices: {{}}\n"),
+            ),
+            (
+                "extends in an extension field",
+                format!("x-later:\n  extends: {{file: {s}/base.yml, service: b}}\nservices: {{}}\n"),
+            ),
         ] {
             let d = repo(&[("compose.yml", &text), ("lib.yml", "services: {}\n")]);
             let e = implicit_reads(d.path(), "compose.yml").expect_err(name);
@@ -993,6 +1122,40 @@ mod tests {
         let link = repo(&[("compose.yml", "include:\n  - b.yml\n")]);
         symlink(server.path().join("base.yml"), link.path().join("b.yml")).unwrap();
         assert!(implicit_reads(link.path(), "compose.yml").is_err());
+        // A merge whose own keys win: what it overrides isn't read.
+        let own = repo(&[(
+            "compose.yml",
+            &format!("x-e: &e {{file: {s}/base.yml, service: b}}\nservices:\n  web:\n    extends:\n      <<: *e\n      file: lib.yml\n"),
+        ), ("lib.yml", "services:\n  b:\n    image: alpine\n")]);
+        assert!(implicit_reads(own.path(), "compose.yml").is_ok());
+    }
+
+    /// Aliases are copied by the loader: a few nested ones would be billions
+    /// of nodes in the agent. Counted from the parser's events instead.
+    #[test]
+    fn alias_bombs_are_refused_before_loading() {
+        let mut bomb = String::from("a0: &a0 [x, x, x, x, x, x, x, x, x, x]\n");
+        for i in 1..9 {
+            let prev = format!("*a{}", i - 1);
+            bomb.push_str(&format!("a{i}: &a{i} [{}]\n", vec![prev.as_str(); 10].join(", ")));
+        }
+        bomb.push_str("services: {}\n");
+        assert!(expanded_nodes(&bomb) > 1_000_000_000);
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("compose.yml"), &bomb).unwrap();
+        let started = std::time::Instant::now();
+        let e = implicit_reads(d.path(), "compose.yml").unwrap_err();
+        assert!(e.message().contains("too large"), "{e}");
+        assert!(started.elapsed() < Duration::from_secs(2), "refused without expanding");
+        // Anchors as compose files use them are fine.
+        let usual = "x-env: &env {A: 1, B: 2}\nservices:\n  web: {image: alpine, environment: *env}\n  \
+                     api: {image: alpine, environment: *env}\n";
+        assert!(expanded_nodes(usual) < 50);
+        assert_eq!(
+            expanded_nodes("a: [1, 2]\nb: {c: 3}\n"),
+            9,
+            "maps and lists count with their items"
+        );
     }
 
     /// A preview with a linked `.env` stops before Compose is run at all.
@@ -1166,6 +1329,26 @@ mod tests {
         assert!(read.to_string().contains("leak-dotenv"), "what the review saw: {read}");
         let e = implicit_reads(dir.path(), "docker-compose.yml").unwrap_err();
         assert!(e.message().contains("prod.env"), "{e}");
+
+        // The second review's case: services merged in, extending a file on
+        // the server. Compose reads it; `implicit_reads` refuses it first.
+        std::fs::remove_file(dir.path().join(".env")).unwrap();
+        std::fs::write(
+            server.path().join("prod.yml"),
+            "services:\n  web:\n    image: alpine:3.20\n    environment:\n      SECRET: leak-extends\n",
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("docker-compose.yml"),
+            format!("x-s: &s\n  web:\n    extends: {{file: {s}/prod.yml, service: web}}\nservices:\n  <<: *s\n"),
+        )
+        .unwrap();
+        let read = config(&docker, dir.path(), &["docker-compose.yml"], Some(p), &[])
+            .await
+            .unwrap();
+        assert!(read.to_string().contains("leak-extends"), "what the review saw: {read}");
+        let e = implicit_reads(dir.path(), "docker-compose.yml").unwrap_err();
+        assert!(e.message().contains("prod.yml"), "{e}");
     }
 
     #[test]
