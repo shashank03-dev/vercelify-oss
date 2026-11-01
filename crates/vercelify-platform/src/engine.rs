@@ -765,16 +765,18 @@ impl Engine {
                             log,
                         )
                         .await;
+                    // An instance started as the cancel came is removed with
+                    // the others: it is in `started` before the check.
+                    if let Ok(p) = &res {
+                        started.push(p.clone());
+                    }
                     let res = match res {
                         Ok(_) if cancel.is_cancelled() => Err(Error::Conflict("cancelled".into())),
                         other => other,
                     };
-                    match res {
-                        Ok(p) => started.push(p),
-                        Err(e) => {
-                            self.remove_placed(&started).await;
-                            return Err(e);
-                        }
+                    if let Err(e) = res {
+                        self.remove_placed(&started).await;
+                        return Err(e);
                     }
                 }
                 started
@@ -1459,18 +1461,23 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
-    /// A Docker that answers everything; `create` waits while `hold-create`
-    /// exists in `dir` (after touching `created`), and every container is
-    /// running on the proxy network.
+    /// A Docker that answers everything and keeps track of containers
+    /// (`<dir>/containers/<name>`): `create --name N` waits while
+    /// `hold-create` exists in `dir` (after touching `created`), then makes
+    /// N, running on the proxy network; `rm` removes it.
     fn stub_docker(dir: &Path) -> String {
         let bin = dir.join("docker");
         let d = dir.display();
+        std::fs::create_dir_all(dir.join("containers")).unwrap();
         std::fs::write(
             &bin,
             format!(
-                "#!/bin/sh\necho \"$*\" >> {d}/calls\ncase \"$1\" in\n  \
-                 create) touch {d}/created; while [ -f {d}/hold-create ]; do sleep 0.02; done; echo cid ;;\n  \
-                 container) echo '{{\"State\":{{\"Running\":true,\"Status\":\"running\"}},\"NetworkSettings\":\
+                "#!/bin/sh\necho \"$*\" >> {d}/calls\nfor a; do last=$a; done\ncase \"$1\" in\n  \
+                 create) touch {d}/created; while [ -f {d}/hold-create ]; do sleep 0.02; done; \
+                 touch {d}/containers/$3; echo cid ;;\n  \
+                 rm) rm -f {d}/containers/$last ;;\n  \
+                 container) [ -f {d}/containers/$last ] || {{ echo \"Error: No such container: $last\" >&2; exit 1; }}; \
+                 echo '{{\"State\":{{\"Running\":true,\"Status\":\"running\"}},\"NetworkSettings\":\
                  {{\"Networks\":{{\"vfy-proxy\":{{\"IPAddress\":\"127.0.0.1\"}}}}}}}}' ;;\nesac\nexit 0\n"
             ),
         )
@@ -1552,6 +1559,16 @@ mod tests {
         }
     }
 
+    /// The containers the stub Docker has, of the preview of PR `n`.
+    fn containers_of(dir: &Path, n: u32) -> Vec<String> {
+        std::fs::read_dir(dir.join("containers"))
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .filter(|c| c.starts_with(&format!("vfy-shop-pr{n}")))
+            .collect()
+    }
+
     fn status(e: &Engine, id: &str) -> DeploymentStatus {
         e.store.with(|c| deployments::get(c, id)).unwrap().status
     }
@@ -1586,6 +1603,7 @@ mod tests {
             .dynamic_dir()
             .join(crate::proxy::base_file(&deploy::route_key("shop", Some(1))));
         assert!(route.exists(), "a live preview has a route");
+        assert_eq!(containers_of(dir.path(), 1).len(), 1, "the stub keeps what was made");
 
         let hold = dir.path().join("hold-create");
         let created = dir.path().join("created");
@@ -1617,10 +1635,13 @@ mod tests {
             .join(crate::proxy::base_file(&deploy::route_key("shop", Some(2))));
         assert!(!route2.exists(), "no route after the close");
         assert!(e.store.with(|c| instances::of(c, &d.id)).unwrap().is_empty());
+        // The container made while it closed is gone, not only one before it.
         let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
-        assert!(
-            calls.contains("rm --force --volumes=false vfy-shop-pr2"),
-            "its container went: {calls}"
+        assert_eq!(containers_of(dir.path(), 2), Vec::<String>::new(), "{calls}");
+        assert_eq!(
+            containers_of(dir.path(), 1).len(),
+            1,
+            "the open preview keeps its container"
         );
         // Still nothing later.
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -1660,7 +1681,7 @@ mod tests {
             None
         );
         let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
-        assert!(calls.contains("rm --force --volumes=false vfy-shop-pr3"), "{calls}");
+        assert_eq!(containers_of(dir.path(), 3), Vec::<String>::new(), "{calls}");
     }
 
     /// Cancelling a build that waits for the power guard, or for the only

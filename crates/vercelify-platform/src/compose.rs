@@ -12,7 +12,13 @@
 //! names explicitly or marks external, and the merged configuration is
 //! checked before anything starts. Storage that can't be made the preview's
 //! own (a bind mount outside the checkout, a volume with driver options,
-//! another container's volumes) stops the preview.
+//! another container's volumes) stops the preview, and so does anything it
+//! would read from the server: an env file, secret or config file outside
+//! the checkout. `config` never reads env files (`--no-env-resolution`), so
+//! nothing is read before these checks pass.
+//!
+//! Builds of every compose app read only the checkout (as `detect.rs`): a
+//! build context, Dockerfile or additional context outside it is refused.
 
 use crate::docker::{Docker, MANAGED, MANAGED_LABEL, PROXY_NETWORK};
 use crate::proc::{self, Cancel, Spec};
@@ -185,7 +191,8 @@ fn resolves_inside(dir: &Path, path: &Path) -> bool {
 
 /// The merged configuration a preview runs with (`docker compose config`
 /// with our override): every volume is the project's own, nothing is mounted
-/// from outside the checkout, and no other container's volumes are used.
+/// from outside the checkout, no other container's volumes are used, and no
+/// env file, secret, config or SSH key comes from outside it.
 pub fn check_preview_storage(config: &serde_json::Value, dir: &Path, project: &str) -> Result<()> {
     let own = format!("{project}_");
     if let Some(vols) = config.get("volumes").and_then(|v| v.as_object()) {
@@ -225,8 +232,54 @@ pub fn check_preview_storage(config: &serde_json::Value, dir: &Path, project: &s
                 return Err(storage_error(format!("{svc} uses the volumes of {from}")));
             }
         }
+        // Env files: strings, or `{path, required}` since Compose 2.24.
+        for f in s.get("env_file").and_then(|v| v.as_array()).into_iter().flatten() {
+            let path = f
+                .as_str()
+                .or_else(|| f.get("path").and_then(|p| p.as_str()))
+                .unwrap_or("");
+            if !resolves_inside(dir, Path::new(path)) {
+                return Err(server_file(format!("{svc} reads the env file {path}")));
+            }
+        }
+        let ssh = s.get("build").and_then(|b| b.get("ssh")).and_then(|v| v.as_array());
+        for k in ssh.into_iter().flatten() {
+            let k = k.as_str().unwrap_or("");
+            if let Some((_, path)) = k.split_once('=') {
+                if !resolves_inside(dir, Path::new(path)) {
+                    return Err(server_file(format!("{svc} builds with the SSH key {path}")));
+                }
+            }
+        }
+    }
+    if config.get(ENV_FILES_READ).is_some() {
+        return Err(Error::Invalid(
+            "this Docker Compose reads env files before Vercelify can check them: update it \
+             (2.24 or newer) for previews of compose apps"
+                .into(),
+        ));
+    }
+    // Secrets and configs from files (services and builds use them by name).
+    for kind in ["secrets", "configs"] {
+        for (k, v) in config.get(kind).and_then(|v| v.as_object()).into_iter().flatten() {
+            if v.get("external").and_then(|e| e.as_bool()).unwrap_or(false) {
+                return Err(server_file(format!("the {kind} entry {k} is external")));
+            }
+            if let Some(f) = v.get("file").and_then(|f| f.as_str()) {
+                if !resolves_inside(dir, Path::new(f)) {
+                    return Err(server_file(format!("the {kind} entry {k} is the file {f}")));
+                }
+            }
+        }
     }
     Ok(())
+}
+
+fn server_file(what: String) -> Error {
+    Error::Invalid(format!(
+        "{what}, outside the repository: a preview must not read production's files from the server \
+         (keep it in the repository, or set preview variables in the app)"
+    ))
 }
 
 pub struct Up<'a> {
@@ -259,22 +312,97 @@ pub async fn config(
     for f in files {
         args.extend(["-f".to_string(), f.to_string()]);
     }
-    args.extend(proc::args(&["config", "--format", "json"]));
-    let o = proc::run(Spec {
-        bin: &docker.bin,
-        args: &args,
-        env,
-        cwd: Some(dir),
-        timeout: Duration::from_secs(60),
-    })
-    .await?;
+    args.extend(proc::args(&["config", "--format", "json", NO_ENV_RESOLUTION]));
+    let run = |args: Vec<String>| async move {
+        proc::run(Spec {
+            bin: &docker.bin,
+            args: &args,
+            env,
+            cwd: Some(dir),
+            timeout: Duration::from_secs(60),
+        })
+        .await
+    };
+    let mut o = run(args.clone()).await?;
+    let mut env_files_read = false;
+    if !o.success() && o.tail(4).contains("unknown flag") {
+        // Compose older than 2.24: env files are read (and inlined) then.
+        args.retain(|a| a != NO_ENV_RESOLUTION);
+        o = run(args).await?;
+        env_files_read = true;
+    }
     if !o.success() {
         return Err(Error::Invalid(format!(
             "{file} is not a valid compose file: {}",
             o.tail(4)
         )));
     }
-    serde_json::from_str(&o.stdout).map_err(|e| Error::Invalid(format!("docker compose config: {e}")))
+    let mut v: serde_json::Value =
+        serde_json::from_str(&o.stdout).map_err(|e| Error::Invalid(format!("docker compose config: {e}")))?;
+    if env_files_read {
+        v[ENV_FILES_READ] = serde_json::Value::Bool(true);
+    }
+    Ok(v)
+}
+
+const NO_ENV_RESOLUTION: &str = "--no-env-resolution";
+/// Set on a [`config`] made by a Compose that read the env files.
+const ENV_FILES_READ: &str = "x-vercelify-env-files-read";
+
+/// A local path Compose resolved (absolute), or a path inside `oci-layout://`;
+/// None for what BuildKit fetches itself (a Git or HTTP URL, an image, a
+/// service).
+fn local_source(s: &str) -> Option<&str> {
+    s.strip_prefix("oci-layout://")
+        .or(Some(s))
+        .filter(|p| p.starts_with('/'))
+}
+
+/// What every compose app's builds may read: the checkout only. A service's
+/// `build.context`, its Dockerfile and `additional_contexts` must resolve
+/// inside `dir` (an inline Dockerfile reads only its context).
+pub fn check_build_inputs(config: &serde_json::Value, dir: &Path) -> Result<()> {
+    let services = config.get("services").and_then(|s| s.as_object());
+    for (svc, s) in services.into_iter().flatten() {
+        let Some(b) = s.get("build").and_then(|b| b.as_object()) else {
+            continue;
+        };
+        let outside = |what: &str, path: &str| {
+            Error::Invalid(format!(
+                "{svc}: the build {what} {path} is outside the repository: builds only read the repository's own files"
+            ))
+        };
+        let context = b.get("context").and_then(|c| c.as_str()).unwrap_or("");
+        let local = local_source(context);
+        if let Some(c) = local {
+            if !resolves_inside(dir, Path::new(c)) {
+                return Err(outside("context", c));
+            }
+        }
+        if let Some(df) = b.get("dockerfile").and_then(|d| d.as_str()) {
+            let path = match local {
+                _ if df.starts_with('/') => Some(Path::new(df).to_path_buf()),
+                Some(c) => Some(Path::new(c).join(df)),
+                None => None,
+            };
+            if let Some(p) = path.filter(|p| !resolves_inside(dir, p)) {
+                return Err(outside("Dockerfile", &p.display().to_string()));
+            }
+        }
+        for (name, v) in b
+            .get("additional_contexts")
+            .and_then(|a| a.as_object())
+            .into_iter()
+            .flatten()
+        {
+            if let Some(p) = v.as_str().and_then(local_source) {
+                if !resolves_inside(dir, Path::new(p)) {
+                    return Err(outside(&format!("context {name}"), p));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// Which service gets the domains: the app's choice; else one that publishes
@@ -322,6 +450,7 @@ pub fn pick(config: &serde_json::Value, explicit: Option<&str>) -> Result<(Vec<S
 /// Build and start the project; returns the routed container's name.
 pub async fn up(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + Send)) -> Result<String> {
     let cfg = config(u.docker, u.dir, &[u.file], None, u.env).await?;
+    check_build_inputs(&cfg, u.dir)?;
     // The file's own order is lost in `config`.
     let (services, routed) =
         pick(&cfg, u.service).map_err(|e| Error::Invalid(format!("{}: {}", u.file, e.message())))?;
@@ -558,6 +687,76 @@ mod tests {
         check_preview_storage(&cfg(r#"{"services":{"db":{"volumes_from":["web"]}}}"#), dir, p).unwrap();
     }
 
+    #[test]
+    fn builds_read_only_the_checkout() {
+        let cfg = |j: String| serde_json::from_str::<serde_json::Value>(&j).unwrap();
+        let checkout = tempfile::tempdir().unwrap();
+        let dir = checkout.path();
+        std::fs::create_dir_all(dir.join("web")).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let out = outside.path().display();
+        std::os::unix::fs::symlink(outside.path(), dir.join("linked")).unwrap();
+        let d = dir.display();
+        let build = |b: &str| {
+            cfg(format!(
+                r#"{{"services":{{"web":{{"build":{b}}},"db":{{"image":"postgres"}}}}}}"#
+            ))
+        };
+        for ok in [
+            format!(r#"{{"context":"{d}","dockerfile":"Dockerfile"}}"#),
+            format!(r#"{{"context":"{d}/web","dockerfile":"../Dockerfile"}}"#),
+            format!(r#"{{"context":"{d}","dockerfile_inline":"FROM alpine\nCOPY . /x"}}"#),
+            r#"{"context":"https://github.com/me/app.git#main","dockerfile":"Dockerfile"}"#.to_string(),
+            format!(
+                r#"{{"context":"{d}","additional_contexts":{{"img":"docker-image://alpine","svc":"service:db","w":"{d}/web"}}}}"#
+            ),
+        ] {
+            check_build_inputs(&build(&ok), dir).unwrap_or_else(|e| panic!("{ok}: {e}"));
+        }
+        for bad in [
+            format!(r#"{{"context":"{out}","dockerfile_inline":"FROM alpine\nCOPY master.key /leak"}}"#),
+            format!(r#"{{"context":"{d}/linked","dockerfile":"Dockerfile"}}"#),
+            format!(r#"{{"context":"{d}","dockerfile":"{out}/Dockerfile"}}"#),
+            format!(r#"{{"context":"{d}","dockerfile":"../outside/Dockerfile"}}"#),
+            format!(r#"{{"context":"{d}","additional_contexts":{{"x":"{out}"}}}}"#),
+            format!(r#"{{"context":"{d}","additional_contexts":{{"x":"oci-layout://{out}"}}}}"#),
+        ] {
+            let e = check_build_inputs(&build(&bad), dir).unwrap_err();
+            assert!(e.message().contains("outside the repository"), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn previews_read_no_server_files() {
+        let cfg = |j: String| serde_json::from_str::<serde_json::Value>(&j).unwrap();
+        let checkout = tempfile::tempdir().unwrap();
+        let dir = checkout.path();
+        let d = dir.display();
+        let p = "vfy-shop-pr4";
+        let ok = cfg(format!(
+            r#"{{"services":{{"web":{{"env_file":[{{"path":"{d}/.vercelify/app.env"}},"{d}/local.env"],
+                "build":{{"context":"{d}","ssh":["default"]}}}}}},
+              "secrets":{{"s":{{"file":"{d}/secret.txt"}},"e":{{"environment":"TOKEN"}}}},
+              "configs":{{"c":{{"content":"x"}}}}}}"#
+        ));
+        check_preview_storage(&ok, dir, p).unwrap();
+        for bad in [
+            r#"{"services":{"web":{"env_file":[{"path":"/srv/prod/app.env","required":false}]}}}"#.to_string(),
+            r#"{"services":{"web":{"env_file":["/srv/prod/app.env"]}}}"#.to_string(),
+            r#"{"services":{"web":{"build":{"ssh":["k=/root/.ssh/id_ed25519"]}}}}"#.to_string(),
+            r#"{"services":{},"secrets":{"s":{"file":"/var/lib/vercelify/master.key"}}}"#.to_string(),
+            r#"{"services":{},"secrets":{"s":{"external":true}}}"#.to_string(),
+            r#"{"services":{},"configs":{"c":{"file":"/etc/app.conf"}}}"#.to_string(),
+        ] {
+            let e = check_preview_storage(&cfg(bad.clone()), dir, p).unwrap_err();
+            assert!(e.message().contains("must not read production's files"), "{bad}: {e}");
+        }
+        // A Compose that read the env files itself can't be checked.
+        let e =
+            check_preview_storage(&cfg(format!(r#"{{"services":{{}},"{ENV_FILES_READ}":true}}"#)), dir, p).unwrap_err();
+        assert!(e.message().contains("update it"), "{e}");
+    }
+
     /// The real Compose resolves our override the way the check expects:
     /// explicit, external and plain volumes all become the preview's own,
     /// and a bind mount from the server stops it (VERCELIFY_DOCKER_TESTS=1;
@@ -613,6 +812,53 @@ mod tests {
             .await
             .unwrap();
         assert!(check_preview_storage(&merged, dir.path(), p).is_err());
+
+        // Production's files on the server: an env file, a secret file, and
+        // a build of a folder outside with an inline Dockerfile.
+        let server = tempfile::tempdir().unwrap();
+        std::fs::write(server.path().join("prod.env"), "SECRET=prod-secret\n").unwrap();
+        std::fs::write(server.path().join("master.key"), "key").unwrap();
+        let s = server.path().display();
+        std::fs::write(
+            dir.path().join("docker-compose.yml"),
+            format!(
+                "services:\n  web:\n    image: alpine:3.20\n    env_file: [{s}/prod.env]\n    secrets: [k]\n\
+                 secrets:\n  k:\n    file: {s}/master.key\n"
+            ),
+        )
+        .unwrap();
+        let merged = config(&docker, dir.path(), &["docker-compose.yml", &ov], Some(p), &[])
+            .await
+            .unwrap();
+        assert!(
+            !merged.to_string().contains("prod-secret"),
+            "config doesn't read env files: {merged}"
+        );
+        let e = check_preview_storage(&merged, dir.path(), p).unwrap_err();
+        assert!(e.message().contains("prod.env"), "{e}");
+        std::fs::write(
+            dir.path().join("docker-compose.yml"),
+            format!("services:\n  web:\n    image: alpine:3.20\n    secrets: [k]\nsecrets:\n  k:\n    file: {s}/master.key\n"),
+        )
+        .unwrap();
+        let merged = config(&docker, dir.path(), &["docker-compose.yml"], Some(p), &[])
+            .await
+            .unwrap();
+        let e = check_preview_storage(&merged, dir.path(), p).unwrap_err();
+        assert!(e.message().contains("master.key"), "{e}");
+        std::fs::write(
+            dir.path().join("docker-compose.yml"),
+            format!(
+                "services:\n  web:\n    build:\n      context: {s}\n      dockerfile_inline: |\n        FROM alpine\n        \
+                 COPY master.key /leak\n"
+            ),
+        )
+        .unwrap();
+        let built = config(&docker, dir.path(), &["docker-compose.yml"], Some("vfy-shop"), &[])
+            .await
+            .unwrap();
+        let e = check_build_inputs(&built, dir.path()).unwrap_err();
+        assert!(e.message().contains("the build context"), "{e}");
     }
 
     #[test]

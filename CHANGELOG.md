@@ -28,9 +28,12 @@ and this project follows [Semantic Versioning](https://semver.org/).
   the proxy connects only to the public addresses found.
 - Security: Compose previews get volumes of their own even when the file names one
   explicitly or marks it external, and are refused when they would mount a server folder
-  outside the repository. Closing the pull request removes those volumes.
+  outside the repository, or read an env file, secret or config file from the server.
+  Closing the pull request removes those volumes.
+- Security: a Compose app's build context, Dockerfile or additional context outside the
+  repository is refused, as for other builds.
 - A preview whose pull request closed while it was deploying no longer goes live
-  afterwards.
+  afterwards, and the container it was starting is removed.
 - Cancelling a deployment that waits for the power guard or a build slot ends it at once.
 - A conditional redirect listed before an unconditional one for the same path wins
   again when its condition matches.

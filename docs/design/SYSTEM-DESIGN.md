@@ -271,7 +271,13 @@ override also renames every top-level volume to `vfy-<app>-pr<n>_<key>` (not ext
 labelled with the app and PR), even one the file names explicitly; the merged
 `docker compose config` is checked before `up` and the preview is refused when storage
 could still be shared (a bind mount resolving outside the checkout, driver options, another
-container's volumes). Closing the PR removes those labelled volumes.
+container's volumes) or it would read the server's files (an env file, secret or config
+file, or SSH key outside the checkout; external secrets). `config` runs with
+`--no-env-resolution`, so env files are read only by `up`, after the check; a Compose too old
+for the flag gets no compose previews. Closing the PR removes those labelled volumes. Every
+compose app's builds read only the checkout: a `build.context`, Dockerfile or
+`additional_contexts` path outside it is refused (production may still mount server files
+at run time).
 
 ### 7.3 Rollback
 
