@@ -20,6 +20,26 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Security: a build context, Dockerfile, Compose file or output directory that is a
+  symbolic link out of the repository is refused, so a pull request can't build (and
+  serve) files of the server.
+- Security: a `vercel.json` rewrite to a name that resolves to a private address (such
+  as `10.77.0.1.sslip.io`) is refused like an IP; names are looked up every minute and
+  the proxy connects only to the public addresses found.
+- Security: Compose previews get volumes of their own even when the file names one
+  explicitly or marks it external, and are refused when they would mount a server folder
+  outside the repository. Closing the pull request removes those volumes.
+- A preview whose pull request closed while it was deploying no longer goes live
+  afterwards.
+- Cancelling a deployment that waits for the power guard or a build slot ends it at once.
+- A conditional redirect listed before an unconditional one for the same path wins
+  again when its condition matches.
+- `installCommand`/`buildCommand` (app settings or `vercel.json`) run in Go, Rust,
+  Python, Deno, Bun, Ruby and PHP builds too; settings a build can't use are noted in
+  its log.
+- Deployer tokens can change project and environment variables, not only the app's.
+- `vfy env pull` writes the variables production gets (project, environment and app
+  merged), not only the app's own.
 - Scheduled tasks of apps that run on a worker ran on the main server and always
   failed; they run where the app runs now (update workers too). A task or backup still
   running is not started again under itself.

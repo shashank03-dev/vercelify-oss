@@ -176,6 +176,8 @@ the volumes, and starts the agent, whose reconciler brings apps and databases ba
 - Thermal pause: before starting a build and every 5 s during one, read
   `/run/vercelify/power-guard.state`. `thermal_paused` → `docker pause` the BuildKit
   container (`buildx_buildkit_vercelify0`), resume when it clears. `shutting_down` → cancel.
+  Cancelling a deployment that waits for the power guard or a build slot ends it at once
+  (the wait is raced against the cancel) and frees the app for its next deployment.
 
 ### 6.2 Pipeline
 
@@ -195,7 +197,14 @@ logs per app are kept.
 
 Order: explicit `build.pack` → `Dockerfile` at `build.dockerfile` (default `Dockerfile`) →
 compose file → language detection. Detection reads only files (never runs code from the
-repository on the host).
+repository on the host), and only the checkout's own: the context, Dockerfile, Compose
+file, output directory and every file read are resolved with symbolic links followed and
+refused (or ignored) when they lead outside it; BuildKit gets the resolved context, checked
+again where the build uses it. Every pack runs the install and build commands it is given
+(the app's over `vercel.json`'s): Node and Static as their steps, the other languages after
+`COPY . .` (Go and Rust then compile unless the build command left the binary, `/out/app`
+/ `/app`). What a plan can't use (commands with a Dockerfile, an output directory for a
+server) is a note in the build log.
 
 | Detected by | Generated image |
 | --- | --- |
@@ -257,7 +266,12 @@ the previous healthy one.
 
 Compose apps: `docker compose -p vfy-<app> -f <file> -f <generated override> up -d --wait`,
 where the override adds our labels, networks, limits and the env file. The routed service is
-`runtime.service`. Zero downtime is best effort (compose recreates in place).
+`runtime.service`. Zero downtime is best effort (compose recreates in place). A preview's
+override also renames every top-level volume to `vfy-<app>-pr<n>_<key>` (not external,
+labelled with the app and PR), even one the file names explicitly; the merged
+`docker compose config` is checked before `up` and the preview is refused when storage
+could still be shared (a bind mount resolving outside the checkout, driver options, another
+container's volumes). Closing the PR removes those labelled volumes.
 
 ### 7.3 Rollback
 
@@ -455,7 +469,12 @@ main server, and the old one stepping down.
     (`Host(...)`, priority 100, TLS when `https`), service with the container's address on
     `vfy-proxy`, Basic Auth middleware when set, HTTPS redirect middleware.
   - `vercelify-routes-<key>.yaml`: the existing `vercel.json` layer from `routing.rs`,
-    priorities 5000–50000 (unchanged), copying our base routers.
+    priorities 5000–50000 (unchanged), copying our base routers. Redirects keep their array
+    order across `has`/`missing`: a conditional redirect's router runs only the unconditional
+    ones listed before it. A rewrite to another site by name is pinned: looked up each
+    reconcile (every minute), refused if any address is private, and served from those
+    addresses with the name as `Host` and TLS server name (`serversTransports`), so Traefik
+    never resolves it itself (no DNS rebinding).
   - `vercelify-wake.yaml`: priority 1 catch-all to the wake listener (unchanged).
 - Router naming keeps today's `http-0-<app>` / `…-pr-<n>` pattern so `sleep.rs` reads the
   same Prometheus series.
@@ -531,7 +550,10 @@ needs, so the cockpit can say "about 2 GB" for Plausible before it is created.
   become our apps; deploy = `deployer.enqueue(app, sha, trigger = push)`.
 - Previews: the existing logic (forks never built, per-app cap, GitHub status + comment)
   calls `deployer.enqueue_preview(app, pr, sha)`; closing a PR deletes the preview's
-  container, route and row.
+  container, route and row. The row is closed first, under the lock a preview's commit
+  point takes (check open → route → record), so a deployment of it under way can't go
+  live afterwards; its running deployments are cancelled and the teardown waits for them.
+  A failed teardown opens the row again for the next check to retry.
 - Webhooks (M9): `POST /v1/webhooks/{github|gitlab|gitea}[/{source}]` on the control
   listener, reachable through the tunnel's public URL (`mesh_public_url`) or on the LAN
   (a self-hosted Gitea). `POST /v1/platform/git-sources/{id}/webhook` (`vercelify
@@ -566,9 +588,13 @@ Conventions: JSON, `snake_case`, lists return arrays, errors `{ "error": "…" }
 long operations return a `Job` and progress on `/v1/events` (topics `apps`, `deployments`,
 `databases`, `mesh`). New capabilities in `/v1/health`: `platform`, `mesh`.
 
-Roles: **viewer** = GET; **deployer** = apps, deployments, env, domains, previews,
-databases (not delete), logs, terminal; **owner** = everything incl. tokens, mesh, nodes,
-settings, deletes. The host token (`agent.token`) is owner.
+Roles: **viewer** = GET; **deployer** = apps, deployments, env (at app, environment and
+project level; creating or deleting projects and environments is an owner's), domains,
+previews, databases (not delete), logs, terminal; **owner** = everything incl. tokens, mesh, nodes,
+settings, deletes. The host token (`agent.token`) is owner. `GET …/apps/{id}/env?resolved=true` lists what production
+deployments of the app get (project < environment < app, no preview overrides, database
+references unexpanded; `vfy env pull`), each with the scope it comes from; `reveal=true`
+needs a deployer.
 
 The platform routes live under `/v1/platform/` (`/v1/projects` is already the
 `vercel.json` rules API): `/v1/platform/projects`, `/v1/platform/apps`,

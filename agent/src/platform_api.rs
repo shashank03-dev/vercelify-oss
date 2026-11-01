@@ -214,6 +214,10 @@ struct EnvQuery {
     reveal: bool,
     #[serde(default)]
     preview_only: bool,
+    /// On an app: what its production deployments get, merged from the
+    /// project, environment and app (for `vfy env pull`), not the app's own.
+    #[serde(default)]
+    resolved: bool,
 }
 
 fn check_reveal(actor: &Actor, q: &EnvQuery) -> Result<(), AppError> {
@@ -307,6 +311,10 @@ async fn app_env(
 ) -> ApiResult<Vec<EnvVar>> {
     check_reveal(&actor, &q)?;
     let id = app_id(&s, app).await?;
+    if q.resolved {
+        let reveal = q.reveal;
+        return Ok(Json(tx(&s, move |c, k| env::effective(c, k, &id, reveal)).await?));
+    }
     list_vars(&s, VarScope::App, id, q.reveal).await
 }
 

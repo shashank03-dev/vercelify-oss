@@ -99,6 +99,15 @@ pub fn close(c: &Connection, app_id: &str, pr: u32) -> Result<Option<Preview>> {
     Ok(p)
 }
 
+/// Undo [`close`] (its teardown failed): open again, to be retried.
+pub fn reopen(c: &Connection, app_id: &str, pr: u32) -> Result<()> {
+    c.execute(
+        "UPDATE previews SET status = 'active', closed_at = NULL WHERE app_id = ?1 AND pr_number = ?2",
+        params![app_id, pr],
+    )?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

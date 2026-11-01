@@ -34,6 +34,10 @@ pub fn allowed(role: Role, method: &Method, path: &str) -> bool {
         ["v1", "platform", "databases", _, "restore" | "move"] => false,
         ["v1", "platform", "apps", _, ..] | ["v1", "platform", "databases", _, ..] => true,
         ["v1", "platform", "databases"] => !delete,
+        // Variables inherited from a project or environment are variables too;
+        // creating or deleting the project/environment itself stays an owner's.
+        ["v1", "platform", "projects" | "environments", _, "env"] => !delete,
+        ["v1", "platform", "projects" | "environments", _, "env", _] => true,
         // Creating an app from the catalogue is creating an app.
         ["v1", "platform", "templates", _] => !delete,
         ["v1", "platform", "deployments", _, ..] => !delete,
@@ -181,5 +185,37 @@ mod tests {
             assert!(!can(d, Method::POST, p), "{p}");
         }
         assert!(can(Role::Owner, Method::DELETE, "/v1/platform/apps/blog"));
+    }
+
+    /// The same variable at app, environment and project scope is the same
+    /// kind of change; the project/environment lifecycle is not.
+    #[test]
+    fn variables_at_every_scope() {
+        let can = |role, m: Method, p: &str| allowed(role, &m, p);
+        let scopes = [
+            "/v1/platform/apps/blog/env",
+            "/v1/platform/environments/env_1/env",
+            "/v1/platform/projects/prj_1/env",
+        ];
+        for base in scopes {
+            let key = format!("{base}/KEY");
+            for role in [Role::Viewer, Role::Deployer, Role::Owner] {
+                assert!(can(role, Method::GET, base), "{role:?} GET {base}");
+            }
+            for role in [Role::Deployer, Role::Owner] {
+                assert!(can(role, Method::PUT, base), "{role:?} PUT {base}");
+                assert!(can(role, Method::DELETE, &key), "{role:?} DELETE {key}");
+            }
+            assert!(!can(Role::Viewer, Method::PUT, base), "viewer PUT {base}");
+            assert!(!can(Role::Viewer, Method::DELETE, &key), "viewer DELETE {key}");
+        }
+        let d = Role::Deployer;
+        assert!(!can(d, Method::DELETE, "/v1/platform/projects/prj_1/env"));
+        assert!(!can(d, Method::POST, "/v1/platform/projects"));
+        assert!(!can(d, Method::PATCH, "/v1/platform/projects/prj_1"));
+        assert!(!can(d, Method::DELETE, "/v1/platform/projects/prj_1"));
+        assert!(!can(d, Method::POST, "/v1/platform/projects/prj_1/environments"));
+        assert!(!can(d, Method::DELETE, "/v1/platform/environments/env_1"));
+        assert!(can(Role::Owner, Method::DELETE, "/v1/platform/projects/prj_1"));
     }
 }

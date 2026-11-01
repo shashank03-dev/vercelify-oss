@@ -51,7 +51,7 @@ pub struct VercelBuild {
 
 impl VercelBuild {
     pub fn read(dir: &Path) -> Self {
-        let Some(v) = read_json(&dir.join("vercel.json")) else {
+        let Some(v) = read_json(dir, "vercel.json") else {
             return Self::default();
         };
         let s = |k: &str| v.get(k).and_then(Value::as_str).map(str::to_string);
@@ -68,16 +68,32 @@ const NODE_MAJORS: [u32; 4] = [18, 20, 22, 24];
 const DEFAULT_NODE: u32 = 22;
 const CADDY: &str = "caddy:2.8-alpine";
 
-fn read_json(p: &Path) -> Option<Value> {
-    serde_json::from_str(&std::fs::read_to_string(p).ok()?).ok()
+/// `dir/name` with symbolic links followed, if that is still inside `dir`.
+/// A repository can link a file or folder anywhere on the server; what the
+/// build reads on the host, or hands to BuildKit, must stay in the checkout.
+fn inside(dir: &Path, name: &str) -> Option<PathBuf> {
+    let base = dir.canonicalize().ok()?;
+    let p = dir.join(name).canonicalize().ok()?;
+    p.starts_with(&base).then_some(p)
 }
 
-fn read(p: &Path) -> String {
-    std::fs::read_to_string(p).unwrap_or_default()
+/// `name` is in `dir` but leads out of it (a symbolic link).
+fn escapes(dir: &Path, name: &str) -> bool {
+    std::fs::symlink_metadata(dir.join(name)).is_ok() && inside(dir, name).is_none()
+}
+
+fn read_json(dir: &Path, name: &str) -> Option<Value> {
+    serde_json::from_str(&read(dir, name)).ok()
+}
+
+fn read(dir: &Path, name: &str) -> String {
+    inside(dir, name)
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default()
 }
 
 fn exists(dir: &Path, f: &str) -> bool {
-    dir.join(f).exists()
+    inside(dir, f).is_some()
 }
 
 /// Commands from settings end up in a `RUN` line: one line, no NUL.
@@ -91,10 +107,42 @@ fn one_line(what: &str, cmd: &str) -> Result<String> {
 
 /// Wrap a build step so build-time variables are loaded first.
 fn with_env(cmd: &str) -> String {
+    with_env_mounts("", cmd)
+}
+
+/// [`with_env`] with extra `--mount` flags (caches), ending in a newline.
+fn with_env_mounts(mounts: &str, cmd: &str) -> String {
+    let mounts = if mounts.is_empty() {
+        String::new()
+    } else {
+        format!("{mounts} ")
+    };
     format!(
-        "RUN --mount=type=secret,id=env,required=false sh -c 'if [ -f /run/secrets/env ]; then . /run/secrets/env; fi; {}'",
+        "RUN {mounts}--mount=type=secret,id=env,required=false sh -c 'if [ -f /run/secrets/env ]; then . /run/secrets/env; fi; {}'",
         cmd.replace('\'', r"'\''")
     )
+}
+
+/// The app's (or vercel.json's) install and build commands, checked.
+fn commands(b: &AppBuild) -> Result<(Option<String>, Option<String>)> {
+    Ok((
+        b.install_command
+            .as_deref()
+            .map(|c| one_line("install command", c))
+            .transpose()?,
+        b.build_command
+            .as_deref()
+            .map(|c| one_line("build command", c))
+            .transpose()?,
+    ))
+}
+
+/// The custom install/build steps of a server pack, after `COPY . .`.
+fn custom_steps(df: &mut String, mounts: &str, install: Option<&str>, build: Option<&str>) {
+    for c in [install, build].into_iter().flatten() {
+        df.push_str(&with_env_mounts(mounts, c));
+        df.push('\n');
+    }
 }
 
 /// Shell-quoted `export` lines for the build secret.
@@ -113,16 +161,12 @@ pub fn plan(root: &Path, kind: AppKind, source: &AppSource, build: &AppBuild) ->
     if context != "." {
         validate::repo_path("context", &context)?;
     }
-    let dir: PathBuf = if context == "." {
-        root.to_path_buf()
-    } else {
-        root.join(&context)
-    };
-    if !dir.is_dir() {
-        return Err(Error::Invalid(format!(
-            "the build context {context} doesn't exist in the repository"
-        )));
+    if escapes(root, &context) {
+        return Err(outside("the build context", &context));
     }
+    let dir = inside(root, &context)
+        .filter(|d| d.is_dir())
+        .ok_or_else(|| Error::Invalid(format!("the build context {context} doesn't exist in the repository")))?;
     if kind == AppKind::Image {
         let image = source
             .image
@@ -142,7 +186,10 @@ pub fn plan(root: &Path, kind: AppKind, source: &AppSource, build: &AppBuild) ->
             .clone()
             .unwrap_or_else(|| "docker-compose.yml".into());
         validate::repo_path("compose file", &file)?;
-        if !root.join(&file).is_file() {
+        if escapes(root, &file) {
+            return Err(outside("the compose file", &file));
+        }
+        if !inside(root, &file).is_some_and(|f| f.is_file()) {
             return Err(Error::Invalid(format!("{file} is not in the repository")));
         }
         return Ok(BuildPlan {
@@ -162,33 +209,71 @@ pub fn plan(root: &Path, kind: AppKind, source: &AppSource, build: &AppBuild) ->
 
     let dockerfile = b.dockerfile.clone().unwrap_or_else(|| "Dockerfile".into());
     validate::repo_path("dockerfile", &dockerfile)?;
-    let has_dockerfile = dir.join(&dockerfile).is_file();
+    if escapes(&dir, &dockerfile) {
+        return Err(outside("the Dockerfile", &dockerfile));
+    }
+    let has_dockerfile = inside(&dir, &dockerfile).is_some_and(|f| f.is_file());
     let mut p = match b.pack {
         BuildPack::Dockerfile => {
             if !has_dockerfile {
                 return Err(Error::Invalid(format!("{dockerfile} is not in {context}")));
             }
-            dockerfile_plan(&dir, &dockerfile)
+            dockerfile_plan(&dir, &dockerfile, &b)
         }
-        BuildPack::Auto if has_dockerfile => dockerfile_plan(&dir, &dockerfile),
+        BuildPack::Auto if has_dockerfile => dockerfile_plan(&dir, &dockerfile, &b),
         BuildPack::Auto => detect(&dir, &b, vercel.framework.as_deref())?,
         BuildPack::Static => static_plan(&dir, &b, "Static site")?,
         BuildPack::Node => node(&dir, &b, vercel.framework.as_deref())?,
-        BuildPack::Python => python(&dir)?,
-        BuildPack::Go => go(&dir)?,
-        BuildPack::Rust => rust(&dir)?,
-        BuildPack::Deno => deno(&dir)?,
+        BuildPack::Python => python(&dir, &b)?,
+        BuildPack::Go => go(&dir, &b)?,
+        BuildPack::Rust => rust(&dir, &b)?,
+        BuildPack::Deno => deno(&dir, &b)?,
         BuildPack::Bun => bun(&dir, &b)?,
-        BuildPack::Ruby => ruby(&dir)?,
-        BuildPack::Php => php(&dir)?,
+        BuildPack::Ruby => ruby(&dir, &b)?,
+        BuildPack::Php => php(&dir, &b)?,
     };
     p.context = context;
     Ok(p)
 }
 
-fn dockerfile_plan(dir: &Path, path: &str) -> BuildPlan {
+/// The plan's build context on disk, checked again where it is used: what
+/// BuildKit is given must be the checkout or a folder in it.
+pub fn context_dir(root: &Path, plan: &BuildPlan) -> Result<PathBuf> {
+    if escapes(root, &plan.context) {
+        return Err(outside("the build context", &plan.context));
+    }
+    inside(root, &plan.context).filter(|d| d.is_dir()).ok_or_else(|| {
+        Error::Invalid(format!(
+            "the build context {} doesn't exist in the repository",
+            plan.context
+        ))
+    })
+}
+
+fn outside(what: &str, path: &str) -> Error {
+    Error::Invalid(format!(
+        "{what} {path} leads outside the repository (a symbolic link): builds only read the repository's own files"
+    ))
+}
+
+/// Server packs run the app, they don't serve a folder: say so rather than
+/// drop an output directory silently.
+fn server_notes(b: &AppBuild, name: &str) -> Vec<String> {
+    b.output_directory
+        .as_ref()
+        .map(|o| {
+            format!(
+                "the output directory {o} is not used: {name} runs as a server \
+                 (pick the Static pack to serve a folder)"
+            )
+        })
+        .into_iter()
+        .collect()
+}
+
+fn dockerfile_plan(dir: &Path, path: &str, b: &AppBuild) -> BuildPlan {
     // EXPOSE in the Dockerfile is the best hint for the port.
-    let port = read(&dir.join(path))
+    let port = read(dir, path)
         .lines()
         .filter_map(|l| {
             let l = l.trim();
@@ -197,19 +282,36 @@ fn dockerfile_plan(dir: &Path, path: &str) -> BuildPlan {
         })
         .next()
         .unwrap_or(3000);
+    let unused: Vec<&str> = [
+        ("the install command", &b.install_command),
+        ("the build command", &b.build_command),
+        ("the output directory", &b.output_directory),
+    ]
+    .into_iter()
+    .filter_map(|(what, v)| v.as_ref().map(|_| what))
+    .collect();
+    let notes = if unused.is_empty() {
+        vec![]
+    } else {
+        vec![format!(
+            "{path} builds the app, so {} {} not used (put the steps in {path}, or pick a build pack)",
+            unused.join(" and "),
+            if unused.len() == 1 { "is" } else { "are" }
+        )]
+    };
     BuildPlan {
         kind: PlanKind::Dockerfile(path.into()),
         context: ".".into(),
         port,
         framework: "Dockerfile".into(),
-        notes: vec![],
+        notes,
     }
 }
 
 fn detect(dir: &Path, b: &AppBuild, vercel_framework: Option<&str>) -> Result<BuildPlan> {
     let has_pkg = exists(dir, "package.json");
     if has_pkg {
-        let pkg = read_json(&dir.join("package.json")).unwrap_or(Value::Null);
+        let pkg = read_json(dir, "package.json").unwrap_or(Value::Null);
         let bun_lock = exists(dir, "bun.lockb") || exists(dir, "bun.lock");
         if bun_lock && node_framework(&pkg, dir).is_none() && !has_dep(&pkg, "vite") {
             return bun(dir, b);
@@ -217,25 +319,25 @@ fn detect(dir: &Path, b: &AppBuild, vercel_framework: Option<&str>) -> Result<Bu
         return node(dir, b, vercel_framework);
     }
     if exists(dir, "deno.json") || exists(dir, "deno.jsonc") {
-        return deno(dir);
+        return deno(dir, b);
     }
     if ["requirements.txt", "pyproject.toml", "Pipfile", "uv.lock"]
         .iter()
         .any(|f| exists(dir, f))
     {
-        return python(dir);
+        return python(dir, b);
     }
     if exists(dir, "go.mod") {
-        return go(dir);
+        return go(dir, b);
     }
     if exists(dir, "Cargo.toml") {
-        return rust(dir);
+        return rust(dir, b);
     }
     if exists(dir, "Gemfile") {
-        return ruby(dir);
+        return ruby(dir, b);
     }
     if exists(dir, "composer.json") || exists(dir, "index.php") {
-        return php(dir);
+        return php(dir, b);
     }
     if exists(dir, "index.html") || b.output_directory.is_some() {
         return static_plan(dir, b, "Static site");
@@ -337,7 +439,7 @@ impl Pm {
 
 /// Node major from `engines.node`, `.nvmrc` or `.node-version`.
 fn node_major(dir: &Path, pkg: &Value) -> u32 {
-    let wanted = [read(&dir.join(".nvmrc")), read(&dir.join(".node-version"))]
+    let wanted = [read(dir, ".nvmrc"), read(dir, ".node-version")]
         .into_iter()
         .chain(
             pkg.get("engines")
@@ -405,14 +507,14 @@ enum NodeFw {
 }
 
 fn file_contains(dir: &Path, names: &[&str], needle: &str) -> bool {
-    names.iter().any(|n| read(&dir.join(n)).contains(needle))
+    names.iter().any(|n| read(dir, n).contains(needle))
 }
 
 fn node_framework(pkg: &Value, dir: &Path) -> Option<NodeFw> {
     if has_dep(pkg, "next") {
         let configs = ["next.config.js", "next.config.mjs", "next.config.ts", "next.config.cjs"];
         let standalone = configs.iter().any(|c| {
-            let s = read(&dir.join(c));
+            let s = read(dir, c);
             s.contains("output: 'standalone'")
                 || s.contains("output: \"standalone\"")
                 || s.contains("output:'standalone'")
@@ -466,7 +568,7 @@ fn node_framework(pkg: &Value, dir: &Path) -> Option<NodeFw> {
 }
 
 fn node(dir: &Path, b: &AppBuild, vercel_framework: Option<&str>) -> Result<BuildPlan> {
-    let pkg = read_json(&dir.join("package.json"))
+    let pkg = read_json(dir, "package.json")
         .ok_or_else(|| Error::Invalid("package.json is missing or not valid JSON".into()))?;
     let pm = package_manager(dir, &pkg);
     let major = node_major(dir, &pkg);
@@ -689,6 +791,7 @@ fn static_plan(dir: &Path, b: &AppBuild, name: &str) -> Result<BuildPlan> {
     if out != "." {
         validate::repo_path("output directory", &out)?;
     }
+    let mut notes = vec![];
     let mut df = String::from("# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\n");
     let stage = if let Some(cmd) = &b.build_command {
         df.push_str("FROM node:22-slim AS build\nWORKDIR /app\nCOPY . .\n");
@@ -700,10 +803,18 @@ fn static_plan(dir: &Path, b: &AppBuild, name: &str) -> Result<BuildPlan> {
         df.push('\n');
         Some("build")
     } else {
-        if out != "." && !dir.join(&out).is_dir() {
+        if out != "." && escapes(dir, &out) {
+            return Err(outside("the output directory", &out));
+        }
+        if out != "." && !inside(dir, &out).is_some_and(|o| o.is_dir()) {
             return Err(Error::Invalid(format!(
                 "the output directory {out} is not in the repository"
             )));
+        }
+        if b.install_command.is_some() {
+            notes.push(
+                "the install command is not used: without a build command the files are served as they are".into(),
+            );
         }
         None
     };
@@ -719,7 +830,7 @@ fn static_plan(dir: &Path, b: &AppBuild, name: &str) -> Result<BuildPlan> {
         context: ".".into(),
         port: 8080,
         framework: name.into(),
-        notes: vec![],
+        notes,
     })
 }
 
@@ -727,7 +838,7 @@ fn static_plan(dir: &Path, b: &AppBuild, name: &str) -> Result<BuildPlan> {
 
 /// A `web:` line of a Procfile, the cross-language way to say how to start.
 fn procfile_web(dir: &Path) -> Option<String> {
-    read(&dir.join("Procfile"))
+    read(dir, "Procfile")
         .lines()
         .find_map(|l| l.strip_prefix("web:").map(|c| c.trim().to_string()))
         .filter(|c| !c.is_empty() && !c.contains(['\n', '\0']))
@@ -749,7 +860,7 @@ fn python_app(dir: &Path, ctor: &str) -> Option<(String, String)> {
         "wsgi.py",
         "asgi.py",
     ] {
-        let src = read(&dir.join(f));
+        let src = read(dir, f);
         for line in src.lines() {
             let l = line.trim();
             if let Some((var, rhs)) = l.split_once('=') {
@@ -767,19 +878,22 @@ fn python_app(dir: &Path, ctor: &str) -> Option<(String, String)> {
     None
 }
 
-fn python(dir: &Path) -> Result<BuildPlan> {
-    let reqs = read(&dir.join("requirements.txt")).to_ascii_lowercase();
-    let pyproject = read(&dir.join("pyproject.toml")).to_ascii_lowercase();
+fn python(dir: &Path, b: &AppBuild) -> Result<BuildPlan> {
+    let (custom_install, build) = commands(b)?;
+    let reqs = read(dir, "requirements.txt").to_ascii_lowercase();
+    let pyproject = read(dir, "pyproject.toml").to_ascii_lowercase();
     let deps = format!("{reqs}\n{pyproject}");
     let dep = |n: &str| deps.contains(n);
-    let version = read(&dir.join(".python-version"));
+    let version = read(dir, ".python-version");
     let version = version.trim().split('.').take(2).collect::<Vec<_>>().join(".");
     let version = if ["3.10", "3.11", "3.12", "3.13"].contains(&version.as_str()) {
         version
     } else {
         "3.12".into()
     };
-    let install = if exists(dir, "uv.lock") {
+    let install = if let Some(c) = &custom_install {
+        c.as_str()
+    } else if exists(dir, "uv.lock") {
         "pip install uv && uv export --frozen --no-hashes -o /tmp/req.txt && pip install -r /tmp/req.txt && pip install --no-deps ."
     } else if exists(dir, "requirements.txt") {
         "pip install -r requirements.txt"
@@ -829,13 +943,15 @@ fn python(dir: &Path) -> Result<BuildPlan> {
     let mut df = format!(
         "# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\nFROM python:{version}-slim\n\
          ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 PORT=8000\nWORKDIR /app\nCOPY . .\n\
-         RUN --mount=type=cache,target=/root/.cache/pip --mount=type=secret,id=env,required=false sh -c 'if [ -f /run/secrets/env ]; then . /run/secrets/env; fi; {install}'\n"
+         {}\n",
+        with_env_mounts("--mount=type=cache,target=/root/.cache/pip", install)
     );
     if !extra.is_empty() && !dep(extra) {
         df.push_str(&format!(
             "RUN --mount=type=cache,target=/root/.cache/pip pip install {extra}\n"
         ));
     }
+    custom_steps(&mut df, "", None, build.as_deref());
     if django {
         df.push_str(&with_env("python manage.py collectstatic --noinput || true"));
         df.push('\n');
@@ -849,12 +965,13 @@ fn python(dir: &Path) -> Result<BuildPlan> {
         context: ".".into(),
         port: 8000,
         framework: name.into(),
-        notes: vec![],
+        notes: server_notes(b, name),
     })
 }
 
-fn go(dir: &Path) -> Result<BuildPlan> {
-    let gomod = read(&dir.join("go.mod"));
+fn go(dir: &Path, b: &AppBuild) -> Result<BuildPlan> {
+    let (install, build) = commands(b)?;
+    let gomod = read(dir, "go.mod");
     let version = gomod
         .lines()
         .find_map(|l| l.strip_prefix("go "))
@@ -862,11 +979,11 @@ fn go(dir: &Path) -> Result<BuildPlan> {
         .filter(|v| v.starts_with("1.") && v.len() <= 5)
         .unwrap_or_else(|| "1.23".into());
     // `package main` at the root, or a single directory under cmd/.
-    let target = if read(&dir.join("main.go")).contains("package main") {
+    let target = if read(dir, "main.go").contains("package main") {
         ".".to_string()
     } else {
-        let cmds: Vec<String> = std::fs::read_dir(dir.join("cmd"))
-            .ok()
+        let cmds: Vec<String> = inside(dir, "cmd")
+            .and_then(|c| std::fs::read_dir(c).ok())
             .into_iter()
             .flatten()
             .flatten()
@@ -884,24 +1001,42 @@ fn go(dir: &Path) -> Result<BuildPlan> {
             }
         }
     };
-    let df = format!(
-        "# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\nFROM golang:{version} AS build\nWORKDIR /src\n\
-         COPY go.mod go.sum* ./\nRUN --mount=type=cache,target=/go/pkg/mod go mod download\nCOPY . .\n\
-         RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-         CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/app {target}\n\n\
-         FROM gcr.io/distroless/static-debian12:nonroot\nCOPY --from=build /out/app /app\nENV PORT=8080\nEXPOSE 8080\nENTRYPOINT [\"/app\"]\n"
+    let caches = "--mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build";
+    let compile = format!("CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/app {target}");
+    let mut df = format!(
+        "# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\nFROM golang:{version} AS build\nWORKDIR /src\n"
     );
+    if install.is_none() {
+        df.push_str("COPY go.mod go.sum* ./\nRUN --mount=type=cache,target=/go/pkg/mod go mod download\n");
+    }
+    df.push_str("COPY . .\n");
+    custom_steps(&mut df, caches, install.as_deref(), build.as_deref());
+    if build.is_some() {
+        // A build command that leaves its own binary at /out/app replaces
+        // the compile; one that only generates code is followed by it.
+        df.push_str(&format!(
+            "RUN {caches} sh -c '[ -x /out/app ] || {}'\n",
+            compile.replace('\'', r"'\''")
+        ));
+    } else {
+        df.push_str(&format!("RUN {caches} {compile}\n"));
+    }
+    df.push_str(
+        "\nFROM gcr.io/distroless/static-debian12:nonroot\nCOPY --from=build /out/app /app\nENV PORT=8080\nEXPOSE 8080\nENTRYPOINT [\"/app\"]\n",
+    );
+    let framework = format!("Go {version}");
     Ok(BuildPlan {
         kind: PlanKind::Generated(df),
         context: ".".into(),
         port: 8080,
-        framework: format!("Go {version}"),
-        notes: vec![],
+        notes: server_notes(b, &framework),
+        framework,
     })
 }
 
-fn rust(dir: &Path) -> Result<BuildPlan> {
-    let cargo = read(&dir.join("Cargo.toml"));
+fn rust(dir: &Path, b: &AppBuild) -> Result<BuildPlan> {
+    let (install, build) = commands(b)?;
+    let cargo = read(dir, "Cargo.toml");
     // [[bin]] name wins, else [package] name.
     let mut section = "";
     let mut bin = None;
@@ -925,25 +1060,34 @@ fn rust(dir: &Path) -> Result<BuildPlan> {
         .or(package)
         .filter(|n| n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'))
         .ok_or_else(|| Error::Invalid("Cargo.toml has no package name (a workspace? add a Dockerfile)".into()))?;
-    let df = format!(
-        "# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\nFROM rust:1-slim-bookworm AS build\nWORKDIR /src\nCOPY . .\n\
-         RUN --mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/src/target \
-         cargo build --release --locked --bin {name} || cargo build --release --bin {name}; \
-         cp target/release/{name} /app\n\n\
-         FROM debian:12-slim\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*\n\
-         COPY --from=build /app /usr/local/bin/app\nRUN useradd --uid 10001 app\nUSER app\nENV PORT=8080\nEXPOSE 8080\nCMD [\"/usr/local/bin/app\"]\n"
+    let caches = "--mount=type=cache,target=/usr/local/cargo/registry --mount=type=cache,target=/src/target";
+    let mut compile =
+        format!("cargo build --release --locked --bin {name} || cargo build --release --bin {name}; cp target/release/{name} /app");
+    let mut df = String::from(
+        "# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\nFROM rust:1-slim-bookworm AS build\nWORKDIR /src\nCOPY . .\n",
+    );
+    custom_steps(&mut df, caches, install.as_deref(), build.as_deref());
+    if build.is_some() {
+        // As for Go: a build command that leaves /app replaces the compile.
+        compile = format!("sh -c 'if [ ! -x /app ]; then {compile}; fi'");
+    }
+    df.push_str(&format!("RUN {caches} {compile}\n"));
+    df.push_str(
+        "\nFROM debian:12-slim\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*\n\
+         COPY --from=build /app /usr/local/bin/app\nRUN useradd --uid 10001 app\nUSER app\nENV PORT=8080\nEXPOSE 8080\nCMD [\"/usr/local/bin/app\"]\n",
     );
     Ok(BuildPlan {
         kind: PlanKind::Generated(df),
         context: ".".into(),
         port: 8080,
         framework: "Rust".into(),
-        notes: vec![],
+        notes: server_notes(b, "Rust"),
     })
 }
 
-fn deno(dir: &Path) -> Result<BuildPlan> {
-    let cfg = read_json(&dir.join("deno.json")).unwrap_or(Value::Null);
+fn deno(dir: &Path, b: &AppBuild) -> Result<BuildPlan> {
+    let (install, build) = commands(b)?;
+    let cfg = read_json(dir, "deno.json").unwrap_or(Value::Null);
     let start = if cfg.get("tasks").and_then(|t| t.get("start")).is_some() {
         "deno task start".to_string()
     } else {
@@ -953,22 +1097,28 @@ fn deno(dir: &Path) -> Result<BuildPlan> {
             .ok_or_else(|| Error::Invalid("deno.json has no start task and there is no main.ts".into()))?;
         format!("deno run --allow-net --allow-env --allow-read {entry}")
     };
-    let df = format!(
-        "# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\nFROM denoland/deno:2.1.4\nWORKDIR /app\nCOPY . .\n\
-         RUN deno install || true\nUSER deno\nENV PORT=8000\nEXPOSE 8000\nCMD {}\n",
-        shell_cmd(&start)
+    let mut df = String::from(
+        "# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\nFROM denoland/deno:2.1.4\nWORKDIR /app\nCOPY . .\n",
     );
+    if install.is_none() {
+        df.push_str("RUN deno install || true\n");
+    }
+    custom_steps(&mut df, "", install.as_deref(), build.as_deref());
+    df.push_str(&format!(
+        "USER deno\nENV PORT=8000\nEXPOSE 8000\nCMD {}\n",
+        shell_cmd(&start)
+    ));
     Ok(BuildPlan {
         kind: PlanKind::Generated(df),
         context: ".".into(),
         port: 8000,
         framework: "Deno".into(),
-        notes: vec![],
+        notes: server_notes(b, "Deno"),
     })
 }
 
 fn bun(dir: &Path, b: &AppBuild) -> Result<BuildPlan> {
-    let pkg = read_json(&dir.join("package.json")).unwrap_or(Value::Null);
+    let pkg = read_json(dir, "package.json").unwrap_or(Value::Null);
     let start = if script(&pkg, "start").is_some() {
         "bun run start".to_string()
     } else {
@@ -979,9 +1129,20 @@ fn bun(dir: &Path, b: &AppBuild) -> Result<BuildPlan> {
         format!("bun run {entry}")
     };
     let mut df = String::from(
-        "# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\nFROM oven/bun:1.1 \nWORKDIR /app\nCOPY . .\n\
-         RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile || bun install\n",
+        "# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\nFROM oven/bun:1.1 \nWORKDIR /app\nCOPY . .\n",
     );
+    match &b.install_command {
+        Some(c) => {
+            df.push_str(&with_env_mounts(
+                "--mount=type=cache,target=/root/.bun/install/cache",
+                &one_line("install command", c)?,
+            ));
+            df.push('\n');
+        }
+        None => df.push_str(
+            "RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile || bun install\n",
+        ),
+    }
     if let Some(c) = b
         .build_command
         .as_deref()
@@ -999,14 +1160,15 @@ fn bun(dir: &Path, b: &AppBuild) -> Result<BuildPlan> {
         context: ".".into(),
         port: 3000,
         framework: "Bun".into(),
-        notes: vec![],
+        notes: server_notes(b, "Bun"),
     })
 }
 
-fn ruby(dir: &Path) -> Result<BuildPlan> {
-    let gemfile = read(&dir.join("Gemfile"));
+fn ruby(dir: &Path, b: &AppBuild) -> Result<BuildPlan> {
+    let (install, build) = commands(b)?;
+    let gemfile = read(dir, "Gemfile");
     let rails = gemfile.contains("\"rails\"") || gemfile.contains("'rails'");
-    let version = read(&dir.join(".ruby-version"));
+    let version = read(dir, ".ruby-version");
     let version = version.trim().trim_start_matches("ruby-");
     let version = if version.starts_with("3.") && version.len() <= 8 {
         version.split('.').take(2).collect::<Vec<_>>().join(".")
@@ -1026,7 +1188,19 @@ fn ruby(dir: &Path) -> Result<BuildPlan> {
         "# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\nFROM ruby:{version}-slim\n\
          RUN apt-get update && apt-get install -y --no-install-recommends build-essential libpq-dev libyaml-dev git && rm -rf /var/lib/apt/lists/*\n\
          ENV BUNDLE_WITHOUT=development:test BUNDLE_DEPLOYMENT=1 RAILS_ENV=production RACK_ENV=production RAILS_LOG_TO_STDOUT=1 PORT=3000\n\
-         WORKDIR /app\nCOPY Gemfile Gemfile.lock* ./\nRUN --mount=type=cache,target=/usr/local/bundle/cache bundle install\nCOPY . .\n"
+         WORKDIR /app\n"
+    );
+    if install.is_none() {
+        df.push_str(
+            "COPY Gemfile Gemfile.lock* ./\nRUN --mount=type=cache,target=/usr/local/bundle/cache bundle install\n",
+        );
+    }
+    df.push_str("COPY . .\n");
+    custom_steps(
+        &mut df,
+        "--mount=type=cache,target=/usr/local/bundle/cache",
+        install.as_deref(),
+        build.as_deref(),
     );
     if rails {
         df.push_str(&with_env(
@@ -1043,11 +1217,14 @@ fn ruby(dir: &Path) -> Result<BuildPlan> {
         context: ".".into(),
         port: 3000,
         framework: if rails { "Rails".into() } else { "Ruby".into() },
-        notes: vec![],
+        notes: server_notes(b, if rails { "Rails" } else { "Ruby" }),
     })
 }
 
-fn php(dir: &Path) -> Result<BuildPlan> {
+fn php(dir: &Path, b: &AppBuild) -> Result<BuildPlan> {
+    let (install, build) = commands(b)?;
+    // A custom install replaces Composer's stage and runs in the app's image.
+    let composer = exists(dir, "composer.json") && install.is_none();
     let laravel = exists(dir, "artisan");
     let root = if laravel || exists(dir, "public/index.php") {
         "/app/public"
@@ -1055,7 +1232,7 @@ fn php(dir: &Path) -> Result<BuildPlan> {
         "/app"
     };
     let mut df = String::from("# syntax=docker/dockerfile:1.7\n# Generated by Vercelify (vfy pack).\n");
-    if exists(dir, "composer.json") {
+    if composer {
         df.push_str(
             "FROM composer:2 AS vendor\nWORKDIR /app\nCOPY composer.json composer.lock* ./\n\
              RUN --mount=type=cache,target=/tmp/cache composer install --no-dev --no-scripts --prefer-dist --no-interaction --ignore-platform-reqs\n\n",
@@ -1065,9 +1242,10 @@ fn php(dir: &Path) -> Result<BuildPlan> {
         "FROM dunglas/frankenphp:1.3-php8.3\nRUN install-php-extensions pdo_mysql pdo_pgsql intl zip opcache\n\
          ENV SERVER_NAME=:8080 SERVER_ROOT={root} PORT=8080\nWORKDIR /app\nCOPY . .\n"
     ));
-    if exists(dir, "composer.json") {
+    if composer {
         df.push_str("COPY --from=vendor /app/vendor ./vendor\n");
     }
+    custom_steps(&mut df, "", install.as_deref(), build.as_deref());
     if laravel {
         df.push_str(
             "RUN chown -R www-data:www-data storage bootstrap/cache && php artisan package:discover --ansi || true\n",
@@ -1079,7 +1257,7 @@ fn php(dir: &Path) -> Result<BuildPlan> {
         context: ".".into(),
         port: 8080,
         framework: if laravel { "Laravel".into() } else { "PHP".into() },
-        notes: vec![],
+        notes: server_notes(b, if laravel { "Laravel" } else { "PHP" }),
     })
 }
 
@@ -1155,7 +1333,7 @@ mod tests {
                 files.push((".nvmrc", n));
             }
             let d = repo(&files);
-            node_major(d.path(), &read_json(&d.path().join("package.json")).unwrap())
+            node_major(d.path(), &read_json(d.path(), "package.json").unwrap())
         };
         assert_eq!(v("20.x", None), 20);
         assert_eq!(v("^18.17", None), 18);
@@ -1319,6 +1497,177 @@ mod tests {
         let p = auto(&d);
         assert_eq!(p.framework, "Laravel");
         assert!(dockerfile(&p).contains("SERVER_ROOT=/app/public"));
+    }
+
+    /// Every pack runs the install and build commands it is given, from
+    /// vercel.json or (winning) the app's settings, or says why not.
+    #[test]
+    fn commands_reach_every_pack() {
+        let vercel = r#"{"installCommand":"repo-install","buildCommand":"repo-build"}"#;
+        let packs: &[(BuildPack, &[(&str, &str)])] = &[
+            (
+                BuildPack::Go,
+                &[("go.mod", "module x\n\ngo 1.22\n"), ("main.go", "package main\n")],
+            ),
+            (BuildPack::Rust, &[("Cargo.toml", "[package]\nname = \"srv\"\n")]),
+            (BuildPack::Python, &[("requirements.txt", "flask\n"), ("main.py", "")]),
+            (
+                BuildPack::Deno,
+                &[("deno.json", r#"{"tasks":{"start":"deno run main.ts"}}"#)],
+            ),
+            (
+                BuildPack::Bun,
+                &[("package.json", r#"{"scripts":{"start":"bun i.ts"}}"#)],
+            ),
+            (BuildPack::Ruby, &[("Gemfile", "gem 'sinatra'\n")]),
+            (BuildPack::Php, &[("composer.json", "{}"), ("index.php", "")]),
+            (
+                BuildPack::Node,
+                &[("package.json", r#"{"scripts":{"start":"node s.js","build":"x"}}"#)],
+            ),
+            (BuildPack::Static, &[("index.html", "")]),
+        ];
+        for (pack, files) in packs {
+            let mut with_vercel = files.to_vec();
+            with_vercel.push(("vercel.json", vercel));
+            let d = repo(&with_vercel);
+            let b = AppBuild {
+                pack: *pack,
+                ..AppBuild::default()
+            };
+            let p = plan(d.path(), AppKind::Git, &AppSource::default(), &b).unwrap();
+            let df = dockerfile(&p);
+            assert!(df.contains("repo-install"), "{pack:?} vercel.json install: {df}");
+            assert!(df.contains("repo-build"), "{pack:?} vercel.json build: {df}");
+            assert!(
+                df.find("repo-install") < df.find("repo-build"),
+                "{pack:?}: install before build"
+            );
+            assert!(p.notes.is_empty(), "{pack:?}: {:?}", p.notes);
+
+            let own = AppBuild {
+                pack: *pack,
+                install_command: Some("app-install 'quoted'".into()),
+                build_command: Some("app-build".into()),
+                ..AppBuild::default()
+            };
+            let p = plan(d.path(), AppKind::Git, &AppSource::default(), &own).unwrap();
+            let df = dockerfile(&p);
+            assert!(df.contains(r"app-install '\''quoted'\''"), "{pack:?} app install: {df}");
+            assert!(df.contains("app-build"), "{pack:?} app build: {df}");
+            assert!(!df.contains("repo-"), "{pack:?}: the app's settings win: {df}");
+        }
+
+        // Go: generating code first still compiles; a build that leaves
+        // /out/app is the compile.
+        let d = repo(&[("go.mod", "module x\n"), ("main.go", "package main\n")]);
+        let gen = AppBuild {
+            pack: BuildPack::Go,
+            build_command: Some("go generate ./...".into()),
+            ..AppBuild::default()
+        };
+        let p = plan(d.path(), AppKind::Git, &AppSource::default(), &gen).unwrap();
+        let df = dockerfile(&p);
+        let generate = df.find("go generate ./...").unwrap();
+        let compile = df.find("[ -x /out/app ] || CGO_ENABLED=0 go build").unwrap();
+        assert!(generate < compile, "{df}");
+        assert!(df.contains("go mod download"), "no custom install: the default one");
+
+        // Settings that a pack can't use are named, not dropped.
+        let out = AppBuild {
+            pack: BuildPack::Go,
+            output_directory: Some("public".into()),
+            ..AppBuild::default()
+        };
+        let p = plan(d.path(), AppKind::Git, &AppSource::default(), &out).unwrap();
+        assert!(
+            p.notes
+                .iter()
+                .any(|n| n.contains("output directory public is not used")),
+            "{:?}",
+            p.notes
+        );
+        let d = repo(&[("Dockerfile", "FROM scratch\n"), ("vercel.json", vercel)]);
+        let p = auto(&d);
+        assert_eq!(
+            p.notes,
+            [
+                "Dockerfile builds the app, so the install command and the build command are not used \
+              (put the steps in Dockerfile, or pick a build pack)"
+            ]
+        );
+        let d = repo(&[("index.html", ""), ("vercel.json", r#"{"installCommand":"npm ci"}"#)]);
+        assert!(auto(&d).notes.iter().any(|n| n.contains("install command is not used")));
+    }
+
+    /// Symbolic links may stay in the repository, never lead out of it: not
+    /// for the context, a folder above it, a Dockerfile, a Compose file, an
+    /// output directory, or a file detection reads.
+    #[test]
+    fn links_out_of_the_repository_are_refused() {
+        use std::os::unix::fs::symlink;
+        let outside_dir = tempfile::tempdir().unwrap();
+        let host = outside_dir.path();
+        std::fs::write(host.join("master.key"), "secret").unwrap();
+        std::fs::write(host.join("index.html"), "<h1>host</h1>").unwrap();
+        std::fs::write(host.join("vercel.json"), r#"{"buildCommand":"cat master.key"}"#).unwrap();
+        std::fs::create_dir_all(host.join("sub")).unwrap();
+        let d = repo(&[
+            ("real/index.html", "ok"),
+            ("go/go.mod", "module x\n"),
+            ("go/main.go", "package main\n"),
+        ]);
+        let root = d.path();
+        symlink(host, root.join("site")).unwrap();
+        symlink(host.join("vercel.json"), root.join("real/vercel.json")).unwrap();
+        symlink(host.join("master.key"), root.join("compose.yml")).unwrap();
+        symlink(host.join("master.key"), root.join("go/Dockerfile")).unwrap();
+        symlink(host.join("sub"), root.join("real/out")).unwrap();
+        // Links that stay inside are fine.
+        symlink(root.join("real"), root.join("alias")).unwrap();
+        let try_plan = |kind, source: &AppSource, b: AppBuild| plan(root, kind, source, &b);
+        let ctx = |c: &str| AppBuild {
+            context: Some(c.into()),
+            ..AppBuild::default()
+        };
+        for c in ["site", "site/sub"] {
+            let e = try_plan(AppKind::Git, &AppSource::default(), ctx(c)).unwrap_err();
+            assert!(e.message().contains("leads outside the repository"), "{c}: {e}");
+        }
+        let e = try_plan(AppKind::Git, &AppSource::default(), ctx("go")).unwrap_err();
+        assert!(e.message().contains("the Dockerfile Dockerfile leads outside"), "{e}");
+        let compose = AppSource {
+            compose_file: Some("compose.yml".into()),
+            ..AppSource::default()
+        };
+        let e = try_plan(AppKind::Compose, &compose, AppBuild::default()).unwrap_err();
+        assert!(
+            e.message().contains("the compose file compose.yml leads outside"),
+            "{e}"
+        );
+        let out = AppBuild {
+            output_directory: Some("out".into()),
+            pack: BuildPack::Static,
+            ..ctx("real")
+        };
+        let e = try_plan(AppKind::Git, &AppSource::default(), out).unwrap_err();
+        assert!(e.message().contains("the output directory out leads outside"), "{e}");
+
+        // The linked vercel.json is not read: no command from the host.
+        let p = try_plan(AppKind::Git, &AppSource::default(), ctx("real")).unwrap();
+        assert!(!dockerfile(&p).contains("master.key"), "{}", dockerfile(&p));
+        assert_eq!(p.framework, "Static site");
+        let p = try_plan(AppKind::Git, &AppSource::default(), ctx("alias")).unwrap();
+        assert_eq!(
+            context_dir(root, &p).unwrap(),
+            root.join("real").canonicalize().unwrap()
+        );
+        // A plan made elsewhere is checked again where it is used.
+        let forged = BuildPlan {
+            context: "site".into(),
+            ..p
+        };
+        assert!(context_dir(root, &forged).is_err());
     }
 
     #[test]

@@ -102,8 +102,11 @@ teardown() { kill "$MOCK_PID" 2>/dev/null; rm -rf "$T"; }
   [ "$status" -eq 0 ]
   [ "$(stat -c %a .env 2>/dev/null || stat -f %Lp .env)" = 600 ]
   grep -qx 'DATABASE_URL="postgres://u:p@db/x"' .env
+  grep -qx 'API_URL="https://api.example.com"' .env
+  grep -qx 'REGION="home"' .env
+  [[ "$output" == *"3 variables written"* ]]
   run ! grep -q PREVIEW_ONLY .env
-  grep -q '^GET /v1/platform/apps/blog/env?reveal=true ' "$T/requests.log"
+  grep -q '^GET /v1/platform/apps/blog/env?reveal=true&resolved=true ' "$T/requests.log"
   run "$VFY" env pull blog
   [ "$status" -ne 0 ]
   run "$VFY" env set blog API_URL=https://x.example.com 'GREETING=hello world' --plain
@@ -173,7 +176,7 @@ JSON
   chmod 0644 .env
   VFY_FORCE=1 run "$VFY" env pull blog .env
   [ "$status" -eq 0 ]
-  [ "$(stat -c %a .env)" = 600 ]
+  [ "$(stat -c %a .env 2>/dev/null || stat -f %Lp .env)" = 600 ]
 }
 
 @test "forced env export refuses symbolic links and preserves their targets" {

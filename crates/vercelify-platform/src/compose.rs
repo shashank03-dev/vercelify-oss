@@ -6,6 +6,13 @@
 //! service on the proxy network. Variables reach Compose through an env file
 //! that exists only while `docker compose up` runs. Compose recreates
 //! containers in place, so zero downtime is best effort here.
+//!
+//! Previews never touch production data (as in `deploy.rs`): the override
+//! gives every named volume a name of the preview's own, even one the file
+//! names explicitly or marks external, and the merged configuration is
+//! checked before anything starts. Storage that can't be made the preview's
+//! own (a bind mount outside the checkout, a volume with driver options,
+//! another container's volumes) stops the preview.
 
 use crate::docker::{Docker, MANAGED, MANAGED_LABEL, PROXY_NETWORK};
 use crate::proc::{self, Cancel, Spec};
@@ -55,7 +62,20 @@ pub struct Labels<'a> {
     pub pr: Option<u32>,
 }
 
-pub fn override_yaml(services: &[String], routed: &str, env_file: &Path, l: &Labels) -> String {
+/// Labels on a preview's own volumes, to remove exactly those when it closes.
+const PREVIEW_APP_LABEL: &str = "vercelify.preview-app";
+const PREVIEW_PR_LABEL: &str = "vercelify.preview-pr";
+
+/// `volumes`: the file's named volumes, renamed to the project's own
+/// (previews only, see [`preview_volumes`]).
+pub fn override_yaml(
+    services: &[String],
+    routed: &str,
+    env_file: &Path,
+    l: &Labels,
+    project: &str,
+    volumes: &[String],
+) -> String {
     let mut y = String::from("# Written by vercelify-agent.\nservices:\n");
     for s in services {
         let _ = writeln!(y, "  {}:", q(s));
@@ -87,7 +107,126 @@ pub fn override_yaml(services: &[String], routed: &str, env_file: &Path, l: &Lab
         }
     }
     let _ = writeln!(y, "networks:\n  {}:\n    external: true", q(PROXY_NETWORK));
+    if !volumes.is_empty() {
+        y.push_str("volumes:\n");
+        for v in volumes {
+            let _ = writeln!(
+                y,
+                "  {}:\n    name: {}\n    external: false\n    labels:\n      {}: {}\n      {}: {}",
+                q(v),
+                q(&format!("{project}_{v}")),
+                q(PREVIEW_APP_LABEL),
+                q(l.app_id),
+                q(PREVIEW_PR_LABEL),
+                q(&l.pr.unwrap_or(0).to_string()),
+            );
+        }
+    }
     y
+}
+
+fn storage_error(what: String) -> Error {
+    Error::Invalid(format!(
+        "{what}: a preview can't be given storage of its own for it, and it must not share production's \
+         (turn previews off for this app, or use named volumes)"
+    ))
+}
+
+/// The named volumes a preview's override renames. Volumes with another
+/// driver or driver options (a `local` volume with `o: bind` is a folder on
+/// the host) can't be copied safely: refused.
+pub fn preview_volumes(config: &serde_json::Value) -> Result<Vec<String>> {
+    let Some(vols) = config.get("volumes").and_then(|v| v.as_object()) else {
+        return Ok(vec![]);
+    };
+    for (k, v) in vols {
+        let driver = v.get("driver").and_then(|d| d.as_str()).unwrap_or("local");
+        let opts = v
+            .get("driver_opts")
+            .and_then(|o| o.as_object())
+            .is_some_and(|o| !o.is_empty());
+        if driver != "local" || opts {
+            return Err(storage_error(format!(
+                "the volume {k} uses driver {driver} or driver options"
+            )));
+        }
+    }
+    Ok(vols.keys().cloned().collect())
+}
+
+/// `path`, or where it leads once symbolic links are followed (as far as
+/// it exists; Docker creates the rest), is in `dir`.
+fn resolves_inside(dir: &Path, path: &Path) -> bool {
+    let Ok(dir) = dir.canonicalize() else {
+        return false;
+    };
+    let mut existing = path;
+    let mut rest = Vec::new();
+    while existing.symlink_metadata().is_err() {
+        match (existing.parent(), existing.file_name()) {
+            (Some(p), Some(n)) => {
+                rest.push(n);
+                existing = p;
+            }
+            _ => return false,
+        }
+    }
+    let Ok(mut real) = existing.canonicalize() else {
+        return false;
+    };
+    for n in rest.into_iter().rev() {
+        if n == ".." {
+            return false;
+        }
+        real.push(n);
+    }
+    real.starts_with(dir)
+}
+
+/// The merged configuration a preview runs with (`docker compose config`
+/// with our override): every volume is the project's own, nothing is mounted
+/// from outside the checkout, and no other container's volumes are used.
+pub fn check_preview_storage(config: &serde_json::Value, dir: &Path, project: &str) -> Result<()> {
+    let own = format!("{project}_");
+    if let Some(vols) = config.get("volumes").and_then(|v| v.as_object()) {
+        for (k, v) in vols {
+            let name = v.get("name").and_then(|n| n.as_str()).unwrap_or("");
+            let external = v.get("external").and_then(|e| e.as_bool()).unwrap_or(false);
+            let opts = v
+                .get("driver_opts")
+                .and_then(|o| o.as_object())
+                .is_some_and(|o| !o.is_empty());
+            if external || opts || !name.starts_with(&own) {
+                return Err(storage_error(format!(
+                    "the volume {k} would be {name}, not the preview's own"
+                )));
+            }
+        }
+    }
+    let services = config.get("services").and_then(|s| s.as_object());
+    for (svc, s) in services.into_iter().flatten() {
+        for m in s.get("volumes").and_then(|v| v.as_array()).into_iter().flatten() {
+            let kind = m.get("type").and_then(|t| t.as_str()).unwrap_or("");
+            let source = m.get("source").and_then(|t| t.as_str()).unwrap_or("");
+            match kind {
+                "volume" | "tmpfs" | "image" => {}
+                "bind" if resolves_inside(dir, Path::new(source)) => {}
+                "bind" => {
+                    return Err(storage_error(format!(
+                        "{svc} mounts {source} from the server, outside the repository"
+                    )))
+                }
+                other => return Err(storage_error(format!("{svc} has a mount of type {other}"))),
+            }
+        }
+        for from in s.get("volumes_from").and_then(|v| v.as_array()).into_iter().flatten() {
+            let from = from.as_str().unwrap_or("");
+            if from.starts_with("container:") {
+                return Err(storage_error(format!("{svc} uses the volumes of {from}")));
+            }
+        }
+    }
+    Ok(())
 }
 
 pub struct Up<'a> {
@@ -103,16 +242,24 @@ pub struct Up<'a> {
     pub timeout: Duration,
 }
 
-/// The services of a compose file and the one to route to, from
-/// `docker compose config --format json` (the file's own order is lost there).
-pub async fn services(
+/// The resolved configuration of compose files (`docker compose config
+/// --format json`), as the project `project` when given.
+pub async fn config(
     docker: &Docker,
     dir: &Path,
-    file: &str,
+    files: &[&str],
+    project: Option<&str>,
     env: &[(String, String)],
-    explicit: Option<&str>,
-) -> Result<(Vec<String>, String)> {
-    let args = proc::args(&["compose", "-f", file, "config", "--format", "json"]);
+) -> Result<serde_json::Value> {
+    let file = files.first().copied().unwrap_or_default();
+    let mut args = vec!["compose".to_string()];
+    if let Some(p) = project {
+        args.extend(["-p".to_string(), p.to_string()]);
+    }
+    for f in files {
+        args.extend(["-f".to_string(), f.to_string()]);
+    }
+    args.extend(proc::args(&["config", "--format", "json"]));
     let o = proc::run(Spec {
         bin: &docker.bin,
         args: &args,
@@ -127,9 +274,7 @@ pub async fn services(
             o.tail(4)
         )));
     }
-    let v: serde_json::Value =
-        serde_json::from_str(&o.stdout).map_err(|e| Error::Invalid(format!("docker compose config: {e}")))?;
-    pick(&v, explicit).map_err(|e| Error::Invalid(format!("{file}: {}", e.message())))
+    serde_json::from_str(&o.stdout).map_err(|e| Error::Invalid(format!("docker compose config: {e}")))
 }
 
 /// Which service gets the domains: the app's choice; else one that publishes
@@ -176,7 +321,15 @@ pub fn pick(config: &serde_json::Value, explicit: Option<&str>) -> Result<(Vec<S
 
 /// Build and start the project; returns the routed container's name.
 pub async fn up(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + Send)) -> Result<String> {
-    let (services, routed) = services(u.docker, u.dir, u.file, u.env, u.service).await?;
+    let cfg = config(u.docker, u.dir, &[u.file], None, u.env).await?;
+    // The file's own order is lost in `config`.
+    let (services, routed) =
+        pick(&cfg, u.service).map_err(|e| Error::Invalid(format!("{}: {}", u.file, e.message())))?;
+    let volumes = if u.labels.pr.is_some() {
+        preview_volumes(&cfg)?
+    } else {
+        vec![]
+    };
     log(
         "info",
         &format!("compose services: {} (routed: {routed})", services.join(", ")),
@@ -197,7 +350,21 @@ pub async fn up(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + Se
         }
     }
     let override_path = work.join("compose.override.yml");
-    std::fs::write(&override_path, override_yaml(&services, &routed, &env_path, &u.labels))?;
+    std::fs::write(
+        &override_path,
+        override_yaml(&services, &routed, &env_path, &u.labels, u.project, &volumes),
+    )?;
+    if u.labels.pr.is_some() {
+        let override_file = override_path.to_string_lossy();
+        let merged = config(u.docker, u.dir, &[u.file, &override_file], Some(u.project), u.env).await;
+        if let Err(e) = merged.and_then(|m| check_preview_storage(&m, u.dir, u.project)) {
+            let _ = std::fs::remove_file(&env_path);
+            return Err(e);
+        }
+        if !volumes.is_empty() {
+            log("info", &format!("preview volumes: {} (its own)", volumes.join(", ")));
+        }
+    }
     u.docker.ensure_network(PROXY_NETWORK).await?;
     let args = proc::args(&[
         "compose",
@@ -233,6 +400,28 @@ pub async fn up(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + Se
         return Err(Error::Invalid(format!("docker compose up failed:\n{}", out.tail(15))));
     }
     Ok(container_of(u.project, &routed))
+}
+
+/// Remove the volumes a closed preview's override created (labelled with
+/// its app and pull request; nothing production uses has those labels).
+pub async fn remove_preview_volumes(docker: &Docker, app_id: &str, pr: u32) -> Result<()> {
+    let args = proc::args(&[
+        "volume",
+        "ls",
+        "--quiet",
+        "--filter",
+        &format!("label={PREVIEW_APP_LABEL}={app_id}"),
+        "--filter",
+        &format!("label={PREVIEW_PR_LABEL}={pr}"),
+    ]);
+    let o = docker.run(&args, Duration::from_secs(60)).await?;
+    if !o.success() {
+        return Err(Error::Internal(format!("docker volume ls: {}", o.tail(3))));
+    }
+    for v in o.stdout.lines().map(str::trim).filter(|v| !v.is_empty()) {
+        docker.volume_remove(v).await?;
+    }
+    Ok(())
 }
 
 /// Stop and remove a compose project's containers (volumes are kept).
@@ -279,6 +468,8 @@ mod tests {
                 project_id: "prj_1",
                 pr: None,
             },
+            "vfy-shop",
+            &[],
         );
         assert!(y.contains("  \"web\":\n    labels:\n      \"vercelify.managed\": \"platform\""));
         assert!(y.contains("\"vercelify.deployment\": \"dpl_1\""));
@@ -297,6 +488,131 @@ mod tests {
             .unwrap();
         assert!(!worker.contains("default: {}"), "other services keep their networks");
         assert!(y.ends_with("networks:\n  \"vfy-proxy\":\n    external: true\n"));
+    }
+
+    #[test]
+    fn preview_storage() {
+        let cfg = |j: &str| serde_json::from_str::<serde_json::Value>(j).unwrap();
+        let checkout = tempfile::tempdir().unwrap();
+        let dir = checkout.path();
+        std::fs::create_dir_all(dir.join("conf")).unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::os::unix::fs::symlink(outside.path(), dir.join("linked")).unwrap();
+        let p = "vfy-shop-pr4";
+        let file = cfg(
+            r#"{"services":{"web":{}},"volumes":{"data":{"name":"production-data"},"ext":{"name":"ext","external":true}}}"#,
+        );
+        assert_eq!(preview_volumes(&file).unwrap(), ["data", "ext"]);
+        let host_dir = cfg(r#"{"volumes":{"data":{"driver_opts":{"type":"none","o":"bind","device":"/srv"}}}}"#);
+        assert!(preview_volumes(&host_dir).is_err());
+        assert!(preview_volumes(&cfg(r#"{"volumes":{"d":{"driver":"nfs"}}}"#)).is_err());
+
+        let y = override_yaml(
+            &["web".into()],
+            "web",
+            Path::new("/x/app.env"),
+            &Labels {
+                app_id: "app_1",
+                app_name: "shop",
+                deployment_id: "dpl_1",
+                project_id: "prj_1",
+                pr: Some(4),
+            },
+            p,
+            &["data".into()],
+        );
+        assert!(y.ends_with(
+            "volumes:\n  \"data\":\n    name: \"vfy-shop-pr4_data\"\n    external: false\n    labels:\n      \
+             \"vercelify.preview-app\": \"app_1\"\n      \"vercelify.preview-pr\": \"4\"\n"
+        ));
+
+        let merged = |vols: &str, mounts: &str| {
+            cfg(&format!(
+                r#"{{"services":{{"web":{{"volumes":[{mounts}]}}}},"volumes":{{{vols}}}}}"#
+            ))
+        };
+        let bind = |src: &std::path::Path| format!(r#"{{"type":"bind","source":"{}","target":"/x"}}"#, src.display());
+        let ok = merged(
+            r#""data":{"name":"vfy-shop-pr4_data"}"#,
+            &format!(
+                r#"{{"type":"volume","source":"data","target":"/data"}},{{"type":"tmpfs","target":"/t"}},{},{}"#,
+                bind(&dir.join("conf")),
+                bind(&dir.join("made/by/docker"))
+            ),
+        );
+        check_preview_storage(&ok, dir, p).unwrap();
+        for bad in [
+            merged(r#""data":{"name":"production-data"}"#, ""),
+            merged(r#""data":{"name":"vfy-shop-pr4_data","external":true}"#, ""),
+            merged(r#""data":{"name":"vfy-shop-pr40_data"}"#, ""),
+            merged("", &bind(Path::new("/var/lib/vercelify"))),
+            merged("", &bind(&dir.join("linked"))),
+            merged("", &bind(&dir.join("linked/new"))),
+            merged("", &bind(&dir.join("conf/../../x"))),
+            merged("", r#"{"type":"npipe","source":"x","target":"/x"}"#),
+            cfg(r#"{"services":{"web":{"volumes_from":["container:vfy-shop-web-1"]}}}"#),
+        ] {
+            let e = check_preview_storage(&bad, dir, p).unwrap_err();
+            assert!(e.message().contains("must not share production"), "{bad}: {e}");
+        }
+        check_preview_storage(&cfg(r#"{"services":{"db":{"volumes_from":["web"]}}}"#), dir, p).unwrap();
+    }
+
+    /// The real Compose resolves our override the way the check expects:
+    /// explicit, external and plain volumes all become the preview's own,
+    /// and a bind mount from the server stops it (VERCELIFY_DOCKER_TESTS=1;
+    /// `docker compose config` needs no daemon).
+    #[tokio::test]
+    #[ignore = "needs Docker Compose: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored"]
+    async fn compose_resolves_preview_volumes() {
+        if std::env::var("VERCELIFY_DOCKER_TESTS").as_deref() != Ok("1") {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let file =
+            "services:\n  web:\n    image: alpine:3.20\n    volumes:\n      - data:/data\n      - ext:/ext\n      \
+                    - plain:/plain\n      - ./conf:/conf:ro\nvolumes:\n  data:\n    name: production-data\n  \
+                    ext:\n    external: true\n  plain: {}\n";
+        std::fs::write(dir.path().join("docker-compose.yml"), file).unwrap();
+        let docker = Docker {
+            bin: std::env::var("VERCELIFY_DOCKER_BIN").unwrap_or_else(|_| "docker".into()),
+        };
+        let p = "vfy-shop-pr4";
+        let prod = config(&docker, dir.path(), &["docker-compose.yml"], Some("vfy-shop"), &[])
+            .await
+            .unwrap();
+        assert_eq!(prod["volumes"]["data"]["name"], "production-data", "what the audit saw");
+        let vols = preview_volumes(&prod).unwrap();
+        let labels = Labels {
+            app_id: "app_1",
+            app_name: "shop",
+            deployment_id: "dpl_1",
+            project_id: "prj_1",
+            pr: Some(4),
+        };
+        let env = dir.path().join("app.env");
+        std::fs::write(&env, "").unwrap();
+        let ov = dir.path().join("override.yml");
+        std::fs::write(&ov, override_yaml(&["web".into()], "web", &env, &labels, p, &vols)).unwrap();
+        let ov = ov.to_string_lossy().to_string();
+        let merged = config(&docker, dir.path(), &["docker-compose.yml", &ov], Some(p), &[])
+            .await
+            .unwrap();
+        for k in ["data", "ext", "plain"] {
+            assert_eq!(merged["volumes"][k]["name"], format!("{p}_{k}"), "{merged:#}");
+            assert!(merged["volumes"][k].get("external").is_none_or(|e| e == false));
+        }
+        check_preview_storage(&merged, dir.path(), p).unwrap();
+
+        std::fs::write(
+            dir.path().join("docker-compose.yml"),
+            file.replace("./conf:/conf:ro", "/var/lib/vercelify:/state"),
+        )
+        .unwrap();
+        let merged = config(&docker, dir.path(), &["docker-compose.yml", &ov], Some(p), &[])
+            .await
+            .unwrap();
+        assert!(check_preview_storage(&merged, dir.path(), p).is_err());
     }
 
     #[test]

@@ -713,10 +713,15 @@ async fn projects_check(State(s): State<AppState>, Json(req): Json<ProjectUpload
     let files = crate::projects::check_upload(&upload_files(req)).map_err(AppError::bad_request)?;
     let refs: Vec<(&str, &str)> = files.iter().map(|(n, t)| (n.as_str(), t.as_str())).collect();
     let mut plan = crate::project::parse(&refs).map_err(AppError::bad_request)?;
+    let mut notes = vec![];
     if !s.config.rewrite_private_targets {
         crate::project::drop_private_rewrites(&mut plan);
+        let resolved = crate::projects::resolve_origins(&crate::project::dns_origins(&plan)).await;
+        notes = crate::project::pin_rewrites(&mut plan, &resolved);
     }
-    Ok(Json(crate::projects::summary(&plan)))
+    let mut summary = crate::projects::summary(&plan);
+    summary.warnings.extend(notes);
+    Ok(Json(summary))
 }
 
 async fn projects_upload(

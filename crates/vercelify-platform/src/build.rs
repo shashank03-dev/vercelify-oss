@@ -346,11 +346,7 @@ impl Builder {
         for n in &plan.notes {
             log.info(&format!("note: {n}"));
         }
-        let context = if plan.context == "." {
-            src.clone()
-        } else {
-            src.join(&plan.context)
-        };
+        let context = detect::context_dir(&src, &plan)?;
         let project_files = read_project_files(&context);
         if let PlanKind::Compose(_) = plan.kind {
             cleanup.keep = true;
@@ -454,11 +450,7 @@ impl Builder {
         } = req;
         let plan = detect::plan(dir, AppKind::Git, &AppSource::default(), build)?;
         log.info(&format!("detected: {}", plan.framework));
-        let context = if plan.context == "." {
-            dir.to_path_buf()
-        } else {
-            dir.join(&plan.context)
-        };
+        let context = detect::context_dir(dir, &plan)?;
         let work = self.work_dir.join(format!("{deployment_id}-dir"));
         let _ = std::fs::remove_dir_all(&work);
         std::fs::create_dir_all(&work)?;
@@ -516,6 +508,87 @@ mod tests {
         );
         std::fs::write(d.path().join("vercel.json"), "x".repeat(MAX_PROJECT_FILE as usize + 1)).unwrap();
         assert!(read_project_files(d.path()).is_empty());
+    }
+
+    /// A pull request that swaps the configured context for a link to the
+    /// server's state is refused before anything is read or built.
+    #[tokio::test]
+    async fn a_linked_context_never_reaches_docker() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let d = tempfile::tempdir().unwrap();
+        let host = d.path().join("host-state");
+        std::fs::create_dir_all(&host).unwrap();
+        std::fs::write(host.join("master.key"), "secret").unwrap();
+        std::fs::write(host.join("index.html"), "<h1>host</h1>").unwrap();
+        std::fs::write(host.join("vercel.json"), r#"{"buildCommand":"cat master.key"}"#).unwrap();
+        let checkout = d.path().join("checkout");
+        std::fs::create_dir_all(checkout.join("real")).unwrap();
+        std::fs::write(checkout.join("real/index.html"), "ok").unwrap();
+        symlink(&host, checkout.join("site")).unwrap();
+        let docker = d.path().join("docker");
+        let called = d.path().join("docker-called");
+        std::fs::write(&docker, format!("#!/bin/sh\necho \"$@\" >> {}\n", called.display())).unwrap();
+        std::fs::set_permissions(&docker, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let b = Builder {
+            docker: docker.display().to_string(),
+            git: "git".into(),
+            work_dir: d.path().join("work"),
+            driver: Driver::Docker,
+            memory: None,
+            timeout: Duration::from_secs(10),
+        };
+        let logs = LogHub::new(d.path().join("logs"));
+        // The context itself, a folder under it, and a Dockerfile.
+        for (context, dockerfile) in [("site", None), ("site/.", None), ("real", Some("../site/x"))] {
+            let build = AppBuild {
+                context: Some(context.into()),
+                pack: vercelify_core::platform::BuildPack::Static,
+                dockerfile: dockerfile.map(String::from),
+                ..AppBuild::default()
+            };
+            let mut log = logs.writer("blog", "dpl_link");
+            let e = b
+                .build_dir(
+                    DirBuild {
+                        dir: &checkout,
+                        app_name: "blog",
+                        deployment_id: "dpl_link",
+                        build: &build,
+                        build_env: &[],
+                    },
+                    Cancel::never(),
+                    &mut log,
+                )
+                .await
+                .unwrap_err();
+            assert!(
+                e.message().contains("outside the repository") || e.message().contains("inside the repository"),
+                "{context}: {e}"
+            );
+        }
+        assert!(!called.exists(), "docker was run");
+        let linked_df = AppBuild {
+            context: Some("real".into()),
+            ..AppBuild::default()
+        };
+        symlink(host.join("master.key"), checkout.join("real/Dockerfile")).unwrap();
+        let mut log = logs.writer("blog", "dpl_link");
+        let e = b
+            .build_dir(
+                DirBuild {
+                    dir: &checkout,
+                    app_name: "blog",
+                    deployment_id: "dpl_link",
+                    build: &linked_df,
+                    build_env: &[],
+                },
+                Cancel::never(),
+                &mut log,
+            )
+            .await
+            .unwrap_err();
+        assert!(e.message().contains("the Dockerfile Dockerfile leads outside"), "{e}");
+        assert!(!called.exists(), "docker was run");
     }
 
     #[test]

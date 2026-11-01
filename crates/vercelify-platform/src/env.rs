@@ -153,6 +153,40 @@ pub fn delete(c: &Connection, scope: VarScope, scope_id: &str, key: &str, previe
     Ok(())
 }
 
+/// The app's environment and project ids.
+fn parents(c: &Connection, app_id: &str) -> Result<(String, String)> {
+    c.query_row(
+        "SELECT a.environment_id, e.project_id FROM apps a JOIN environments e ON a.environment_id = e.id
+         WHERE a.id = ?1",
+        [app_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .optional()?
+    .ok_or_else(|| Error::not_found(format!("app {app_id}")))
+}
+
+/// The variables a production deployment of the app gets, merged the way
+/// [`resolve`] merges them (project < environment < app, preview-only
+/// values left out), each with the scope it came from. Database references
+/// stay as written: they name the database, not a password. Secret values
+/// are None unless `reveal`.
+pub fn effective(c: &Connection, key: &MasterKey, app_id: &str, reveal: bool) -> Result<Vec<EnvVar>> {
+    let (env_id, project_id) = parents(c, app_id)?;
+    let mut out = BTreeMap::new();
+    for (scope, id) in [
+        (VarScope::Project, project_id.as_str()),
+        (VarScope::Environment, env_id.as_str()),
+        (VarScope::App, app_id),
+    ] {
+        for v in list(c, key, scope, id, reveal)? {
+            if !v.preview_only {
+                out.insert(v.key.clone(), v);
+            }
+        }
+    }
+    Ok(out.into_values().collect())
+}
+
 /// One variable as a deployment sees it.
 pub struct Resolved {
     pub value: Zeroizing<String>,
@@ -163,15 +197,7 @@ pub struct Resolved {
 /// preview, preview-only values (again project < environment < app) are
 /// applied after all normal ones, so any preview-only value wins.
 pub fn resolve(c: &Connection, key: &MasterKey, app_id: &str, preview: bool) -> Result<BTreeMap<String, Resolved>> {
-    let (env_id, project_id): (String, String) = c
-        .query_row(
-            "SELECT a.environment_id, e.project_id FROM apps a JOIN environments e ON a.environment_id = e.id
-             WHERE a.id = ?1",
-            [app_id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
-        )
-        .optional()?
-        .ok_or_else(|| Error::not_found(format!("app {app_id}")))?;
+    let (env_id, project_id) = parents(c, app_id)?;
     let mut out = BTreeMap::new();
     let mut st = c.prepare(
         "SELECT id, key, value, build FROM env_vars
@@ -493,6 +519,68 @@ mod tests {
         let preview = s.with(|c| resolve(c, &k, &app, true)).unwrap();
         assert_eq!(get(&preview, "A"), "app-preview");
         assert_eq!(get(&preview, "B"), "env");
+    }
+
+    #[test]
+    fn effective_production_variables() {
+        let (s, app, env, project) = setup();
+        let k = key();
+        let set = |scope, id: &str, vars: Vec<EnvVarInput>| {
+            s.tx(|c| put(c, &k, scope, id, &EnvVarsPut { vars, replace: false }))
+                .unwrap();
+        };
+        let preview = |k: &str, v: &str| EnvVarInput {
+            preview_only: Some(true),
+            ..input(k, v)
+        };
+        set(
+            VarScope::Project,
+            &project,
+            vec![
+                input("DATABASE_URL", "postgres://project"),
+                input("SHARED", "project"),
+                preview("PREVIEW_URL", "https://pr.project"),
+            ],
+        );
+        set(
+            VarScope::Environment,
+            &env,
+            vec![input("API_URL", "https://env"), input("SHARED", "env")],
+        );
+        set(
+            VarScope::App,
+            &app,
+            vec![
+                input("GREETING", "hi"),
+                input("SHARED", "app"),
+                preview("SHARED", "app-preview"),
+            ],
+        );
+        let vars = s.with(|c| effective(c, &k, &app, true)).unwrap();
+        let got: Vec<(&str, &str, VarScope)> = vars
+            .iter()
+            .map(|v| (v.key.as_str(), v.value.as_deref().unwrap(), v.scope))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("API_URL", "https://env", VarScope::Environment),
+                ("DATABASE_URL", "postgres://project", VarScope::Project),
+                ("GREETING", "hi", VarScope::App),
+                ("SHARED", "app", VarScope::App),
+            ]
+        );
+        assert!(vars.iter().all(|v| !v.preview_only));
+        // The same merge a production deployment gets.
+        let prod = s.with(|c| resolve(c, &k, &app, false)).unwrap();
+        assert_eq!(prod.len(), vars.len());
+        for v in &vars {
+            assert_eq!(prod[&v.key].value.as_str(), v.value.as_deref().unwrap());
+        }
+        // Masked unless revealed.
+        let masked = s.with(|c| effective(c, &k, &app, false)).unwrap();
+        assert!(masked.iter().all(|v| v.value.is_none()));
+        assert!(s.with(|c| effective(c, &k, "app_missing", true)).is_err());
     }
 
     #[test]

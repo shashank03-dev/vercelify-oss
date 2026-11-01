@@ -21,7 +21,7 @@
 //!   other router whose paths it provably covers (`/api/(.*)` covers
 //!   `/api/users/:id`).
 
-use crate::project::{net_regex, FirewallAction, Net, Pattern, Plan, RewriteTo};
+use crate::project::{self, net_regex, FirewallAction, Net, Pattern, Plan, RewriteTo};
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
@@ -241,13 +241,21 @@ struct Shared<'a> {
     /// Headers without conditions.
     headers: Vec<(String, &'a Pattern)>,
     tidy: Vec<String>,
-    redirects: Vec<String>,
+    /// Redirects without conditions, with their index in `redirects`.
+    redirects: Vec<(usize, String)>,
     fallback: Option<String>,
 }
 
 impl Shared<'_> {
     /// Middlewares every router for paths of `pat` (None: any path) carries.
     fn chain(&self, pat: Option<&Pattern>, r: &AppRouter) -> Vec<String> {
+        self.chain_before(pat, r, usize::MAX)
+    }
+
+    /// [`Self::chain`] with only the unconditional redirects listed before
+    /// redirect `before`: the router of a conditional redirect runs those
+    /// first (an earlier rule wins) and its own next, never a later one.
+    fn chain_before(&self, pat: Option<&Pattern>, r: &AppRouter, before: usize) -> Vec<String> {
         let mut v = self.global_rates.clone();
         if let Some(p) = pat {
             v.extend(
@@ -265,7 +273,12 @@ impl Shared<'_> {
         );
         v.extend(r.middlewares.iter().cloned());
         v.extend(self.tidy.iter().cloned());
-        v.extend(self.redirects.iter().cloned());
+        v.extend(
+            self.redirects
+                .iter()
+                .filter(|(i, _)| *i < before)
+                .map(|(_, m)| m.clone()),
+        );
         v
     }
 }
@@ -290,6 +303,7 @@ pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (
     let pre = format!("vfy-{key}");
     let mut mws = Map::new();
     let mut services = Map::new();
+    let mut transports = Map::new();
     let mut out_routers = Map::new();
     let fw = &plan.firewall;
 
@@ -361,7 +375,7 @@ pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (
             mws.insert(n, mw);
         }
         if r.conditions.is_empty() {
-            sh.redirects.extend(names.iter().cloned());
+            sh.redirects.extend(names.iter().map(|n| (i, n.clone())));
         }
         redirect_names.push(names);
     }
@@ -378,15 +392,43 @@ pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (
                     json!({ "replacePathRegex": { "regex": rw.pattern.path, "replacement": templ } }),
                 );
             }
-            RewriteTo::External { origin, path } => {
+            RewriteTo::External { origin, path, addrs } => {
                 mws.insert(
                     format!("{pre}-rw{i}"),
                     json!({ "replacePathRegex": { "regex": rw.pattern.path, "replacement": path } }),
                 );
-                services.insert(
-                    format!("{pre}-ext{i}"),
-                    json!({ "loadBalancer": { "servers": [{ "url": origin }], "passHostHeader": false } }),
-                );
+                if addrs.is_empty() {
+                    services.insert(
+                        format!("{pre}-ext{i}"),
+                        json!({ "loadBalancer": { "servers": [{ "url": origin }], "passHostHeader": false } }),
+                    );
+                } else {
+                    // Pinned (project::pin_rewrites): connect to the checked
+                    // addresses only, and name the site in Host and TLS.
+                    let (host, port, tls) = project::origin_target(origin);
+                    let scheme = if tls { "https" } else { "http" };
+                    let servers: Vec<Value> = addrs
+                        .iter()
+                        .map(|ip| json!({ "url": format!("{scheme}://{}", std::net::SocketAddr::new(*ip, port)) }))
+                        .collect();
+                    let default_port = if tls { 443 } else { 80 };
+                    let host_header = if port == default_port {
+                        host.clone()
+                    } else {
+                        format!("{host}:{port}")
+                    };
+                    mws.insert(
+                        format!("{pre}-rwh{i}"),
+                        json!({ "headers": { "customRequestHeaders": { "Host": host_header } } }),
+                    );
+                    let mut lb = json!({ "servers": servers, "passHostHeader": true });
+                    if tls {
+                        let transport = format!("{pre}-tls{i}");
+                        transports.insert(transport.clone(), json!({ "serverName": host }));
+                        lb["serversTransport"] = json!(transport);
+                    }
+                    services.insert(format!("{pre}-ext{i}"), json!({ "loadBalancer": lb }));
+                }
             }
             RewriteTo::Fallback(_) => {}
         }
@@ -502,7 +544,7 @@ pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (
                 cond.push(path_rule(&rd.pattern));
             }
             cond.extend(rd.conditions.iter().cloned());
-            let mut m = sh.chain(Some(&rd.pattern), r);
+            let mut m = sh.chain_before(Some(&rd.pattern), r, i);
             m.extend(redirect_names[i].iter().cloned());
             add(format!("r{i}"), cond, P_REDIRECT - i as i64, m, None);
         }
@@ -522,8 +564,11 @@ pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (
                     m.push(format!("{pre}-rw{i}"));
                     None
                 }
-                RewriteTo::External { .. } => {
+                RewriteTo::External { addrs, .. } => {
                     m.push(format!("{pre}-rw{i}"));
+                    if !addrs.is_empty() {
+                        m.push(format!("{pre}-rwh{i}"));
+                    }
                     Some(format!("{pre}-ext{i}"))
                 }
                 RewriteTo::Fallback(d) => {
@@ -559,6 +604,9 @@ pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (
     http.insert("middlewares".into(), Value::Object(mws));
     if !services.is_empty() {
         http.insert("services".into(), Value::Object(services));
+    }
+    if !transports.is_empty() {
+        http.insert("serversTransports".into(), Value::Object(transports));
     }
     notes.dedup();
     (Some(json!({ "http": http })), notes)
@@ -700,6 +748,60 @@ mod tests {
     }
 
     #[test]
+    fn pinned_rewrites_connect_to_checked_addresses() {
+        let mut plan = project::parse(&[(
+            "vercel.json",
+            r#"{"rewrites": [
+                {"source": "/api/(.*)", "destination": "https://api.example.com/$1"},
+                {"source": "/alt/(.*)", "destination": "http://alt.example.com:8080/$1"}
+            ]}"#,
+        )])
+        .unwrap();
+        let ip = |s: &str| s.parse::<std::net::IpAddr>().unwrap();
+        let resolved = std::collections::HashMap::from([
+            (
+                ("api.example.com".to_string(), 443),
+                vec![ip("93.184.216.34"), ip("2606:2800:220:1::1")],
+            ),
+            (("alt.example.com".to_string(), 8080), vec![ip("93.184.216.35")]),
+        ]);
+        assert!(project::pin_rewrites(&mut plan, &resolved).is_empty());
+        let (c, _) = config("abc", &[router()], &plan, &Proxy::default());
+        let c = c.unwrap();
+        let http = &c["http"];
+        assert_eq!(
+            http["services"]["vfy-abc-ext0"]["loadBalancer"],
+            json!({
+                "servers": [{"url": "https://93.184.216.34:443"}, {"url": "https://[2606:2800:220:1::1]:443"}],
+                "passHostHeader": true,
+                "serversTransport": "vfy-abc-tls0"
+            })
+        );
+        assert_eq!(
+            http["serversTransports"]["vfy-abc-tls0"],
+            json!({"serverName": "api.example.com"})
+        );
+        assert_eq!(
+            http["middlewares"]["vfy-abc-rwh0"],
+            json!({"headers": {"customRequestHeaders": {"Host": "api.example.com"}}})
+        );
+        assert_eq!(
+            mw_of(&c, "vfy-abc-http-0-abc-rw0"),
+            vec!["gzip@docker", "vfy-abc-rw0", "vfy-abc-rwh0"]
+        );
+        assert_eq!(
+            http["services"]["vfy-abc-ext1"]["loadBalancer"],
+            json!({"servers": [{"url": "http://93.184.216.35:8080"}], "passHostHeader": true})
+        );
+        assert_eq!(
+            http["middlewares"]["vfy-abc-rwh1"]["headers"]["customRequestHeaders"]["Host"],
+            "alt.example.com:8080"
+        );
+        // No name of a private origin is left for the proxy to look up.
+        assert!(!render(&c).contains("\"url\":\"https://api.example.com"));
+    }
+
+    #[test]
     fn redirect_with_a_query_and_conditions() {
         let (c, _) = cfg(
             r#"{"redirects": [
@@ -729,6 +831,60 @@ mod tests {
             m["vfy-abc-r1"]["redirectRegex"]["replacement"],
             "https://uk.example.com/${p1}${vfyq}"
         );
+    }
+
+    /// Array order holds across conditional and unconditional redirects for
+    /// the same path: the first matching rule wins, as on Vercel.
+    #[test]
+    fn redirect_order_across_conditions() {
+        use regex::Regex;
+        let vip = r#"{"source": "/offer", "destination": "/special", "has": [{"type": "query", "key": "vip"}]}"#;
+        let all = r#"{"source": "/offer", "destination": "/ordinary"}"#;
+        // Where a request ends up: the highest-priority router whose rule
+        // matches, then the first redirect in its chain whose regex does.
+        let follow = |c: &Value, vip_query: bool| -> String {
+            let routers = c["http"]["routers"].as_object().unwrap();
+            let picked = routers
+                .iter()
+                .filter(|(name, r)| {
+                    let rule = r["rule"].as_str().unwrap();
+                    !name.ends_with("-block") && !name.ends_with("-trusted") && (!rule.contains("vip") || vip_query)
+                })
+                .max_by_key(|(_, r)| r["priority"].as_i64().unwrap())
+                .unwrap()
+                .0;
+            let url = if vip_query {
+                "https://a.test/offer?vip=1"
+            } else {
+                "https://a.test/offer"
+            };
+            for m in mw_of(c, picked) {
+                let Some(rr) = c["http"]["middlewares"][m].get("redirectRegex") else {
+                    continue;
+                };
+                let re = Regex::new(rr["regex"].as_str().unwrap()).unwrap();
+                if re.is_match(url) {
+                    let to = re.replace(url, rr["replacement"].as_str().unwrap());
+                    return to.split(['?', '#']).next().unwrap().to_string();
+                }
+            }
+            panic!("no redirect for {url} through {picked}");
+        };
+
+        // Conditional first, the fallback second.
+        let (c, _) = cfg(&format!(r#"{{"redirects": [{vip}, {all}]}}"#), Proxy::default());
+        assert_eq!(mw_of(&c, "vfy-abc-http-0-abc-r0"), vec!["gzip@docker", "vfy-abc-r0"]);
+        assert_eq!(follow(&c, true), "/special");
+        assert_eq!(follow(&c, false), "/ordinary");
+
+        // Unconditional first: it wins either way.
+        let (c, _) = cfg(&format!(r#"{{"redirects": [{all}, {vip}]}}"#), Proxy::default());
+        assert_eq!(
+            mw_of(&c, "vfy-abc-http-0-abc-r1"),
+            vec!["gzip@docker", "vfy-abc-r0", "vfy-abc-r1"]
+        );
+        assert_eq!(follow(&c, true), "/ordinary");
+        assert_eq!(follow(&c, false), "/ordinary");
     }
 
     #[test]

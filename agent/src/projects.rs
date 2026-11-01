@@ -97,6 +97,19 @@ struct Live {
     cron_secret: Option<String>,
 }
 
+/// Look up the names external rewrites connect to (see
+/// `project::pin_rewrites`). A name that fails or takes over 5 s is left out.
+pub async fn resolve_origins(origins: &[(String, u16)]) -> HashMap<(String, u16), Vec<std::net::IpAddr>> {
+    let mut out = HashMap::new();
+    for (host, port) in origins {
+        let found = tokio::time::timeout(Duration::from_secs(5), tokio::net::lookup_host((host.as_str(), *port))).await;
+        if let Ok(Ok(addrs)) = found {
+            out.insert((host.clone(), *port), addrs.map(|a| a.ip()).collect());
+        }
+    }
+    out
+}
+
 pub fn key_for(app_uuid: &str, pr: u64) -> String {
     if pr == 0 {
         app_uuid.to_string()
@@ -631,7 +644,7 @@ impl Projects {
         let mut live = HashMap::new();
         for p in &projects {
             let mut l = Live::default();
-            let plan = match p.plan(&self.cfg) {
+            let mut plan = match p.plan(&self.cfg) {
                 Ok(plan) => plan,
                 Err(e) => {
                     l.error = Some(e);
@@ -640,6 +653,12 @@ impl Projects {
                     continue;
                 }
             };
+            if !self.cfg.rewrite_private_targets {
+                // Looked up again every reconcile: a name moved to a private
+                // address loses its rewrite within a minute.
+                let resolved = resolve_origins(&project::dns_origins(&plan)).await;
+                l.notes.extend(project::pin_rewrites(&mut plan, &resolved));
+            }
             let routers = match platform.get(&p.key) {
                 Some((routers, secret)) => {
                     l.cron_secret = secret.clone();
