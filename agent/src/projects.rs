@@ -632,7 +632,12 @@ impl Projects {
         for p in &projects {
             let mut l = Live::default();
             let plan = match p.plan(&self.cfg) {
-                Ok(plan) => plan,
+                Ok(mut plan) => {
+                    if !self.cfg.rewrite_private_targets {
+                        project::pin_rewrites(&mut plan, project::system_resolve).await;
+                    }
+                    plan
+                }
                 Err(e) => {
                     l.error = Some(e);
                     let _ = self.write_file(&p.key, None);

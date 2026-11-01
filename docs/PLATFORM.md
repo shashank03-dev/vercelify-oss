@@ -118,8 +118,14 @@ URL that queues a deployment when called.
 1. **New app** in the Mac app: a Git repository (with its branch), a Docker image, or a
    service from the catalogue (Umami, Plausible, MinIO, Uptime Kuma, Vaultwarden…).
 2. The build pack detects Next.js, Vite, Nuxt, Astro, SvelteKit, Remix, Express, Go,
-   Python, Rust, Ruby, PHP, Deno and Bun; a `Dockerfile` or a compose file is used when
-   the repository has one. `buildCommand`, `installCommand`, `outputDirectory` and
+   Python, Rust, Ruby, PHP, Deno and Bun; a `Dockerfile` is used when the repository has
+   one, and a compose file (`compose.yaml`, `docker-compose.yml`…) when nothing else is
+   found (the app becomes a compose app; a repository whose language is detected keeps
+   its compose file for local development). Compose apps can't ask for the server
+   itself: no `privileged`, host namespaces, devices, Docker socket or files outside the
+   repository; published `ports` are ignored (the proxy routes the domains), and bind
+   mounts must be read-only (keep data in named volumes). With several web services,
+   choose the one the domains route to in the app's settings. `buildCommand`, `installCommand`, `outputDirectory` and
    `framework` in `vercel.json` are honoured, and the rest of `vercel.json` (redirects,
    rewrites, headers, firewall, crons) is applied by the proxy: see
    [PROJECT-CONFIG.md](PROJECT-CONFIG.md).

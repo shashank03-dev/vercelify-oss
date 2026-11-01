@@ -290,6 +290,7 @@ pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (
     let pre = format!("vfy-{key}");
     let mut mws = Map::new();
     let mut services = Map::new();
+    let mut transports = Map::new();
     let mut out_routers = Map::new();
     let fw = &plan.firewall;
 
@@ -378,15 +379,50 @@ pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (
                     json!({ "replacePathRegex": { "regex": rw.pattern.path, "replacement": templ } }),
                 );
             }
-            RewriteTo::External { origin, path } => {
+            RewriteTo::External { origin, path, pinned } => {
                 mws.insert(
                     format!("{pre}-rw{i}"),
                     json!({ "replacePathRegex": { "regex": rw.pattern.path, "replacement": path } }),
                 );
-                services.insert(
-                    format!("{pre}-ext{i}"),
-                    json!({ "loadBalancer": { "servers": [{ "url": origin }], "passHostHeader": false } }),
-                );
+                match crate::project::origin_host(origin).filter(|_| !pinned.is_empty()) {
+                    // Connect to the checked addresses; the site still sees
+                    // its own name (Host header, TLS server name).
+                    Some((host, port)) => {
+                        let scheme = origin.split("://").next().unwrap_or("http").to_ascii_lowercase();
+                        let servers: Vec<Value> = pinned
+                            .iter()
+                            .map(|ip| {
+                                let ip = match ip {
+                                    std::net::IpAddr::V6(v6) => format!("[{v6}]"),
+                                    v4 => v4.to_string(),
+                                };
+                                json!({ "url": format!("{scheme}://{ip}:{port}") })
+                            })
+                            .collect();
+                        let default_port = if scheme == "https" { 443 } else { 80 };
+                        let host_header = if port == default_port {
+                            host.clone()
+                        } else {
+                            format!("{host}:{port}")
+                        };
+                        mws.insert(
+                            format!("{pre}-rwh{i}"),
+                            json!({ "headers": { "customRequestHeaders": { "Host": host_header } } }),
+                        );
+                        let mut lb = json!({ "servers": servers, "passHostHeader": true });
+                        if scheme == "https" {
+                            transports.insert(format!("{pre}-st{i}"), json!({ "serverName": host }));
+                            lb["serversTransport"] = json!(format!("{pre}-st{i}"));
+                        }
+                        services.insert(format!("{pre}-ext{i}"), json!({ "loadBalancer": lb }));
+                    }
+                    None => {
+                        services.insert(
+                            format!("{pre}-ext{i}"),
+                            json!({ "loadBalancer": { "servers": [{ "url": origin }], "passHostHeader": false } }),
+                        );
+                    }
+                }
             }
             RewriteTo::Fallback(_) => {}
         }
@@ -522,8 +558,11 @@ pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (
                     m.push(format!("{pre}-rw{i}"));
                     None
                 }
-                RewriteTo::External { .. } => {
+                RewriteTo::External { pinned, .. } => {
                     m.push(format!("{pre}-rw{i}"));
+                    if !pinned.is_empty() {
+                        m.push(format!("{pre}-rwh{i}"));
+                    }
                     Some(format!("{pre}-ext{i}"))
                 }
                 RewriteTo::Fallback(d) => {
@@ -559,6 +598,9 @@ pub fn config(key: &str, routers: &[AppRouter], plan: &Plan, proxy: &Proxy) -> (
     http.insert("middlewares".into(), Value::Object(mws));
     if !services.is_empty() {
         http.insert("services".into(), Value::Object(services));
+    }
+    if !transports.is_empty() {
+        http.insert("serversTransports".into(), Value::Object(transports));
     }
     notes.dedup();
     (Some(json!({ "http": http })), notes)
@@ -697,6 +739,58 @@ mod tests {
             json!({"loadBalancer": {"servers": [{"url": "https://api.example.com"}], "passHostHeader": false}})
         );
         assert_eq!(m["vfy-abc-rw0"]["replacePathRegex"]["replacement"], "/v1/${p1}");
+    }
+
+    /// Regression (audit A03): a pinned rewrite connects to the checked
+    /// addresses and still presents the site's own name.
+    #[test]
+    fn pinned_rewrites_connect_to_checked_addresses() {
+        let mut plan = project::parse(&[(
+            "vercel.json",
+            r#"{"rewrites": [
+                {"source": "/api/(.*)", "destination": "https://api.example.com/v1/$1"},
+                {"source": "/x/(.*)", "destination": "http://x.example.com:8080/$1"}
+            ]}"#,
+        )])
+        .unwrap();
+        for (i, ips) in [vec!["93.184.215.14", "2606:4700::1"], vec!["8.8.4.4"]]
+            .iter()
+            .enumerate()
+        {
+            if let RewriteTo::External { pinned, .. } = &mut plan.rewrites[i].to {
+                *pinned = ips.iter().map(|s| s.parse().unwrap()).collect();
+            }
+        }
+        let (c, _) = config("abc", &[router()], &plan, &Proxy::default());
+        let c = c.unwrap();
+        assert_eq!(
+            c["http"]["services"]["vfy-abc-ext0"],
+            json!({"loadBalancer": {
+                "servers": [{"url": "https://93.184.215.14:443"}, {"url": "https://[2606:4700::1]:443"}],
+                "passHostHeader": true,
+                "serversTransport": "vfy-abc-st0"}})
+        );
+        assert_eq!(
+            c["http"]["serversTransports"]["vfy-abc-st0"],
+            json!({"serverName": "api.example.com"})
+        );
+        let m = &c["http"]["middlewares"];
+        assert_eq!(
+            m["vfy-abc-rwh0"]["headers"]["customRequestHeaders"]["Host"],
+            "api.example.com"
+        );
+        assert_eq!(
+            m["vfy-abc-rwh1"]["headers"]["customRequestHeaders"]["Host"],
+            "x.example.com:8080"
+        );
+        assert_eq!(
+            c["http"]["services"]["vfy-abc-ext1"]["loadBalancer"],
+            json!({"servers": [{"url": "http://8.8.4.4:8080"}], "passHostHeader": true})
+        );
+        assert_eq!(
+            mw_of(&c, "vfy-abc-http-0-abc-rw0"),
+            vec!["gzip@docker", "vfy-abc-rw0", "vfy-abc-rwh0"]
+        );
     }
 
     #[test]

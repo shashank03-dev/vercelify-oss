@@ -715,6 +715,7 @@ async fn projects_check(State(s): State<AppState>, Json(req): Json<ProjectUpload
     let mut plan = crate::project::parse(&refs).map_err(AppError::bad_request)?;
     if !s.config.rewrite_private_targets {
         crate::project::drop_private_rewrites(&mut plan);
+        crate::project::pin_rewrites(&mut plan, crate::project::system_resolve).await;
     }
     Ok(Json(crate::projects::summary(&plan)))
 }

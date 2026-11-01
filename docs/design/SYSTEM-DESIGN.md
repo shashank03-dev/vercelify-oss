@@ -141,10 +141,21 @@ Online copy via SQLite's backup API to `platform.db.bak` before every migration,
 backs up a copy, never the live file: `vercelify backup run` takes a fresh one with
 `sqlite3 .backup` into its staging directory when `sqlite3` is installed, else it saves
 the 5-minute copy; `platform.db`, `-wal` and `-shm` are excluded. The master key and the
-mesh directory go with it. `vercelify backup restore --instance` stops the agent and the
-app containers, puts back the master key, the state copy (as `platform.db`, without a
-stale WAL) and the mesh directory (so workers and devices keep their certificates), then
-the volumes, and starts the agent, whose reconciler brings apps and databases back.
+mesh directory go with it. `vercelify backup restore --instance` builds a manifest first:
+Vercelify's Docker volumes (`vfy-*`, `vfyv2-*`) and the storage disk's volumes; other
+Docker volumes are left alone unless `--all-volumes`. It stops the agent, then every
+container labelled `vercelify.managed=platform` and any other one using a listed volume,
+and checks they are stopped; if any is not, it starts everything again and changes
+nothing. Then it puts back the master key, the state copy (as `platform.db`, without a
+stale WAL), the token registry and the agent token (devices authenticate as at the
+backup; machine settings such as `agent.toml` and tunnels stay), and the mesh directory
+(so workers and devices keep their certificates). Each volume is copied into an empty
+staging tree beside it and switched into place, so it holds exactly the snapshot; the
+previous tree stays as `<volume>.before-restore-<stamp>` until the user removes it. Then
+the containers and the agent start, whose reconciler brings apps and databases back.
+`vercelify backup setup` run again keeps the off-site credentials and retention of the
+existing `backup.env` unless they are given anew, and replaces the file only after the
+repositories open with the new settings.
 
 ## 5. Secrets
 
@@ -194,8 +205,11 @@ logs per app are kept.
 ### 6.3 Detector ("vfy pack")
 
 Order: explicit `build.pack` → `Dockerfile` at `build.dockerfile` (default `Dockerfile`) →
-compose file → language detection. Detection reads only files (never runs code from the
-repository on the host).
+compose file (compose apps) → language detection → a compose file (`compose.yaml`,
+`compose.yml`, `docker-compose.yaml`, `docker-compose.yml`, Compose's order) when nothing
+else was found, which makes a Git app a compose app from then on. Detection reads only
+files (never runs code from the repository on the host). The build context, Dockerfile
+and compose file must resolve inside the checkout once symbolic links are followed.
 
 | Detected by | Generated image |
 | --- | --- |
@@ -242,7 +256,8 @@ switch of that pointer and the route file is the commit point of a deploy.
    then `docker network connect vfy-proxy`; `docker start`.
 3. Health: `runtime.healthcheck` (`{http: "/healthz"}` or `{cmd: [...]}`) polled every 2 s from
    inside the proxy network (an HTTP GET through the agent to the container IP), else TCP
-   connect to the port. Must pass 2 times in a row within `runtime.health_timeout_secs`
+   connect to the port. An HTTP check passes on 2xx/3xx only (a 4xx means the path or the
+   app is wrong). Must pass 2 times in a row within `runtime.health_timeout_secs`
    (default 180).
 4. Commit: write the app's base route file (§9) pointing at the new container, atomically
    (`write tmp → fsync → rename`); set `current_deployment_id`, old deployment `superseded`.
@@ -256,8 +271,31 @@ or health failing 3 times) within 3 minutes after step 4 triggers a rollback dep
 the previous healthy one.
 
 Compose apps: `docker compose -p vfy-<app> -f <file> -f <generated override> up -d --wait`,
-where the override adds our labels, networks, limits and the env file. The routed service is
-`runtime.service`. Zero downtime is best effort (compose recreates in place).
+where the override adds our labels, networks, limits and the env file, and resets every
+service's published `ports` (the proxy is the way in). The env file and the override are
+written into a fresh private directory of ours outside the checkout (created exclusively,
+0600) and removed after `up`. Before `up`:
+
+- no symbolic link in the checkout may lead outside it (or nowhere): Compose follows them
+  as root for `.env`, env files, mounts, configs, secrets and build contexts;
+- the model Compose resolves from both files (`config --no-env-resolution`) must stay
+  inside the deployment boundary, for every role (there is no unrestricted mode): no
+  `privileged`, extra capabilities beyond Docker's defaults, devices, host or
+  `container:` namespaces, `cgroup_parent`, `security_opt` other than
+  `no-new-privileges`, Docker API socket, provider services, published ports, external
+  or driver-option volumes, external networks (but `vfy-proxy`), and no file (bind
+  source, env file, config, secret, build context or Dockerfile) outside the checkout;
+  bind mounts must be read-only (persistent data lives in named volumes). An inline
+  compose file gets a quick textual check when the app is saved.
+
+The checkout moves to `<work>/compose/<project>/<deployment>` and stays while the
+project's containers may read it (read-only mounts, configs); older ones go once a newer
+deployment is healthy, all of them when the app or preview is removed. The routed service
+is `runtime.service`, else the one non-database service that declares a port, else one
+called web/app/server/frontend, else the only one; a database (by image or port) is never
+guessed and several candidates mean the app must choose. Its port is the one it declares
+when it declares exactly one and `runtime.port` is unset. Zero downtime is best effort
+(compose recreates in place).
 
 ### 7.3 Rollback
 
@@ -459,6 +497,12 @@ main server, and the old one stepping down.
   - `vercelify-wake.yaml`: priority 1 catch-all to the wake listener (unchanged).
 - Router naming keeps today's `http-0-<app>` / `…-pr-<n>` pattern so `sleep.rs` reads the
   same Prometheus series.
+- Rewrites to another site (`vercel.json`): an origin that is, or whose name resolves to,
+  an address on this machine or a private network is dropped with a note (unless
+  `rewrite_private_targets`). The name is resolved on each reconcile and Traefik gets the
+  checked addresses (Host header and TLS server name kept), never the name: a name that
+  later resolves elsewhere (DNS rebinding) can't reach a private address. Traefik does not
+  follow upstream redirects.
 
 ## 10. Databases
 
@@ -707,6 +751,9 @@ depends on re-serialising JSON (`vercelify-mesh::cert`).
 - Peers visible to a node: servers see all servers and all devices; devices see servers only.
 - `allowed_ports`: for a server's view of a device, the ports the device may reach (enforced
   by the server's firewall, §13.8).
+- State writes go through a temporary file of their own and a rename; a `state.lock`
+  (`flock`, shared by the daemon and a pairing) is held from reading the identity to
+  replacing it, so a running daemon never overwrites a newer pairing.
 - The map is persisted by the node (in `state.json`, 0600) and used at start before the
   stream connects, so a reboot brings the mesh back while the coordinator is away.
 - `epoch` increases when a standby is promoted; nodes ignore maps with a lower epoch.
@@ -915,7 +962,7 @@ container block). A database's public port changing bumps the map version.
 | Control listener `:7443` | Plain HTTP carrying sealed enrollment (§13.2), the relay (authenticated by node key, §13.7) and a hello; only `enroll`, `hello`, `relay` (later `webhooks`, `hooks/deploy`) exist there; enrollment rate-limited (10/min per address) and claim-protected (single use, TTL); node tokens work only from the node's own mesh address |
 | Mesh traffic | WireGuard; keys generated on each node; certificates signed by the coordinator; map signed; revocation within one map push |
 | Secrets at rest | XChaCha20-Poly1305 with AAD per cell; master key 0600 root; backups encrypted by restic |
-| Containers | No Docker socket mounted into apps; containers can't reach the mesh except DNS and replies (existing isolation); Docker provider in Traefik off |
+| Containers | No Docker socket mounted into apps; compose apps checked against the deployment boundary (§7.2) whatever the token's role; containers can't reach the mesh except DNS and replies (existing isolation); Docker provider in Traefik off |
 | Builds | Run in BuildKit, never on the host shell; repository code never executes outside a container; git hardened (no inherited config, only http(s)/ssh with pinned host keys) |
 | Webhooks / deploy hooks | HMAC-SHA256 per git source (GitLab: its token), 60/min per source; deploy hooks a 256-bit secret, 6/min; payloads never trusted for the commit |
 | GitHub App | Private key and webhook secret sealed; the manifest flow gated by a one-time state; installation tokens per repository, an hour at most, signed JWTs 9 minutes |

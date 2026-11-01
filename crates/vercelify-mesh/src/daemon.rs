@@ -631,8 +631,11 @@ fn identity_changed(running: &State, now: Option<&State>) -> Option<&'static str
 /// the file now holds another identity: a new pairing written while this
 /// process runs is what it restarts on, not something to overwrite.
 fn save_own(running: &State, dir: &Path) -> std::io::Result<()> {
+    // Locked from the check to the write: a pairing saved in between would
+    // otherwise be replaced by this process's old identity.
+    let _lock = crate::state::StateLock::acquire(dir)?;
     match State::load(dir) {
-        Ok(now) if identity_changed(running, now.as_ref()).is_none() => running.save(dir),
+        Ok(now) if identity_changed(running, now.as_ref()).is_none() => running.save_locked(dir),
         // Replaced, gone, or being written: leave it.
         _ => Ok(()),
     }
@@ -977,6 +980,40 @@ mod tests {
         own.map = Some("map 2".into());
         save_own(&own, dir.path()).unwrap();
         assert_eq!(State::load(dir.path()).unwrap().unwrap().node_token, "new");
+    }
+
+    /// Regression (audit A09): the daemon's check-then-write can't interleave
+    /// with a pairing that holds the state lock.
+    #[test]
+    fn its_own_update_waits_for_a_pairing_in_progress() {
+        let dir = tempfile::tempdir().unwrap();
+        let running: State = serde_json::from_value(serde_json::json!({
+            "node_id": "n1", "name": "mac", "kind": "device", "ipv4": "10.77.0.2", "ipv6": "",
+            "ipv4_prefix_len": 16, "certificate": "c", "node_token": "old", "coordinator_key": "ck",
+            "coordinator": {"public_key": "wg", "ipv4": "10.77.0.1", "endpoints": []},
+            "api_url": "http://10.77.0.1:7420"
+        }))
+        .unwrap();
+        running.save(dir.path()).unwrap();
+        let before = std::fs::read(crate::state::state_path(dir.path())).unwrap();
+        // A pairing starts: it holds the lock while it writes the new identity.
+        let pairing = crate::state::StateLock::acquire(dir.path()).unwrap();
+        let (d, mut own) = (dir.path().to_path_buf(), running.clone());
+        own.map = Some("map from the old daemon".into());
+        let daemon = std::thread::spawn(move || save_own(&own, &d).unwrap());
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        assert_eq!(
+            std::fs::read(crate::state::state_path(dir.path())).unwrap(),
+            before,
+            "nothing written while the pairing holds the lock"
+        );
+        let mut paired = running.clone();
+        paired.node_token = "new".into();
+        paired.save_locked(dir.path()).unwrap();
+        drop(pairing);
+        daemon.join().unwrap();
+        let now = State::load(dir.path()).unwrap().unwrap();
+        assert_eq!((now.node_token.as_str(), now.map), ("new", None));
     }
 
     fn rec(id: &str, name: &str, kind: NodeKind, idx: u16) -> NodeRecord {

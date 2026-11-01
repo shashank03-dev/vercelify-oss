@@ -34,6 +34,11 @@ without it nobody, you included, can restore. It is stored on the server in
 `/etc/vercelify/backup.env` (mode 0600), which is also inside the backup, so
 the copy you keep is what lets you restore after losing the disk.
 
+Running `setup` again (to add or change a repository) keeps the bucket keys and the
+retention (`BACKUP_KEEP_DAILY`, `…_WEEKLY`, `…_MONTHLY`) already in `backup.env`, unless
+you give new ones; the file only changes once every repository opens with the new
+settings.
+
 Backups run with idle I/O priority and nice 15, so apps don't notice. Each run
 writes `/var/lib/vercelify/backup.json`; the doctor warns when the last backup
 is older than two days or failed, and the agent sends an alert.
@@ -53,9 +58,14 @@ A whole server, onto a fresh machine after a disk failure:
 2. Connect to the same repository with the password you kept:
    `sudo VERCELIFY_BACKUP_PASSWORD='<password>' vercelify backup setup --to <the same repository>`
    (an off-site one: the local disk is gone).
-3. `sudo vercelify backup restore latest --instance` — stops the agent and the apps,
-   puts back the master key, the engine's state and the network's keys, then the app
-   volumes, and starts everything again. The engine brings every app and database back
+3. `sudo vercelify backup restore latest --instance` — stops the agent and the apps
+   (and changes nothing if one of them won't stop), puts back the master key, the
+   engine's state, the paired devices' tokens and the network's keys, then each of
+   Vercelify's volumes exactly as it was in the backup, and starts everything again.
+   The data a volume had before stays beside it as `…before-restore-<date>`: remove it
+   once the apps check out. Other Docker volumes on the machine are left alone
+   (`--all-volumes` restores them too). Tokens revoked after the backup work again:
+   revoke them again with `sudo vercelify tokens`. The engine brings every app and database back
    as it was when the backup ran; database dumps are under
    `<restore dir>/var/lib/vercelify/backup-stage/databases` if you want to load one by
    hand.

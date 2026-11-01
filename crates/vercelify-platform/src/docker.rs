@@ -432,9 +432,24 @@ impl Docker {
         Ok(())
     }
 
+    /// Removes a volume; one that is already gone counts as removed. A
+    /// volume Docker keeps (in use) is an error: its data is still there.
     pub async fn volume_remove(&self, name: &str) -> Result<()> {
-        let _ = self.run(&proc::args(&["volume", "rm", name]), quick()).await?;
-        Ok(())
+        let o = self.run(&proc::args(&["volume", "rm", name]), quick()).await?;
+        if o.success() {
+            return Ok(());
+        }
+        let tail = o.tail(3);
+        if tail.to_ascii_lowercase().contains("no such volume") {
+            return Ok(());
+        }
+        if tail.contains("Cannot connect to the Docker daemon") || tail.contains("Is the docker daemon running") {
+            return Err(Error::Unavailable("Docker is not running".into()));
+        }
+        Err(Error::Conflict(format!(
+            "Docker kept the volume {name}: {}",
+            tail.trim()
+        )))
     }
 }
 
@@ -510,6 +525,37 @@ mod tests {
              2026-10-27T11:08:38.5Z > node server.js\n2026-10-27T11:08:38.6Z SyntaxError\n"
         );
         assert_eq!(by_time("", ""), "");
+    }
+
+    fn fake(dir: &std::path::Path, script: &str) -> Docker {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.join("docker");
+        std::fs::write(&bin, format!("#!/bin/sh\n{script}\n")).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Docker {
+            bin: bin.to_string_lossy().into(),
+        }
+    }
+
+    /// Regression (audit A12): a volume Docker refuses to remove is an error;
+    /// one that is already gone is not.
+    #[tokio::test]
+    async fn volume_remove_reports_refusal() {
+        let dir = tempfile::tempdir().unwrap();
+        let in_use = fake(
+            dir.path(),
+            "echo 'Error response from daemon: remove v: volume is in use - [abc]' >&2; exit 1",
+        );
+        let e = in_use.volume_remove("v").await.unwrap_err();
+        assert!(matches!(e, Error::Conflict(_)), "{e:?}");
+        assert!(e.message().contains("in use"));
+        let gone = fake(
+            dir.path(),
+            "echo 'Error response from daemon: get v: no such volume' >&2; exit 1",
+        );
+        gone.volume_remove("v").await.unwrap();
+        let ok = fake(dir.path(), "echo v");
+        ok.volume_remove("v").await.unwrap();
     }
 
     #[test]

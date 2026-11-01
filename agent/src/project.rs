@@ -118,8 +118,14 @@ pub enum RewriteTo {
     /// Serve this path when the app has nothing at the requested one (404),
     /// like Vercel, which applies rewrites after its file system.
     Fallback(String),
-    /// Proxy to another site.
-    External { origin: String, path: String },
+    /// Proxy to another site. `pinned`: the addresses its name resolved to
+    /// and passed [`private_origin`] (see [`pin_rewrites`]); the proxy
+    /// connects to those, never to whatever the name says later.
+    External {
+        origin: String,
+        path: String,
+        pinned: Vec<IpAddr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -755,6 +761,7 @@ fn rewrite(rule: &Value, label: &str, warnings: &mut Vec<String>) -> Result<Rewr
         RewriteTo::External {
             origin,
             path: path.to_string(),
+            pinned: vec![],
         }
     } else if dest.starts_with('/') {
         let templ = destination(dest, &pattern)?;
@@ -932,6 +939,11 @@ pub fn private_origin(origin: &str) -> bool {
                     || a.is_unspecified()
                     || a.is_broadcast()
                     || (o[0] == 100 && (64..128).contains(&o[1]))
+                    || o[0] == 0
+                    || a.is_multicast()
+                    || o[0] >= 240
+                    || (o[0] == 198 && (o[1] & 0xfe) == 18)
+                    || (o[0] == 192 && o[1] == 0 && o[2] == 0)
             }
             IpAddr::V6(a) => {
                 let s = a.segments();
@@ -939,8 +951,14 @@ pub fn private_origin(origin: &str) -> bool {
                     || a.is_unspecified()
                     || (s[0] & 0xfe00) == 0xfc00
                     || (s[0] & 0xffc0) == 0xfe80
+                    || a.is_multicast()
                     || a.to_ipv4_mapped()
                         .is_some_and(|v4| private_origin(&format!("http://{v4}")))
+                    // NAT64 (64:ff9b::/96) carries an IPv4 address too.
+                    || (s[0] == 0x64 && s[1] == 0xff9b && s[2..6] == [0, 0, 0, 0] && {
+                        let v4 = std::net::Ipv4Addr::new((s[6] >> 8) as u8, s[6] as u8, (s[7] >> 8) as u8, s[7] as u8);
+                        private_origin(&format!("http://{v4}"))
+                    })
             }
         };
     }
@@ -964,6 +982,80 @@ pub fn drop_private_rewrites(plan: &mut Plan) {
         _ => true,
     });
     plan.warnings.extend(notes);
+}
+
+/// The host and port of an origin (`https://a.b:8443` → `a.b`, 8443).
+pub fn origin_host(origin: &str) -> Option<(String, u16)> {
+    let (scheme, rest) = origin.split_once("://")?;
+    let rest = rest.split('/').next().unwrap_or("");
+    let (host, port) = if let Some(v6) = rest.strip_prefix('[') {
+        let (h, after) = v6.split_once(']')?;
+        (h.to_string(), after.strip_prefix(':'))
+    } else {
+        match rest.rsplit_once(':') {
+            Some((h, p)) => (h.to_string(), Some(p)),
+            None => (rest.to_string(), None),
+        }
+    };
+    let default = if scheme.eq_ignore_ascii_case("https") { 443 } else { 80 };
+    let port = match port {
+        Some(p) => p.parse().ok()?,
+        None => default,
+    };
+    (!host.is_empty()).then(|| (host.to_ascii_lowercase(), port))
+}
+
+/// Resolve the names of external rewrites now, and keep a rewrite only when
+/// every address is public; the proxy is then given those addresses, so a
+/// name that later resolves elsewhere (DNS rebinding, `127.0.0.1.sslip.io`)
+/// can't reach this machine or its network. Run after
+/// [`drop_private_rewrites`]; `resolve` is the system resolver outside tests.
+pub async fn pin_rewrites<F, Fut>(plan: &mut Plan, resolve: F)
+where
+    F: Fn(String, u16) -> Fut,
+    Fut: std::future::Future<Output = std::io::Result<Vec<IpAddr>>>,
+{
+    let mut notes = Vec::new();
+    let mut keep = Vec::with_capacity(plan.rewrites.len());
+    for mut r in std::mem::take(&mut plan.rewrites) {
+        if let RewriteTo::External { origin, pinned, .. } = &mut r.to {
+            let Some((host, port)) = origin_host(origin) else {
+                notes.push(format!("{}: {origin} isn't a valid origin — skipped", r.label));
+                continue;
+            };
+            if host.parse::<IpAddr>().is_err() {
+                let addrs = match resolve(host.clone(), port).await {
+                    Ok(a) if !a.is_empty() => a,
+                    _ => {
+                        notes.push(format!("{}: {host} doesn't resolve right now — skipped", r.label));
+                        continue;
+                    }
+                };
+                if let Some(bad) = addrs.iter().find(|a| private_origin(&format!("http://[{a}]"))) {
+                    notes.push(format!(
+                        "{}: {host} resolves to {bad}, on this machine or a private network; proxying to it would make it public — skipped",
+                        r.label
+                    ));
+                    continue;
+                }
+                let mut addrs = addrs;
+                addrs.sort();
+                addrs.dedup();
+                *pinned = addrs;
+            }
+        }
+        keep.push(r);
+    }
+    plan.rewrites = keep;
+    plan.warnings.extend(notes);
+}
+
+/// The system resolver, for [`pin_rewrites`].
+pub async fn system_resolve(host: String, port: u16) -> std::io::Result<Vec<IpAddr>> {
+    Ok(tokio::net::lookup_host((host.as_str(), port))
+        .await?
+        .map(|a| a.ip())
+        .collect())
 }
 
 /// Merge the files (later keys win) into one configuration object.
@@ -1273,7 +1365,8 @@ mod tests {
             plan.rewrites[0].to,
             RewriteTo::External {
                 origin: "https://api.example.com".into(),
-                path: "/v1/${p1}".into()
+                path: "/v1/${p1}".into(),
+                pinned: vec![],
             }
         );
         assert_eq!(plan.rewrites[1].to, RewriteTo::Path("/posts/${slug}".into()));
@@ -1423,6 +1516,87 @@ mod tests {
             .warnings
             .iter()
             .any(|w| w.contains("rewrites[0]") && w.contains("private network")));
+    }
+
+    /// Regression (audit A03): names are judged by what they resolve to,
+    /// and the proxy gets the checked addresses.
+    #[tokio::test]
+    async fn rewrite_names_are_resolved_and_pinned() {
+        let mut plan = parse(&[(
+            "vercel.json",
+            r#"{"rewrites": [
+                {"source": "/a/(.*)", "destination": "http://127.0.0.1.sslip.io:11434/$1"},
+                {"source": "/b/(.*)", "destination": "https://api.example.com/$1"},
+                {"source": "/c/(.*)", "destination": "http://lan.example.net:8080/$1"},
+                {"source": "/d/(.*)", "destination": "https://gone.example.org/$1"},
+                {"source": "/e/(.*)", "destination": "https://mixed.example.com/$1"},
+                {"source": "/f/(.*)", "destination": "http://8.8.8.8/$1"},
+                {"source": "/g/(.*)", "destination": "https://v6.example.com:8443/$1"}
+            ]}"#,
+        )])
+        .unwrap();
+        drop_private_rewrites(&mut plan);
+        let asked = std::sync::Mutex::new(vec![]);
+        pin_rewrites(&mut plan, |host: String, port: u16| {
+            asked.lock().unwrap().push(format!("{host}:{port}"));
+            let r: Vec<IpAddr> = match host.as_str() {
+                "127.0.0.1.sslip.io" => vec!["127.0.0.1".parse().unwrap()],
+                "api.example.com" => vec!["93.184.215.14".parse().unwrap(), "93.184.215.14".parse().unwrap()],
+                "lan.example.net" => vec!["192.168.1.20".parse().unwrap()],
+                "mixed.example.com" => vec!["1.1.1.1".parse().unwrap(), "::ffff:10.0.0.1".parse().unwrap()],
+                "v6.example.com" => vec!["2606:4700::6810:84e5".parse().unwrap()],
+                _ => vec![],
+            };
+            async move { Ok(r) }
+        })
+        .await;
+        let kept: Vec<(&str, &[IpAddr])> = plan
+            .rewrites
+            .iter()
+            .map(|r| match &r.to {
+                RewriteTo::External { origin, pinned, .. } => (origin.as_str(), pinned.as_slice()),
+                _ => unreachable!(),
+            })
+            .collect();
+        let ip = |s: &str| s.parse::<IpAddr>().unwrap();
+        assert_eq!(
+            kept,
+            vec![
+                ("https://api.example.com", &[ip("93.184.215.14")][..]),
+                ("http://8.8.8.8", &[][..]),
+                ("https://v6.example.com:8443", &[ip("2606:4700::6810:84e5")][..]),
+            ]
+        );
+        assert!(
+            !asked.lock().unwrap().contains(&"8.8.8.8:80".to_string()),
+            "IP literals aren't looked up"
+        );
+        assert!(asked.lock().unwrap().contains(&"v6.example.com:8443".to_string()));
+        for (rule, why) in [
+            ("rewrites[0]", "resolves to 127.0.0.1"),
+            ("rewrites[2]", "resolves to 192.168.1.20"),
+            ("rewrites[3]", "doesn't resolve"),
+            ("rewrites[4]", "resolves to ::ffff:10.0.0.1"),
+        ] {
+            assert!(
+                plan.warnings.iter().any(|w| w.contains(rule) && w.contains(why)),
+                "{rule}: {:?}",
+                plan.warnings
+            );
+        }
+        for o in [
+            "http://198.18.0.1",
+            "http://224.0.0.1",
+            "http://240.0.0.1",
+            "http://[64:ff9b::a00:1]",
+            "http://[ff02::1]",
+        ] {
+            assert!(private_origin(o), "{o}");
+        }
+        assert!(!private_origin("http://[64:ff9b::808:808]"));
+        assert_eq!(origin_host("https://a.b"), Some(("a.b".into(), 443)));
+        assert_eq!(origin_host("http://[::1]:7420"), Some(("::1".into(), 7420)));
+        assert_eq!(origin_host("http://A.B:81/x"), Some(("a.b".into(), 81)));
     }
 
     #[test]

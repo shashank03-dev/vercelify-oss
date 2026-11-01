@@ -22,7 +22,7 @@ use crate::{
     compose, deployments, env, git_sources, nodes, placement, previews, registry, volumes, Error, Result, Store,
 };
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::Notify;
@@ -613,6 +613,11 @@ impl Engine {
                 )
                 .await?;
             if let PlanKind::Compose(file) = &built.plan.kind {
+                if app.kind == AppKind::Git {
+                    log.info(&format!("{file} found: this app is a compose app from now on"));
+                    let (id, f) = (app.id.clone(), file.clone());
+                    self.store.tx(move |c| apps::adopt_compose(c, &id, &f).map(|_| ()))?;
+                }
                 compose_job = Some((file.clone(), built.checkout.clone().unwrap_or_default()));
             }
             image = built.image.clone();
@@ -632,7 +637,7 @@ impl Engine {
         }
         self.emit(EngineEvent::Changed);
         let d = self.store.with(|c| deployments::get(c, &d.id))?;
-        let port = app.runtime.port.or(port).unwrap_or(3000);
+        let mut port = app.runtime.port.or(port).unwrap_or(3000);
         if d.image != image {
             let img = image.clone();
             self.store.with(|c| deployments::set_image(c, &d.id, &img))?;
@@ -686,10 +691,18 @@ impl Engine {
             Some((file, checkout)) => {
                 let _cleanup = CheckoutGuard(checkout.parent().map(PathBuf::from).unwrap_or_else(|| checkout.clone()));
                 let project = compose::project_name(&app.name, d.pr_number);
+                // The project's containers read their (read-only) mounts
+                // from the checkout: it moves to a place of the project's
+                // own and stays until a newer deployment is healthy.
+                let kept = self.compose_dir(&project);
+                std::fs::create_dir_all(&kept)?;
+                let src = kept.join(&d.id);
+                let _ = std::fs::remove_dir_all(&src);
+                std::fs::rename(checkout, &src)?;
                 let res = compose::up(
                     compose::Up {
                         docker,
-                        dir: checkout,
+                        dir: &src,
                         file,
                         project: &project,
                         service: app.runtime.service.as_deref(),
@@ -702,14 +715,21 @@ impl Engine {
                             pr: d.pr_number,
                         },
                         timeout: Duration::from_secs(app.runtime.health_timeout_secs as u64),
+                        scratch: &self.builder.work_dir,
                     },
                     cancel.clone(),
                     &mut |s, l| log.line(s, l),
                 )
                 .await?;
+                if app.runtime.port.is_none() {
+                    if let Some(p) = res.port {
+                        port = p;
+                    }
+                }
+                let res = res.container;
                 // `compose up --wait` only knows the services' own health
                 // checks: probe the routed one like any other deployment.
-                log.info(&format!("waiting for {res} to be healthy"));
+                log.info(&format!("waiting for {res} to be healthy on port {port}"));
                 crate::health::wait_healthy(
                     crate::health::Wait {
                         docker,
@@ -724,6 +744,7 @@ impl Engine {
                 )
                 .await
                 .map_err(|e| Error::Invalid(format!("{e} (the compose project stays up; fix it and deploy again)")))?;
+                prune_compose_sources(&kept, &d.id);
                 vec![Placed {
                     node: main.clone(),
                     instance: Instance {
@@ -1083,6 +1104,15 @@ pub(crate) struct StartArgs<'a> {
     port: u16,
 }
 
+/// Removes every kept compose checkout of a project but `keep`.
+fn prune_compose_sources(kept: &Path, keep: &str) {
+    for e in std::fs::read_dir(kept).into_iter().flatten().flatten() {
+        if e.file_name() != keep {
+            let _ = std::fs::remove_dir_all(e.path());
+        }
+    }
+}
+
 /// Removes a compose checkout when the deployment step ends.
 struct CheckoutGuard(PathBuf);
 
@@ -1091,6 +1121,13 @@ impl Drop for CheckoutGuard {
         if !self.0.as_os_str().is_empty() {
             let _ = std::fs::remove_dir_all(&self.0);
         }
+    }
+}
+
+impl Engine {
+    /// Where a compose project's checkouts live while its containers do.
+    pub(crate) fn compose_dir(&self, project: &str) -> PathBuf {
+        self.builder.work_dir.join("compose").join(project)
     }
 }
 
@@ -1200,7 +1237,9 @@ impl Engine {
             }
         }
         if app.kind == AppKind::Compose {
-            compose::down(docker, &compose::project_name(&app.name, Some(pr))).await?;
+            let project = compose::project_name(&app.name, Some(pr));
+            compose::down(docker, &project).await?;
+            let _ = std::fs::remove_dir_all(self.compose_dir(&project));
         }
         crate::proxy::remove_route(&self.deployer.proxy, &key)?;
         for name in &vol_names {
@@ -1268,7 +1307,10 @@ impl Engine {
             }
         }
         if app.kind == AppKind::Compose {
-            let _ = compose::down(docker, &compose::project_name(&app.name, None)).await;
+            let project = compose::project_name(&app.name, None);
+            if compose::down(docker, &project).await.is_ok() {
+                let _ = std::fs::remove_dir_all(self.compose_dir(&project));
+            }
         }
         // Its project's network, unless other apps or databases still use it
         // (Docker refuses then).

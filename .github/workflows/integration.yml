@@ -11,38 +11,31 @@ name: Integration
 #     app placed on it through the mesh registry, replicas on both servers,
 #     logs, restart, a terminal, automatic rollback and revocation; then the
 #     warm standby promoted after the main server dies
+#   - the engine on real Docker: builds, deployments, rollbacks, compose
+#     apps (the deployment boundary, kept checkouts), databases and storage
+#     (the VERCELIFY_DOCKER_TESTS tests that ordinary CI skips)
 #   - the real installer in a systemd container (Docker, the agent with the
 #     engine and its proxy, the mesh, guard, firewall, an app deployed),
 #     twice, to prove it is idempotent
 on:
   pull_request:
+    # Whole crates rather than a list of modules: a change confined to one
+    # module (compose, builds, storage, the proxy) must not skip these.
     paths:
+      - Cargo.toml
+      - Cargo.lock
+      - crates/vercelify-core/**
+      - crates/vercelify-platform/**
+      - crates/vercelify-mesh/**
+      - agent/**
       - host/setup-host.sh
+      - host/vercelify
+      - host/firewall.sh
       - host/lib/**
       - host/systemd/**
       - host/tests/contract/**
       - host/tests/integration/**
-      - crates/vercelify-platform/src/databases.rs
-      - agent/src/sleep.rs
-      - agent/src/watch.rs
-      - agent/src/doctor.rs
-      - agent/src/project.rs
-      - agent/src/projects.rs
-      - agent/src/routing.rs
-      - agent/src/cron.rs
-      - agent/src/mesh.rs
-      - crates/vercelify-mesh/**
-      - crates/vercelify-platform/src/mesh_registry.rs
-      - crates/vercelify-platform/src/engine.rs
-      - crates/vercelify-platform/src/fleet.rs
-      - crates/vercelify-platform/src/reconcile.rs
-      - crates/vercelify-platform/src/registry.rs
-      - crates/vercelify-platform/src/runtime.rs
-      - agent/src/runtime_api.rs
-      - agent/src/worker.rs
-      - agent/src/standby.rs
-      - crates/vercelify-platform/src/standby.rs
-      - host/firewall.sh
+      - install.sh
       - .github/workflows/integration.yml
   schedule:
     - cron: "17 5 * * 1"
@@ -71,6 +64,18 @@ jobs:
       - run: cargo build -p vercelify-agent
       - name: Contract
         run: sudo -E env "PATH=$PATH" TRAEFIK_IMAGE="${{ matrix.traefik }}" AGENT_BIN="$PWD/target/debug/vercelify-agent" host/tests/contract/routing.sh
+
+  platform-docker:
+    name: Engine on real Docker (compose, databases, storage)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: docker compose version
+      - name: Ignored Docker tests
+        run: sudo -E env "PATH=$PATH" VERCELIFY_DOCKER_TESTS=1 cargo test -p vercelify-platform -- --include-ignored --test-threads 1
 
   mesh-contract:
     name: Mesh in network namespaces

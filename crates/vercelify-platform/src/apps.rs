@@ -172,6 +172,7 @@ fn check_source(kind: AppKind, s: &AppSource) -> Result<AppSource> {
             if !content.lines().any(|l| l.trim_end() == "services:") {
                 return Err(Error::Invalid("the compose file has no `services:`".into()));
             }
+            crate::compose::precheck(&content)?;
             s = AppSource {
                 compose_content: Some(content),
                 ..AppSource::default()
@@ -436,6 +437,27 @@ pub fn patch(c: &Connection, id: &str, p: &AppPatch) -> Result<App> {
     get(c, id)
 }
 
+/// A repository app whose build found only a compose file becomes a compose
+/// app, so placement, previews and cleanup treat it as one from now on.
+pub fn adopt_compose(c: &Connection, id: &str, file: &str) -> Result<App> {
+    let app = get(c, id)?;
+    if app.kind != AppKind::Git {
+        return Ok(app);
+    }
+    let source = check_source(
+        AppKind::Compose,
+        &AppSource {
+            compose_file: Some(file.to_string()),
+            ..app.source.clone()
+        },
+    )?;
+    c.execute(
+        "UPDATE apps SET kind = ?2, source = ?3, updated_at = ?4 WHERE id = ?1",
+        params![id, AppKind::Compose.as_str(), json(&source), now()],
+    )?;
+    get(c, id)
+}
+
 /// Removes the app and everything that belongs to it from the database.
 /// Its containers, routes and images are removed by the reconciler.
 pub fn delete(c: &Connection, id: &str) -> Result<App> {
@@ -650,6 +672,25 @@ pub(crate) mod tests {
             node_id: None,
             domains: vec![],
         }
+    }
+
+    /// Regression (audit A14): a repository app that turned out to be a
+    /// compose file is a compose app afterwards (main server, compose cleanup).
+    #[test]
+    fn repository_app_adopts_its_compose_file() {
+        let s = Store::open_in_memory().unwrap();
+        let a = s.tx(|c| create(c, &git_app("stack"))).unwrap();
+        let b = s.tx(|c| adopt_compose(c, &a.id, "compose.yaml")).unwrap();
+        assert_eq!(b.kind, AppKind::Compose);
+        assert_eq!(b.source.compose_file.as_deref(), Some("compose.yaml"));
+        assert_eq!(b.source.repository, a.source.repository);
+        assert_eq!(b.source.branch.as_deref(), Some("main"));
+        let again = s.tx(|c| adopt_compose(c, &a.id, "other.yml")).unwrap();
+        assert_eq!(again.source.compose_file.as_deref(), Some("compose.yaml"), "only once");
+        assert!(
+            s.tx(|c| adopt_compose(c, &a.id, "../x.yml")).is_ok(),
+            "no-op for compose apps"
+        );
     }
 
     #[test]

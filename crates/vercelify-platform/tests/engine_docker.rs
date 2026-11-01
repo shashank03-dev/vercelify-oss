@@ -543,9 +543,12 @@ async fn deploy_redeploy_rollback_recover() {
     let repo = dir.path().join("git/shop.git");
     let work = dir.path().join("shop-src");
     std::fs::create_dir_all(&work).unwrap();
+    // A read-only config mount from the repository (audit A04): it must
+    // outlive the deployment step's checkout cleanup and a restart.
+    std::fs::write(work.join("suffix.txt"), "-mounted").unwrap();
     std::fs::write(
         work.join("docker-compose.yml"),
-        "services:\n  web:\n    image: node:22-slim\n    command: [\"node\", \"-e\", \"require('http').createServer((q,s)=>s.end('compose-'+process.env.GREETING)).listen(8080)\"]\n  worker:\n    image: alpine:3.20\n    command: [\"sleep\", \"600\"]\n",
+        "services:\n  web:\n    image: node:22-slim\n    volumes: [\"./suffix.txt:/suffix.txt:ro\"]\n    command: [\"node\", \"-e\", \"require('http').createServer((q,s)=>s.end('compose-'+process.env.GREETING+require('fs').readFileSync('/suffix.txt'))).listen(8080)\"]\n  worker:\n    image: alpine:3.20\n    command: [\"sleep\", \"600\"]\n",
     )
     .unwrap();
     let sh = |cmd: &str, cwd: &std::path::Path| {
@@ -645,7 +648,31 @@ async fn deploy_redeploy_rollback_recover() {
     let cd = engine.enqueue("shop", Enqueue::default()).unwrap();
     let cd = wait_for(&engine, &cd.id, DeploymentStatus::Healthy).await;
     assert_eq!(cd.commit_message, "init");
-    body_of("shop.test.localhost", "compose-ok").await;
+    body_of("shop.test.localhost", "compose-ok-mounted").await;
+    let kept = dir.path().join("work/compose/vfy-shop");
+    assert!(
+        kept.join(&cd.id).join("suffix.txt").is_file(),
+        "the checkout is kept for the mount"
+    );
+    assert!(
+        !dir.path().join("work").join(&cd.id).exists(),
+        "the build directory is gone"
+    );
+    docker
+        .run(
+            &vercelify_platform::proc::args(&["restart", "vfy-shop-web-1"]),
+            Duration::from_secs(60),
+        )
+        .await
+        .unwrap();
+    body_of("shop.test.localhost", "compose-ok-mounted").await;
+    let cd2 = engine.enqueue("shop", Enqueue::default()).unwrap();
+    let cd2 = wait_for(&engine, &cd2.id, DeploymentStatus::Healthy).await;
+    body_of("shop.test.localhost", "compose-ok-mounted").await;
+    assert!(
+        kept.join(&cd2.id).is_dir() && !kept.join(&cd.id).exists(),
+        "older checkouts pruned"
+    );
     let report = rec.once().await.unwrap();
     assert!(
         report.removed.is_empty(),
@@ -661,6 +688,7 @@ async fn deploy_redeploy_rollback_recover() {
         .unwrap()
         .iter()
         .any(|c| c.name.starts_with("vfy-shop-")));
+    assert!(!kept.exists(), "the kept checkout goes with the app");
 
     // 9. A compose app without a repository (a catalogue service), its
     // variables and the app's own URL interpolated into the file.

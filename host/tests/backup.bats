@@ -23,14 +23,22 @@ STUB
 echo "docker $*" >>"$CALLS"
 case "$1" in
   inspect) exit 0 ;;
-  ps) if [[ "$*" == *'{{.Names}}' ]]; then printf 'vercelify-proxy\npg-main\nweb\n'
+  ps) if [[ "$*" == *'label=vercelify.managed=platform'* ]]; then
+        [[ -e "$CALLS.stopped" ]] || printf 'pg-main\nweb\n'
+      elif [[ "$*" == *'volume='* ]]; then :
+      elif [[ "$*" == *'{{.Names}}' ]]; then
+        echo vercelify-proxy; [[ -e "$CALLS.stopped" ]] || printf 'pg-main\nweb\nunrelated-db\n'
       else printf 'a1 pg-main postgres:16\nb2 web node:22\nc3 cache redis:7\nd4 maria mariadb:11\n'; fi ;;
+  stop) [[ -e "$CALLS.stop-fails" ]] && exit 1; touch "$CALLS.stopped" ;;
+  start) rm -f "$CALLS.stopped" ;;
   exec) if [[ "$*" == *psql* ]]; then echo 1; else echo "-- dump of $2"; fi ;;
 esac
 STUB
   printf '#!/usr/bin/env bash\necho "systemctl $*" >>"$CALLS"\n' >"$T/bin/systemctl"
-  printf '#!/usr/bin/env bash\necho "rsync $*" >>"$CALLS"\n' >"$T/bin/rsync"
+  # The real rsync (restores must leave exact trees), with each call logged.
+  printf '#!/usr/bin/env bash\necho "rsync $*" >>"$CALLS"\nexec %q "$@"\n' "$(command -v rsync)" >"$T/bin/rsync"
   printf '#!/usr/bin/env bash\necho "sqlite3 $*" >>"$CALLS"\n' >"$T/bin/sqlite3"
+  printf '#!/usr/bin/env bash\necho "install $*" >>"$CALLS"\nexec %q "$@"\n' "$(command -v install)" >"$T/bin/install"
   echo db >"$T/state/platform.db"
   chmod +x "$T/bin/"*
   export CALLS="$T/calls" PATH="$T/bin:$PATH" NO_COLOR=1 VERCELIFY_TEST=1
@@ -107,7 +115,7 @@ teardown() { rm -rf "$T"; }
   "$CLI" backup setup --to "$T/repo" >/dev/null 2>&1
   : >"$CALLS"
   printf '#!/usr/bin/env bash\necho "install $*" >>"$CALLS"\n' >"$T/bin/install"; chmod +x "$T/bin/install"
-  mkdir -p "$T/out$T/volumes/pg-data" "$T/out$T/storage/volumes" "$T/out$T/state/backup-stage"
+  mkdir -p "$T/out$T/volumes/vfy-db-pg-data/_data" "$T/out$T/storage/volumes" "$T/out$T/state/backup-stage"
   echo fresh >"$T/out$T/state/backup-stage/platform.db"
   echo bak >"$T/out$T/state/platform.db.bak"
   echo key >"$T/out$T/state/master.key"
@@ -122,6 +130,103 @@ teardown() { rm -rf "$T"; }
   # the engine stops first, the apps' containers before their volumes are
   # rewritten; the fresh copy (not the 5-minute one) becomes platform.db
   [[ "$calls" == *"systemctl stop vercelify-agent"*"docker stop pg-main web"*"install -m 0600 $T/out$T/state/master.key $T/state/master.key"*"install -m 0600 $T/out$T/state/backup-stage/platform.db $T/state/platform.db"*"rsync"*"$T/volumes/"*"docker start pg-main web"*"systemctl start vercelify-agent"* ]]
+}
+
+# The snapshot of an instance under $T/out: an engine state and two volumes,
+# one of Vercelify's and one of something else on the same Docker host.
+instance_snapshot() {
+  "$CLI" backup setup --to "$T/repo" >/dev/null 2>&1
+  : >"$CALLS"
+  mkdir -p "$T/out$T/state/backup-stage" "$T/out$T/volumes/vfy-db-pg-data/_data" "$T/out$T/volumes/other-db/_data"
+  echo fresh >"$T/out$T/state/backup-stage/platform.db"
+  echo key >"$T/out$T/state/master.key"
+  echo snapshot >"$T/out$T/volumes/vfy-db-pg-data/_data/table"
+  echo theirs-then >"$T/out$T/volumes/other-db/_data/table"
+  mkdir -p "$T/volumes/vfy-db-pg-data/_data" "$T/volumes/other-db/_data"
+  echo live >"$T/volumes/vfy-db-pg-data/_data/table"
+  echo written-after-the-backup >"$T/volumes/vfy-db-pg-data/_data/000002.wal"
+  echo theirs-now >"$T/volumes/other-db/_data/table"
+  echo current >"$T/state/platform.db"
+}
+
+@test "--instance (audit A05): a writer that won't stop means nothing changes, and everything starts again" {
+  instance_snapshot
+  touch "$CALLS.stop-fails"
+  ASSUME_YES=1 run "$CLI" backup restore latest --instance --target "$T/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"still running: pg-main web"*"nothing was changed"* ]]
+  [ "$(cat "$T/state/platform.db")" = current ]
+  [ "$(cat "$T/volumes/vfy-db-pg-data/_data/table")" = live ]
+  run ! grep -q '^install' "$CALLS"
+  run ! grep -q '^rsync' "$CALLS"
+  grep -q 'docker start pg-main web' "$CALLS"
+  grep -q 'systemctl start vercelify-agent' "$CALLS"
+  # only Vercelify's containers are stopped, never the rest of the host
+  run ! grep -q 'docker stop.*unrelated-db' "$CALLS"
+}
+
+@test "--instance (audit A05, A06): each of Vercelify's volumes comes back exactly; others are left alone" {
+  instance_snapshot
+  ASSUME_YES=1 run "$CLI" backup restore latest --instance --target "$T/out"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"left as they are: other-db"* ]]
+  [ "$(ls "$T/volumes/vfy-db-pg-data/_data")" = table ]   # no file from after the snapshot
+  [ "$(cat "$T/volumes/vfy-db-pg-data/_data/table")" = snapshot ]
+  [ "$(cat "$T/volumes/other-db/_data/table")" = theirs-now ]
+  grep -q 'docker volume create vfy-db-pg-data' "$CALLS"
+  run ! grep -q 'docker stop.*unrelated-db' "$CALLS"
+  # the data it replaced is kept for checking
+  kept=("$T"/volumes/vfy-db-pg-data/_data.before-restore-*)
+  [ -f "${kept[0]}/000002.wal" ]
+  [ ! -e "$T/volumes/vfy-db-pg-data/_data.vfy-restore" ]
+  # with an explicit scope, the other volume comes back too
+  instance_snapshot
+  ASSUME_YES=1 run "$CLI" backup restore latest --instance --all-volumes --target "$T/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/volumes/other-db/_data/table")" = theirs-then ]
+  grep -q 'docker stop pg-main unrelated-db web' "$CALLS"
+}
+
+@test "--instance (audit A08): paired devices' tokens come back; this machine's settings stay" {
+  instance_snapshot
+  mkdir -p "$T/out$T/etc"
+  echo '{"tokens":["old-device"]}' >"$T/out$T/state/tokens.json"
+  echo old-agent-token >"$T/out$T/etc/agent.token"
+  echo 'port = 1' >"$T/out$T/etc/agent.toml"
+  echo '{"tokens":["fresh-install"]}' >"$T/state/tokens.json"
+  echo new-agent-token >"$T/etc/agent.token"
+  echo 'port = 2' >"$T/etc/agent.toml"
+  ASSUME_YES=1 run "$CLI" backup restore latest --instance --target "$T/out"
+  [ "$status" -eq 0 ]
+  [ "$(cat "$T/state/tokens.json")" = '{"tokens":["old-device"]}' ]
+  [ "$(stat -c %a "$T/state/tokens.json" 2>/dev/null || stat -f %Lp "$T/state/tokens.json")" = 600 ]
+  [ "$(cat "$T/etc/agent.token")" = old-agent-token ]
+  [ "$(cat "$T/etc/agent.toml")" = 'port = 2' ]
+  [[ "$output" == *"revoked after it work again"* ]]
+  # tokens are back before the agent starts
+  calls=$(grep -E '^(install|systemctl start vercelify-agent)' "$CALLS")
+  [[ "$calls" == *"tokens.json"*"systemctl start vercelify-agent"* ]]
+}
+
+@test "setup again (audit A07): off-site credentials and retention are kept unless given anew" {
+  "$CLI" backup setup --to "$T/repo" --s3-key synthetic-id --s3-secret 'synthetic secret $x' >/dev/null 2>&1
+  sed -i.bak 's/^BACKUP_KEEP_DAILY=.*/BACKUP_KEEP_DAILY=30/' "$T/etc/backup.env"
+  echo "AWS_DEFAULT_REGION='eu-west-1'" >>"$T/etc/backup.env"
+  "$CLI" backup setup >/dev/null 2>&1
+  read_env() { bash -c '. "$1"; printf "%s|%s|%s|%s" "$AWS_ACCESS_KEY_ID" "$AWS_SECRET_ACCESS_KEY" "$BACKUP_KEEP_DAILY" "$AWS_DEFAULT_REGION"' _ "$T/etc/backup.env"; }
+  [ "$(read_env)" = 'synthetic-id|synthetic secret $x|30|eu-west-1' ]
+  # a new destination keeps them too; a new key replaces only the key
+  "$CLI" backup setup --to "$T/repo-2" --s3-key new-id >/dev/null 2>&1
+  [ "$(read_env)" = 'new-id|synthetic secret $x|30|eu-west-1' ]
+  grep -q "BACKUP_REPOS=\"$T/repo-2\"" "$T/etc/backup.env"
+  [ "$(stat -c %a "$T/etc/backup.env" 2>/dev/null || stat -f %Lp "$T/etc/backup.env")" = 600 ]
+  # a setup that fails leaves the working file as it was
+  cp "$T/etc/backup.env" "$T/before"
+  mkdir -p "$T/locked" && touch "$T/locked/config" "$T/locked/other-password"
+  run "$CLI" backup setup --to "$T/locked"
+  [ "$status" -ne 0 ]
+  cmp "$T/before" "$T/etc/backup.env"
+  [ ! -e "$T/etc/backup.env.new" ]
 }
 
 @test "not set up: clear message" {
