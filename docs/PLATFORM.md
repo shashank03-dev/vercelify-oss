@@ -141,7 +141,8 @@ Apps can **sleep** when idle to free memory (`sudo vercelify sleep on APP 30`, o
   (`NEXT_PUBLIC_*`) as **build** variables.
 - Values are secret by default: stored sealed, shown only when you reveal them.
 - **Preview** overrides apply to pull request previews only (for example a separate
-  database URL).
+  database URL), and in a preview any of them beats a normal value at every level; among
+  preview overrides the app's win over the environment's, then the project's.
 - A database's URL is referenced as `${{db.<name>.url}}`, filled in at deploy time, so
   rotating its password needs only a redeploy.
 - From the terminal: `vfy env pull APP`, `vfy env set APP KEY=VALUE`, `vfy env push APP`.

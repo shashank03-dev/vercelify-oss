@@ -159,8 +159,9 @@ pub struct Resolved {
     pub build: bool,
 }
 
-/// The merged variables for an app: project < environment < app; in a
-/// preview, preview-only values override at each level.
+/// The merged variables for an app: project < environment < app. In a
+/// preview, preview-only values (again project < environment < app) are
+/// applied after all normal ones, so any preview-only value wins.
 pub fn resolve(c: &Connection, key: &MasterKey, app_id: &str, preview: bool) -> Result<BTreeMap<String, Resolved>> {
     let (env_id, project_id): (String, String) = c
         .query_row(
@@ -174,15 +175,13 @@ pub fn resolve(c: &Connection, key: &MasterKey, app_id: &str, preview: bool) -> 
     let mut out = BTreeMap::new();
     let mut st = c.prepare(
         "SELECT id, key, value, build FROM env_vars
-         WHERE scope = ?1 AND scope_id = ?2 AND (preview_only = 0 OR ?3)
-         ORDER BY preview_only",
+         WHERE scope = ?1 AND scope_id = ?2 AND preview_only = ?3",
     )?;
-    for (scope, id) in [
-        ("project", &project_id),
-        ("environment", &env_id),
-        ("app", &app_id.to_string()),
-    ] {
-        let mut rows = st.query(params![scope, id, preview])?;
+    let app_id = app_id.to_string();
+    let levels = [("project", &project_id), ("environment", &env_id), ("app", &app_id)];
+    let groups: &[bool] = if preview { &[false, true] } else { &[false] };
+    for (preview_only, (scope, id)) in groups.iter().flat_map(|g| levels.iter().map(move |l| (g, l))) {
+        let mut rows = st.query(params![scope, id, preview_only])?;
         while let Some(r) = rows.next()? {
             let vid: String = r.get(0)?;
             let sealed: Vec<u8> = r.get(2)?;
@@ -494,6 +493,54 @@ mod tests {
         let preview = s.with(|c| resolve(c, &k, &app, true)).unwrap();
         assert_eq!(get(&preview, "A"), "app-preview");
         assert_eq!(get(&preview, "B"), "env");
+    }
+
+    #[test]
+    fn preview_only_wins_across_levels() {
+        let (s, app, env, project) = setup();
+        let k = key();
+        let set = |scope, id: &str, vars: Vec<EnvVarInput>| {
+            s.tx(|c| put(c, &k, scope, id, &EnvVarsPut { vars, replace: false }))
+                .unwrap();
+        };
+        let preview_only = |k: &str, v: &str| EnvVarInput {
+            preview_only: Some(true),
+            ..input(k, v)
+        };
+        set(
+            VarScope::Project,
+            &project,
+            vec![
+                preview_only("DATABASE_URL", "project-preview"),
+                preview_only("B", "project-preview"),
+                preview_only("C", "project-preview"),
+                preview_only("ONLY_PREVIEW", "x"),
+            ],
+        );
+        set(VarScope::Environment, &env, vec![input("C", "env")]);
+        set(
+            VarScope::App,
+            &app,
+            vec![
+                input("DATABASE_URL", "app"),
+                input("B", "app"),
+                preview_only("B", "app-preview"),
+            ],
+        );
+        let get = |m: &BTreeMap<String, Resolved>, key: &str| m[key].value.to_string();
+        let prod = s.with(|c| resolve(c, &k, &app, false)).unwrap();
+        let preview = s.with(|c| resolve(c, &k, &app, true)).unwrap();
+        // a) project preview-only beats app normal in a preview only.
+        assert_eq!(get(&preview, "DATABASE_URL"), "project-preview");
+        assert_eq!(get(&prod, "DATABASE_URL"), "app");
+        // b) among preview-only values the more specific level wins.
+        assert_eq!(get(&preview, "B"), "app-preview");
+        // c) environment normal loses to project preview-only.
+        assert_eq!(get(&preview, "C"), "project-preview");
+        assert_eq!(get(&prod, "C"), "env");
+        // d) production never sees preview-only values.
+        assert!(!prod.contains_key("ONLY_PREVIEW"));
+        assert_eq!(get(&prod, "B"), "app");
     }
 
     #[test]
