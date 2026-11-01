@@ -274,7 +274,11 @@ could still be shared (a bind mount resolving outside the checkout, driver optio
 container's volumes) or it would read the server's files (an env file, secret or config
 file, or SSH key outside the checkout; external secrets). `config` runs with
 `--no-env-resolution`, so env files are read only by `up`, after the check; a Compose too old
-for the flag gets no compose previews. Closing the PR removes those labelled volumes. Every
+for the flag gets no compose previews. What Compose reads while resolving (each project
+directory's `.env` for `${…}`, `include` paths, env files and project directories,
+`extends.file`, recursively, `<<` merges included) is found in the YAML itself
+(`compose::implicit_reads`, yaml-rust2, ~95 KiB of the agent) and must be in the checkout
+before Compose runs at all; a path Compose would interpolate is refused. Closing the PR removes those labelled volumes. Every
 compose app's builds read only the checkout: a `build.context`, Dockerfile or
 `additional_contexts` path outside it is refused (production may still mount server files
 at run time).

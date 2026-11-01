@@ -17,6 +17,11 @@
 //! the checkout. `config` never reads env files (`--no-env-resolution`), so
 //! nothing is read before these checks pass.
 //!
+//! Compose also reads files while resolving: the project's `.env` (for
+//! `${…}`), `include`d files and their env files, `extends.file`. For a
+//! preview [`implicit_reads`] finds those in the files themselves and they
+//! must be in the checkout, before Compose is run at all.
+//!
 //! Builds of every compose app read only the checkout (as `detect.rs`): a
 //! build context, Dockerfile or additional context outside it is refused.
 
@@ -25,7 +30,7 @@ use crate::proc::{self, Cancel, Spec};
 use crate::{Error, Result};
 use std::fmt::Write as _;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 pub fn project_name(app: &str, pr: Option<u32>) -> String {
@@ -187,6 +192,131 @@ fn resolves_inside(dir: &Path, path: &Path) -> bool {
         real.push(n);
     }
     real.starts_with(dir)
+}
+
+/// Everything Compose reads to resolve `file` (in `dir`) besides `file`:
+/// `.env` of each project directory, `include` paths, env files and project
+/// directories, and `extends.file`, following included and extended files.
+/// Refused: any of them outside `dir`, or a path with `$` in it (Compose
+/// would interpolate it: there's no telling where it leads).
+pub fn implicit_reads(dir: &Path, file: &str) -> Result<Vec<PathBuf>> {
+    use yaml_rust2::{Yaml, YamlLoader};
+    let outside = |what: &str, p: &Path| {
+        let to = std::fs::canonicalize(p)
+            .ok()
+            .filter(|real| real != p)
+            .map(|real| format!(" (it leads to {})", real.display()))
+            .unwrap_or_default();
+        Error::Invalid(format!(
+            "{what} {}{to} is outside the repository: a preview must not read production's files from the server",
+            p.display()
+        ))
+    };
+    // `<<` merges, which Compose applies, before looking up a key.
+    fn lookup<'a>(m: &'a Yaml, key: &str, out: &mut Vec<&'a Yaml>) {
+        if let Some(h) = m.as_hash() {
+            if let Some(v) = h.get(&Yaml::String(key.into())) {
+                out.push(v);
+            }
+            match h.get(&Yaml::String("<<".into())) {
+                Some(Yaml::Array(a)) => a.iter().for_each(|m| lookup(m, key, out)),
+                Some(m) => lookup(m, key, out),
+                None => {}
+            }
+        }
+    }
+    fn strings(y: &Yaml) -> Vec<&str> {
+        match y {
+            Yaml::String(s) => vec![s.as_str()],
+            Yaml::Array(a) => a.iter().filter_map(Yaml::as_str).collect(),
+            _ => vec![],
+        }
+    }
+    let mut reads: Vec<PathBuf> = vec![];
+    let mut queue = vec![dir.join(file)];
+    let mut seen = std::collections::HashSet::new();
+    let dotenv = |project: &Path, reads: &mut Vec<PathBuf>| {
+        let env = project.join(".env");
+        if env.symlink_metadata().is_ok() {
+            reads.push(env);
+        }
+    };
+    dotenv(dir.join(file).parent().unwrap_or(dir), &mut reads);
+    while let Some(f) = queue.pop() {
+        if !seen.insert(f.clone()) {
+            continue;
+        }
+        if !resolves_inside(dir, &f) {
+            return Err(outside("the compose file", &f));
+        }
+        let text = std::fs::read_to_string(&f).map_err(|e| Error::Invalid(format!("{}: {e}", f.display())))?;
+        let docs = YamlLoader::load_from_str(&text).map_err(|e| Error::Invalid(format!("{}: {e}", f.display())))?;
+        let base = f.parent().unwrap_or(dir).to_path_buf();
+        let at = |p: &str| -> Result<PathBuf> {
+            if p.contains('$') {
+                return Err(Error::Invalid(format!(
+                    "{}: `{p}` is interpolated: a preview's compose files must name their files plainly",
+                    f.display()
+                )));
+            }
+            Ok(base.join(p))
+        };
+        for doc in &docs {
+            let mut includes = vec![];
+            lookup(doc, "include", &mut includes);
+            for inc in includes.iter().flat_map(|i| match i {
+                Yaml::Array(a) => a.iter().collect::<Vec<_>>(),
+                other => vec![*other],
+            }) {
+                // `- path` or `{path, env_file, project_directory}`.
+                let (paths, env_files, project) = match inc {
+                    Yaml::String(_) => (strings(inc), vec![], None),
+                    _ => (
+                        strings(&inc["path"]),
+                        strings(&inc["env_file"]),
+                        inc["project_directory"].as_str(),
+                    ),
+                };
+                for p in paths {
+                    let p = at(p)?;
+                    if project.is_none() {
+                        dotenv(p.parent().unwrap_or(dir), &mut reads);
+                    }
+                    queue.push(p);
+                }
+                for e in env_files {
+                    reads.push(at(e)?);
+                }
+                if let Some(pd) = project {
+                    // Its `.env` and relative paths are read from there.
+                    let pd = at(pd)?;
+                    if !resolves_inside(dir, &pd) {
+                        return Err(outside("the include's project directory", &pd));
+                    }
+                    dotenv(&pd, &mut reads);
+                }
+            }
+            let mut services = vec![];
+            lookup(doc, "services", &mut services);
+            for svc in services.iter().filter_map(|s| s.as_hash()).flat_map(|h| h.values()) {
+                let mut extends = vec![];
+                lookup(svc, "extends", &mut extends);
+                for e in extends {
+                    let mut files = vec![];
+                    lookup(e, "file", &mut files);
+                    for file in files.into_iter().filter_map(Yaml::as_str) {
+                        queue.push(at(file)?);
+                    }
+                }
+            }
+        }
+    }
+    for r in &reads {
+        if !resolves_inside(dir, r) {
+            return Err(outside("the file", r));
+        }
+    }
+    Ok(reads)
 }
 
 /// The merged configuration a preview runs with (`docker compose config`
@@ -449,6 +579,10 @@ pub fn pick(config: &serde_json::Value, explicit: Option<&str>) -> Result<(Vec<S
 
 /// Build and start the project; returns the routed container's name.
 pub async fn up(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + Send)) -> Result<String> {
+    if u.labels.pr.is_some() {
+        // Before Compose reads anything (see `implicit_reads`).
+        implicit_reads(u.dir, u.file)?;
+    }
     let cfg = config(u.docker, u.dir, &[u.file], None, u.env).await?;
     check_build_inputs(&cfg, u.dir)?;
     // The file's own order is lost in `config`.
@@ -757,6 +891,162 @@ mod tests {
         assert!(e.message().contains("update it"), "{e}");
     }
 
+    /// What Compose would read besides the compose file, found in the files
+    /// themselves: the review's `.env` symlink, `include` and `extends` out
+    /// of the checkout, however they are spelled.
+    #[test]
+    fn implicit_reads_stay_in_the_checkout() {
+        use std::os::unix::fs::symlink;
+        let server = tempfile::tempdir().unwrap();
+        std::fs::write(server.path().join("prod.env"), "PRODUCTION_ONLY_KEY=leak\n").unwrap();
+        std::fs::write(server.path().join("base.yml"), "services:\n  b:\n    image: alpine\n").unwrap();
+        let s = server.path().display();
+        let repo = |files: &[(&str, &str)]| {
+            let d = tempfile::tempdir().unwrap();
+            for (p, c) in files {
+                let path = d.path().join(p);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, c).unwrap();
+            }
+            d
+        };
+        let web = "services:\n  web:\n    image: alpine\n    environment:\n      K: ${PRODUCTION_ONLY_KEY}\n";
+
+        // Fine: a .env, included and extended files of the repository's own.
+        let ok = repo(&[
+            (".env", "A=1\n"),
+            (
+                "compose.yml",
+                "include:\n  - lib/db.yml\n  - path: [lib/cache.yml]\n    env_file: lib/cache.env\n\
+                 services:\n  web:\n    extends:\n      file: lib/base.yml\n      service: b\n  same:\n    extends: web\n",
+            ),
+            ("lib/db.yml", "services:\n  db:\n    image: postgres\n"),
+            ("lib/cache.yml", "services:\n  cache:\n    image: redis\n"),
+            ("lib/cache.env", "X=1\n"),
+            ("lib/base.yml", "services:\n  b:\n    image: alpine\n"),
+        ]);
+        let reads = implicit_reads(ok.path(), "compose.yml").unwrap();
+        assert!(
+            reads.iter().any(|r| r.ends_with(".env")) && reads.iter().any(|r| r.ends_with("cache.env")),
+            "{reads:?}"
+        );
+
+        // The reported case: `.env` links to production's env file.
+        let linked = repo(&[("compose.yml", web)]);
+        symlink(server.path().join("prod.env"), linked.path().join(".env")).unwrap();
+        let e = implicit_reads(linked.path(), "compose.yml").unwrap_err();
+        assert!(
+            e.message().contains("prod.env") && e.message().contains("outside the repository"),
+            "{e}"
+        );
+        // The same next to a compose file in a folder.
+        let nested = repo(&[("apps/web/compose.yml", web)]);
+        symlink(server.path().join("prod.env"), nested.path().join("apps/web/.env")).unwrap();
+        assert!(implicit_reads(nested.path(), "apps/web/compose.yml").is_err());
+
+        let to_server = "../".repeat(30) + &server.path().strip_prefix("/").unwrap().display().to_string();
+        for (name, text) in [
+            ("include", format!("include:\n  - {s}/base.yml\n{web}")),
+            (
+                "include, relative",
+                format!("include:\n  - {to_server}/base.yml\n{web}"),
+            ),
+            (
+                "include env_file",
+                format!("include:\n  - path: lib.yml\n    env_file: {s}/prod.env\n{web}"),
+            ),
+            (
+                "include project_directory",
+                format!("include:\n  - path: lib.yml\n    project_directory: {s}\n{web}"),
+            ),
+            (
+                "extends",
+                format!("services:\n  web:\n    extends:\n      file: {s}/base.yml\n      service: b\n"),
+            ),
+            (
+                "extends, flow",
+                format!("services: {{web: {{extends: {{file: '{s}/base.yml', service: b}}}}}}\n"),
+            ),
+            (
+                "extends, merge key",
+                format!("x-e: &e\n  extends:\n    file: {s}/base.yml\n    service: b\nservices:\n  web:\n    <<: *e\n"),
+            ),
+            (
+                "extends, escaped key",
+                format!("services:\n  web:\n    \"ext\\x65nds\":\n      file: {s}/base.yml\n      service: b\n"),
+            ),
+            ("interpolated", "include:\n  - ${LIB}/x.yml\nservices: {}\n".to_string()),
+        ] {
+            let d = repo(&[("compose.yml", &text), ("lib.yml", "services: {}\n")]);
+            let e = implicit_reads(d.path(), "compose.yml").expect_err(name);
+            assert!(
+                e.message().contains("outside the repository") || e.message().contains("interpolated"),
+                "{name}: {e}"
+            );
+        }
+        // Deeper in: an included file includes the server's, or is a link to it.
+        let deep = repo(&[
+            ("compose.yml", "include:\n  - a.yml\n"),
+            ("a.yml", &format!("include:\n  - {s}/base.yml\n")),
+        ]);
+        assert!(implicit_reads(deep.path(), "compose.yml").is_err());
+        let link = repo(&[("compose.yml", "include:\n  - b.yml\n")]);
+        symlink(server.path().join("base.yml"), link.path().join("b.yml")).unwrap();
+        assert!(implicit_reads(link.path(), "compose.yml").is_err());
+    }
+
+    /// A preview with a linked `.env` stops before Compose is run at all.
+    #[tokio::test]
+    async fn a_preview_checks_before_compose_reads_anything() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let d = tempfile::tempdir().unwrap();
+        let server = tempfile::tempdir().unwrap();
+        std::fs::write(server.path().join("prod.env"), "PRODUCTION_ONLY_KEY=leak\n").unwrap();
+        let checkout = d.path().join("src");
+        std::fs::create_dir_all(&checkout).unwrap();
+        std::fs::write(
+            checkout.join("docker-compose.yml"),
+            "services:\n  web:\n    image: alpine\n",
+        )
+        .unwrap();
+        symlink(server.path().join("prod.env"), checkout.join(".env")).unwrap();
+        let bin = d.path().join("docker");
+        let calls = d.path().join("calls");
+        std::fs::write(&bin, format!("#!/bin/sh\necho \"$*\" >> {}\nexit 1\n", calls.display())).unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let docker = Docker {
+            bin: bin.display().to_string(),
+        };
+        let e = up(
+            Up {
+                docker: &docker,
+                dir: &checkout,
+                file: "docker-compose.yml",
+                project: "vfy-shop-pr4",
+                service: None,
+                env: &[],
+                labels: Labels {
+                    app_id: "app_1",
+                    app_name: "shop",
+                    deployment_id: "dpl_1",
+                    project_id: "prj_1",
+                    pr: Some(4),
+                },
+                timeout: Duration::from_secs(10),
+            },
+            Cancel::never(),
+            &mut |_, _| {},
+        )
+        .await
+        .unwrap_err();
+        assert!(e.message().contains("prod.env"), "{e}");
+        assert!(
+            !calls.exists(),
+            "docker was run: {}",
+            std::fs::read_to_string(&calls).unwrap_or_default()
+        );
+    }
+
     /// The real Compose resolves our override the way the check expects:
     /// explicit, external and plain volumes all become the preview's own,
     /// and a bind mount from the server stops it (VERCELIFY_DOCKER_TESTS=1;
@@ -859,6 +1149,23 @@ mod tests {
             .unwrap();
         let e = check_build_inputs(&built, dir.path()).unwrap_err();
         assert!(e.message().contains("the build context"), "{e}");
+
+        // The review's case: `.env` links to production's env file, and the
+        // file interpolates from it. Compose would read it (`config` shows
+        // the value); `implicit_reads` refuses it first.
+        std::fs::write(
+            dir.path().join("docker-compose.yml"),
+            "services:\n  web:\n    image: alpine:3.20\n    environment:\n      K: ${PRODUCTION_ONLY_KEY}\n",
+        )
+        .unwrap();
+        std::fs::write(server.path().join("prod.env"), "PRODUCTION_ONLY_KEY=leak-dotenv\n").unwrap();
+        std::os::unix::fs::symlink(server.path().join("prod.env"), dir.path().join(".env")).unwrap();
+        let read = config(&docker, dir.path(), &["docker-compose.yml"], Some(p), &[])
+            .await
+            .unwrap();
+        assert!(read.to_string().contains("leak-dotenv"), "what the review saw: {read}");
+        let e = implicit_reads(dir.path(), "docker-compose.yml").unwrap_err();
+        assert!(e.message().contains("prod.env"), "{e}");
     }
 
     #[test]

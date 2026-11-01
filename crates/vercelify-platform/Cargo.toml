@@ -28,3 +28,6 @@ hyper-util = { version = "0.1", features = ["tokio"] }
 http-body-util = "0.1"
 bytes = "1"
 tempfile = "3"
+# What a compose file makes Compose read (include, extends, .env), checked
+# before Compose runs for a preview. 1.65 MSRV; no encoding_rs.
+yaml-rust2 = { version = "0.10.4", default-features = false }

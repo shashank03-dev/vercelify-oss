@@ -28,7 +28,8 @@ and this project follows [Semantic Versioning](https://semver.org/).
   the proxy connects only to the public addresses found.
 - Security: Compose previews get volumes of their own even when the file names one
   explicitly or marks it external, and are refused when they would mount a server folder
-  outside the repository, or read an env file, secret or config file from the server.
+  outside the repository, or read an env file, secret or config file from the server —
+  also through a `.env` link, `include` or `extends`, checked before Compose runs.
   Closing the pull request removes those volumes.
 - Security: a Compose app's build context, Dockerfile or additional context outside the
   repository is refused, as for other builds.
