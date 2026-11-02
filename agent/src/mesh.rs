@@ -680,6 +680,34 @@ pub fn private_ipv4(cfg: &Config) -> Option<String> {
     own_ipv4(cfg).map(|ip| ip.to_string())
 }
 
+/// Where private previews are served (design §9.1): this node's mesh name
+/// and the mesh's address ranges (IPv4 from its prefix, IPv6 the mesh's
+/// /48). None until the node has joined.
+pub fn ingress(cfg: &Config) -> Option<vercelify_platform::apps::MeshIngress> {
+    let s = NodeState::load(&cfg.mesh_dir).ok().flatten()?;
+    ingress_of(&s.name, &s.ipv4, s.ipv4_prefix_len, &s.ipv6)
+}
+
+fn ingress_of(name: &str, ipv4: &str, prefix: u8, ipv6: &str) -> Option<vercelify_platform::apps::MeshIngress> {
+    let v4: std::net::Ipv4Addr = ipv4.parse().ok()?;
+    if name.is_empty() || !(8..=30).contains(&prefix) {
+        return None;
+    }
+    let mask = u32::MAX << (32 - u32::from(prefix));
+    let mut cidrs = vec![format!("{}/{prefix}", std::net::Ipv4Addr::from(u32::from(v4) & mask))];
+    if let Ok(v6) = ipv6.parse::<std::net::Ipv6Addr>() {
+        let s = v6.segments();
+        cidrs.push(format!(
+            "{}/48",
+            std::net::Ipv6Addr::new(s[0], s[1], s[2], 0, 0, 0, 0, 0)
+        ));
+    }
+    Some(vercelify_platform::apps::MeshIngress {
+        node: name.to_string(),
+        cidrs,
+    })
+}
+
 /// This node's mesh address, once it has joined (for `listen = ["mesh"]`).
 pub fn own_ipv4(cfg: &Config) -> Option<IpAddr> {
     NodeState::load(&cfg.mesh_dir)
@@ -691,6 +719,21 @@ pub fn own_ipv4(cfg: &Config) -> Option<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_previews_answer_the_mesh_ranges() {
+        let m = ingress_of("main", "10.77.0.1", 16, "fd76:6679:6d65::1").unwrap();
+        assert_eq!(m.node, "main");
+        assert_eq!(m.cidrs, ["10.77.0.0/16", "fd76:6679:6d65::/48"]);
+        let m = ingress_of("pi", "10.88.3.9", 16, "").unwrap();
+        assert_eq!(m.cidrs, ["10.88.0.0/16"]);
+        assert!(ingress_of("", "10.77.0.1", 16, "").is_none());
+        assert!(ingress_of("main", "nope", 16, "").is_none());
+        assert!(
+            ingress_of("main", "10.77.0.1", 0, "").is_none(),
+            "never the whole internet"
+        );
+    }
 
     #[test]
     fn away_from_home_needs_a_public_address() {

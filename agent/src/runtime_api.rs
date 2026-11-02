@@ -72,14 +72,28 @@ async fn dispatch(
         },
         ["containers", name, "logs"] if get => {
             let tail = query_value(&q, "tail").and_then(|t| t.parse().ok()).unwrap_or(200);
-            crate::platform_api::docker_logs(&d.docker.bin, name, tail, query_value(&q, "follow") == Some("true"))?
+            crate::platform_api::docker_logs(
+                &d.docker.bin,
+                name,
+                tail,
+                query_value(&q, "follow") == Some("true"),
+                Default::default(),
+            )?
         }
         ["containers", name, "exec"] if post => {
             json(vercelify_platform::runtime::exec_local(d, name, &body(&b)?).await?)
         }
         ["apply"] if post => json(apply_local(d, &body::<Apply>(&b)?).await),
         ["routes"] if get => json(vercelify_platform::proxy::route_keys(&d.proxy)),
-        ["instances" | "instances-v2"] if post => start_instance(w.clone(), body(&b)?),
+        ["instances" | "instances-v2" | "instances-isolated-preview"] if post => {
+            let spec: StartSpec = body(&b)?;
+            if spec.deployment.pr_number.is_some() && seg[0] != "instances-isolated-preview" {
+                return Err(AppError::bad_request(
+                    "upgrade the main server to deploy isolated previews",
+                ));
+            }
+            start_instance(w.clone(), spec)
+        }
         ["health"] if post => {
             d.wait(&body::<HealthWait>(&b)?).await?;
             json(json!({ "healthy": true }))

@@ -203,6 +203,13 @@ pub fn project_files(c: &Connection, id: &str) -> Result<Vec<(String, String)>> 
 }
 
 /// The port and framework recorded at build time.
+/// The port an image app was found to listen on (its `EXPOSE`), kept with
+/// the deployment so a rollback to it doesn't have to look again.
+pub fn set_port(c: &Connection, id: &str, port: u16) -> Result<()> {
+    c.execute("UPDATE deployments SET port = ?2 WHERE id = ?1", params![id, port])?;
+    Ok(())
+}
+
 pub fn built_info(c: &Connection, id: &str) -> Result<(Option<u16>, String)> {
     Ok(
         c.query_row("SELECT port, framework FROM deployments WHERE id = ?1", [id], |r| {

@@ -124,11 +124,36 @@ impl Deployer {
     /// Start the new container and wait for it to be healthy. On failure the
     /// new container is removed and the error carries its last log lines.
     pub async fn start(&self, i: &DeployInput<'_>, log: &mut (dyn FnMut(&str) + Send)) -> Result<String> {
+        let result = self.start_container(i, log).await;
+        if result.is_err() {
+            if let Some(pr) = i.deployment.pr_number {
+                if let Err(e) =
+                    crate::preview_network::remove_if_unused(&self.docker, &crate::preview_network::name(&i.app.id, pr))
+                        .await
+                {
+                    tracing::warn!("cleaning failed preview network: {e}");
+                }
+            }
+        }
+        result
+    }
+
+    async fn start_container(&self, i: &DeployInput<'_>, log: &mut (dyn FnMut(&str) + Send)) -> Result<String> {
         let pr = i.deployment.pr_number;
         let name = instance_name(&i.app.name, pr, &i.deployment.id, i.replica);
-        let net = project_network(&i.app.project_id);
-        self.docker.ensure_network(&net).await?;
-        self.docker.ensure_network(PROXY_NETWORK).await?;
+        let net = match pr {
+            Some(pr) => {
+                let net = crate::preview_network::name(&i.app.id, pr);
+                crate::preview_network::ensure(&self.docker, &net).await?;
+                net
+            }
+            None => {
+                let net = project_network(&i.app.project_id);
+                self.docker.ensure_network(&net).await?;
+                self.docker.ensure_network(PROXY_NETWORK).await?;
+                net
+            }
+        };
         if !self.docker.image_exists(i.image).await? {
             log(&format!("pulling {}", i.image));
             self.docker.pull(i.image).await?;
@@ -151,7 +176,12 @@ impl Deployer {
             image: i.image.to_string(),
             labels,
             env: i.env.clone(),
-            networks: vec![net, PROXY_NETWORK.into()],
+            networks: if pr.is_some() {
+                vec![net.clone()]
+            } else {
+                vec![net.clone(), PROXY_NETWORK.into()]
+            },
+            isolated_preview: pr.is_some(),
             // Other apps of the project reach production as `http://<name>:<port>`.
             aliases: if pr.is_none() { vec![i.app.name.clone()] } else { vec![] },
             memory_mb: i.app.runtime.memory_mb,
@@ -172,7 +202,7 @@ impl Deployer {
             health::Wait {
                 docker: &self.docker,
                 container: &name,
-                network: PROXY_NETWORK,
+                network: if pr.is_some() { &net } else { PROXY_NETWORK },
                 port: i.port,
                 probe: probe_for(i.app.runtime.health.as_ref()),
                 timeout: Duration::from_secs(i.app.runtime.health_timeout_secs as u64),

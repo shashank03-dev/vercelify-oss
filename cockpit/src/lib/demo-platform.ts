@@ -16,7 +16,10 @@ import type {
   DeployHook,
   Deployment,
   DeploymentStatus,
+  EffectiveVar,
+  EnvProvenance,
   EnvVar,
+  WithheldVar,
   EnvVarsPut,
   GitSource,
   GitWatchStatus,
@@ -93,7 +96,7 @@ function newApp(name: string, kind: App["kind"], over: Partial<App> = {}): App {
     source: { repository: null, branch: null, git_source_id: null, image: null, compose_file: null, compose_content: null, pinned_sha: null },
     build: { pack: "auto", dockerfile: null, context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] },
     runtime: { port: null, command: null, replicas: 1, memory_mb: null, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, service: null, failover: false },
-    previews: { enabled: kind === "git", max: 3 },
+    previews: { enabled: kind === "git", max: 3, access: "private" },
     node_id: "node_demomain00000000",
     desired: "running",
     current_deployment_id: null,
@@ -203,23 +206,24 @@ seed(apps[2]!, ["healthy"], [60 * 24 * 6]);
 seed(apps[3]!, ["healthy", "superseded"], [60 * 24 * 2, 60 * 24 * 9]);
 
 const env = new Map<string, EnvVar[]>();
-const envVar = (key: string, value: string, secret: boolean, build = false): EnvVar => ({
+const envVar = (key: string, value: string, secret: boolean, build = false, share = false): EnvVar => ({
   id: id("env"),
   key,
   value: secret ? null : value,
   build,
   preview_only: false,
+  share_with_previews: share,
   secret,
   scope: "app",
   updated_at: iso(600),
 });
 const secretValues = new Map<string, string>();
 env.set(apps[0]!.id, [
-  envVar("NEXT_PUBLIC_SITE_URL", "https://shop.apps.shashank.dev", false, true),
+  envVar("NEXT_PUBLIC_SITE_URL", "https://shop.apps.shashank.dev", false, true, true),
   envVar("STRIPE_SECRET_KEY", "", true),
   envVar("DATABASE_URL", "${{db.shop-db.url}}", false),
 ]);
-secretValues.set(`${apps[0]!.id}/STRIPE_SECRET_KEY`, "sk_live_demo_51NzQ…");
+secretValues.set(env.get(apps[0]!.id)!.find((v) => v.key === "STRIPE_SECRET_KEY")!.id, "sk_live_demo_51NzQ…");
 
 const previews = new Map<string, Preview[]>([
   [
@@ -231,7 +235,7 @@ const previews = new Map<string, Preview[]>([
         pr_number: 42,
         head_sha: sha(42),
         title: "New pricing page",
-        url: `https://pr-42-shop.${WILDCARD}`,
+        url: "http://pr-42-shop.main.vfy",
         deployment_id: null,
         status: "healthy",
         asleep: false,
@@ -440,17 +444,49 @@ function enqueue(app: App, trigger: Deployment["trigger"], rollbackOf: Deploymen
 
 const clone = <T>(v: T): T => structuredClone(v);
 
-function revealEnv(app: App, list: EnvVar[], reveal: boolean): EnvVar[] {
-  return list.map((v) => (v.secret && reveal ? { ...v, value: secretValues.get(`${app.id}/${v.key}`) ?? "" } : { ...v }));
+function revealEnv(list: EnvVar[], reveal: boolean): EnvVar[] {
+  return list.map((v) => (v.secret && reveal ? { ...v, value: secretValues.get(v.id) ?? "" } : { ...v }));
+}
+
+/** The agent's `env::provenance` for app-level variables (the demo has no others). */
+function envProvenance(list: EnvVar[]): EnvProvenance {
+  const reference = (v: EnvVar) => (v.value ?? secretValues.get(v.id) ?? "").includes("${{db.");
+  const effective = (v: EnvVar): EffectiveVar => ({
+    key: v.key,
+    scope: v.scope,
+    origin: v.preview_only ? "preview_only" : v.share_with_previews ? "shared" : "production",
+    build: v.build,
+    secret: v.secret,
+    database_reference: reference(v),
+  });
+  const previewOnly = list.filter((v) => v.preview_only);
+  const preview: EffectiveVar[] = previewOnly.filter((v) => !reference(v)).map(effective);
+  const withheld: WithheldVar[] = [];
+  for (const v of previewOnly.filter(reference)) withheld.push({ key: v.key, scope: v.scope, reason: "production_database" });
+  for (const v of list.filter((x) => !x.preview_only)) {
+    if (previewOnly.some((p) => p.key === v.key)) continue;
+    if (!v.share_with_previews) withheld.push({ key: v.key, scope: v.scope, reason: "production_only" });
+    else if (reference(v)) withheld.push({ key: v.key, scope: v.scope, reason: "production_database" });
+    else preview.push(effective(v));
+  }
+  preview.sort((a, b) => a.key.localeCompare(b.key));
+  withheld.sort((a, b) => a.key.localeCompare(b.key));
+  return { production: list.filter((v) => !v.preview_only).map(effective), preview, withheld };
 }
 
 function putEnv(app: App, r: EnvVarsPut) {
   const list = env.get(app.id) ?? [];
-  const keep = r.replace ? [] : list.filter((v) => !r.vars.some((n) => n.key === v.key));
+  const keep = r.replace ? [] : list.filter((v) => !r.vars.some((n) => n.key === v.key && (n.preview_only ?? false) === v.preview_only));
   for (const n of r.vars) {
     const secret = n.secret ?? true;
-    keep.push({ ...envVar(n.key, n.value, secret, n.build ?? false), preview_only: n.preview_only ?? false, updated_at: isoNow() });
-    if (secret) secretValues.set(`${app.id}/${n.key}`, n.value);
+    const previewOnly = n.preview_only ?? false;
+    const before = list.find((v) => v.key === n.key && v.preview_only === previewOnly);
+    const share = !previewOnly && (n.share_with_previews ?? before?.share_with_previews ?? false);
+    const variable = { ...envVar(n.key, n.value, secret, n.build ?? false, share), preview_only: previewOnly, updated_at: isoNow() };
+    if (before) variable.id = before.id;
+    keep.push(variable);
+    if (secret) secretValues.set(variable.id, n.value);
+    else secretValues.delete(variable.id);
   }
   env.set(app.id, keep.sort((a, b) => a.key.localeCompare(b.key)));
   return { saved: r.vars.length };
@@ -672,12 +708,20 @@ export function platformRoute(req: HttpRequest): unknown {
             .map((l) => ({ key: l.slice(0, l.indexOf("=")).replace(/^export /, "").trim(), value: l.slice(l.indexOf("=") + 1).replace(/^["']|["']$/g, "") }));
           return putEnv(app, { vars, replace: !!body.replace });
         }
+        if (seg[3] === "provenance") return envProvenance(env.get(app.id) ?? []);
+        if (seg[3] && seg[4] === "share" && m === "PUT") {
+          const v = (env.get(app.id) ?? []).find((x) => x.key === seg[3] && !x.preview_only);
+          if (!v) throw new Error(`no variable ${seg[3]}`);
+          v.share_with_previews = !!body.share;
+          return { key: v.key, share_with_previews: v.share_with_previews };
+        }
         if (seg[3] && m === "DELETE") {
-          env.set(app.id, (env.get(app.id) ?? []).filter((v) => v.key !== seg[3]));
+          const previewOnly = params.get("preview_only") === "true";
+          env.set(app.id, (env.get(app.id) ?? []).filter((v) => v.key !== seg[3] || v.preview_only !== previewOnly));
           return { deleted: seg[3] };
         }
         if (m === "PUT") return putEnv(app, body as unknown as EnvVarsPut);
-        return revealEnv(app, env.get(app.id) ?? [], params.get("reveal") === "true");
+        return revealEnv(env.get(app.id) ?? [], params.get("reveal") === "true");
       }
       case "domains": {
         if (m === "POST") {

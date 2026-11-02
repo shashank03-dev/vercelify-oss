@@ -1,0 +1,28 @@
+    Blocking waiting for file lock on build directory
+warning: failed to parse serde attribute
+  | 
+  | deserialize_with = "runtime_port"
+  | 
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 9.22s
+     Running unittests src/lib.rs (target/debug/deps/vercelify_platform-aaf8c53ab32ae1e2)
+
+running 1 test
+test engine::tests::preview_does_not_join_the_production_database_network ... FAILED
+
+failures:
+
+---- engine::tests::preview_does_not_join_the_production_database_network stdout ----
+
+thread 'engine::tests::preview_does_not_join_the_production_database_network' (11996207) panicked at crates/vercelify-platform/src/engine.rs:1712:9:
+preview joins the production database network vfy-net-prj-xehzk2cpmd4vpsqw: create --name vfy-shop-pr7-tx6drds5 --restart unless-stopped --pids-limit 4096 --log-driver local --log-opt max-size=10m --log-opt max-file=3 --label vercelify.app=app_vr55wzwd1cpja85h --label vercelify.app-name=shop --label vercelify.deployment=dpl_67nmv9h6tx6drds5 --label vercelify.kind=preview --label vercelify.managed=platform --label vercelify.pr=7 --label vercelify.project=prj_xehzk2cpmd4vpsqw -e PORT -e VERCELIFY_ENV -e VERCELIFY_URL -e VERCELIFY_GIT_COMMIT_SHA -e VERCELIFY_GIT_BRANCH -e VERCELIFY_DEPLOYMENT_ID -e SOURCE_COMMIT --network vfy-net-prj-xehzk2cpmd4vpsqw nginx:1.27
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    engine::tests::preview_does_not_join_the_production_database_network
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 163 filtered out; finished in 0.38s
+
+error: test failed, to rerun pass `-p vercelify-platform --lib`

@@ -26,6 +26,7 @@ pub const MIGRATIONS: &[(u32, &str)] = &[
     (4, include_str!("../migrations/0004_git_waiting.sql")),
     (5, include_str!("../migrations/0005_volume_identity.sql")),
     (6, include_str!("../migrations/0006_node_removal.sql")),
+    (7, include_str!("../migrations/0007_preview_safety.sql")),
 ];
 
 pub fn latest_version() -> u32 {
@@ -318,6 +319,53 @@ mod tests {
         for (i, (v, _)) in MIGRATIONS.iter().enumerate() {
             assert_eq!(*v as usize, i + 1);
         }
+    }
+
+    /// Migration 0007: previews that were running under the old rules (with
+    /// production's variables and networks) are listed for retirement before
+    /// the engine takes any work; closed ones are not.
+    #[test]
+    fn upgrading_lists_running_previews_for_retirement() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("platform.db");
+        let (app, closed_app) = {
+            let mut c = Connection::open(&path).unwrap();
+            for (v, sql) in MIGRATIONS.iter().filter(|(v, _)| *v <= 6) {
+                let tx = c.transaction().unwrap();
+                tx.execute_batch(sql).unwrap();
+                tx.pragma_update(None, "user_version", v).unwrap();
+                tx.commit().unwrap();
+            }
+            let a = crate::apps::create(&c, &crate::apps::tests::git_app("blog")).unwrap();
+            let b = crate::apps::create(&c, &crate::apps::tests::git_app("docs")).unwrap();
+            crate::previews::upsert(&c, &a.id, 4, "abc", "open").unwrap();
+            crate::previews::upsert(&c, &b.id, 9, "def", "closed").unwrap();
+            crate::previews::close(&c, &b.id, 9).unwrap();
+            (a.id, b.id)
+        };
+        let s = Store::open(&path).unwrap();
+        assert_eq!(s.schema_version().unwrap(), latest_version());
+        let pending: Vec<(String, u32)> = s.with(|c| get_setting(c, "preview_safety_retire")).unwrap().unwrap();
+        assert_eq!(pending, [(app, 4)]);
+        assert!(!pending.iter().any(|(a, _)| *a == closed_app));
+    }
+
+    #[test]
+    fn control_plane_sqlite_omits_unused_search_extensions() {
+        let s = Store::open_in_memory().unwrap();
+        s.with(|c| {
+            for feature in ["ENABLE_FTS3", "ENABLE_FTS5", "ENABLE_RTREE"] {
+                let enabled: i64 = c.query_row("SELECT sqlite_compileoption_used(?1)", [feature], |r| r.get(0))?;
+                assert_eq!(
+                    enabled, 0,
+                    "unused SQLite {feature} consumes the static daemon's size budget"
+                );
+            }
+            let json: String = c.query_row("SELECT json_array(1, 2)", [], |r| r.get(0))?;
+            assert_eq!(json, "[1,2]");
+            Ok(())
+        })
+        .unwrap();
     }
 
     fn project_and_env(c: &Connection) -> Result<String> {

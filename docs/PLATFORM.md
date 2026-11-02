@@ -126,9 +126,16 @@ URL that queues a deployment when called.
 3. Every deployment starts a new container, waits until it answers its health check, and
    only then switches traffic; the old one keeps serving while it drains. A deployment
    that fails its health check never takes traffic.
-4. **Previews**: each pull request gets its own deployment at `pr-<n>-<app>.<domain>`,
-   deleted when the pull request is merged or closed. Forks are never built.
-5. **Rollbacks**: **Deployments → Roll back** (or `vfy rollback APP COMMIT|#N`) starts the
+4. **Previews**: each pull request gets a private deployment at
+   `http://pr-<n>-<app>.<server>.vfy`, accessible through the Vercelify mesh.
+   Choose **Public** deliberately to use `pr-<n>-<app>.<wildcard-domain>` instead.
+   Closing or merging the PR removes its containers, routes and owned resources.
+   Forks are never built. Docker 28+ is required; Compose previews need 2.24.4+.
+5. **Ports**: a Git app listens where its framework or Dockerfile says. An image app
+   with no port set uses the one TCP port its image `EXPOSE`s; if it exposes none or
+   several, the deployment stops at once and asks you to set the port (Settings → Port,
+   or `"runtime": {"port": 8080}` in the API).
+6. **Rollbacks**: **Deployments → Roll back** (or `vfy rollback APP COMMIT|#N`) starts the
    earlier image again at once, without rebuilding.
 
 Apps can **sleep** when idle to free memory (`sudo vercelify sleep on APP 30`, or the app's
@@ -139,10 +146,20 @@ Apps can **sleep** when idle to free memory (`sudo vercelify sleep on APP 30`, o
 - Variables live on the app (**Environment**), on its project, or on an environment
   (`production`, `staging`…); the app's own win. Mark the ones needed while building
   (`NEXT_PUBLIC_*`) as **build** variables.
-- Values are secret by default: stored sealed, shown only when you reveal them.
-- **Preview** overrides apply to pull request previews only (for example a separate
-  database URL), and in a preview any of them beats a normal value at every level; among
-  preview overrides the app's win over the environment's, then the project's.
+- Values are secret by default: stored sealed, shown only when you reveal them. A secret
+  value printed by a build or by the app shows as `[redacted]` in its logs (a safety
+  net: code that is given a secret can still send it elsewhere).
+- Normal values are **production-only** until deliberately shared with previews,
+  even when they are marked nonsecret. The Variables tab shows scope, policy and
+  the keys previews are missing. **Preview** overrides beat shared normal values
+  at every level; among preview overrides app wins over environment, then project.
+- Platform `${{db.…}}` references are refused in previews, including preview-only
+  variables: those references currently identify production databases. Runtime
+  previews have no outbound access to the host, production networks or internet;
+  keep required services inside their preview Compose stack. Isolated platform
+  PostgreSQL previews are a later milestone, not part of this change.
+- On upgrade to this policy, existing previews are retired before new work starts.
+  Review their Variables settings, then redeploy the pull requests.
 - A database's URL is referenced as `${{db.<name>.url}}`, filled in at deploy time, so
   rotating its password needs only a redeploy.
 - From the terminal: `vfy env pull APP`, `vfy env set APP KEY=VALUE`, `vfy env push APP`.

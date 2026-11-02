@@ -134,6 +134,7 @@ pub fn routes(base: &RouteBase, placed: &[Placed], main_id: &str) -> BTreeMap<St
             host: h.host.clone(),
             https: false,
             redirect_to: None,
+            allow_from: h.allow_from.clone(),
         })
         .collect();
     for id in others.keys() {
@@ -196,11 +197,13 @@ mod tests {
                     host: "blog.example.com".into(),
                     https: true,
                     redirect_to: None,
+                    allow_from: vec![],
                 },
                 RouteHost {
                     host: "www.blog.example.com".into(),
                     https: true,
                     redirect_to: Some("blog.example.com".into()),
+                    allow_from: vec![],
                 },
             ],
             port: 3000,

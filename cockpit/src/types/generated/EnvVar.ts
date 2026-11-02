@@ -13,4 +13,4 @@ build: boolean,
 /**
  * Only for previews (overrides the normal value there).
  */
-preview_only: boolean, secret: boolean, scope: VarScope, updated_at: string, };
+preview_only: boolean, share_with_previews: boolean, secret: boolean, scope: VarScope, updated_at: string, };

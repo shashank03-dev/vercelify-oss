@@ -28,7 +28,7 @@ use std::time::Duration;
 use tokio::sync::Notify;
 use vercelify_core::platform::{
     App, AppKind, AppPatch, AppSource, CertStatus, Deployment, DeploymentStatus, DeploymentTrigger, GitAuthKind,
-    PlatformNode, VolumeOwner,
+    PlatformNode, PreviewAccess, VolumeOwner,
 };
 
 /// What happened, for the agent's events, alerts and GitHub statuses.
@@ -413,6 +413,7 @@ impl Engine {
                     (DeploymentStatus::Failed, e.to_string())
                 };
                 log.error(&msg);
+                let msg = log.redact_text(&msg);
                 let updated = self
                     .store
                     .tx(|c| deployments::transition(c, &d.id, status, Some(&msg)))
@@ -501,6 +502,32 @@ impl Engine {
         })
     }
 
+    /// The port of an image app nobody set one for: the image's one TCP
+    /// `EXPOSE`. None or several: stop and ask, rather than guess a port the
+    /// health check then waits on for minutes.
+    async fn image_port(&self, image: &str, log: &mut LogWriter) -> Result<u16> {
+        let docker = &self.deployer.docker;
+        if !docker.image_exists(image).await.unwrap_or(false) {
+            log.info(&format!("pulling {image} to read its port"));
+            docker.pull(image).await?;
+        }
+        match docker.exposed_tcp_ports(image).await?.as_slice() {
+            [p] => {
+                log.info(&format!(
+                    "listening port {p}, from the image's EXPOSE (set a port to change it)"
+                ));
+                Ok(*p)
+            }
+            [] => Err(Error::Invalid(format!(
+                "{image} doesn't say which port it listens on (no EXPOSE): set the app's port"
+            ))),
+            many => Err(Error::Invalid(format!(
+                "{image} exposes several ports ({}): set the app's port to the one that serves HTTP",
+                many.iter().map(u16::to_string).collect::<Vec<_>>().join(", ")
+            ))),
+        }
+    }
+
     async fn steps(
         self: &Arc<Self>,
         app: &App,
@@ -522,7 +549,7 @@ impl Engine {
         } else {
             String::new()
         };
-        let vars = {
+        let resolution = {
             let key = self.key.clone();
             let id = app.id.clone();
             let ip = main_ip.clone();
@@ -532,6 +559,19 @@ impl Engine {
                 })
                 .await?
         };
+        // Secret values never show in this deployment's log, whatever the
+        // build prints.
+        log.redact(crate::logs::Redactor::new(
+            resolution.vars.values().filter(|v| v.secret).map(|v| v.value.as_str()),
+        ));
+        if preview && !resolution.withheld.is_empty() {
+            let keys: Vec<&str> = resolution.withheld.keys().map(String::as_str).collect();
+            log.info(&format!(
+                "previews don't get production-only variables: {} (give them preview values, or share them with previews)",
+                keys.join(", ")
+            ));
+        }
+        let vars = resolution.vars;
         let native = main.arch.clone();
         // Builds happen here; other architectures are built too (emulated).
         let mut extra_archs: Vec<String> = vec![];
@@ -667,7 +707,15 @@ impl Engine {
         }
         self.emit(EngineEvent::Changed);
         let d = self.store.with(|c| deployments::get(c, &d.id))?;
-        let port = app.runtime.port.or(port).unwrap_or(3000);
+        let port = match app.runtime.port.or(port) {
+            Some(p) => p,
+            None if app.kind == AppKind::Image => {
+                let p = self.image_port(&image, log).await?;
+                self.store.tx(|c| deployments::set_port(c, &d.id, p))?;
+                p
+            }
+            None => 3000,
+        };
         if d.image != image {
             let img = image.clone();
             self.store.with(|c| deployments::set_image(c, &d.id, &img))?;
@@ -677,7 +725,11 @@ impl Engine {
         let settings = self.store.with(domain_settings)?;
         let (hosts, url) = hosts_for(&settings, app, d.pr_number);
         if d.pr_number.is_some() && hosts.is_empty() {
-            log.info("no wildcard domain is set: the preview runs but has no URL");
+            log.info(if app.previews.access == PreviewAccess::Private {
+                "previews are private (mesh only) and this server isn't on the mesh yet: the preview runs but has no URL"
+            } else {
+                "no wildcard domain is set: the preview runs but has no URL"
+            });
         }
 
         let mut runtime_env: Vec<(String, String)> =
@@ -1277,6 +1329,26 @@ impl Engine {
         Ok(())
     }
 
+    /// Upgrade safety: old previews may retain production credentials and
+    /// shared bridges. Drain the durable migration list before starting jobs.
+    pub async fn retire_legacy_previews(&self) -> Result<()> {
+        let mut pending: Vec<(String, u32)> = self
+            .store
+            .with(|c| Ok(crate::store::get_setting(c, "preview_safety_retire")?.unwrap_or_default()))?;
+        while let Some((app, pr)) = pending.first().cloned() {
+            if self.store.with(|c| apps::get(c, &app)).is_ok() {
+                self.remove_preview(&app, pr).await?;
+                tracing::warn!(
+                    "{app} PR #{pr}: retired preview for the safety upgrade; review preview variables and redeploy"
+                );
+            }
+            pending.remove(0);
+            self.store
+                .tx(|c| crate::store::put_setting(c, "preview_safety_retire", &pending))?;
+        }
+        Ok(())
+    }
+
     /// Whether the deployments `ids` all ended within `timeout`.
     async fn wait_finished(&self, ids: &[String], timeout: Duration) -> bool {
         let deadline = tokio::time::Instant::now() + timeout;
@@ -1319,6 +1391,11 @@ impl Engine {
                     grace_secs: Some(10),
                     remove_routes: if rt.is_local() { vec![] } else { vec![key.clone()] },
                     remove_volumes: if rt.is_local() { vec![] } else { vol_names.clone() },
+                    remove_preview_networks: if rt.is_local() {
+                        vec![]
+                    } else {
+                        vec![crate::preview_network::name(&app.id, pr)]
+                    },
                     ..Apply::default()
                 })
                 .await?;
@@ -1329,6 +1406,9 @@ impl Engine {
             compose::remove_preview_volumes(docker, &app.id, pr).await?;
         }
         crate::proxy::remove_route(&self.deployer.proxy, &key)?;
+        if preview.is_some() {
+            crate::preview_network::remove(docker, &crate::preview_network::name(&app.id, pr)).await?;
+        }
         for name in &vol_names {
             let _ = docker.volume_remove(name).await;
             let _ = std::fs::remove_dir_all(self.deployer.hdd_root.join(name));
@@ -1351,6 +1431,7 @@ impl Engine {
         for n in &workers {
             let Ok(rt) = self.node_runtime(n) else { continue };
             let mut a = Apply {
+                remove_preview_apps: vec![app.id.clone()],
                 prune: Some((app.name.clone(), vec![])),
                 ..Apply::default()
             };
@@ -1384,6 +1465,9 @@ impl Engine {
         }
         if app.kind == AppKind::Compose {
             let _ = compose::down(docker, &compose::project_name(&app.name, None)).await;
+        }
+        if let Err(e) = crate::preview_network::remove_for_app(docker, &app.id).await {
+            tracing::warn!("cleaning preview networks of {}: {e}", app.name);
         }
         // Its project's network, unless other apps or databases still use it
         // (Docker refuses then).
@@ -1422,6 +1506,23 @@ impl Engine {
 /// URL people use.
 pub fn hosts_for(settings: &apps::DomainSettings, app: &App, pr: Option<u32>) -> (Vec<RouteHost>, Option<String>) {
     match pr {
+        // Private (design §9.1): this server's mesh name, plain HTTP inside
+        // the WireGuard tunnel, answered only to mesh addresses.
+        Some(pr) if app.previews.access == PreviewAccess::Private => match &settings.mesh {
+            Some(m) => {
+                let host = deploy::preview_host(&app.name, pr, &format!("{}.vfy", m.node));
+                (
+                    vec![RouteHost {
+                        host: host.clone(),
+                        https: false,
+                        redirect_to: None,
+                        allow_from: m.cidrs.clone(),
+                    }],
+                    Some(format!("http://{host}")),
+                )
+            }
+            None => (vec![], None),
+        },
         Some(pr) => match settings.wildcard.as_deref().filter(|w| !w.is_empty()) {
             Some(w) => {
                 let host = deploy::preview_host(&app.name, pr, w);
@@ -1435,6 +1536,7 @@ pub fn hosts_for(settings: &apps::DomainSettings, app: &App, pr: Option<u32>) ->
                         host: host.clone(),
                         https: settings.https && !settings.edge_tls,
                         redirect_to: None,
+                        allow_from: vec![],
                     }],
                     Some(format!("{scheme}://{host}")),
                 )
@@ -1448,6 +1550,7 @@ pub fn hosts_for(settings: &apps::DomainSettings, app: &App, pr: Option<u32>) ->
                     host: dm.host.clone(),
                     https: dm.https && dm.cert_status != CertStatus::Edge,
                     redirect_to: dm.redirect_to.clone(),
+                    allow_from: vec![],
                 })
                 .collect(),
             app.url.clone(),
@@ -1498,11 +1601,15 @@ mod tests {
             format!(
                 "#!/bin/sh\necho \"$*\" >> {d}/calls\nfor a; do last=$a; done\ncase \"$1\" in\n  \
                  create) touch {d}/created; while [ -f {d}/hold-create ]; do sleep 0.02; done; \
-                 touch {d}/containers/$3; echo cid ;;\n  \
+                 if [ -f {d}/fail-create ]; then cat {d}/fail-create >&2; exit 1; fi; \
+                 touch {d}/containers/$3; prev=''; for a; do [ \"$prev\" != --network ] || echo \"$a\" > {d}/network-$3; prev=$a; done; echo cid ;;\n  \
+                 network) case \"$2\" in inspect) echo '{{\"Driver\":\"bridge\",\"Internal\":true,\"EnableIPv6\":false,\"Options\":{{\"com.docker.network.bridge.gateway_mode_ipv4\":\"isolated\"}},\"Labels\":{{\"vercelify.preview-network\":\"true\",\"vercelify.managed\":\"platform\"}}}}' ;; esac ;;\n  \
                  rm) rm -f {d}/containers/$last ;;\n  \
+                 image) case \"$4\" in *ExposedPorts*) cat {d}/exposed 2>/dev/null || echo '{{\"80/tcp\":{{}}}}' ;; esac ;;\n  \
                  container) [ -f {d}/containers/$last ] || {{ echo \"Error: No such container: $last\" >&2; exit 1; }}; \
+                 net=$(cat {d}/network-$last 2>/dev/null || echo vfy-proxy); \
                  echo '{{\"State\":{{\"Running\":true,\"Status\":\"running\"}},\"NetworkSettings\":\
-                 {{\"Networks\":{{\"vfy-proxy\":{{\"IPAddress\":\"127.0.0.1\"}}}}}}}}' ;;\nesac\nexit 0\n"
+                 {{\"Networks\":{{\"vfy-proxy\":{{\"IPAddress\":\"127.0.0.1\"}},\"'\"$net\"'\":{{\"IPAddress\":\"127.0.0.1\"}}}}}}}}' ;;\nesac\nexit 0\n"
             ),
         )
         .unwrap();
@@ -1524,7 +1631,19 @@ mod tests {
                         wildcard: Some("example.test".into()),
                         https: false,
                         edge_tls: false,
+                        mesh: None,
                     },
+                )
+            })
+            .unwrap();
+        store
+            .with(|c| {
+                crate::apps::set_mesh_ingress(
+                    c,
+                    Some(&crate::apps::MeshIngress {
+                        node: "main".into(),
+                        cidrs: vec!["10.77.0.0/16".into()],
+                    }),
                 )
             })
             .unwrap();
@@ -1604,6 +1723,198 @@ mod tests {
             pr_title: Some("A change".into()),
             ..Enqueue::default()
         }
+    }
+
+    #[tokio::test]
+    async fn deployment_errors_do_not_store_or_publish_secrets_from_log_tails() {
+        use vercelify_core::platform::{EnvVarInput, EnvVarsPut, VarScope};
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let app = image_app(&e);
+        e.store
+            .tx(|c| {
+                env::put(
+                    c,
+                    &e.key,
+                    VarScope::App,
+                    &app.id,
+                    &EnvVarsPut {
+                        vars: vec![EnvVarInput {
+                            key: "TOKEN".into(),
+                            value: "sensitive-runtime-token".into(),
+                            build: None,
+                            preview_only: None,
+                            secret: Some(true),
+                            share_with_previews: None,
+                        }],
+                        replace: false,
+                    },
+                )
+            })
+            .unwrap();
+        std::fs::write(dir.path().join("fail-create"), "failed: token=sensitive-runtime-token").unwrap();
+        tokio::spawn(e.clone().run());
+        let dep = e.enqueue(&app.id, Enqueue::default()).unwrap();
+        until("the failed deployment", || {
+            status(&e, &dep.id) == DeploymentStatus::Failed
+        })
+        .await;
+        let failed = e.store.with(|c| deployments::get(c, &dep.id)).unwrap();
+        assert!(
+            !failed.error.contains("sensitive-runtime-token"),
+            "stored deployment error leaked a secret"
+        );
+        assert!(failed.error.contains("[redacted]"));
+    }
+
+    /// M1 release gate: withholding variables must not leave PR code on the
+    /// network used by production databases. This fixture records Docker
+    /// arguments; a passing result still requires a real network contract.
+    #[tokio::test]
+    async fn preview_does_not_join_the_production_database_network() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let app = image_app(&e);
+        tokio::spawn(e.clone().run());
+        let d = e.enqueue(&app.id, preview(7)).unwrap();
+        until("the preview deployment", || {
+            matches!(status(&e, &d.id), DeploymentStatus::Healthy | DeploymentStatus::Failed)
+        })
+        .await;
+        assert_eq!(status(&e, &d.id), DeploymentStatus::Healthy);
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
+        let create = calls
+            .lines()
+            .find(|line| line.starts_with("create "))
+            .expect("container created");
+        let production_network = deploy::project_network(&app.project_id);
+        assert!(
+            !create.split_whitespace().any(|arg| arg == production_network),
+            "preview joins the production database network {production_network}: {create}"
+        );
+        assert!(
+            !calls
+                .lines()
+                .any(|line| line.starts_with(&format!("network connect {production_network} "))),
+            "preview connects to production after creation: {calls}"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_upgrade_retires_old_previews_before_new_work_and_survives_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let app = image_app(&e);
+        tokio::spawn(e.clone().run());
+        let dep = e.enqueue(&app.id, preview(4)).unwrap();
+        until("the old preview", || status(&e, &dep.id) == DeploymentStatus::Healthy).await;
+        e.store
+            .set_setting("preview_safety_retire", &vec![(app.id.clone(), 4u32)])
+            .unwrap();
+        e.retire_legacy_previews().await.unwrap();
+        assert_eq!(
+            e.store.with(|c| previews::get(c, &app.id, 4)).unwrap().unwrap().status,
+            "closed"
+        );
+        assert!(containers_of(dir.path(), 4).is_empty());
+        let pending: Vec<(String, u32)> = e.store.setting("preview_safety_retire").unwrap().unwrap();
+        assert!(pending.is_empty());
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
+        e.retire_legacy_previews().await.unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("calls")).unwrap(), calls);
+    }
+
+    /// Previews are private by default: this server's mesh name, plain HTTP,
+    /// mesh sources only; none without the mesh. Public ones use the wildcard.
+    #[test]
+    fn preview_hosts_follow_their_access() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let mut app = image_app(&e);
+        let settings = e.store.with(domain_settings).unwrap();
+        let (hosts, url) = hosts_for(&settings, &app, Some(7));
+        assert_eq!(hosts.len(), 1);
+        assert_eq!(hosts[0].host, "pr-7-shop.main.vfy");
+        assert!(!hosts[0].https);
+        assert_eq!(hosts[0].allow_from, ["10.77.0.0/16"]);
+        assert_eq!(url.as_deref(), Some("http://pr-7-shop.main.vfy"));
+        // Production is untouched.
+        assert!(hosts_for(&settings, &app, None)
+            .0
+            .iter()
+            .all(|h| h.allow_from.is_empty()));
+
+        let off_mesh = apps::DomainSettings {
+            mesh: None,
+            ..settings.clone()
+        };
+        assert_eq!(
+            hosts_for(&off_mesh, &app, Some(7)),
+            (vec![], None),
+            "never falls back to public"
+        );
+
+        app.previews.access = PreviewAccess::Public;
+        let (hosts, url) = hosts_for(&settings, &app, Some(7));
+        assert_eq!(hosts[0].host, "pr-7-shop.example.test");
+        assert!(hosts[0].allow_from.is_empty());
+        assert_eq!(url.as_deref(), Some("http://pr-7-shop.example.test"));
+    }
+
+    /// An image app with no port set listens where its one TCP `EXPOSE` says
+    /// (whoami: 80, not the old default 3000 that failed after minutes);
+    /// several or none stop at once with what to do; a set port wins.
+    #[tokio::test]
+    async fn an_image_apps_port_comes_from_its_expose() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let app = image_app(&e);
+        tokio::spawn(e.clone().run());
+        let run = |e: &Arc<Engine>| e.enqueue(&app.id, Enqueue::default()).unwrap();
+        let done = |e: &Engine, id: &str| matches!(status(e, id), DeploymentStatus::Healthy | DeploymentStatus::Failed);
+
+        let d = run(&e);
+        until("the first deployment", || done(&e, &d.id)).await;
+        assert_eq!(status(&e, &d.id), DeploymentStatus::Healthy);
+        assert_eq!(e.store.with(|c| deployments::built_info(c, &d.id)).unwrap().0, Some(80));
+        let route = std::fs::read_to_string(
+            e.deployer
+                .proxy
+                .dynamic_dir()
+                .join(crate::proxy::base_file(&deploy::route_key("shop", None))),
+        )
+        .unwrap();
+        assert!(route.contains(":80\""), "the proxy sends to port 80: {route}");
+
+        std::fs::write(dir.path().join("exposed"), r#"{"80/tcp":{},"443/tcp":{},"53/udp":{}}"#).unwrap();
+        let d = run(&e);
+        until("the second deployment", || done(&e, &d.id)).await;
+        let failed = e.store.with(|c| deployments::get(c, &d.id)).unwrap();
+        assert_eq!(failed.status, DeploymentStatus::Failed);
+        assert!(failed.error.contains("several ports (80, 443)"), "{}", failed.error);
+
+        std::fs::write(dir.path().join("exposed"), "null").unwrap();
+        let d = run(&e);
+        until("the third deployment", || done(&e, &d.id)).await;
+        let failed = e.store.with(|c| deployments::get(c, &d.id)).unwrap();
+        assert!(failed.error.contains("no EXPOSE"), "{}", failed.error);
+
+        // A set port wins, and the image isn't asked.
+        e.store
+            .tx(|c| {
+                let mut patch = vercelify_core::platform::AppPatch::default();
+                let mut rt = app.runtime.clone();
+                rt.port = Some(8080);
+                patch.runtime = Some(rt);
+                apps::patch(c, &app.id, &patch)
+            })
+            .unwrap();
+        std::fs::write(dir.path().join("calls"), "").unwrap();
+        let d = run(&e);
+        until("the fourth deployment", || done(&e, &d.id)).await;
+        assert_eq!(status(&e, &d.id), DeploymentStatus::Healthy);
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert!(!calls.contains("ExposedPorts"), "{calls}");
     }
 
     /// Closing a pull request while its preview deployment is creating its

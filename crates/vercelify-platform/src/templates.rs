@@ -312,6 +312,7 @@ pub fn create(c: &Connection, key: &MasterKey, id: &str, req: &TemplateCreate) -
                         build: None,
                         preview_only: None,
                         secret: Some(true),
+                        share_with_previews: None,
                     })
                     .collect(),
                 replace: false,

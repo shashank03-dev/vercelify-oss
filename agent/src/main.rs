@@ -281,6 +281,7 @@ async fn serve(cfg: Config) {
         // Databases' public ports listen on the private network only.
         let private = mesh::private_ipv4(&state.config);
         p.engine.set_private_ip(private);
+        platform_api::record_mesh_ingress(p, &state.config);
         // Tests run with the background loops off (watch interval 0).
         let every = if state.config.watch_interval_secs == 0 { 0 } else { 30 };
         p.spawn(Duration::from_secs(every));

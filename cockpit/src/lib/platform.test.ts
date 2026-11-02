@@ -13,7 +13,7 @@ const app = (over: Partial<App> = {}): App => ({
   source: { repository: "https://github.com/me/shop", branch: "main", git_source_id: null, image: null, compose_file: null, compose_content: null, pinned_sha: null },
   build: { pack: "auto", dockerfile: null, context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] },
   runtime: { port: null, command: null, replicas: 1, memory_mb: null, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, service: null, failover: false },
-  previews: { enabled: true, max: 3 },
+  previews: { enabled: true, max: 3, access: "private" },
   node_id: null,
   desired: "running",
   current_deployment_id: "dep_1",

@@ -107,13 +107,23 @@ pub async fn wait_healthy(w: Wait<'_>, log: &mut (dyn FnMut(&str) + Send)) -> Re
         if let Some(why) = gave_up(&i) {
             return Err(Error::Invalid(why));
         }
-        let ip = i.ips.get(w.network).cloned().unwrap_or_default();
+        let network = i
+            .ips
+            .keys()
+            .find(|n| n.starts_with(crate::preview_network::PREFIX))
+            .map_or(w.network, String::as_str);
+        let isolated = network.starts_with(crate::preview_network::PREFIX);
+        let ip = i.ips.get(network).cloned().unwrap_or_default();
         let ok = if ip.is_empty() {
             last = format!("no address on {}", w.network);
             false
         } else {
             match &w.probe {
-                Probe::Http { path } => match http_status(&ip, w.port, path, Duration::from_secs(5)).await {
+                Probe::Http { path } => match if isolated {
+                    proxy_http_status(w.docker, &ip, w.port, path).await
+                } else {
+                    http_status(&ip, w.port, path, Duration::from_secs(5)).await
+                } {
                     Ok(code) if code < 500 => true,
                     Ok(code) => {
                         last = format!("GET {path} answered {code}");
@@ -125,7 +135,18 @@ pub async fn wait_healthy(w: Wait<'_>, log: &mut (dyn FnMut(&str) + Send)) -> Re
                     }
                 },
                 Probe::Tcp => {
-                    let open = tcp_open(&ip, w.port, Duration::from_secs(3)).await;
+                    let open = if isolated {
+                        w.docker
+                            .exec(
+                                crate::proxy::CONTAINER,
+                                &crate::proc::args(&["nc", "-z", "-w", "3", &ip, &w.port.to_string()]),
+                                Duration::from_secs(5),
+                            )
+                            .await?
+                            .success()
+                    } else {
+                        tcp_open(&ip, w.port, Duration::from_secs(3)).await
+                    };
                     if !open {
                         last = format!("nothing listens on port {}", w.port);
                     }
@@ -160,6 +181,29 @@ pub async fn wait_healthy(w: Wait<'_>, log: &mut (dyn FnMut(&str) + Send)) -> Re
         }
         tokio::time::sleep(w.interval).await;
     }
+}
+
+/// The isolated bridge has no host address: probe from the ingress proxy,
+/// without mounting sockets or adding a host route into the preview.
+async fn proxy_http_status(docker: &Docker, ip: &str, port: u16, path: &str) -> std::result::Result<u16, String> {
+    let url = format!("http://{ip}:{port}{path}");
+    let out = docker
+        .exec(
+            crate::proxy::CONTAINER,
+            &crate::proc::args(&["wget", "-S", "-O", "/dev/null", "-T", "5", &url]),
+            Duration::from_secs(7),
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    out.stderr
+        .lines()
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            words.next().filter(|s| s.starts_with("HTTP/"))?;
+            words.next()?.parse::<u16>().ok()
+        })
+        .next()
+        .ok_or_else(|| "preview HTTP probe received no status".into())
 }
 
 #[cfg(test)]

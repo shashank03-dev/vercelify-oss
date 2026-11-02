@@ -20,12 +20,43 @@ pub struct DomainSettings {
     pub https: bool,
     /// TLS ends at Cloudflare (tunnel mode).
     pub edge_tls: bool,
+    /// Where private previews are served: this server on the mesh. Not part
+    /// of the saved domain settings; the agent records it ([`set_mesh_ingress`]).
+    #[serde(skip)]
+    pub mesh: Option<MeshIngress>,
+}
+
+/// This server's place on the mesh (design §9.1): its node name, for
+/// `<host>.<node>.vfy`, and the mesh's address ranges, the only sources a
+/// private preview answers.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct MeshIngress {
+    pub node: String,
+    pub cidrs: Vec<String>,
 }
 
 pub const DOMAIN_SETTING: &str = "domain";
+pub const MESH_INGRESS_SETTING: &str = "mesh_ingress";
 
 pub fn domain_settings(c: &Connection) -> Result<DomainSettings> {
-    Ok(get_setting(c, DOMAIN_SETTING)?.unwrap_or_default())
+    let mut s: DomainSettings = get_setting(c, DOMAIN_SETTING)?.unwrap_or_default();
+    s.mesh = get_setting::<MeshIngress>(c, MESH_INGRESS_SETTING)
+        .ok()
+        .flatten()
+        .filter(|m| !m.node.is_empty() && !m.cidrs.is_empty());
+    Ok(s)
+}
+
+/// Record (or, with None, forget) where private previews are served.
+/// Returns whether it changed.
+pub fn set_mesh_ingress(c: &Connection, m: Option<&MeshIngress>) -> Result<bool> {
+    let new = m.cloned().unwrap_or_default();
+    let old: MeshIngress = get_setting(c, MESH_INGRESS_SETTING).ok().flatten().unwrap_or_default();
+    if old == new {
+        return Ok(false);
+    }
+    crate::store::put_setting(c, MESH_INGRESS_SETTING, &new)?;
+    Ok(true)
 }
 
 fn json<T: Serialize>(v: &T) -> String {
@@ -347,7 +378,7 @@ pub fn create(c: &Connection, req: &AppCreate) -> Result<App> {
     check_runtime(&runtime)?;
     let previews = req.previews.clone().unwrap_or(PreviewSettings {
         enabled: req.kind == AppKind::Git,
-        max: 3,
+        ..PreviewSettings::default()
     });
     check_previews(&previews)?;
     let node = check_node(c, req.node_id.as_deref())?;
@@ -670,6 +701,7 @@ pub(crate) mod tests {
                     wildcard: Some("example.com".into()),
                     https: true,
                     edge_tls: false,
+                    mesh: None,
                 },
             )
         })
@@ -1022,6 +1054,7 @@ pub(crate) mod tests {
                     wildcard: Some("example.com".into()),
                     https: true,
                     edge_tls: true,
+                    mesh: None,
                 },
             )
         })

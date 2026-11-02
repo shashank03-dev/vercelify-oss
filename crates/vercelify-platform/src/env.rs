@@ -1,13 +1,16 @@
 //! Environment variables at three levels: project, environment, app. Values
 //! are sealed (design §5); a deployment sees the merge, app over environment
-//! over project, with preview-only values winning in previews.
+//! over project. Previews (design §5.1) get preview-only values, which win,
+//! and only the normal values shared with them on purpose: pull-request code
+//! never reads a production value by default, and a shared value that points
+//! at a production database stops a preview instead of being used.
 
 use crate::ids::new_id;
 use crate::secrets::{aad, MasterKey};
 use crate::{now, validate, Error, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::BTreeMap;
-use vercelify_core::platform::{EnvVar, EnvVarsPut, VarScope};
+use vercelify_core::platform::{EffectiveVar, EnvProvenance, EnvVar, EnvVarsPut, VarOrigin, VarScope, WithheldVar};
 use zeroize::Zeroizing;
 
 pub const MAX_VARS_PER_SCOPE: usize = 500;
@@ -34,7 +37,7 @@ fn scope_exists(c: &Connection, scope: VarScope, id: &str) -> Result<()> {
 pub fn list(c: &Connection, key: &MasterKey, scope: VarScope, scope_id: &str, reveal: bool) -> Result<Vec<EnvVar>> {
     scope_exists(c, scope, scope_id)?;
     let mut st = c.prepare(
-        "SELECT id, key, value, build, preview_only, secret, updated_at FROM env_vars
+        "SELECT id, key, value, build, preview_only, secret, updated_at, share_with_previews FROM env_vars
          WHERE scope = ?1 AND scope_id = ?2 ORDER BY key, preview_only",
     )?;
     let mut rows = st.query(params![scope.as_str(), scope_id])?;
@@ -53,6 +56,7 @@ pub fn list(c: &Connection, key: &MasterKey, scope: VarScope, scope_id: &str, re
             value,
             build: r.get(3)?,
             preview_only: r.get(4)?,
+            share_with_previews: r.get(7)?,
             secret,
             scope,
             updated_at: r.get(6)?,
@@ -87,16 +91,21 @@ pub fn put(c: &Connection, key: &MasterKey, scope: VarScope, scope_id: &str, req
             .optional()?;
         let id = existing.clone().unwrap_or_else(|| new_id("var"));
         let sealed = key.seal_str(&seal_aad(&id), &v.value);
+        // Sharing is a property of a normal value; a preview-only one is the
+        // preview's already.
+        let share = if preview { Some(false) } else { v.share_with_previews };
         if existing.is_some() {
             c.execute(
-                "UPDATE env_vars SET value = ?2, build = coalesce(?3, build), secret = coalesce(?4, secret), updated_at = ?5
+                "UPDATE env_vars SET value = ?2, build = coalesce(?3, build), secret = coalesce(?4, secret),
+                 share_with_previews = coalesce(?6, share_with_previews), updated_at = ?5
                  WHERE id = ?1",
-                params![id, sealed, v.build, v.secret, t],
+                params![id, sealed, v.build, v.secret, t, share],
             )?;
         } else {
             c.execute(
-                "INSERT INTO env_vars (id, scope, scope_id, key, value, build, preview_only, secret, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?9)",
+                "INSERT INTO env_vars (id, scope, scope_id, key, value, build, preview_only, secret, share_with_previews,
+                 created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?10)",
                 params![
                     id,
                     scope.as_str(),
@@ -106,6 +115,7 @@ pub fn put(c: &Connection, key: &MasterKey, scope: VarScope, scope_id: &str, req
                     v.build.unwrap_or(false),
                     preview,
                     v.secret.unwrap_or(true),
+                    share.unwrap_or(false),
                     t
                 ],
             )?;
@@ -153,6 +163,20 @@ pub fn delete(c: &Connection, scope: VarScope, scope_id: &str, key: &str, previe
     Ok(())
 }
 
+/// Share a normal value with previews, or stop sharing it, without
+/// touching its value (a hidden secret needn't be sent again).
+pub fn set_sharing(c: &Connection, scope: VarScope, scope_id: &str, key: &str, share: bool) -> Result<()> {
+    let n = c.execute(
+        "UPDATE env_vars SET share_with_previews = ?4, updated_at = ?5
+         WHERE scope = ?1 AND scope_id = ?2 AND key = ?3 AND preview_only = 0",
+        params![scope.as_str(), scope_id, key, share, now()],
+    )?;
+    if n == 0 {
+        return Err(Error::not_found(format!("variable {key}")));
+    }
+    Ok(())
+}
+
 /// The app's environment and project ids.
 fn parents(c: &Connection, app_id: &str) -> Result<(String, String)> {
     c.query_row(
@@ -191,40 +215,109 @@ pub fn effective(c: &Connection, key: &MasterKey, app_id: &str, reveal: bool) ->
 pub struct Resolved {
     pub value: Zeroizing<String>,
     pub build: bool,
+    /// Hidden in logs (`logs::Redactor`).
+    pub secret: bool,
+    pub scope: VarScope,
+    pub origin: VarOrigin,
 }
 
-/// The merged variables for an app: project < environment < app. In a
-/// preview, preview-only values (again project < environment < app) are
-/// applied after all normal ones, so any preview-only value wins.
-pub fn resolve(c: &Connection, key: &MasterKey, app_id: &str, preview: bool) -> Result<BTreeMap<String, Resolved>> {
+/// What a deployment gets, and (in a preview) what it was denied.
+#[derive(Default)]
+pub struct Resolution {
+    pub vars: BTreeMap<String, Resolved>,
+    /// Normal values a preview goes without (not shared), by key.
+    pub withheld: BTreeMap<String, VarScope>,
+}
+
+/// The merged variables for an app: project < environment < app. A preview
+/// gets the normal values shared with previews, then preview-only values
+/// (again project < environment < app) on top, so any preview-only value
+/// wins; every other normal value is withheld.
+pub fn resolve_all(c: &Connection, key: &MasterKey, app_id: &str, preview: bool) -> Result<Resolution> {
     let (env_id, project_id) = parents(c, app_id)?;
-    let mut out = BTreeMap::new();
+    let mut out = Resolution::default();
     let mut st = c.prepare(
-        "SELECT id, key, value, build FROM env_vars
+        "SELECT id, key, value, build, secret, share_with_previews FROM env_vars
          WHERE scope = ?1 AND scope_id = ?2 AND preview_only = ?3",
     )?;
-    let app_id = app_id.to_string();
-    let levels = [("project", &project_id), ("environment", &env_id), ("app", &app_id)];
+    let levels = [
+        (VarScope::Project, project_id.as_str()),
+        (VarScope::Environment, env_id.as_str()),
+        (VarScope::App, app_id),
+    ];
     let groups: &[bool] = if preview { &[false, true] } else { &[false] };
-    for (preview_only, (scope, id)) in groups.iter().flat_map(|g| levels.iter().map(move |l| (g, l))) {
-        let mut rows = st.query(params![scope, id, preview_only])?;
-        while let Some(r) = rows.next()? {
-            let vid: String = r.get(0)?;
-            let sealed: Vec<u8> = r.get(2)?;
-            out.insert(
-                r.get::<_, String>(1)?,
-                Resolved {
-                    value: key.open_string(&seal_aad(&vid), &sealed)?,
-                    build: r.get(3)?,
-                },
-            );
+    for &preview_only in groups {
+        for (scope, id) in levels {
+            let mut rows = st.query(params![scope.as_str(), id, preview_only])?;
+            while let Some(r) = rows.next()? {
+                let k: String = r.get(1)?;
+                let shared: bool = r.get(5)?;
+                let origin = match (preview_only, shared) {
+                    (true, _) => VarOrigin::PreviewOnly,
+                    (false, true) => VarOrigin::Shared,
+                    (false, false) => VarOrigin::Production,
+                };
+                if preview && origin == VarOrigin::Production {
+                    // A more specific level that isn't shared hides a less
+                    // specific shared one too: production's value is the
+                    // app's, and that one is production-only.
+                    out.vars.remove(&k);
+                    out.withheld.insert(k, scope);
+                    continue;
+                }
+                let vid: String = r.get(0)?;
+                let sealed: Vec<u8> = r.get(2)?;
+                out.withheld.remove(&k);
+                out.vars.insert(
+                    k,
+                    Resolved {
+                        value: key.open_string(&seal_aad(&vid), &sealed)?,
+                        build: r.get(3)?,
+                        secret: r.get(4)?,
+                        scope,
+                        origin,
+                    },
+                );
+            }
         }
     }
     Ok(out)
 }
 
-/// [`resolve`], with database references (`${{db.<name>.url}}`) filled in:
-/// what a deployment actually gets.
+/// [`resolve_all`]'s variables.
+pub fn resolve(c: &Connection, key: &MasterKey, app_id: &str, preview: bool) -> Result<BTreeMap<String, Resolved>> {
+    Ok(resolve_all(c, key, app_id, preview)?.vars)
+}
+
+fn database_reference(value: &str) -> bool {
+    value.contains("${{db.")
+}
+
+/// A preview may not use a production database through a shared value
+/// (design §5.1): checked before any reference is filled in, for build and
+/// runtime alike. Platform DB references currently name production services;
+/// preview-only scope is not permission to resolve those credentials.
+fn check_preview(vars: &BTreeMap<String, Resolved>) -> Result<()> {
+    let blocked: Vec<&str> = vars
+        .iter()
+        .filter(|(_, v)| database_reference(&v.value))
+        .map(|(k, _)| k.as_str())
+        .collect();
+    if blocked.is_empty() {
+        return Ok(());
+    }
+    Err(Error::Invalid(format!(
+        "{} {} a production database, which previews can't use: give {} a preview-only value \
+         value for an isolated database (not a platform production DB reference), or remove {}",
+        blocked.join(", "),
+        if blocked.len() == 1 { "points at" } else { "point at" },
+        if blocked.len() == 1 { "it" } else { "each" },
+        if blocked.len() == 1 { "it" } else { "them" },
+    )))
+}
+
+/// [`resolve_all`], with database references (`${{db.<name>.url}}`) filled
+/// in: what a deployment actually gets.
 ///
 /// `main_ip`: the main server's mesh address, for an app on another server
 /// (the databases' public ports are used then).
@@ -234,16 +327,68 @@ pub fn resolve_for_deploy(
     app_id: &str,
     preview: bool,
     main_ip: Option<&str>,
-) -> Result<BTreeMap<String, Resolved>> {
-    let mut vars = resolve(c, key, app_id, preview)?;
-    for (k, v) in vars.iter_mut() {
-        if v.value.contains("${{db.") {
+) -> Result<Resolution> {
+    let mut res = resolve_all(c, key, app_id, preview)?;
+    if preview {
+        check_preview(&res.vars)?;
+    }
+    for (k, v) in res.vars.iter_mut() {
+        if database_reference(&v.value) {
             let filled = crate::databases::resolve_references_at(c, key, &v.value, main_ip)
                 .map_err(|e| Error::Invalid(format!("{k}: {}", e.message())))?;
             v.value = Zeroizing::new(filled);
+            // A filled reference carries a password.
+            v.secret = true;
         }
     }
-    Ok(vars)
+    Ok(res)
+}
+
+/// Where each variable of production and of previews comes from, and what
+/// previews go without. Never values.
+pub fn provenance(c: &Connection, key: &MasterKey, app_id: &str) -> Result<EnvProvenance> {
+    let effective = |res: &Resolution| -> Vec<EffectiveVar> {
+        res.vars
+            .iter()
+            .map(|(k, v)| EffectiveVar {
+                key: k.clone(),
+                scope: v.scope,
+                origin: v.origin,
+                build: v.build,
+                secret: v.secret,
+                database_reference: database_reference(&v.value),
+            })
+            .collect()
+    };
+    let prod = resolve_all(c, key, app_id, false)?;
+    let preview = resolve_all(c, key, app_id, true)?;
+    let mut withheld: Vec<WithheldVar> = preview
+        .withheld
+        .iter()
+        .map(|(k, scope)| WithheldVar {
+            key: k.clone(),
+            scope: *scope,
+            reason: "production_only".into(),
+        })
+        .collect();
+    let mut preview_vars = effective(&preview);
+    preview_vars.retain(|v| {
+        let blocked = v.database_reference;
+        if blocked {
+            withheld.push(WithheldVar {
+                key: v.key.clone(),
+                scope: v.scope,
+                reason: "production_database".into(),
+            });
+        }
+        !blocked
+    });
+    withheld.sort_by(|a, b| a.key.cmp(&b.key));
+    Ok(EnvProvenance {
+        production: effective(&prod),
+        preview: preview_vars,
+        withheld,
+    })
 }
 
 /// Parse a `.env` file: `KEY=value`, `export KEY=value`, quotes, comments.
@@ -366,6 +511,34 @@ fn unescape(s: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn preview_only_cannot_resolve_production_database_credentials() {
+        let (s, app, _, _) = setup();
+        let k = key();
+        s.tx(|c| {
+            put(
+                c,
+                &k,
+                VarScope::App,
+                &app,
+                &EnvVarsPut {
+                    vars: vec![EnvVarInput {
+                        preview_only: Some(true),
+                        ..input("DATABASE_URL", "${{db.prod.url}}")
+                    }],
+                    replace: false,
+                },
+            )
+        })
+        .unwrap();
+        let err = s
+            .with(|c| resolve_for_deploy(c, &k, &app, true, None))
+            .err()
+            .expect("production DB reference refused before lookup");
+        assert!(err.to_string().contains("production database"), "{err}");
+        let provenance = s.with(|c| provenance(c, &k, &app)).unwrap();
+        assert!(provenance.preview.iter().all(|v| v.key != "DATABASE_URL"));
+    }
     use super::*;
     use crate::apps;
     use crate::Store;
@@ -382,6 +555,7 @@ mod tests {
             build: None,
             preview_only: None,
             secret: None,
+            share_with_previews: None,
         }
     }
 
@@ -516,9 +690,186 @@ mod tests {
         assert_eq!(get(&prod, "B"), "env");
         assert_eq!(get(&prod, "C"), "app");
         assert!(prod["D"].build);
+        let preview = s.with(|c| resolve_all(c, &k, &app, true)).unwrap();
+        assert_eq!(get(&preview.vars, "A"), "app-preview");
+        assert!(!preview.vars.contains_key("B"), "not shared: production-only");
+        assert_eq!(
+            preview.withheld.keys().collect::<Vec<_>>(),
+            ["B", "C", "D"],
+            "previews say what they go without"
+        );
+    }
+
+    /// Design §5.1: previews get normal values only when shared on purpose,
+    /// a production database never, and existing variables (migration 0007)
+    /// start production-only.
+    #[test]
+    fn previews_get_only_what_is_shared() {
+        let (s, app, env, project) = setup();
+        let k = key();
+        let set = |scope, id: &str, vars: Vec<EnvVarInput>| {
+            s.tx(|c| put(c, &k, scope, id, &EnvVarsPut { vars, replace: false }))
+                .unwrap();
+        };
+        let shared = |k: &str, v: &str| EnvVarInput {
+            share_with_previews: Some(true),
+            secret: Some(false),
+            ..input(k, v)
+        };
+        set(
+            VarScope::Project,
+            &project,
+            vec![
+                shared("NEXT_PUBLIC_SITE", "https://example.test"),
+                shared("API_URL", "https://api"),
+                input("STRIPE_KEY", "sk_live_123456"),
+            ],
+        );
+        set(
+            VarScope::Environment,
+            &env,
+            vec![
+                shared("DATABASE_URL", "${{db.main.url}}"),
+                EnvVarInput {
+                    preview_only: Some(true),
+                    share_with_previews: Some(true),
+                    ..input("FEATURE", "on")
+                },
+            ],
+        );
+        // The app's own API_URL isn't shared: it hides the project's shared one.
+        set(VarScope::App, &app, vec![input("API_URL", "https://app-api")]);
+
+        let prod = s.with(|c| resolve_all(c, &k, &app, false)).unwrap();
+        assert_eq!(prod.vars.len(), 4, "production gets every normal value");
+        assert!(prod.withheld.is_empty());
+        let preview = s.with(|c| resolve_all(c, &k, &app, true)).unwrap();
+        let got: Vec<(&str, VarOrigin)> = preview.vars.iter().map(|(k, v)| (k.as_str(), v.origin)).collect();
+        assert_eq!(
+            got,
+            [
+                ("DATABASE_URL", VarOrigin::Shared),
+                ("FEATURE", VarOrigin::PreviewOnly),
+                ("NEXT_PUBLIC_SITE", VarOrigin::Shared),
+            ]
+        );
+        assert_eq!(preview.withheld.keys().collect::<Vec<_>>(), ["API_URL", "STRIPE_KEY"]);
+        // A preview-only value is never "shared" (it is the preview's).
+        let listed = s.with(|c| list(c, &k, VarScope::Environment, &env, false)).unwrap();
+        assert!(listed.iter().all(|v| !(v.preview_only && v.share_with_previews)));
+
+        // The shared database reference stops the preview before anything is
+        // filled in, with what to do; production fills it as before.
+        let err = s
+            .with(|c| resolve_for_deploy(c, &k, &app, true, None))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(err.contains("DATABASE_URL points at a production database"), "{err}");
+        assert!(err.contains("preview-only value"), "{err}");
+        let prod_err = s.with(|c| resolve_for_deploy(c, &k, &app, false, None)).err().unwrap();
+        assert!(
+            !prod_err.to_string().contains("production database"),
+            "production resolves references as before: {prod_err}"
+        );
+
+        // Provenance: no values, the withheld keys and why.
+        let p = s.with(|c| provenance(c, &k, &app)).unwrap();
+        let withheld: Vec<(&str, &str)> = p.withheld.iter().map(|w| (w.key.as_str(), w.reason.as_str())).collect();
+        assert_eq!(
+            withheld,
+            [
+                ("API_URL", "production_only"),
+                ("DATABASE_URL", "production_database"),
+                ("STRIPE_KEY", "production_only")
+            ]
+        );
+        assert_eq!(
+            p.preview.iter().map(|v| v.key.as_str()).collect::<Vec<_>>(),
+            ["FEATURE", "NEXT_PUBLIC_SITE"]
+        );
+        assert!(p
+            .production
+            .iter()
+            .any(|v| v.key == "DATABASE_URL" && v.database_reference));
+        let json = serde_json::to_string(&p).unwrap();
+        assert!(
+            !json.contains("sk_live") && !json.contains("example.test"),
+            "never values"
+        );
+
+        s.tx(|c| set_sharing(c, VarScope::Project, &project, "STRIPE_KEY", true))
+            .unwrap();
+        assert!(s
+            .with(|c| resolve(c, &k, &app, true))
+            .unwrap()
+            .contains_key("STRIPE_KEY"));
+        s.tx(|c| set_sharing(c, VarScope::Project, &project, "STRIPE_KEY", false))
+            .unwrap();
+        assert!(matches!(
+            s.tx(|c| set_sharing(c, VarScope::Project, &project, "NOPE", true)),
+            Err(Error::NotFound(_))
+        ));
+
+        // Unsharing and replacing keep the flag where it was not given.
+        set(
+            VarScope::Project,
+            &project,
+            vec![input("NEXT_PUBLIC_SITE", "https://new.test")],
+        );
         let preview = s.with(|c| resolve(c, &k, &app, true)).unwrap();
-        assert_eq!(get(&preview, "A"), "app-preview");
-        assert_eq!(get(&preview, "B"), "env");
+        assert_eq!(
+            preview["NEXT_PUBLIC_SITE"].value.as_str(),
+            "https://new.test",
+            "still shared"
+        );
+        set(
+            VarScope::Project,
+            &project,
+            vec![EnvVarInput {
+                share_with_previews: Some(false),
+                ..input("NEXT_PUBLIC_SITE", "https://new.test")
+            }],
+        );
+        assert!(!s
+            .with(|c| resolve(c, &k, &app, true))
+            .unwrap()
+            .contains_key("NEXT_PUBLIC_SITE"));
+    }
+
+    /// Rows written before migration 0007 read as production-only.
+    #[test]
+    fn existing_variables_become_production_only() {
+        let (s, app, _, _) = setup();
+        let k = key();
+        s.tx(|c| {
+            put(
+                c,
+                &k,
+                VarScope::App,
+                &app,
+                &EnvVarsPut {
+                    vars: vec![input("TOKEN", "abcdef")],
+                    replace: false,
+                },
+            )
+        })
+        .unwrap();
+        s.with(|c| {
+            assert_eq!(
+                c.query_row(
+                    "SELECT dflt_value FROM pragma_table_info('env_vars') WHERE name = 'share_with_previews'",
+                    [],
+                    |r| r.get::<_, String>(0)
+                )?,
+                "0"
+            );
+            Ok(())
+        })
+        .unwrap();
+        let r = s.with(|c| resolve_all(c, &k, &app, true)).unwrap();
+        assert!(r.vars.is_empty());
+        assert!(r.withheld.contains_key("TOKEN"));
     }
 
     #[test]

@@ -97,17 +97,23 @@ pub fn requests_per_key(counts: &HashMap<String, f64>) -> HashMap<String, f64> {
     out
 }
 
+/// A host of a sleeping app or preview: (https, host, allowed sources).
+pub type WakeHost = (bool, String, Vec<String>);
+
 /// Traefik dynamic configuration: requests for these hosts reach the wake
-/// listener when the app's own (higher priority) route is gone.
-pub fn dynamic_config_for(hosts: &[(bool, String)], wake_url: &str) -> Option<String> {
+/// listener when the app's own (higher priority) route is gone. Mesh-only
+/// hosts (private previews) get their own router behind the same source
+/// check as their route: a visit from outside neither wakes nor reaches them.
+pub fn dynamic_config_for(hosts: &[WakeHost], wake_url: &str) -> Option<String> {
     if hosts.is_empty() {
         return None;
     }
-    let rule = |https: bool| {
+    let (private, public): (Vec<&WakeHost>, Vec<&WakeHost>) = hosts.iter().partition(|(_, _, a)| !a.is_empty());
+    let rule = |hosts: &[&WakeHost], https: bool| {
         let mut hs: Vec<&str> = hosts
             .iter()
-            .filter(|(h, _)| *h == https || !https)
-            .map(|(_, h)| h.as_str())
+            .filter(|(h, _, _)| *h == https || !https)
+            .map(|(_, h, _)| h.as_str())
             .collect();
         hs.sort_unstable();
         hs.dedup();
@@ -117,16 +123,34 @@ pub fn dynamic_config_for(hosts: &[(bool, String)], wake_url: &str) -> Option<St
             .join(" || ")
     };
     let mut y = String::from("# Written by vercelify-agent (sleeping apps). Do not edit.\nhttp:\n  routers:\n");
-    y.push_str(&format!(
-        "    vercelify-wake-http:\n      rule: \"{}\"\n      entryPoints: [web]\n      service: vercelify-wake\n      priority: 1\n",
-        rule(false),
-    ));
-    if hosts.iter().any(|(https, _)| *https) {
+    if !public.is_empty() {
+        y.push_str(&format!(
+            "    vercelify-wake-http:\n      rule: \"{}\"\n      entryPoints: [web]\n      service: vercelify-wake\n      priority: 1\n",
+            rule(&public, false),
+        ));
+    }
+    if public.iter().any(|(https, _, _)| *https) {
         y.push_str(&format!(
             "    vercelify-wake-https:\n      rule: \"{}\"\n      entryPoints: [websecure]\n      service: vercelify-wake\n      priority: 1\n      tls:\n        certResolver: {}\n",
-            rule(true),
+            rule(&public, true),
             vercelify_platform::proxy::RESOLVER
         ));
+    }
+    let mut ranges: Vec<&str> = private
+        .iter()
+        .flat_map(|(_, _, a)| a.iter().map(String::as_str))
+        .collect();
+    ranges.sort_unstable();
+    ranges.dedup();
+    if !private.is_empty() {
+        y.push_str(&format!(
+            "    vercelify-wake-private:\n      rule: \"{}\"\n      entryPoints: [web]\n      service: vercelify-wake\n      priority: 1\n      middlewares:\n        - vercelify-wake-private\n",
+            rule(&private, false),
+        ));
+        y.push_str("  middlewares:\n    vercelify-wake-private:\n      ipAllowList:\n        sourceRange:\n");
+        for r in &ranges {
+            y.push_str(&format!("          - \"{r}\"\n"));
+        }
     }
     y.push_str(&format!(
         "  services:\n    vercelify-wake:\n      loadBalancer:\n        servers:\n          - url: \"{wake_url}\"\n"
@@ -181,7 +205,7 @@ struct Target {
     key: String,
     app_uuid: String,
     pr: u64,
-    hosts: Vec<(bool, String)>,
+    hosts: Vec<WakeHost>,
     idle: Duration,
 }
 
@@ -276,12 +300,12 @@ impl Sleep {
             for app in vercelify_platform::apps::list(c, None)? {
                 let Some(s) = by_id.get(app.id.as_str()) else { continue };
                 let idle = Duration::from_secs(u64::from(s.idle_minutes) * minute());
-                let hosts_of_route = |pr: Option<u32>| -> Vec<(bool, String)> {
+                let hosts_of_route = |pr: Option<u32>| -> Vec<WakeHost> {
                     vercelify_platform::engine::hosts_for(&domain, &app, pr)
                         .0
                         .into_iter()
                         .filter(|h| h.redirect_to.is_none())
-                        .map(|h| (h.https, h.host))
+                        .map(|h| (h.https, h.host, h.allow_from))
                         .collect()
                 };
                 if app.current_deployment_id.is_some() && app.desired != vercelify_core::platform::Desired::Stopped {
@@ -350,7 +374,7 @@ impl Sleep {
                     key: t.key.clone(),
                     app_uuid: t.app_uuid.clone(),
                     pull_request_id: t.pr,
-                    hosts: t.hosts.iter().map(|(_, h)| h.clone()).collect(),
+                    hosts: t.hosts.iter().map(|(_, h, _)| h.clone()).collect(),
                     state: if waking.contains(&t.key) {
                         "waking"
                     } else if store.asleep.contains_key(&t.key) {
@@ -484,7 +508,7 @@ impl Sleep {
         let dir = self.cfg.proxy_dir.join("dynamic");
         let path = dir.join(DYNAMIC_FILE);
         let wake_port = self.cfg.wake_listen.rsplit(':').next().unwrap_or("7421");
-        let hosts: Vec<(bool, String)> = targets.iter().flat_map(|t| t.hosts.clone()).collect();
+        let hosts: Vec<WakeHost> = targets.iter().flat_map(|t| t.hosts.clone()).collect();
         match dynamic_config_for(&hosts, &format!("http://host.docker.internal:{wake_port}")) {
             Some(y) => {
                 if std::fs::read_to_string(&path).ok().as_deref() != Some(y.as_str()) && dir.is_dir() {
@@ -585,7 +609,7 @@ impl Sleep {
             "sleep",
             format!(
                 "{} went to sleep",
-                t.hosts.first().map_or(t.key.as_str(), |(_, h)| h.as_str())
+                t.hosts.first().map_or(t.key.as_str(), |(_, h, _)| h.as_str())
             ),
             Some(&t.app_uuid),
         );
@@ -669,7 +693,7 @@ impl Sleep {
             .lock()
             .await
             .iter()
-            .find(|t| t.hosts.iter().any(|(_, h)| h == host))
+            .find(|t| t.hosts.iter().any(|(_, h, _)| h == host))
             .map(|t| t.key.clone())
     }
 
@@ -778,7 +802,7 @@ traefik_entrypoint_requests_total{code="200",entrypoint="web"} 99
         assert_eq!(router_key("vfy-blog-pr-7-0-secure@file"), Some("blog-pr-7"));
         assert_eq!(router_key("vercelify-wake-http@file"), None);
         assert_eq!(router_key("vfy-blog@file"), None);
-        let y = dynamic_config_for(&[(true, "a.test".into())], "http://h:1").unwrap();
+        let y = dynamic_config_for(&[(true, "a.test".into(), vec![])], "http://h:1").unwrap();
         assert!(y.contains("entryPoints: [web]") && y.contains("entryPoints: [websecure]"));
         assert!(y.contains("certResolver: le\n"));
     }
@@ -795,15 +819,51 @@ traefik_entrypoint_requests_total{code="200",entrypoint="web"} 99
     #[test]
     fn wake_routes_only_add_https_where_used() {
         assert_eq!(dynamic_config_for(&[], "http://h:7421"), None);
-        let y = dynamic_config_for(&[(false, "a.test".into())], "http://host.docker.internal:7421").unwrap();
+        let y = dynamic_config_for(&[(false, "a.test".into(), vec![])], "http://host.docker.internal:7421").unwrap();
         assert!(y.contains("rule: \"Host(`a.test`)\""));
         assert!(y.contains("priority: 1"));
         assert!(!y.contains("vercelify-wake-https"));
         assert!(y.contains("url: \"http://host.docker.internal:7421\""));
-        let y = dynamic_config_for(&[(true, "b.test".into()), (false, "a.test".into())], "http://h:1").unwrap();
+        let y = dynamic_config_for(
+            &[(true, "b.test".into(), vec![]), (false, "a.test".into(), vec![])],
+            "http://h:1",
+        )
+        .unwrap();
         // http serves both (Cloudflare tunnels arrive on http); https only the https one.
         assert!(y.contains("rule: \"Host(`a.test`) || Host(`b.test`)\""));
         assert!(y.contains("vercelify-wake-https:\n      rule: \"Host(`b.test`)\""));
+    }
+
+    /// A sleeping private preview wakes for the mesh only: its catch-all has
+    /// the same source check as its route, and public hosts are unchanged.
+    #[test]
+    fn private_hosts_wake_from_the_mesh_only() {
+        let mesh = vec!["10.77.0.0/16".to_string(), "fd76:6679:6d65::/48".to_string()];
+        let y = dynamic_config_for(
+            &[
+                (false, "pr-1-blog.main.vfy".into(), mesh.clone()),
+                (true, "blog.test".into(), vec![]),
+            ],
+            "http://h:1",
+        )
+        .unwrap();
+        assert!(
+            y.contains("vercelify-wake-http:\n      rule: \"Host(`blog.test`)\""),
+            "{y}"
+        );
+        assert!(
+            y.contains("vercelify-wake-private:\n      rule: \"Host(`pr-1-blog.main.vfy`)\""),
+            "{y}"
+        );
+        assert!(y.contains("        - vercelify-wake-private\n"));
+        assert!(y.contains(
+            "ipAllowList:\n        sourceRange:\n          - \"10.77.0.0/16\"\n          - \"fd76:6679:6d65::/48\"\n"
+        ));
+        let only = dynamic_config_for(&[(false, "pr-2-blog.main.vfy".into(), mesh)], "http://h:1").unwrap();
+        assert!(
+            !only.contains("vercelify-wake-http:"),
+            "no public catch-all for it: {only}"
+        );
     }
 
     #[test]

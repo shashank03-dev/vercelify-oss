@@ -1,0 +1,80 @@
+==> agent and proxy (traefik:v3.7)
+  ✓ agent advertises projects and the engine
+==> apps
+  ✓ both apps deployed
+  ✓ the proxy serves the engine's routes
+  ✓ the app's basic auth guards the https app
+==> check without applying
+  ✓ a configuration is checked without applying it
+  ✓ broken JSON is refused
+  ✓ nothing written yet
+==> upload and apply
+  ✓ web app's rules accepted
+  ✓ echo app's rules accepted
+  ✓ one routes file per app
+  ✓ status lists both, with the proxy version
+  ✓ the proxy picked up both apps' rules
+==> redirects
+  ✓ permanent redirect keeps the query
+  ✓ case-insensitive source
+  ✓ temporary redirect
+  ✓ redirect to another site
+  ✓ destination query merged with the visitor's
+  ✓ destination query alone
+  ✓ has: cookie present → redirect
+  ✓ has: cookie missing → no redirect
+  ✓ cleanUrls: /about-us.html → /about-us
+  ✓ cleanUrls: /blog/index.html → /blog
+  ✓ cleanUrls: /index.html → /
+  ✓ trailingSlash false: /docs/ → /docs
+==> rewrites
+  ✓ files are served as they are
+  ✓ SPA fallback: unknown path serves index.html (200)
+  ✓ proxy to another site with the path rewritten
+  ✓ the other site gets its own Host
+  ✓ path rewrite with a parameter (behind basic auth, over https)
+  ✓ the app's basic auth still runs first
+  ✓ redirect on the https app
+  ✓ the http→https redirect still applies
+==> headers
+  ✓ catch-all header on pages
+  ✓ catch-all header on the SPA fallback
+  ✓ catch-all header on redirects
+  ✓ path header on its paths
+  ✓ path header not elsewhere
+  ✓ both headers on a covered path
+==> firewall (direct visitors)
+  ✓ deny by path
+  ✓ deny by user agent + method
+  ✓ same user agent, other method passes
+  ✓ rate limit: 3 requests pass
+  ✓ rate limit: the 4th is refused
+  ✓ tunnel header from this machine: blocked range
+  ✓ tunnel header from this machine: other visitor
+  ✓ trusted IPs: this machine itself passes
+  ✓ trusted IPs: a trusted visitor through the tunnel
+  ✓ trusted IPs: anyone else gets 403
+  - no second address on this machine: direct-visitor checks skipped
+==> firewall behind the Cloudflare tunnel
+  ✓ rules re-applied for tunnel mode
+  ✓ rate limit counts per tunnel visitor
+  ✓ the proxy applied it
+  ✓ visitor A: 3 requests pass, the 4th is refused
+  ✓ visitor B is not limited by A
+==> cron jobs
+  ✓ run a cron job now
+  ✓ it reached the app with CRON_SECRET and Vercel's user agent
+  ✓ its result is recorded
+  ✓ the schedule runs it again by itself (* * * * *)
+  ✓ an unknown cron path is refused
+==> a stopped app (asleep or redeploying)
+  ✓ its routes are skipped, not an error page from our rules
+  ✓ other apps keep working
+  ✓ back when it starts again
+==> removing rules
+  ✓ remove the web app's rules
+  ✓ its file is gone
+  ✓ the proxy serves the app with its base routes again
+  ✓ the other app keeps its rules
+  ✓ proxy logged no configuration errors
+all routing checks passed

@@ -231,12 +231,31 @@ pub struct PreviewSettings {
     pub enabled: bool,
     /// Previews running at once; the oldest stops when a new one starts.
     pub max: u8,
+    // Who can open a preview. Private serves this server's mesh name only;
+    // public uses the wildcard domain like production.
+    pub access: PreviewAccess,
 }
 
 impl Default for PreviewSettings {
     fn default() -> Self {
-        Self { enabled: false, max: 3 }
+        Self {
+            enabled: false,
+            max: 3,
+            access: PreviewAccess::Private,
+        }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "lowercase")]
+#[ts(export)]
+pub enum PreviewAccess {
+    /// `http://pr-<n>-<app>.<server>.vfy`, reachable from the mesh only.
+    #[default]
+    Private,
+    /// `pr-<n>-<app>.<wildcard>`, as reachable as production (Basic Auth
+    /// still applies when set).
+    Public,
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, TS)]
@@ -404,6 +423,9 @@ pub struct EnvVar {
     pub build: bool,
     /// Only for previews (overrides the normal value there).
     pub preview_only: bool,
+    // Sharing is explicit, independently of whether a value is secret.
+    #[serde(default)]
+    pub share_with_previews: bool,
     pub secret: bool,
     pub scope: VarScope,
     pub updated_at: String,
@@ -424,6 +446,57 @@ pub struct EnvVarInput {
     #[serde(default)]
     #[ts(optional)]
     pub secret: Option<bool>,
+    // Let previews have this normal value too; default false.
+    #[serde(default)]
+    #[ts(optional)]
+    pub share_with_previews: Option<bool>,
+}
+
+/// Where a variable a deployment gets comes from.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, TS)]
+#[serde(rename_all = "snake_case")]
+#[ts(export)]
+pub enum VarOrigin {
+    /// A normal value (production deployments).
+    Production,
+    /// A normal value shared with previews on purpose.
+    Shared,
+    /// A preview-only value.
+    PreviewOnly,
+}
+
+/// One variable of an effective set: where it comes from, never its value.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct EffectiveVar {
+    pub key: String,
+    pub scope: VarScope,
+    pub origin: VarOrigin,
+    pub build: bool,
+    pub secret: bool,
+    /// Filled from a database reference (`${{db.<name>.url}}`).
+    pub database_reference: bool,
+}
+
+/// A variable left out of previews, and why.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct WithheldVar {
+    pub key: String,
+    pub scope: VarScope,
+    /// `production_only`, or `production_database` (shared, but it points at
+    /// a production database: a preview deployment fails until it gets a
+    /// preview-only value).
+    pub reason: String,
+}
+
+/// What production and previews of an app get (`GET …/env/provenance`).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct EnvProvenance {
+    pub production: Vec<EffectiveVar>,
+    pub preview: Vec<EffectiveVar>,
+    pub withheld: Vec<WithheldVar>,
 }
 
 /// Upsert variables. With `replace`, variables of this scope (and the same

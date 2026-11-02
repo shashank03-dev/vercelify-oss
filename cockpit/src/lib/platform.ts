@@ -20,6 +20,7 @@ import type {
   Deployment,
   DeployRequest,
   DomainRequest,
+  EnvProvenance,
   EnvVar,
   EnvVarsPut,
   GitSource,
@@ -129,6 +130,10 @@ export function platformOn(server?: string) {
       req<{ saved: number }>("POST", `/apps/${q(app)}/env/import`, { content, replace }),
     deleteEnv: (app: string, key: string, previewOnly = false) =>
       req<unknown>("DELETE", `/apps/${q(app)}/env/${q(key)}${previewOnly ? "?preview_only=true" : ""}`),
+    /** Share a production variable with previews (or stop), value untouched. */
+    shareEnv: (app: string, key: string, share: boolean) => req<unknown>("PUT", `/apps/${q(app)}/env/${q(key)}/share`, { share }),
+    /** What production and previews get, and what previews go without (never values). */
+    envProvenance: (app: string) => req<EnvProvenance>("GET", `/apps/${q(app)}/env/provenance`),
 
     domains: (app: string) => req<AppDomain[]>("GET", `/apps/${q(app)}/domains`),
     addDomain: (app: string, r: DomainRequest) => req<AppDomain>("POST", `/apps/${q(app)}/domains`, r),

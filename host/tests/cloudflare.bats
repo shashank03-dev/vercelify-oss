@@ -3,6 +3,8 @@
 
 setup() {
   T=$(mktemp -d)
+  export VERCELIFY_ETC="$T/etc"
+  mkdir -p "$VERCELIFY_ETC"
   python3 "$BATS_TEST_DIRNAME/mock_cloudflare.py" "$T/port" "$T/state.json" &
   MOCK_PID=$!
   for _ in $(seq 50); do [ -s "$T/port" ] && break; sleep 0.1; done

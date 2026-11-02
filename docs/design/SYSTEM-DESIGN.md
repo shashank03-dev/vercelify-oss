@@ -165,6 +165,49 @@ the volumes, and starts the agent, whose reconciler brings apps and databases ba
   They reach containers as `--env-file` from a 0600 file in `/run/vercelify/env/` that is
   deleted after `docker run`/`create` returns.
 
+### 5.1 Preview policy (M1)
+
+Migration 0007 adds `env_vars.share_with_previews`, default false for existing
+and new normal values. Preview-only values win over explicitly shared values;
+production-only values are withheld before interpolation, and production database
+references are rejected for previews. Provenance responses expose keys, scopes and
+policy, without values. Sharing a variable is a deliberate operation, independent
+of its `secret` flag.
+
+Deployment and runtime log redaction must hide every nonempty secret, including
+one-character values. Match against the original text, longest value first at
+each position; inserted `[redacted]` markers must never be processed again.
+Multiline secrets also supply individual nonempty line patterns. Redaction is
+defense in depth, not containment of malicious code that receives a secret.
+
+Runtime previews join only `vfy-preview-<app id>-pr<n>`: a labelled Docker bridge
+with `internal=true`, IPv6 off, and IPv4 gateway mode `isolated` (Docker 28+).
+Validate existing networks before use; unsupported Docker or a name collision
+fails closed. The proxy alone joins these bridges for ingress. Preview containers
+never join production project networks or `vfy-proxy`; raw sockets are dropped and
+privilege escalation disabled. This conservative first version disables runtime
+outbound internet access as well. Compose dependencies can share their own PR's
+bridge. M5 will add scoped platform preview database credentials; until then all
+`${{db.…}}` references are production references and are refused in previews.
+
+Health probes run through the pinned proxy's `nc`/`wget` utilities because the
+isolated bridge has no host gateway. Proxy recreation reconnects existing bridges
+without recreating concurrently deleted ones. Failed starts remove unused bridges;
+PR close and app deletion remove owned bridges after containers. Remote runtime
+apply carries the same cleanup operations. Compose 2.24.4+ `!override` replaces
+all service networks, including sidecars, with the PR bridge; direct published
+ports, host namespaces, elevated privileges, Docker API socket injection and custom
+providers are refused before execution. Compose subprocesses inherit only Docker
+connection/configuration settings and explicit deployment variables, rather than
+the agent's environment.
+
+Migration 0007 saves the existing active previews in a durable retirement list.
+Startup closes and cleans them before starting deployment/reconciliation work;
+each successful cleanup is persisted so a crash can retry. An upgrade therefore
+requires owners to review preview variables and redeploy existing previews.
+The real Docker contract is `host/tests/contract/preview-safety.sh`; validation
+results and remaining qualification boundaries are recorded with M1's evidence.
+
 ## 6. Builds
 
 ### 6.1 Queue
@@ -243,7 +286,15 @@ switch of that pointer and the route file is the commit point of a deploy.
 
 ### 7.2 Deploy procedure (single container apps)
 
+The listening port: the app's `runtime.port` when set; for a build, the plan's port;
+for an image app with neither, the image's `EXPOSE` (`.Config.ExposedPorts`, pulled
+first): exactly one TCP port is used and kept on the deployment (rollbacks reuse it);
+none or several stop the deployment at once, naming the ports and asking for one.
+`EXPOSE` is metadata, not proof of a listener, so the health check still decides.
+
 1. Pick the node (§8.3). Ensure networks `vfy-<project>` and `vfy-proxy` exist on it.
+   Previews instead use only the PR's isolated bridge (§5.1), with the proxy joined
+   for ingress and health probes; they never attach to these production networks.
 2. `docker create` the container `vfy-<app>-<dpl suffix>` with labels
    (`vercelify.managed=platform`, `vercelify.app`, `vercelify.deployment`, `vercelify.kind=app|preview|db`,
    `vercelify.project`), env file, limits (`--memory`, `--cpus`, `--pids-limit 4096`),
@@ -517,6 +568,20 @@ main server, and the old one stepping down.
 - Router naming keeps today's `http-0-<app>` / `…-pr-<n>` pattern so `sleep.rs` reads the
   same Prometheus series.
 
+### 9.1 Preview ingress (M1)
+
+Preview access defaults to private. Private routes use
+`pr-<number>-<app>.<node>.vfy`, plain HTTP inside the mesh, with a connection-source
+allowlist for the recorded mesh ranges. No mesh configuration means no private
+route; do not fall back to a public wildcard. Explicitly public previews retain
+wildcard routing. Apply the source restriction before other middleware on base
+routes, higher-priority project rules and wake routes. Forwarded request headers
+must not grant membership. This ingress policy does not establish container egress
+isolation by itself; the independent runtime boundary is specified in §5.1.
+The real-Docker preview contract checks direct IPv4, forged `Host` and forwarded
+headers against the running proxy; an external IPv6 client, the tunnel path and
+WebSocket upgrades are still to be qualified (`docs/validation/2026-11-02-m1`).
+
 ## 10. Databases
 
 Templates in `crates/vercelify-platform/templates/databases.toml` (versioned with the code):
@@ -647,7 +712,16 @@ request per app.
 
 - `GET /v1/platform/apps/{id}/logs?tail=N[&follow=true]`: the live container's output
   (`docker logs --timestamps`) as JSON lines `{at, stream, text}`; following keeps the
-  response open, and the `docker logs` process ends with it.
+  response open, and the `docker logs` process ends with it. Lines from another server's
+  agent are redacted on the main server, which alone knows the app's secrets.
+- Output handling (deployment and runtime logs alike, `proc::read_line`,
+  `logs::strip_ansi`): output is read as bytes, invalid UTF-8 is replaced (it never ends
+  the stream: a child still writing to an unread pipe would block until the build
+  timeout), and a line over 64 KiB arrives in pieces. A `\r` returns to the start of the
+  line as on a terminal, so only a progress bar's last state is kept; CSI/OSC/charset
+  escapes and other control characters except tab are removed. A message of several
+  lines becomes several log entries, so the file's `<time> <stream> <text>` format and
+  the sequence numbers followers rely on stay intact.
 - `POST /v1/platform/apps/{id}/restart`: every container of the live deployment (compose
   sidecars too).
 - Terminals: not a WebSocket. `POST …/apps/{id}/terminal` (or `…/databases/{id}/terminal`)

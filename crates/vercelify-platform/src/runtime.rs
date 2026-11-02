@@ -38,6 +38,8 @@ pub struct StartSpec {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Apply {
+    pub remove_preview_networks: Vec<String>,
+    pub remove_preview_apps: Vec<String>,
     pub start: Vec<String>,
     pub stop: Vec<String>,
     pub restart: Vec<String>,
@@ -109,6 +111,16 @@ pub async fn apply_local(d: &Deployer, a: &Apply) -> Applied {
         let _ = docker.volume_remove(v).await;
         if !v.contains('/') && !v.is_empty() {
             let _ = std::fs::remove_dir_all(d.hdd_root.join(v));
+        }
+    }
+    for network in &a.remove_preview_networks {
+        if let Err(e) = crate::preview_network::remove(docker, network).await {
+            out.errors.push(format!("remove preview network {network}: {e}"));
+        }
+    }
+    for app in &a.remove_preview_apps {
+        if let Err(e) = crate::preview_network::remove_for_app(docker, app).await {
+            out.errors.push(format!("remove preview networks of {app}: {e}"));
         }
     }
     if let Some((app, keep)) = &a.prune {
@@ -463,7 +475,9 @@ impl NodeRuntime {
                     Method::POST,
                     // Old workers ignore unknown volume fields. A distinct route makes
                     // them fail safely instead of mounting the legacy storage name.
-                    if s.volumes.iter().any(|v| v.storage_name.is_some()) {
+                    if s.deployment.pr_number.is_some() {
+                        "/v1/runtime/instances-isolated-preview"
+                    } else if s.volumes.iter().any(|v| v.storage_name.is_some()) {
                         "/v1/runtime/instances-v2"
                     } else {
                         "/v1/runtime/instances"
@@ -488,7 +502,9 @@ impl NodeRuntime {
                 )
                 .await
                 .map_err(|e| {
-                    if matches!(e, Error::NotFound(_)) && s.volumes.iter().any(|v| v.storage_name.is_some()) {
+                    if matches!(e, Error::NotFound(_)) && s.deployment.pr_number.is_some() {
+                        Error::Unavailable(format!("upgrade {} before deploying isolated previews", r.node))
+                    } else if matches!(e, Error::NotFound(_)) && s.volumes.iter().any(|v| v.storage_name.is_some()) {
                         Error::Unavailable(format!(
                             "upgrade {} before deploying volumes with storage identities",
                             r.node
@@ -646,7 +662,7 @@ mod tests {
                 )
             })
             .unwrap();
-        for legacy in [false, true] {
+        for (legacy, preview) in [(false, false), (true, false), (false, true)] {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = format!("http://{}", listener.local_addr().unwrap());
             let peer = tokio::spawn(async move {
@@ -659,7 +675,9 @@ mod tests {
                     request.extend_from_slice(&chunk[..n]);
                 }
                 let request = String::from_utf8_lossy(&request);
-                assert!(request.starts_with(if legacy {
+                assert!(request.starts_with(if preview {
+                    "POST /v1/runtime/instances-isolated-preview "
+                } else if legacy {
                     "POST /v1/runtime/instances "
                 } else {
                     "POST /v1/runtime/instances-v2 "
@@ -684,7 +702,7 @@ mod tests {
             if legacy {
                 v.storage_name = None;
             }
-            let spec = StartSpec {
+            let mut spec = StartSpec {
                 app: app.clone(),
                 deployment: deployment.clone(),
                 image: "test:latest".into(),
@@ -693,6 +711,9 @@ mod tests {
                 port: 3000,
                 replica: 0,
             };
+            if preview {
+                spec.deployment.pr_number = Some(1);
+            }
             let remote = NodeRuntime::Remote(Remote {
                 node: "old-worker".into(),
                 base,

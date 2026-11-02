@@ -370,6 +370,26 @@ test("platform engine: deploy with a live log, roll back, variables, domains, da
   await page.getByTestId("env-import-text").fill("NODE_ENV=production\nexport FLAG=1\n");
   await page.getByTestId("env-import-run").click();
   await expect(page.getByTestId("env-FLAG")).toBeVisible();
+  // previews get nothing from production until it is shared (design §5.1)
+  await expect(page.getByTestId("withheld-API_URL")).toContainText("Production only");
+  await page.getByTestId("env-share-API_URL").click();
+  await expect(page.getByTestId("preview-var-API_URL")).toContainText("Shared from production");
+  await expect(page.getByTestId("env-API_URL")).toContainText("Shared with previews");
+  await page.getByTestId("env-for-preview").click();
+  await expect(page.getByTestId("env-share-new")).toBeHidden();
+  await page.getByTestId("env-key").fill("FLAG");
+  await page.getByTestId("env-value").fill("preview");
+  await page.getByTestId("env-add").click();
+  await expect(page.getByTestId("preview-var-FLAG")).toContainText("Preview value");
+  await expect(page.getByTestId("withheld-FLAG")).toBeHidden();
+  // previews are private (mesh only) unless made public
+  await page.getByTestId("tab-previews").click();
+  await expect(page.getByTestId("previews-card")).toContainText("for devices on your Vercelify network only");
+  await page.getByTestId("previews-public").click();
+  await expect(page.getByTestId("previews-card")).toContainText("as reachable as production");
+  await page.getByTestId("previews-private").click();
+  await expect(page.getByTestId("previews-card")).toContainText("Private: at http://pr-<number>-api.<server>.vfy");
+  await expect(page.getByTestId("previews-card")).toContainText("Outbound network access is disabled for previews");
 
   // a custom domain gets its certificate
   await page.getByTestId("tab-domains").click();

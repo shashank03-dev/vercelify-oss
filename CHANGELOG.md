@@ -6,6 +6,21 @@ and this project follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Previews are private by default and no longer get production's variables. A preview
+  opens at `http://pr-<n>-<app>.<server>.vfy` for devices on the Vercelify network only
+  (the server refuses everyone else, whatever name or address they use); choose
+  **Public** under Previews for the old wildcard address. A normal variable reaches
+  previews only when you share it (Variables → share button, or "Share with previews"),
+  and a shared `${{db.…}}` reference stops the preview instead of handing it the
+  production database. Variables → "What previews get" lists what previews go without.
+  **On upgrade every existing variable is production-only and running previews are
+  closed:** review the variables, then push to the pull requests again.
+- Previews run on their own isolated Docker network: no production network, no proxy
+  network, no host or internet access. Needs Docker 28+ (Compose previews 2.24.4+); with
+  an older Docker a preview fails instead of running unisolated.
+
 ### Added
 
 - Remote desktop pairs by itself: **Launch Moonlight** sets Sunshine's login and hands
@@ -19,6 +34,14 @@ and this project follows [Semantic Versioning](https://semver.org/).
   (system packages, Docker, Node 22, Rust, zig), so `./dev check` runs natively there.
 
 ### Fixed
+
+- An image app with no port set listens on the one TCP port its image `EXPOSE`s
+  (whoami: 80) instead of 3000; with none or several the deploy stops at once and asks
+  for the port, instead of failing its health check after 3 minutes.
+- Build output with a byte that isn't UTF-8 no longer stops the log (and could stall the
+  build until its timeout). Progress bars (`\r`), colours and multi-line messages are
+  shown as a terminal would, one line each, and secret variable values are shown as
+  `[redacted]` in build and app logs.
 
 - Security: a build context, Dockerfile, Compose file or output directory that is a
   symbolic link out of the repository is refused, so a pull request can't build (and

@@ -110,6 +110,26 @@ pub struct RouteHost {
     pub https: bool,
     /// Redirect this host (permanently) to another one, keeping the path.
     pub redirect_to: Option<String>,
+    /// Source address ranges allowed (`10.77.0.0/16`); empty = anyone. A
+    /// private preview's host answers the mesh only, by the connection's
+    /// own address (forwarded headers are not trusted), on every router of
+    /// it: base, `vercel.json` and wake.
+    #[serde(default)]
+    pub allow_from: Vec<String>,
+}
+
+/// The middleware that limits host `index` of route `key` to its
+/// `allow_from`.
+pub fn allow_middleware(key: &str, index: usize) -> String {
+    format!("vfy-{key}-{index}-private")
+}
+
+fn allow_list_yaml(name: &str, ranges: &[String]) -> String {
+    let items: Vec<String> = ranges.iter().map(|r| format!("          - {}\n", q(r))).collect();
+    format!(
+        "    {name}:\n      ipAllowList:\n        sourceRange:\n{}",
+        items.concat()
+    )
 }
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -159,6 +179,11 @@ pub fn render(r: &Route) -> String {
     for (i, h) in r.hosts.iter().enumerate() {
         let rule = format!("Host(`{}`)", h.host);
         let mut mws: Vec<String> = vec![];
+        if !h.allow_from.is_empty() {
+            let name = allow_middleware(&r.key, i);
+            middlewares.push_str(&allow_list_yaml(&name, &h.allow_from));
+            mws.push(name);
+        }
         let target_service = svc.clone();
         if let Some(to) = &h.redirect_to {
             let name = format!("vfy-{}-{i}-redirect", r.key);
@@ -335,8 +360,10 @@ pub async fn ensure(docker: &Docker, c: &ProxyConfig, env: Vec<(String, String)>
         if o == hash {
             if !i.running {
                 docker.start(CONTAINER).await?;
+                crate::preview_network::reconnect(docker).await?;
                 return Ok(true);
             }
+            crate::preview_network::reconnect(docker).await?;
             return Ok(false);
         }
         tracing::info!("proxy configuration changed: recreating {CONTAINER}");
@@ -385,6 +412,7 @@ pub async fn ensure(docker: &Docker, c: &ProxyConfig, env: Vec<(String, String)>
     };
     docker.create(&spec).await?;
     docker.start(CONTAINER).await?;
+    crate::preview_network::reconnect(docker).await?;
     Ok(true)
 }
 
@@ -481,16 +509,19 @@ mod tests {
                     host: "blog.example.com".into(),
                     https: true,
                     redirect_to: None,
+                    allow_from: vec![],
                 },
                 RouteHost {
                     host: "www.example.com".into(),
                     https: true,
                     redirect_to: Some("blog.example.com".into()),
+                    allow_from: vec![],
                 },
                 RouteHost {
                     host: "blog.10.77.0.1.sslip.io".into(),
                     https: false,
                     redirect_to: None,
+                    allow_from: vec![],
                 },
             ],
             upstreams: vec!["http://vfy-blog-abc:3000".into()],
@@ -512,6 +543,39 @@ mod tests {
         assert!(!y.contains("vfy-blog-2-secure"), "plain HTTP host has no TLS router");
         assert!(y.contains("          - url: \"http://vfy-blog-abc:3000\""));
         assert!(y.contains("priority: 100"));
+    }
+
+    /// A mesh-only host checks the connection's source before anything
+    /// else (its password too), and only that host does.
+    #[test]
+    fn mesh_only_hosts_check_the_source_first() {
+        let mut r = route();
+        r.basic_auth = vec!["me:$apr1$x$y".into()];
+        r.hosts[2].allow_from = vec!["10.77.0.0/16".into(), "fd76:6679:6d65::/48".into()];
+        let y = render(&r);
+        assert!(y.contains(
+            "    vfy-blog-2-private:\n      ipAllowList:\n        sourceRange:\n          - \"10.77.0.0/16\"\n          - \"fd76:6679:6d65::/48\"\n"
+        ));
+        let router2 = y
+            .split("    vfy-blog-2:\n")
+            .nth(1)
+            .unwrap()
+            .split("\n  middlewares:\n")
+            .next()
+            .unwrap();
+        assert!(
+            router2.ends_with("      middlewares:\n        - \"vfy-blog-2-private\"\n        - \"vfy-blog-auth\""),
+            "{router2}"
+        );
+        let router0 = y
+            .split("    vfy-blog-0-secure:\n")
+            .nth(1)
+            .unwrap()
+            .split("    vfy-blog-1")
+            .next()
+            .unwrap();
+        assert!(!router0.contains("private"), "other hosts are as they were");
+        assert_eq!(y.matches("ipAllowList").count(), 1);
     }
 
     #[test]

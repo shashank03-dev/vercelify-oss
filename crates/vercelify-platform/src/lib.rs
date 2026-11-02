@@ -30,6 +30,7 @@ pub mod logs;
 pub mod mesh_registry;
 pub mod nodes;
 pub mod placement;
+pub mod preview_network;
 pub mod previews;
 pub mod proc;
 pub mod projects;

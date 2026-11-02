@@ -2,3 +2,7 @@
 # ts-rs: emit plain `number` for 64-bit ints (values stay well below 2^53)
 TS_RS_LARGE_INT = "number"
 TS_RS_EXPORT_DIR = { value = "cockpit/src/types/generated", relative = true }
+# The platform SQLite store uses ordinary tables, JSON, WAL and backups;
+# it exposes no full-text or spatial SQL. Bundled SQLite enables these
+# otherwise unused modules by default, outside the static agent's budget.
+LIBSQLITE3_FLAGS = "-USQLITE_ENABLE_FTS3 -USQLITE_ENABLE_FTS3_PARENTHESIS -USQLITE_ENABLE_FTS5 -USQLITE_ENABLE_RTREE"

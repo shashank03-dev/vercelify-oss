@@ -246,7 +246,7 @@ type PlatformRoutes = (Vec<AppRouter>, Option<String>);
 /// The base routers of a platform app or preview, in the shape the
 /// `vercel.json` layer copies (it sits above them at higher priorities).
 pub fn platform_routers(route: &vercelify_platform::proxy::Route) -> Vec<AppRouter> {
-    use vercelify_platform::proxy::{router_name, service_name, RESOLVER};
+    use vercelify_platform::proxy::{allow_middleware, router_name, service_name, RESOLVER};
     let auth = (!route.basic_auth.is_empty()).then(|| format!("vfy-{}-auth@file", route.key));
     route
         .hosts
@@ -258,7 +258,13 @@ pub fn platform_routers(route: &vercelify_platform::proxy::Route) -> Vec<AppRout
             rule: format!("Host(`{}`)", h.host),
             entry_points: vec![if h.https { "websecure" } else { "web" }.to_string()],
             service: format!("{}@file", service_name(&route.key)),
-            middlewares: auth.iter().cloned().collect(),
+            // The source check first: a private preview's rules (higher
+            // priority than its base router) mustn't be a way around it.
+            middlewares: (!h.allow_from.is_empty())
+                .then(|| format!("{}@file", allow_middleware(&route.key, i)))
+                .into_iter()
+                .chain(auth.iter().cloned())
+                .collect(),
             tls: h.https.then(|| serde_json::json!({ "certResolver": RESOLVER })),
         })
         .collect()
@@ -934,16 +940,19 @@ mod tests {
                     host: "blog.example.com".into(),
                     https: true,
                     redirect_to: None,
+                    allow_from: vec![],
                 },
                 RouteHost {
                     host: "www.example.com".into(),
                     https: true,
                     redirect_to: Some("blog.example.com".into()),
+                    allow_from: vec![],
                 },
                 RouteHost {
                     host: "blog.lan".into(),
                     https: false,
                     redirect_to: None,
+                    allow_from: vec!["10.77.0.0/16".into()],
                 },
             ],
             upstreams: vec!["http://vfy-blog-1:3000".into()],
@@ -959,6 +968,11 @@ mod tests {
         assert!(routers[0].tls.is_some());
         assert_eq!(routers[1].name, "vfy-blog-2");
         assert!(routers[1].tls.is_none());
+        assert_eq!(
+            routers[1].middlewares,
+            ["vfy-blog-2-private@file", "vfy-blog-auth@file"],
+            "a mesh-only host keeps its source check, first, on project rules too"
+        );
         assert_eq!(cron_base(&routers).as_deref(), Some("https://blog.example.com"));
     }
 

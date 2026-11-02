@@ -30,6 +30,7 @@ import {
   RotateCw,
   ScrollText,
   Server,
+  Share2,
   Search,
   Settings2,
   Square,
@@ -89,7 +90,7 @@ import {
   type RuntimeLine,
 } from "../lib/platform";
 import { useSession } from "../lib/session";
-import type { App, AppKind, BuildPack, Database, DatabaseKind, Deployment, SleepTarget, StorageTier } from "../types";
+import type { App, AppKind, BuildPack, Database, DatabaseKind, Deployment, EnvProvenance, EnvVar, PreviewAccess, SleepTarget, StorageTier } from "../types";
 import { ExplainFailure } from "../components/ExplainFailure";
 import { MachineCard } from "../components/MachineCard";
 import { ProjectPanel } from "../components/ProjectPanel";
@@ -983,17 +984,29 @@ function EnvTab({ app, client }: { app: App; client: PlatformClient }) {
   const [value, setValue] = useState("");
   const [secret, setSecret] = useState(true);
   const [build, setBuild] = useState(false);
+  const [target, setTarget] = useState<"production" | "preview">("production");
+  const [share, setShare] = useState(false);
   const [importing, setImporting] = useState(false);
   const [dotenv, setDotenv] = useState("");
   const keyOk = ENV_KEY.test(key);
   const { vars: parsed, error: parseError } = readDotenv(dotenv);
+  const provenance = usePoll(() => client.envProvenance(app.id), 0, [app.id, client, vars.data]);
 
   async function add() {
-    if (await act("add", () => client.putEnv(app.id, { vars: [{ key, value, secret, build }], replace: false }), `Saved ${key}. Deploy to use it.`)) {
+    const previewOnly = target === "preview";
+    const input = { key, value, secret, build, preview_only: previewOnly, share_with_previews: !previewOnly && share };
+    const done = previewOnly ? `Saved ${key} for previews. Their next deploy uses it.` : `Saved ${key}. Deploy to use it.`;
+    if (await act("add", () => client.putEnv(app.id, { vars: [input], replace: false }), done)) {
       setKey("");
       setValue("");
       void vars.refresh();
     }
+  }
+
+  function toggleShare(v: EnvVar) {
+    const next = !v.share_with_previews;
+    const done = next ? `Previews get ${v.key} from their next deploy` : `Previews no longer get ${v.key}`;
+    void act(`share-${v.key}`, () => client.shareEnv(app.id, v.key, next), done).then(() => void vars.refresh());
   }
 
   return (
@@ -1029,9 +1042,19 @@ function EnvTab({ app, client }: { app: App; client: PlatformClient }) {
                 <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-fg-muted">{v.value ?? "••••••••"}</span>
                 <span className="flex shrink-0 gap-1">
                   {v.build && <Tag>Build</Tag>}
-                  {v.preview_only && <Tag>Previews</Tag>}
+                  {v.preview_only && <Tag>Previews only</Tag>}
+                  {v.share_with_previews && <Tag>Shared with previews</Tag>}
                   {v.scope !== "app" && <Tag>{v.scope}</Tag>}
                 </span>
+                {v.scope === "app" && !v.preview_only && (
+                  <IconButton
+                    label={v.share_with_previews ? `Stop sharing ${v.key} with previews` : `Share ${v.key} with previews`}
+                    onClick={() => toggleShare(v)}
+                    data-testid={`env-share-${v.key}`}
+                  >
+                    <Share2 />
+                  </IconButton>
+                )}
                 {v.scope === "app" && (
                   <IconButton
                     label={`Delete ${v.key}`}
@@ -1061,11 +1084,26 @@ function EnvTab({ app, client }: { app: App; client: PlatformClient }) {
           <label className="flex h-8 items-center gap-1.5 text-xs text-fg-muted">
             <input type="checkbox" checked={build} onChange={(e) => setBuild(e.target.checked)} /> Build
           </label>
+          {target === "production" && (
+            <label className="flex h-8 items-center gap-1.5 text-xs text-fg-muted">
+              <input type="checkbox" checked={share} onChange={(e) => setShare(e.target.checked)} data-testid="env-share-new" /> Share with previews
+            </label>
+          )}
+          <Segmented
+            label="who gets it"
+            value={target}
+            onChange={(v) => setTarget(v as "production" | "preview")}
+            options={[
+              { value: "production", label: "Production", testId: "env-for-production" },
+              { value: "preview", label: "Previews only", testId: "env-for-preview" },
+            ]}
+          />
           <Button variant="primary" icon={<Plus />} disabled={!keyOk} busy={busy === "add"} onClick={() => void add()} data-testid="env-add">
             Add
           </Button>
         </div>
       </Card>
+      <PreviewVariables app={app} provenance={provenance.data} error={provenance.error} />
       <Modal open={importing} onClose={() => setImporting(false)} title="Import a .env file" description="Existing keys are overwritten; others stay.">
         <div className="space-y-3 p-5">
           <textarea
@@ -1111,6 +1149,49 @@ function EnvTab({ app, client }: { app: App; client: PlatformClient }) {
         </div>
       </Modal>
     </div>
+  );
+}
+
+const WITHHELD: Record<string, { health: Health; label: string }> = {
+  production_only: { health: "idle", label: "Production only" },
+  production_database: { health: "bad", label: "Production database: previews fail until it has a preview value" },
+};
+
+/** What pull-request previews get, and what they go without (design §5.1). */
+function PreviewVariables({ app, provenance, error }: { app: App; provenance: EnvProvenance | undefined; error: { message: string } | null | undefined }) {
+  if (app.kind !== "git") return null;
+  return (
+    <Card
+      flush
+      title="What previews get"
+      description="Previews run pull-request code, so they get only values added for previews and the ones you share. Everything else stays with production."
+      testId="env-previews-card"
+    >
+      <ErrorNote error={error} className="m-4" />
+      {!provenance ? (
+        <div className="p-4">
+          <Loading rows={2} />
+        </div>
+      ) : (
+        <div className="divide-y divide-line">
+          {provenance.withheld.map((w) => (
+            <div key={`w-${w.key}`} className="flex items-center gap-3 px-4 py-2" data-testid={`withheld-${w.key}`}>
+              <span className="w-56 shrink-0 truncate font-mono text-[12px] text-fg-muted">{w.key}</span>
+              <StatusText health={WITHHELD[w.reason]?.health ?? "idle"} label={WITHHELD[w.reason]?.label ?? w.reason} className="min-w-0 flex-1" />
+              {w.scope !== "app" && <Tag>{w.scope}</Tag>}
+            </div>
+          ))}
+          {provenance.preview.map((v) => (
+            <div key={`p-${v.key}`} className="flex items-center gap-3 px-4 py-2" data-testid={`preview-var-${v.key}`}>
+              <span className="w-56 shrink-0 truncate font-mono text-[12px] text-fg">{v.key}</span>
+              <StatusText health="ok" label={v.origin === "preview_only" ? "Preview value" : "Shared from production"} className="min-w-0 flex-1" />
+              {v.scope !== "app" && <Tag>{v.scope}</Tag>}
+            </div>
+          ))}
+          {provenance.withheld.length + provenance.preview.length === 0 && <p className="px-4 py-6 text-center text-[13px] text-fg-muted">No variables yet.</p>}
+        </div>
+      )}
+    </Card>
   );
 }
 
@@ -1236,20 +1317,37 @@ function PreviewsTab({
     <div className="space-y-4">
       <Card
         title="Pull request previews"
-        description={`Each open pull request gets its own URL, rebuilt on every push. Up to ${app.previews.max} run at once.`}
+        description={`Each open pull request gets its own URL, rebuilt on every push. Up to ${app.previews.max} run at once. ${
+          app.previews.access === "private"
+            ? `Private: at http://pr-<number>-${app.name}.<server>.vfy, for devices on your Vercelify network only; the server refuses everyone else, whatever name or address they use.`
+            : "Public: on your wildcard domain, as reachable as production (Basic Auth applies when set)."
+        } Outbound network access is disabled for previews. Keep required services in the preview's Compose stack.`}
         actions={
-          <Button
-            size="sm"
-            busy={busy === "toggle"}
-            data-testid="previews-toggle"
-            onClick={() =>
-              void act("toggle", () => client.patchApp(app.id, { previews: { ...app.previews, enabled: !app.previews.enabled } }), app.previews.enabled ? "Previews off" : "Previews on").then(
-                onChanged,
-              )
-            }
-          >
-            {app.previews.enabled ? "Turn off" : "Turn on"}
-          </Button>
+          <>
+            <Segmented
+              label="who can open previews"
+              value={app.previews.access}
+              onChange={(v) =>
+                void act("access", () => client.patchApp(app.id, { previews: { ...app.previews, access: v as PreviewAccess } }), v === "private" ? "Previews are private" : "Previews are public").then(onChanged)
+              }
+              options={[
+                { value: "private", label: "Private", testId: "previews-private" },
+                { value: "public", label: "Public", testId: "previews-public" },
+              ]}
+            />
+            <Button
+              size="sm"
+              busy={busy === "toggle"}
+              data-testid="previews-toggle"
+              onClick={() =>
+                void act("toggle", () => client.patchApp(app.id, { previews: { ...app.previews, enabled: !app.previews.enabled } }), app.previews.enabled ? "Previews off" : "Previews on").then(
+                  onChanged,
+                )
+              }
+            >
+              {app.previews.enabled ? "Turn off" : "Turn on"}
+            </Button>
+          </>
         }
         flush
         testId="previews-card"

@@ -117,6 +117,15 @@ impl Platform {
                     }
                 }
             }
+            loop {
+                match me.engine.retire_legacy_previews().await {
+                    Ok(()) => break,
+                    Err(e) => {
+                        tracing::error!("retiring unsafe previews before accepting work: {e}; retrying in 5s");
+                        tokio::time::sleep(Duration::from_secs(5)).await;
+                    }
+                }
+            }
             tokio::spawn(me.engine.clone().run());
             // A consistent copy for restic (and the warm standby): backups
             // never read the live database file.

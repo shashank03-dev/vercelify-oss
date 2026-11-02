@@ -168,6 +168,7 @@ async fn deploy_redeploy_rollback_recover() {
                     wildcard: Some("test.localhost".into()),
                     https: false,
                     edge_tls: false,
+                    mesh: None,
                 },
             )
         })
@@ -232,6 +233,7 @@ async fn deploy_redeploy_rollback_recover() {
                             build: None,
                             preview_only: None,
                             secret: None,
+                            share_with_previews: None,
                         }],
                         replace: false,
                     },
@@ -636,6 +638,7 @@ async fn deploy_redeploy_rollback_recover() {
                         build: None,
                         preview_only: None,
                         secret: None,
+                        share_with_previews: None,
                     }],
                     replace: false,
                 },
@@ -706,6 +709,7 @@ async fn deploy_redeploy_rollback_recover() {
                         build: None,
                         preview_only: None,
                         secret: Some(true),
+                        share_with_previews: None,
                     }],
                     replace: false,
                 },

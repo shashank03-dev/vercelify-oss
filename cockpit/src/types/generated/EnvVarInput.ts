@@ -4,4 +4,4 @@ export type EnvVarInput = { key: string, value: string, build?: boolean, preview
 /**
  * Default true: values are hidden unless revealed.
  */
-secret?: boolean, };
+secret?: boolean, share_with_previews?: boolean, };

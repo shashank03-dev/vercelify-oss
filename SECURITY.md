@@ -47,3 +47,20 @@ projects.
 - Apps are published through the proxy on 80/443. Containers can't reach the mesh
   beyond its ACL; Ollama and the image registry are firewalled to the mesh.
 - Installers verify SHA-256 checksums of the release binaries and the Mac disk image.
+
+## Preview trust boundary
+
+Previews are private by default and receive only preview-only values or deliberately
+shared normal values. Making a value nonsecret does not grant sharing. Production
+database references are refused before credentials are resolved. Runtime previews
+use a dedicated ingress-only network, with no production/shared proxy bridge or
+outbound internet route. Docker 28+ and Compose 2.24.4+ are required for these paths;
+unsupported isolation fails closed. Existing previews are retired during the policy
+upgrade, so review variables before redeploying them.
+
+Vercelify is intended for repositories you trust on hardware you administer, not
+hostile multi-tenant execution. Image builds still execute repository instructions
+through Docker/BuildKit; private ingress is not a build sandbox. Code that receives
+an approved secret can deliberately reveal or misuse it despite log redaction.
+Fork builds remain disabled. Runtime isolation does not protect against Docker or
+kernel exploits, a compromised host administrator, or a compromised ingress proxy.

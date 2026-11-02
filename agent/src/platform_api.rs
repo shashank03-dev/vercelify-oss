@@ -17,6 +17,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 use vercelify_core::platform::*;
 use vercelify_platform::engine::{EngineEvent, Enqueue};
+use vercelify_platform::logs::Redactor;
 use vercelify_platform::{
     apps, databases, dbengine, deployments, env, git_sources, git_watch, hooks, nodes, previews, projects, tasks,
     volumes,
@@ -54,8 +55,13 @@ pub fn router() -> Router<AppState> {
         .route("/platform/apps", get(app_list).post(app_create))
         .route("/platform/apps/{app}", get(app_get).patch(app_patch).delete(app_delete))
         .route("/platform/apps/{app}/env", get(app_env).put(app_env_put))
+        .route("/platform/apps/{app}/env/provenance", get(app_env_provenance))
         .route("/platform/apps/{app}/env/import", post(app_env_import))
         .route("/platform/apps/{app}/env/{key}", delete(app_env_delete))
+        .route(
+            "/platform/apps/{app}/env/{key}/share",
+            axum::routing::put(app_env_share),
+        )
         .route("/platform/apps/{app}/domains", get(app_domains).post(app_domain_add))
         .route("/platform/apps/{app}/domains/{host}", delete(app_domain_remove))
         .route("/platform/apps/{app}/volumes", get(app_volumes).post(app_volume_create))
@@ -321,6 +327,16 @@ async fn app_env(
     list_vars(&s, VarScope::App, id, q.reveal).await
 }
 
+/// Where each variable of production and of previews comes from, and which
+/// ones previews go without (never values).
+async fn app_env_provenance(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+) -> ApiResult<vercelify_core::platform::EnvProvenance> {
+    let id = app_id(&s, app).await?;
+    Ok(Json(tx(&s, move |c, k| env::provenance(c, k, &id)).await?))
+}
+
 async fn app_env_put(
     State(s): State<AppState>,
     Path(app): Path<String>,
@@ -356,6 +372,7 @@ async fn app_env_import(
             build: Some(req.build),
             preview_only: Some(req.preview_only),
             secret: None,
+            share_with_previews: None,
         })
         .collect();
     let id = app_id(&s, app).await?;
@@ -378,6 +395,24 @@ async fn app_env_delete(
 ) -> ApiResult<Value> {
     let id = app_id(&s, app).await?;
     delete_var(&s, VarScope::App, id, key, q.preview_only).await
+}
+
+#[derive(Deserialize)]
+struct ShareReq {
+    share: bool,
+}
+
+/// Share an app's (normal) variable with its previews, or stop.
+async fn app_env_share(
+    State(s): State<AppState>,
+    Path((app, key)): Path<(String, String)>,
+    Json(req): Json<ShareReq>,
+) -> ApiResult<Value> {
+    let id = app_id(&s, app).await?;
+    let k = key.clone();
+    tx(&s, move |c, _| env::set_sharing(c, VarScope::App, &id, &k, req.share)).await?;
+    changed(&s, "apps");
+    Ok(Json(json!({ "key": key, "share_with_previews": req.share })))
 }
 
 // ----- apps -------------------------------------------------------------------
@@ -1137,6 +1172,25 @@ pub async fn run_task(p: &crate::platform::Platform, t: &ScheduledTask) -> Strin
 }
 
 /// The minute loop for scheduled tasks.
+/// Keep the platform's record of where private previews are served in step
+/// with the mesh (it joins after install, a rename, a new prefix); routes
+/// follow on the next reconcile when it changed.
+pub fn record_mesh_ingress(p: &crate::platform::Platform, cfg: &crate::config::Config) {
+    let m = crate::mesh::ingress(cfg);
+    match p.store.with(|c| apps::set_mesh_ingress(c, m.as_ref())) {
+        Ok(true) => tracing::info!(
+            "private previews: {}",
+            m.as_ref().map_or("not on the mesh yet".to_string(), |m| format!(
+                "*.{}.vfy from {}",
+                m.node,
+                m.cidrs.join(", ")
+            ))
+        ),
+        Ok(false) => {}
+        Err(e) => tracing::warn!("recording the mesh for previews: {e}"),
+    }
+}
+
 pub async fn run_tasks(p: Arc<crate::platform::Platform>, cfg: Arc<crate::config::Config>) {
     use chrono::Timelike;
     let mut last = None;
@@ -1165,6 +1219,7 @@ pub async fn run_tasks(p: Arc<crate::platform::Platform>, cfg: Arc<crate::config
                 }
             });
         }
+        record_mesh_ingress(&p, &cfg);
         let (p2, cfg2) = (p.clone(), cfg.clone());
         tokio::spawn(async move { run_database_backups(&p2, &cfg2, now).await });
     }
@@ -1261,6 +1316,7 @@ async fn domain_set(State(s): State<AppState>, Json(req): Json<PlatformDomain>) 
         wildcard: wildcard.clone(),
         https: req.https && !req.edge_tls,
         edge_tls: req.edge_tls,
+        mesh: None,
     };
     tx(&s, move |c, _| {
         vercelify_platform::store::put_setting(c, apps::DOMAIN_SETTING, &settings)
@@ -1612,18 +1668,81 @@ async fn app_runtime_logs(
     let id = tx(&s, move |c, _| Ok(apps::find(c, &app)?.id)).await?;
     let (rt, container) = p.engine.live_instance(&id)?;
     let tail = q.tail.unwrap_or(200).clamp(1, 5000);
+    // What the app prints of its own secrets isn't shown either.
+    let redactor = {
+        let id = id.clone();
+        let main_ip = if rt.is_local() {
+            None
+        } else {
+            crate::mesh::private_ipv4(&s.config)
+        };
+        tx(&s, move |c, k| runtime_log_redactor(c, k, &id, main_ip.as_deref())).await?
+    };
     match rt {
         vercelify_platform::runtime::NodeRuntime::Remote(r) => {
             let path = format!(
                 "/v1/runtime/containers/{container}/logs?tail={tail}&follow={}",
                 q.follow
             );
-            passthrough(r.stream(&path).await?)
+            Ok(redacted_lines(r.stream(&path).await?, redactor))
         }
         vercelify_platform::runtime::NodeRuntime::Local(_) => {
-            docker_logs(&p.engine.deployer.docker.bin, &container, tail, q.follow)
+            docker_logs(&p.engine.deployer.docker.bin, &container, tail, q.follow, redactor)
         }
     }
+}
+
+fn runtime_log_redactor(
+    c: &vercelify_platform::rusqlite::Connection,
+    key: &vercelify_platform::secrets::MasterKey,
+    app: &str,
+    main_ip: Option<&str>,
+) -> vercelify_platform::Result<Redactor> {
+    let vars = env::resolve_for_deploy(c, key, app, false, main_ip)?.vars;
+    Ok(Redactor::new(
+        vars.values().filter(|v| v.secret).map(|v| v.value.as_str()),
+    ))
+}
+
+/// Another server's `{at, stream, text}` lines with `redactor` applied (that
+/// server doesn't know the app's variables).
+fn redacted_lines(resp: hyper::Response<hyper::body::Incoming>, redactor: Redactor) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    use http_body_util::BodyExt;
+    let (tx_, rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(256);
+    let mut body = resp.into_body();
+    tokio::spawn(async move {
+        let mut buf: Vec<u8> = Vec::new();
+        let send = |line: &[u8]| -> Option<bytes::Bytes> {
+            let mut v: Value = serde_json::from_slice(line).ok()?;
+            if let Some(t) = v.get("text").and_then(Value::as_str) {
+                v["text"] = Value::String(redactor.apply(t));
+            }
+            let mut out = serde_json::to_vec(&v).ok()?;
+            out.push(b'\n');
+            Some(bytes::Bytes::from(out))
+        };
+        while let Some(Ok(frame)) = body.frame().await {
+            let Ok(data) = frame.into_data() else { continue };
+            buf.extend_from_slice(&data);
+            while let Some(i) = buf.iter().position(|&b| b == b'\n') {
+                let line: Vec<u8> = buf.drain(..=i).collect();
+                if let Some(b) = send(&line[..i]) {
+                    if tx_.send(b).await.is_err() {
+                        return;
+                    }
+                }
+            }
+            if buf.len() > 4 * vercelify_platform::proc::MAX_LINE {
+                buf.clear();
+            }
+        }
+    });
+    let headers = [
+        (axum::http::header::CONTENT_TYPE, "application/x-ndjson"),
+        (axum::http::header::CACHE_CONTROL, "no-store"),
+    ];
+    (headers, axum::body::Body::new(crate::routes::LineBody(rx))).into_response()
 }
 
 /// A streamed answer from another server's agent, passed on as it is.
@@ -1642,6 +1761,7 @@ pub(crate) fn docker_logs(
     container: &str,
     tail: u32,
     follow: bool,
+    redactor: Redactor,
 ) -> Result<axum::response::Response, AppError> {
     use axum::response::IntoResponse;
     let tail = tail.clamp(1, 5000).to_string();
@@ -1660,11 +1780,12 @@ pub(crate) fn docker_logs(
         .map_err(|e| AppError::internal(format!("docker logs: {e}")))?;
     let (out, err) = (child.stdout.take(), child.stderr.take());
     let (tx_, rx) = tokio::sync::mpsc::channel::<bytes::Bytes>(256);
+    let redactor = std::sync::Arc::new(redactor);
     if let Some(o) = out {
-        tokio::spawn(forward_lines(o, "stdout", tx_.clone()));
+        tokio::spawn(forward_lines(o, "stdout", tx_.clone(), redactor.clone()));
     }
     if let Some(e) = err {
-        tokio::spawn(forward_lines(e, "stderr", tx_.clone()));
+        tokio::spawn(forward_lines(e, "stderr", tx_.clone(), redactor));
     }
     drop(tx_);
     // The process lives as long as the response: dropped (and killed) when
@@ -1680,16 +1801,20 @@ pub(crate) fn docker_logs(
 }
 
 /// Each line of `pipe` as `{at, stream, text}` JSON until it ends or the
-/// reader goes away.
+/// reader goes away. Any bytes: invalid UTF-8 is replaced, not the end of
+/// the stream; terminal escapes and `\r` overwrites are resolved as in
+/// deployment logs; secret values are hidden.
 async fn forward_lines<R: tokio::io::AsyncRead + Unpin>(
     pipe: R,
     stream: &'static str,
     tx_: tokio::sync::mpsc::Sender<bytes::Bytes>,
+    redactor: std::sync::Arc<Redactor>,
 ) {
-    use tokio::io::AsyncBufReadExt;
-    let mut lines = tokio::io::BufReader::new(pipe).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
+    let mut r = tokio::io::BufReader::new(pipe);
+    let mut buf = Vec::new();
+    while let Ok(Some(line)) = vercelify_platform::proc::read_line(&mut r, &mut buf).await {
         let (at, text) = split_timestamp(&line);
+        let text = redactor.apply(&vercelify_platform::logs::strip_ansi(text));
         let mut v = serde_json::to_vec(&json!({ "at": at, "stream": stream, "text": text })).unwrap_or_default();
         v.push(b'\n');
         if tx_.send(bytes::Bytes::from(v)).await.is_err() {
@@ -1698,7 +1823,6 @@ async fn forward_lines<R: tokio::io::AsyncRead + Unpin>(
     }
 }
 
-/// `2025-01-02T03:04:05.123456789Z text` → (`2025-01-02T03:04:05Z`, `text`).
 pub fn split_timestamp(line: &str) -> (String, &str) {
     match line.split_once(' ') {
         Some((ts, rest)) if ts.len() >= 20 && ts.as_bytes()[4] == b'-' && ts.ends_with('Z') => {
@@ -2088,4 +2212,32 @@ async fn volume_move(
         events.changed("apps");
     });
     snapshot.map(Json).ok_or_else(|| AppError::internal("job vanished"))
+}
+
+#[cfg(test)]
+mod runtime_log_tests {
+    use super::*;
+    #[test]
+    fn filled_database_urls_are_redacted_in_runtime_logs() {
+        let store = vercelify_platform::Store::open_in_memory().unwrap();
+        let key = vercelify_platform::secrets::MasterKey::from_bytes(&[8; 32]).unwrap();
+        store
+            .tx(|c| {
+                let req: AppCreate =
+                    serde_json::from_value(json!({"name":"logtest","kind":"image","source":{"image":"node:22-slim"}}))
+                        .unwrap();
+                let app = apps::create(c, &req)?;
+                let req: DatabaseCreate =
+                    serde_json::from_value(json!({"name":"log-db","kind":"postgresql","link_app":app.id})).unwrap();
+                databases::create(c, &key, &req)?;
+                let filled = databases::resolve_references(c, &key, "${{db.log-db.url}}")?;
+                let redactor = runtime_log_redactor(c, &key, &app.id, None)?;
+                assert_eq!(
+                    redactor.apply(&format!("connected to {filled}")),
+                    "connected to [redacted]"
+                );
+                Ok(())
+            })
+            .unwrap();
+    }
 }

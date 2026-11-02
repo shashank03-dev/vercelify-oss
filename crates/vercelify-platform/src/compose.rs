@@ -109,7 +109,10 @@ pub fn override_yaml(
         }
         let _ = writeln!(y, "    env_file:\n      - {}", q(&env_file.to_string_lossy()));
         y.push_str("    restart: unless-stopped\n");
-        if s == routed {
+        if let Some(pr) = l.pr {
+            let net = crate::preview_network::name(l.app_id, pr);
+            let _ = writeln!(y, "    networks: !override\n      {}: {{}}\n    cap_drop:\n      - NET_RAW\n    security_opt:\n      - no-new-privileges:true", q(&net));
+        } else if s == routed {
             let _ = writeln!(
                 y,
                 "    networks:\n      default: {{}}\n      {}: {{}}",
@@ -117,7 +120,17 @@ pub fn override_yaml(
             );
         }
     }
-    let _ = writeln!(y, "networks:\n  {}:\n    external: true", q(PROXY_NETWORK));
+    if let Some(pr) = l.pr {
+        let net = crate::preview_network::name(l.app_id, pr);
+        let _ = writeln!(
+            y,
+            "networks: !override\n  {}:\n    external: true\n    name: {}",
+            q(&net),
+            q(&net)
+        );
+    } else {
+        let _ = writeln!(y, "networks:\n  {}:\n    external: true", q(PROXY_NETWORK));
+    }
     if !volumes.is_empty() {
         y.push_str("volumes:\n");
         for v in volumes {
@@ -440,6 +453,7 @@ pub fn check_preview_storage(config: &serde_json::Value, dir: &Path, project: &s
     }
     let services = config.get("services").and_then(|s| s.as_object());
     for (svc, s) in services.into_iter().flatten() {
+        check_preview_execution(svc, s)?;
         for m in s.get("volumes").and_then(|v| v.as_array()).into_iter().flatten() {
             let kind = m.get("type").and_then(|t| t.as_str()).unwrap_or("");
             let source = m.get("source").and_then(|t| t.as_str()).unwrap_or("");
@@ -503,6 +517,84 @@ pub fn check_preview_storage(config: &serde_json::Value, dir: &Path, project: &s
     Ok(())
 }
 
+fn check_preview_execution(svc: &str, s: &serde_json::Value) -> Result<()> {
+    let nonempty = |key: &str| {
+        s.get(key).is_some_and(|v| match v {
+            serde_json::Value::Null => false,
+            serde_json::Value::Array(a) => !a.is_empty(),
+            serde_json::Value::Object(o) => !o.is_empty(),
+            serde_json::Value::String(s) => !s.is_empty(),
+            serde_json::Value::Bool(b) => *b,
+            _ => true,
+        })
+    };
+    for field in [
+        "privileged",
+        "network_mode",
+        "pid",
+        "ipc",
+        "uts",
+        "cgroup",
+        "cap_add",
+        "devices",
+        "device_cgroup_rules",
+        "ports",
+        "external_links",
+        "container_name",
+        "use_api_socket",
+        "provider",
+        "gpus",
+    ] {
+        if nonempty(field) {
+            return Err(Error::Invalid(format!(
+                "{svc}: {field} is not allowed in isolated previews"
+            )));
+        }
+    }
+    for hook in ["post_start", "pre_stop"] {
+        if s[hook]
+            .as_array()
+            .is_some_and(|a| a.iter().any(|h| h["privileged"] == true))
+        {
+            return Err(Error::Invalid(format!(
+                "{svc}: privileged lifecycle hooks are not allowed in previews"
+            )));
+        }
+    }
+    if s.get("security_opt")
+        .and_then(|v| v.as_array())
+        .is_some_and(|a| a.iter().any(|v| v.as_str() != Some("no-new-privileges:true")))
+    {
+        return Err(Error::Invalid(format!(
+            "{svc}: preview security options cannot weaken isolation"
+        )));
+    }
+    if s.get("build").is_some_and(|b| {
+        b["privileged"] == true
+            || b["network"] == "host"
+            || b.get("entitlements")
+                .and_then(|v| v.as_array())
+                .is_some_and(|a| !a.is_empty())
+    }) {
+        return Err(Error::Invalid(format!(
+            "{svc}: privileged or host-network builds are not allowed in previews"
+        )));
+    }
+    Ok(())
+}
+
+fn check_preview_networks(config: &serde_json::Value, network: &str) -> Result<()> {
+    for (svc, s) in config["services"].as_object().into_iter().flatten() {
+        let networks = s["networks"].as_object();
+        if !networks.is_some_and(|n| n.len() == 1 && n.contains_key(network)) {
+            return Err(Error::Invalid(format!(
+                "{svc}: preview must join only its isolated network (Compose 2.24.4+ required)"
+            )));
+        }
+    }
+    Ok(())
+}
+
 fn server_file(what: String) -> Error {
     Error::Invalid(format!(
         "{what}, outside the repository: a preview must not read production's files from the server \
@@ -542,7 +634,7 @@ pub async fn config(
     }
     args.extend(proc::args(&["config", "--format", "json", NO_ENV_RESOLUTION]));
     let run = |args: Vec<String>| async move {
-        proc::run(Spec {
+        proc::run_clean(Spec {
             bin: &docker.bin,
             args: &args,
             env,
@@ -678,11 +770,32 @@ pub fn pick(config: &serde_json::Value, explicit: Option<&str>) -> Result<(Vec<S
 /// Build and start the project; returns the routed container's name.
 pub async fn up(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + Send)) -> Result<String> {
     if u.labels.pr.is_some() {
-        // Before Compose reads anything (see `implicit_reads`).
+        // Reject implicit server-file reads before even consulting Docker
+        // for cleanup; no external tool may resolve this source first.
         implicit_reads(u.dir, u.file)?;
     }
+    let network = u.labels.pr.map(|pr| crate::preview_network::name(u.labels.app_id, pr));
+    let docker = u.docker.clone();
+    let result = up_inner(u, cancel, log).await;
+    if result.is_err() {
+        if let Some(net) = network {
+            if let Err(e) = crate::preview_network::remove_if_unused(&docker, &net).await {
+                tracing::warn!("cleaning failed compose preview network: {e}");
+            }
+        }
+    }
+    result
+}
+
+async fn up_inner(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + Send)) -> Result<String> {
     let cfg = config(u.docker, u.dir, &[u.file], None, u.env).await?;
     check_build_inputs(&cfg, u.dir)?;
+    if let Some(pr) = u.labels.pr {
+        for (svc, s) in cfg["services"].as_object().into_iter().flatten() {
+            check_preview_execution(svc, s)?;
+        }
+        crate::preview_network::ensure(u.docker, &crate::preview_network::name(u.labels.app_id, pr)).await?;
+    }
     // The file's own order is lost in `config`.
     let (services, routed) =
         pick(&cfg, u.service).map_err(|e| Error::Invalid(format!("{}: {}", u.file, e.message())))?;
@@ -718,7 +831,13 @@ pub async fn up(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + Se
     if u.labels.pr.is_some() {
         let override_file = override_path.to_string_lossy();
         let merged = config(u.docker, u.dir, &[u.file, &override_file], Some(u.project), u.env).await;
-        if let Err(e) = merged.and_then(|m| check_preview_storage(&m, u.dir, u.project)) {
+        if let Err(e) = merged.and_then(|m| {
+            check_preview_storage(&m, u.dir, u.project)?;
+            check_preview_networks(
+                &m,
+                &crate::preview_network::name(u.labels.app_id, u.labels.pr.expect("preview")),
+            )
+        }) {
             let _ = std::fs::remove_file(&env_path);
             return Err(e);
         }
@@ -726,7 +845,9 @@ pub async fn up(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + Se
             log("info", &format!("preview volumes: {} (its own)", volumes.join(", ")));
         }
     }
-    u.docker.ensure_network(PROXY_NETWORK).await?;
+    if u.labels.pr.is_none() {
+        u.docker.ensure_network(PROXY_NETWORK).await?;
+    }
     let args = proc::args(&[
         "compose",
         "-p",
@@ -743,7 +864,7 @@ pub async fn up(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + Se
         "--wait-timeout",
         &u.timeout.as_secs().to_string(),
     ]);
-    let res = proc::stream(
+    let res = proc::stream_clean(
         Spec {
             bin: &u.docker.bin,
             args: &args,
@@ -805,6 +926,46 @@ pub async fn down(docker: &Docker, project: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn compose_does_not_inherit_the_agents_environment() {
+        use std::os::unix::fs::PermissionsExt;
+        assert!(
+            std::env::var("CARGO_MANIFEST_DIR").is_ok(),
+            "run this regression with cargo test"
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("docker");
+        std::fs::write(&bin, "#!/bin/sh\nprintf '{\"services\":{\"web\":{\"environment\":{\"INHERITED\":\"%s\"}}}}' \"$CARGO_MANIFEST_DIR\"\n").unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let docker = super::Docker {
+            bin: bin.to_string_lossy().into_owned(),
+        };
+        let cfg = super::config(&docker, dir.path(), &["compose.yml"], None, &[])
+            .await
+            .unwrap();
+        assert_eq!(cfg["services"]["web"]["environment"]["INHERITED"], "");
+    }
+    #[test]
+    fn previews_reject_host_privileges_and_direct_ingress() {
+        let dir = tempfile::tempdir().unwrap();
+        for escape in [
+            serde_json::json!({"privileged":true}),
+            serde_json::json!({"network_mode":"host"}),
+            serde_json::json!({"pid":"host"}),
+            serde_json::json!({"cap_add":["NET_ADMIN"]}),
+            serde_json::json!({"ports":[{"target":80,"published":"9000"}]}),
+            serde_json::json!({"devices":["/dev/mem"]}),
+            serde_json::json!({"external_links":["production-db"]}),
+            serde_json::json!({"security_opt":["seccomp=unconfined"]}),
+            serde_json::json!({"build":{"context":".","privileged":true}}),
+        ] {
+            let cfg = serde_json::json!({"services":{"web":escape}});
+            assert!(
+                super::check_preview_storage(&cfg, dir.path(), "preview").is_err(),
+                "{cfg}"
+            );
+        }
+    }
     use super::*;
 
     #[test]

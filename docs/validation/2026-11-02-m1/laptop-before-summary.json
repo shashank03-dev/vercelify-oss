@@ -1,0 +1,17 @@
+{
+  "samples": 12,
+  "system_used_mib": {
+    "median": 1381.0,
+    "min": 1374,
+    "max": 1409
+  },
+  "process_rss_mib": {
+    "vercelify-agent": 20.87,
+    "vercelify-mesh": 3.25,
+    "traefik": 88.33,
+    "dockerd": 99.11,
+    "containerd": 72.7,
+    "containerd-shim": 65.5,
+    "buildkitd": 35.47
+  }
+}

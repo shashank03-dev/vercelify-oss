@@ -555,6 +555,7 @@ mod tests {
                 host: format!("{name}.example.com"),
                 https: true,
                 redirect_to: None,
+                allow_from: vec![],
             }],
             upstreams: vec![format!("http://vfy-{name}-1:3000")],
             basic_auth: vec![],

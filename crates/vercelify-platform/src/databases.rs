@@ -470,6 +470,7 @@ pub fn link(c: &Connection, key: &MasterKey, app: &str, db_name: &str, var: &str
                 build: None,
                 preview_only: None,
                 secret: Some(true),
+                share_with_previews: None,
             }],
             replace: false,
         },

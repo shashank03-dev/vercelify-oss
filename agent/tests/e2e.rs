@@ -403,6 +403,8 @@ fn protected_routes_reject_missing_wrong_and_revoked_tokens() {
         ("PUT", "/v1/platform/apps/app/env"),
         ("POST", "/v1/platform/apps/app/env/import"),
         ("DELETE", "/v1/platform/apps/app/env/KEY"),
+        ("PUT", "/v1/platform/apps/app/env/KEY/share"),
+        ("GET", "/v1/platform/apps/app/env/provenance"),
         ("GET", "/v1/platform/apps/app/domains"),
         ("POST", "/v1/platform/apps/app/domains"),
         ("DELETE", "/v1/platform/apps/app/domains/example.com"),
@@ -1383,6 +1385,44 @@ fn platform_api() {
         .find(|v| v["key"] == "DATABASE_URL")
         .unwrap();
     assert_eq!(db["value"], "postgres://secret");
+    // Previews (design §5.1): nothing is shared until asked, provenance never
+    // carries values, and sharing doesn't need the (hidden) value again.
+    let (s, p) = get(&a, "/v1/platform/apps/blog/env/provenance");
+    assert_eq!(s, 200, "{p}");
+    assert!(p["preview"].as_array().unwrap().is_empty(), "{p}");
+    let withheld: Vec<&str> = p["withheld"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["key"].as_str().unwrap())
+        .collect();
+    assert_eq!(withheld, ["A", "DATABASE_URL", "NODE_ENV"]);
+    assert!(!p.to_string().contains("postgres://secret"));
+    let (s, v) = send(
+        &a,
+        "PUT",
+        "/v1/platform/apps/blog/env/NODE_ENV/share",
+        TOKEN,
+        Some(json!({"share": true})),
+    );
+    assert_eq!(s, 200, "{v}");
+    let (_, p) = get(&a, "/v1/platform/apps/blog/env/provenance");
+    assert_eq!(p["preview"][0]["key"], "NODE_ENV");
+    assert_eq!(p["preview"][0]["origin"], "shared");
+    let (_, vars) = get(&a, "/v1/platform/apps/blog/env");
+    assert!(vars
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v["key"] == "NODE_ENV" && v["share_with_previews"] == true));
+    let (s, _) = send(
+        &a,
+        "PUT",
+        "/v1/platform/apps/blog/env/MISSING/share",
+        TOKEN,
+        Some(json!({"share": true})),
+    );
+    assert_eq!(s, 404);
     let raw = std::fs::read(a.root.join("state/platform.db")).unwrap();
     assert!(
         !String::from_utf8_lossy(&raw).contains("postgres://secret"),
@@ -1469,6 +1509,14 @@ fn platform_api() {
     assert_eq!(s, 200);
     let (s, _) = send(&a, "GET", "/v1/platform/apps/blog/env?reveal=true", &viewer, None);
     assert_eq!(s, 403, "viewers can't reveal secrets");
+    let (s, _) = send(
+        &a,
+        "PUT",
+        "/v1/platform/apps/blog/env/NODE_ENV/share",
+        &viewer,
+        Some(json!({"share": false})),
+    );
+    assert_eq!(s, 403, "viewers can't change what previews get");
     let (s, _) = send(
         &a,
         "PUT",

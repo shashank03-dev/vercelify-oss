@@ -35,6 +35,8 @@ pub struct Mount {
 
 #[derive(Debug, Clone, Default)]
 pub struct ContainerSpec {
+    /// Drop raw sockets and prevent privilege escalation in isolated previews.
+    pub isolated_preview: bool,
     pub name: String,
     pub image: String,
     pub labels: BTreeMap<String, String>,
@@ -145,6 +147,19 @@ impl Docker {
         Ok(o.stdout.trim().to_string())
     }
 
+    /// The TCP ports an image declares with `EXPOSE` (`.Config.ExposedPorts`),
+    /// sorted. Metadata, not proof that anything listens there.
+    pub async fn exposed_tcp_ports(&self, image: &str) -> Result<Vec<u16>> {
+        let o = self
+            .ok(
+                &proc::args(&["image", "inspect", "--format", "{{json .Config.ExposedPorts}}", image]),
+                quick(),
+                "docker image inspect",
+            )
+            .await?;
+        Ok(parse_exposed(&o.stdout))
+    }
+
     pub async fn image_exists(&self, image: &str) -> Result<bool> {
         Ok(self
             .run(
@@ -182,6 +197,14 @@ impl Docker {
     /// Create (not start) a container.
     pub async fn create(&self, spec: &ContainerSpec) -> Result<String> {
         let mut args = proc::args(&["create", "--name", &spec.name]);
+        if spec.isolated_preview {
+            args.extend(proc::args(&[
+                "--cap-drop",
+                "NET_RAW",
+                "--security-opt",
+                "no-new-privileges:true",
+            ]));
+        }
         let restart = if spec.restart.is_empty() {
             "unless-stopped"
         } else {
@@ -477,6 +500,23 @@ pub fn parse_ps(stdout: &str) -> Vec<ContainerState> {
 
 /// `docker logs --timestamps` output, its two streams merged into one in
 /// time order (a crash's error then follows the lines before it).
+/// `{"80/tcp":{},"53/udp":{}}` (or `null`) → the TCP ports.
+pub fn parse_exposed(raw: &str) -> Vec<u16> {
+    let v: serde_json::Value = serde_json::from_str(raw.trim()).unwrap_or_default();
+    let mut ports: Vec<u16> = v
+        .as_object()
+        .into_iter()
+        .flat_map(|o| o.keys())
+        .filter_map(|k| {
+            let (port, proto) = k.split_once('/').unwrap_or((k.as_str(), "tcp"));
+            (proto == "tcp").then(|| port.parse().ok()).flatten()
+        })
+        .collect();
+    ports.sort_unstable();
+    ports.dedup();
+    ports
+}
+
 fn by_time(stdout: &str, stderr: &str) -> String {
     let mut lines: Vec<&str> = stdout.lines().chain(stderr.lines()).collect();
     lines.sort_by_key(|l| l.split_once(' ').map_or(*l, |(t, _)| t));
@@ -499,6 +539,18 @@ pub fn created_at(created: &str) -> Option<chrono::DateTime<chrono::Utc>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exposed_ports() {
+        assert_eq!(parse_exposed(r#"{"80/tcp":{}}"#), [80]);
+        assert_eq!(
+            parse_exposed(r#"{"8080/tcp":{},"53/udp":{},"443":{},"80/tcp":{}}"#),
+            [80, 443, 8080]
+        );
+        assert!(parse_exposed("null\n").is_empty());
+        assert!(parse_exposed("").is_empty());
+        assert!(parse_exposed(r#"{"53/udp":{}}"#).is_empty());
+    }
 
     #[test]
     fn logs_from_both_streams_are_in_time_order() {
