@@ -1,0 +1,10 @@
+{"ok":true,"version":"1.0.0","hostname":"user-Inspiron-5567","role":"main","pairing_open":false,"api_version":2,"capabilities":["doctor","update","rollback","hardware","alerts","metrics","uptime","tokens","audit","backup","backup-recovery-kit","previews","auto-rollback","images","events","jobs","sleep","power-guard","domain","projects","roles","sunshine-pair","mesh","platform"]}22de1c0081d76a62108d67105d15ce6737ce129d30ccb74a1030645824afbded  /usr/local/bin/vercelify-agent
+vfy-db-gwdb Up 7 hours
+vfy-gw-2cv2ryfw Up 7 hours
+buildx_buildkit_vercelify0 Up 7 hours
+vercelify-proxy Up 7 hours
+voxbento-mediamtx-1 Up 7 hours
+Nov 02 07:45:33 user-Inspiron-5567 vercelify-agent[160082]: 2026-11-02T02:15:33.649687Z  INFO platform engine: /var/lib/vercelify/platform.db
+Nov 02 07:45:33 user-Inspiron-5567 vercelify-agent[160082]: 2026-11-02T02:15:33.658976Z  INFO private previews: *.user-inspiron-5567.vfy from 10.77.0.0/16, fd76:6679:6d65::/48
+Nov 02 07:45:34 user-Inspiron-5567 vercelify-agent[160082]: 2026-11-02T02:15:34.908410Z  WARN app_q4psfmgmevf6sehb PR #1: retired preview for the safety upgrade; review preview variables and redeploy
+curl: (7) Failed to connect to 127.0.0.1 port 7420 after 0 ms: Connection refused

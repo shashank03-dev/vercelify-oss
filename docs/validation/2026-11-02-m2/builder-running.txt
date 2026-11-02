@@ -1,0 +1,1541 @@
+started 2026-11-02T02:15:06Z
+Linux 6.8.0-142-generic aarch64 GNU/Linux
+               total        used        free      shared  buff/cache   available
+Mem:            3905         703         339           1        3054        3202
+Swap:           4095           0        4095
+Docker server 29.9.2
+7a0b3feb4d4c8561163530a4163d9de02b4ff55df5ef30a208dedd17c8ca176a  /usr/local/bin/vercelify-agent
+bbadc8c95e82bb61aac307386db7154d0c3576e5f4a87bed98a64a48ec652f72  /usr/local/bin/vercelify-mesh
+container vfy-blog-cc5wwk9b image vfy/blog:8yywze68cc5wwk9b id ae73335730de83d8b3f4a213db2817bf4acf442556ac18f04124fe257127c721
+container buildx_buildkit_vercelify0 image moby/buildkit:v0.18.2 id 501769e3cbf93a41bfb7039709fa2f4cdc4f9f854deea1a8138b25365ee5847c
+container vfy-w5-0xa84s17 image traefik/whoami:v1.10 id ddb159fdc561818e848c69ffe9a08aa3c25b41a6326f477f1015799480020a9d
+container vfy-w4-mzhcarvh image traefik/whoami:v1.10 id b1fd781b40088591902ad2275bc3d941796718ffb73a1bc07bc3099a5e6772ef
+container vfy-w3-bban4zvy image traefik/whoami:v1.10 id 5c53de799da9de58f60682108837cb1d9e491a27502829f8422ee001d45e145d
+container vfy-w2-e9vn93v5 image traefik/whoami:v1.10 id 28a74a994186d7a3df32f555e765bef965a79ef4350235cd32ea2c0d09e43c24
+container vfy-w1-cdyp1kh9 image traefik/whoami:v1.10 id 1d00d3faeea8d81b4f07260b307a27e9aea884d485d3aa164b944196c12e78a5
+container vercelify-proxy image traefik:v3.7 id 173069cbf2c65ecd249f3f8f583168f5a9fc395fc7b19ac7672f45cf583c9ab8
+REPOSITORY       TAG                DIGEST                                                                    IMAGE ID                                                                  CREATED         SIZE
+vfy/blog         8yywze68cc5wwk9b   sha256:35387f82398b559356ce1ac066122b31dc928fb3b8fb9b408f56d1f2587b1166   sha256:35387f82398b559356ce1ac066122b31dc928fb3b8fb9b408f56d1f2587b1166   10 hours ago    994MB
+vfy/blog         qwayay0gvab9g2zj   sha256:cf126d9f6ee05d1bde0f19bd1f0a8a1535e7c324da6fd0fb238a5591f214a186   sha256:cf126d9f6ee05d1bde0f19bd1f0a8a1535e7c324da6fd0fb238a5591f214a186   10 hours ago    994MB
+traefik          v3.7               sha256:e9338a01a43389362bdef90afd4ff4a30dd6c0a2e1b0ce00c5e0f52659aa2d9c   sha256:e9338a01a43389362bdef90afd4ff4a30dd6c0a2e1b0ce00c5e0f52659aa2d9c   2 days ago      227MB
+docker           29-dind            sha256:9e79b879b177fbd72c34376a3dd3d91747da5db49e1f560f76aea59561471977   sha256:9e79b879b177fbd72c34376a3dd3d91747da5db49e1f560f76aea59561471977   11 days ago     435MB
+traefik/whoami   v1.10              sha256:1699d99cb4b9acc17f74ca670b3d8d0b7ba27c948b3445f0593b58ebece92f04   sha256:1699d99cb4b9acc17f74ca670b3d8d0b7ba27c948b3445f0593b58ebece92f04   21 months ago   10.1MB
+moby/buildkit    v0.18.2            sha256:86c0ad9d1137c186e9d455912167df20e530bdf7f7c19de802e892bb8ca16552   sha256:86c0ad9d1137c186e9d455912167df20e530bdf7f7c19de802e892bb8ca16552   22 months ago   305MB
+sample 1 2026-11-02T02:15:07Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         682         360           1        3054        3223
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3280
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 52480
+rss_kib containerd-shim 86716
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35420
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-eve 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ex 0
+rss_kib kworker/u4:2-fl 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-ev 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-fl 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 33756
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90576
+rss_kib node 118392
+rss_kib oom_reaper 0
+rss_kib packagekitd 19680
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3788
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3036
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15444
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timedat 6820
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94148
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8136
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34516
+container_memory vfy-blog-cc5wwk9b 112.6MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.605MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.59MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.48MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.793MiB / 3.814GiB
+container_memory vercelify-proxy 20.06MiB / 3.814GiB
+sample 2 2026-11-02T02:15:15Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         682         360           1        3054        3223
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3280
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 52480
+rss_kib containerd-shim 87652
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35420
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-eve 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ex 0
+rss_kib kworker/u4:2-fl 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-ev 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-fl 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 33756
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90576
+rss_kib node 118400
+rss_kib oom_reaper 0
+rss_kib packagekitd 19680
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3788
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3032
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15444
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timedat 6820
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94148
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8136
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34516
+container_memory vfy-blog-cc5wwk9b 112.6MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.605MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.59MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.48MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.793MiB / 3.814GiB
+container_memory vercelify-proxy 20.06MiB / 3.814GiB
+sample 3 2026-11-02T02:15:23Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         686         357           1        3054        3219
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3312
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 52480
+rss_kib containerd-shim 88304
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35420
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-eve 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ex 0
+rss_kib kworker/u4:2-ev 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-ev 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-fl 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 33756
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90576
+rss_kib node 118404
+rss_kib oom_reaper 0
+rss_kib packagekitd 19680
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3780
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3036
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15444
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timedat 6820
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94148
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8136
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34516
+container_memory vfy-blog-cc5wwk9b 112.6MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.605MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.59MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.48MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.793MiB / 3.814GiB
+container_memory vercelify-proxy 20.06MiB / 3.814GiB
+sample 4 2026-11-02T02:15:31Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         688         354           1        3054        3216
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3280
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 52480
+rss_kib containerd-shim 89000
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35420
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-eve 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ex 0
+rss_kib kworker/u4:2-fl 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-ev 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-fl 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 33756
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90576
+rss_kib node 118408
+rss_kib oom_reaper 0
+rss_kib packagekitd 19680
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3788
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3016
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15444
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94148
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8136
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34516
+container_memory vfy-blog-cc5wwk9b 112.6MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.605MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.59MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.48MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.793MiB / 3.814GiB
+container_memory vercelify-proxy 20.06MiB / 3.814GiB
+sample 5 2026-11-02T02:15:39Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         682         360           1        3054        3223
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3284
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 52560
+rss_kib containerd-shim 88160
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35420
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-eve 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ex 0
+rss_kib kworker/u4:2-ev 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-fl 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-ev 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 33756
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90576
+rss_kib node 118412
+rss_kib oom_reaper 0
+rss_kib packagekitd 19680
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3776
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3032
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15444
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94148
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8140
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34516
+container_memory vfy-blog-cc5wwk9b 112.6MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.605MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.59MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.48MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.793MiB / 3.814GiB
+container_memory vercelify-proxy 20.06MiB / 3.814GiB
+sample 6 2026-11-02T02:15:47Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         682         360           1        3054        3223
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3280
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 52560
+rss_kib containerd-shim 88284
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35420
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-eve 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ex 0
+rss_kib kworker/u4:2-ev 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-fl 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-ev 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 33756
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90576
+rss_kib node 118420
+rss_kib oom_reaper 0
+rss_kib packagekitd 19680
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3784
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3036
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15444
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94148
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8140
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34516
+container_memory vfy-blog-cc5wwk9b 112.6MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.605MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.59MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.48MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.793MiB / 3.814GiB
+container_memory vercelify-proxy 20.06MiB / 3.814GiB
+sample 7 2026-11-02T02:15:55Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         708         334           1        3054        3196
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3280
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 52560
+rss_kib containerd-shim 88348
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib curl 12628
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35436
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-eve 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ex 0
+rss_kib kworker/u4:2-ev 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-ev 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-ev 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 33756
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90736
+rss_kib node 118424
+rss_kib oom_reaper 0
+rss_kib packagekitd 19680
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3784
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3032
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15448
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timedat 6820
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94164
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8160
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34644
+container_memory vfy-blog-cc5wwk9b 112.8MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.613MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.625MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.543MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.812MiB / 3.814GiB
+container_memory vercelify-proxy 20.08MiB / 3.814GiB
+sample 8 2026-11-02T02:16:03Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         683         359           1        3054        3222
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3284
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 52560
+rss_kib containerd-shim 87760
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35436
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-mm_ 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ex 0
+rss_kib kworker/u4:2-ev 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-ev 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-ev 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 33756
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90740
+rss_kib node 118428
+rss_kib oom_reaper 0
+rss_kib packagekitd 19680
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3784
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3032
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15448
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timedat 6820
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94164
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8160
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34644
+container_memory vfy-blog-cc5wwk9b 112.8MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.613MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.625MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.543MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.812MiB / 3.814GiB
+container_memory vercelify-proxy 20.08MiB / 3.814GiB
+sample 9 2026-11-02T02:16:11Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         679         363           1        3054        3226
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3280
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 53044
+rss_kib containerd-shim 88364
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35436
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-eve 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ex 0
+rss_kib kworker/u4:2-ev 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-fl 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-ev 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 31668
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90740
+rss_kib node 118432
+rss_kib oom_reaper 0
+rss_kib packagekitd 19680
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3784
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3036
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15448
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timedat 6820
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94164
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8148
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34644
+container_memory vfy-blog-cc5wwk9b 112.8MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.613MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.625MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.543MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.812MiB / 3.814GiB
+container_memory vercelify-proxy 20.08MiB / 3.814GiB
+sample 10 2026-11-02T02:16:20Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         686         356           1        3054        3219
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3276
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 53044
+rss_kib containerd-shim 89064
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35436
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-eve 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ex 0
+rss_kib kworker/u4:2-fl 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-ev 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-ev 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 31668
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90740
+rss_kib node 118440
+rss_kib oom_reaper 0
+rss_kib packagekitd 19680
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3784
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3036
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15448
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timedat 6820
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94164
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8148
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34644
+container_memory vfy-blog-cc5wwk9b 112.8MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.613MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.625MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.543MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.812MiB / 3.814GiB
+container_memory vercelify-proxy 20.08MiB / 3.814GiB
+sample 11 2026-11-02T02:16:28Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         674         368           1        3054        3231
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3268
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 53044
+rss_kib containerd-shim 89120
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35436
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-eve 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ev 0
+rss_kib kworker/u4:2-ev 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-ev 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-ev 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 31668
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90740
+rss_kib node 118444
+rss_kib oom_reaper 0
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3788
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3064
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15520
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94164
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8148
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34644
+container_memory vfy-blog-cc5wwk9b 112.8MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.613MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.625MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.543MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.812MiB / 3.814GiB
+container_memory vercelify-proxy 20.08MiB / 3.814GiB
+sample 12 2026-11-02T02:16:36Z
+               total        used        free      shared  buff/cache   available
+Mem:            3905         678         363           1        3054        3227
+Swap:           4095           0        4095
+rss_kib (sd-pam) 3432
+rss_kib ModemManager 12064
+rss_kib agetty 3584
+rss_kib awk 3280
+rss_kib bash 6236
+rss_kib buildkitd 43236
+rss_kib containerd 52788
+rss_kib containerd-shim 88172
+rss_kib cpuhp/0 0
+rss_kib cpuhp/1 0
+rss_kib cron 2500
+rss_kib dbus-daemon 5100
+rss_kib docker-init 596
+rss_kib docker-proxy 35436
+rss_kib dockerd 109868
+rss_kib ecryptfs-kthrea 0
+rss_kib hwrng 0
+rss_kib idle_inject/0 0
+rss_kib idle_inject/1 0
+rss_kib irq/13-ACPI:Eve 0
+rss_kib jbd2/vda1-8 0
+rss_kib jbd2/vda16-8 0
+rss_kib kauditd 0
+rss_kib kcompactd0 0
+rss_kib kdevtmpfs 0
+rss_kib khugepaged 0
+rss_kib khungtaskd 0
+rss_kib khvcd 0
+rss_kib ksmd 0
+rss_kib ksoftirqd/0 0
+rss_kib ksoftirqd/1 0
+rss_kib kswapd0 0
+rss_kib kthreadd 0
+rss_kib kworker/0:0-cgr 0
+rss_kib kworker/0:0H-ev 0
+rss_kib kworker/0:1-cgr 0
+rss_kib kworker/0:1H-kb 0
+rss_kib kworker/0:3-eve 0
+rss_kib kworker/1:0-vir 0
+rss_kib kworker/1:0H-ev 0
+rss_kib kworker/1:1-ine 0
+rss_kib kworker/1:1H-kb 0
+rss_kib kworker/1:2-cgr 0
+rss_kib kworker/R-acpi_ 0
+rss_kib kworker/R-ata_s 0
+rss_kib kworker/R-blkcg 0
+rss_kib kworker/R-charg 0
+rss_kib kworker/R-devfr 0
+rss_kib kworker/R-edac- 0
+rss_kib kworker/R-ext4- 0
+rss_kib kworker/R-inet_ 0
+rss_kib kworker/R-ipv6_ 0
+rss_kib kworker/R-kbloc 0
+rss_kib kworker/R-kinte 0
+rss_kib kworker/R-kmpat 0
+rss_kib kworker/R-kstrp 0
+rss_kib kworker/R-kthro 0
+rss_kib kworker/R-md 0
+rss_kib kworker/R-md_bi 0
+rss_kib kworker/R-mld 0
+rss_kib kworker/R-mm_pe 0
+rss_kib kworker/R-netns 0
+rss_kib kworker/R-quota 0
+rss_kib kworker/R-raid5 0
+rss_kib kworker/R-rcu_g 0
+rss_kib kworker/R-rcu_p 0
+rss_kib kworker/R-slub_ 0
+rss_kib kworker/R-tls-s 0
+rss_kib kworker/R-tpm_d 0
+rss_kib kworker/R-write 0
+rss_kib kworker/u4:0-fl 0
+rss_kib kworker/u4:1-ev 0
+rss_kib kworker/u4:2-fl 0
+rss_kib kworker/u4:3-fl 0
+rss_kib kworker/u4:4-ev 0
+rss_kib kworker/u4:5-fl 0
+rss_kib kworker/u4:6-ev 0
+rss_kib kworker/u4:7 0
+rss_kib kworker/u5:0 0
+rss_kib lima-guestagent 31668
+rss_kib migration/0 0
+rss_kib migration/1 0
+rss_kib multipathd 26108
+rss_kib next-router-wor 90740
+rss_kib node 118448
+rss_kib oom_reaper 0
+rss_kib polkitd 7504
+rss_kib pool_workqueue_ 0
+rss_kib ps 3788
+rss_kib psimon 0
+rss_kib rcu_preempt 0
+rss_kib rcu_tasks_kthre 0
+rss_kib rcu_tasks_rude_ 0
+rss_kib rcu_tasks_trace 0
+rss_kib rsyslogd 4540
+rss_kib sh 1384
+rss_kib sort 3016
+rss_kib sshd 15920
+rss_kib sudo 5904
+rss_kib systemd 24224
+rss_kib systemd-journal 15520
+rss_kib systemd-logind 8360
+rss_kib systemd-network 9620
+rss_kib systemd-resolve 12692
+rss_kib systemd-timesyn 7212
+rss_kib systemd-udevd 7220
+rss_kib traefik 94164
+rss_kib udisksd 12740
+rss_kib unattended-upgr 22132
+rss_kib vercelify-agent 8568
+rss_kib vercelify-mesh 2968
+rss_kib watchdogd 0
+rss_kib whoami 34644
+container_memory vfy-blog-cc5wwk9b 112.8MiB / 3.814GiB
+container_memory buildx_buildkit_vercelify0 81.1MiB / 3.814GiB
+container_memory vfy-w5-0xa84s17 2.613MiB / 3.814GiB
+container_memory vfy-w4-mzhcarvh 2.535MiB / 3.814GiB
+container_memory vfy-w3-bban4zvy 2.625MiB / 3.814GiB
+container_memory vfy-w2-e9vn93v5 2.543MiB / 3.814GiB
+container_memory vfy-w1-cdyp1kh9 2.812MiB / 3.814GiB
+container_memory vercelify-proxy 20.08MiB / 3.814GiB

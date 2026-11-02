@@ -196,13 +196,21 @@ impl Builder {
         }
     }
 
-    /// Create the BuildKit container builder if it doesn't exist.
+    /// Create the BuildKit builder, or bootstrap its retained container/cache.
     pub async fn ensure_builder(&self, log: &mut LogWriter) -> Result<()> {
         if self.driver == Driver::Docker {
             return Ok(());
         }
         let inspect = proc::args(&["buildx", "inspect", BUILDER]);
         if proc::run(self.spec(&inspect, Duration::from_secs(30))).await?.success() {
+            let bootstrap = proc::args(&["buildx", "inspect", "--bootstrap", BUILDER]);
+            let out = proc::run(self.spec(&bootstrap, Duration::from_secs(300))).await?;
+            if !out.success() {
+                return Err(Error::Unavailable(format!(
+                    "could not start the BuildKit builder: {}",
+                    out.tail(3)
+                )));
+            }
             return Ok(());
         }
         log.info("creating the BuildKit builder (first build on this server)");
@@ -495,6 +503,48 @@ impl Builder {
 mod tests {
     use super::*;
     use crate::logs::LogHub;
+
+    #[tokio::test]
+    async fn existing_builder_is_bootstrapped_and_errors_are_not_recreated() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("docker");
+        std::fs::write(
+            &bin,
+            format!(
+                r#"#!/bin/sh
+echo "$*" >> '{d}/calls'
+if [ "$3" = --bootstrap ]; then
+  echo bootstrap-failed >&2
+  exit 1
+fi
+"#,
+                d = dir.path().display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let builder = Builder {
+            docker: bin.display().to_string(),
+            git: "git".into(),
+            work_dir: dir.path().join("work"),
+            driver: Driver::Container,
+            memory: None,
+            timeout: Duration::from_secs(10),
+        };
+        let logs = LogHub::new(dir.path().join("logs"));
+        let error = builder
+            .ensure_builder(&mut logs.writer("app", "dpl_test"))
+            .await
+            .unwrap_err();
+        assert!(error.message().contains("bootstrap-failed"));
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert!(calls.contains("buildx inspect --bootstrap vercelify"), "{calls}");
+        assert!(
+            !calls.contains("create"),
+            "do not replace a builder on bootstrap failure"
+        );
+    }
 
     #[test]
     fn project_files_skip_symlinks_and_big_files() {

@@ -23,6 +23,7 @@ pub struct Platform {
     pub engine: Arc<Engine>,
     pub reconciler: Arc<Reconciler>,
     pub proxy: ProxyConfig,
+    builder_idle_timeout: Duration,
 }
 
 /// What the doctor reports when the platform couldn't be opened.
@@ -81,6 +82,7 @@ impl Platform {
             engine,
             reconciler,
             proxy,
+            builder_idle_timeout: Duration::from_secs(u64::from(cfg.builder_idle_minutes) * 60),
         })
     }
 
@@ -127,6 +129,20 @@ impl Platform {
                 }
             }
             tokio::spawn(me.engine.clone().run());
+            if !me.builder_idle_timeout.is_zero() {
+                let engine = me.engine.clone();
+                let timeout = me.builder_idle_timeout;
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(30)).await;
+                        match engine.stop_idle_builder(timeout).await {
+                            Ok(true) => tracing::info!("idle BuildKit stopped; cache retained"),
+                            Ok(false) => {}
+                            Err(e) => tracing::warn!("idle BuildKit: {e}; retrying next tick"),
+                        }
+                    }
+                });
+            }
             // A consistent copy for restic (and the warm standby): backups
             // never read the live database file.
             let store = me.store.clone();

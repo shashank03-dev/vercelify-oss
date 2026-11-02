@@ -222,6 +222,24 @@ results and remaining qualification boundaries are recorded with M1's evidence.
   Cancelling a deployment that waits for the power guard or a build slot ends it at once
   (the wait is raced against the cancel) and frees the app for its next deployment.
 
+### 6.1.1 Idle BuildKit lifecycle (competitive M2)
+
+`agent.toml` `builder_idle_minutes` defaults to 10; 0 disables idle stopping.
+A dedicated agent task checks every 30 seconds, independently of reconciliation.
+`BuildGate` returns an RAII permit that records monotonic completion time on drop
+(success, failure or cancellation). Maintenance nonblockingly acquires all build
+slots before checking elapsed time, and retains them through Docker inspection
+and stop. An active or starting build therefore cannot race an idle stop.
+Startup grants a fresh full idle interval; maintenance does not reset the clock.
+
+Only the dedicated `buildx_buildkit_vercelify0` container is stopped, with a
+10-second Docker grace. Missing, stopped or paused containers and held power
+states are skipped; errors are logged and retried next tick. The container and
+cache volume are retained. Existing builders are explicitly bootstrapped before
+buildx build; bootstrap failure fails the build without replacing its builder.
+The embedded `docker` driver is untouched. External commands using this builder
+must coordinate with the agent or disable idle stopping.
+
 ### 6.2 Pipeline
 
 | Step | What | Fails when |
@@ -1088,6 +1106,7 @@ the user chose to deploy.
 | Mesh daemon idle CPU on a Pi 4 | < 1 % | mesh test (`ps` sampling) |
 | Reconciler cost | one `docker ps` per node per 30 s | design |
 | Build concurrency | hardware profile | §6.1 |
+| Idle dedicated BuildKit | stops after configured idle interval (default 10 min), checked every 30 s | all-slot gate, §6.1.1 |
 
 The release profile uses fat LTO and `opt-level = "z"` for the whole workspace (per-crate
 levels measured larger under fat LTO): with thin LTO and `"s"` the agent measured 8.9 MiB

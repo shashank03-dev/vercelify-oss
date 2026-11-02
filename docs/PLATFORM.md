@@ -22,7 +22,7 @@ servers. The engineering details are in [the design](design/SYSTEM-DESIGN.md).
 | The engine | in `vercelify-agent` (`engine = "platform"` in `/etc/vercelify/agent.toml`), state in `/var/lib/vercelify/platform.db` | Builds, deploys, previews, rollbacks, databases |
 | Master key | `/var/lib/vercelify/master.key` (0600) | Seals every stored secret (variables, database passwords, Git tokens). It is part of every backup: without it, sealed values can't be read. |
 | Proxy | the `vercelify-proxy` container (Traefik, pinned and contract-tested) on ports 80 and 443 | Routes `<app>.<domain>` to the app's containers, gets certificates, applies `vercel.json` rules |
-| Builder | the `buildx_buildkit_vercelify0` container (BuildKit) | Builds images with a cache; the power guard pauses it when the laptop runs hot |
+| Builder | the `buildx_buildkit_vercelify0` container (BuildKit) | Builds images with a retained cache; stops when idle; the power guard pauses it when hot |
 | Network | `vercelify-mesh` (WireGuard on `vfy0`, `10.77.0.0/16`); the main server coordinates it as `10.77.0.1` | Your Mac and other servers reach the agent privately, from anywhere. See [MESH.md](MESH.md). |
 | App domain | `http://<app>.10.77.0.1.sslip.io` until you set a domain | Works at once on every device on your network |
 | State copy | `/var/lib/vercelify/platform.db.bak`, every 5 minutes and before upgrades | What backups, `vercelify rollback` and `vercelify restore-state` use; the live file is never copied while it is written |
@@ -215,6 +215,12 @@ server's state on a worker, refreshed every 5 minutes. If the main server dies, 
 ## 7. Settings for an 8 GB laptop
 
 - One build at a time (the default on 8 GB or less): running apps stay responsive.
+- The dedicated BuildKit container stops after ten idle minutes. Set
+  `builder_idle_minutes` in `/etc/vercelify/agent.toml` and restart the agent to
+  change this (`0` disables it). A check runs every 30 seconds; active builds
+  and paused builders are skipped. The next build starts it again with its
+  cache intact. The daemon's `docker` build driver is unaffected. Restarting
+  the agent starts a fresh idle grace period.
 - All containers share a memory-capped slice below the machine's RAM, so a leaking app
   can't starve the agent, the network or SSH.
 - Let rarely used apps **sleep**.

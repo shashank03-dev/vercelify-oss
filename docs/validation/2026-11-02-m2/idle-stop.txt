@@ -1,0 +1,1 @@
+automatic stop observed 61s after agent restart; configured timeout 60s

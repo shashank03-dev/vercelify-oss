@@ -1,0 +1,58 @@
+
+==> Preflight
+  ✓ Ubuntu 24.04.5 LTS
+  ✓ hardware profile: pc
+  ✓ architecture arm64
+  ✓ 3905 MB RAM, 24 GB free on /
+  ✓ internet access
+  • Installing the private server. Optional features can be added later in the app or with sudo vercelify.
+
+==> Plan
+  • role:       main
+  • name:       lima-vfybench
+  • storage:    none → /mnt/storage
+  • domain:     none — apps private to your Vercelify network via sslip.io
+
+==> Base packages
+  ✓ base packages ready (unattended security upgrades on)
+
+==> Laptop server mode
+  ✓ lid close / suspend disabled
+
+==> Kernel & memory tuning
+  ✓ vm.swappiness=10, inotify and network buffers raised
+
+==> Hardware (pc)
+  ✓ swap present:   4G
+  • no hardware watchdog found — skipping
+
+==> Storage tier (/mnt/storage)
+  ! storage disk skipped — everything will live on the system disk
+
+==> Docker Engine
+  ✓ Docker 29.9.2 already installed
+
+==> Vercelify agent
+  ✓ agent 1.0.0 running on :7420
+
+==> Private network (vercelify-mesh)
+  ✓ on the network as 10.77.0.1
+
+==> App addresses
+  ✓ wildcard domain → http://10.77.0.1.sslip.io
+
+==> Firewall
+  ✓ the agent's and AI API's ports reachable only over Vercelify's network (apps on 80/443 stay public)
+
+==> Reboot window
+  ✓ reboots for security updates only when needed, around 04:30 (change: sudo vercelify maintenance)
+
+✔ Vercelify is ready  (main, 1.0.0)
+
+  Agent              Ready
+  Apps               http://<app>.10.77.0.1.sslip.io
+  Network            lima-vfybench at 10.77.0.1 (vfy0)
+  Storage            single disk (/mnt/storage on /)
+
+
+  Health check: sudo vercelify doctor     Logs: /var/log/vercelify-setup.log

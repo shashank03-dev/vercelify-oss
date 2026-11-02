@@ -279,6 +279,159 @@ laptop. Raw samples, binary hashes and scripts:
 [script](../validation/2026-11-02-m1/sample-memory.sh),
 [M1 validation](../validation/2026-11-02-m1/VALIDATION.md).
 
+### Re-measured for M2 idle BuildKit, 2 November 2026
+
+M2 candidate, same §6 method and matched workloads **within each machine**.
+The VM rebuilt Next.js commit `90cfee0f74c25bb3688369a0587e435f8b8f114d`
+before both sample sets; five whoami apps plus that one Next.js container stayed
+running throughout. Test daemon stopped. The physical laptop runs its production
+app, PostgreSQL, proxy, unrelated media service and desktop. Its old PR preview
+was retired by the explicitly authorized safety upgrade before both candidate
+sample sets. These machines are not directly comparable.
+
+| Median MiB | VM builder running | VM auto-stopped | Laptop builder running | Laptop auto-stopped |
+| --- | ---: | ---: | ---: | ---: |
+| System used (range) | 682 (674–708) | 656.5 (638–689) | 1427 (1415–1438) | 1377 (1364–1397) |
+| BuildKit RSS | 42.22 | 0 | 60.63 | 0 |
+| Agent RSS | 7.95 | 7.74 | 10.30 | 9.99 |
+| Mesh RSS | 2.90 | 2.90 | 3.60 | 3.60 |
+| Traefik RSS | 91.95 | 91.68 | 89.23 | 89.35 |
+| dockerd / containerd RSS | 107.29 / 51.33 | 107.53 / 51.15 | 100.80 / 72.82 | 100.29 / 73.63 |
+| All shim RSS | 86.22 | 75.52 | 66.25 | 55.28 |
+
+Both hosts automatically stopped the builder **61 seconds** after restart with
+`builder_idle_minutes = 1` (gate: timeout + 60 seconds). The default is ten minutes;
+zero disables stopping. Cache survives; the real disposable Docker contract passed
+three build/stop/restart cycles, including warm-cache reuse. VM system-used medians
+fell 25.5 MiB with overlapping ranges; observed builder RSS disappears, but a fixed
+105 MiB saving is not a product guarantee. The laptop medians fell 50 MiB;
+its sample ranges do not overlap, but this is still one matched run. No new minimum-RAM or comparative
+competitor claim follows. Raw samples, hashes, scripts, tests and boundaries are
+in [M2 validation](../validation/2026-11-02-m2/VALIDATION.md).
+
+## 7. Feature verdicts after validation
+
+### 7.1 Your computer builds, your server serves — build early
+
+**Demand confirmed; uniqueness rejected.** Dokploy [#711](https://github.com/Dokploy/dokploy/issues/711)
+has 50 reactions and is closed; [#2386](https://github.com/Dokploy/dokploy/issues/2386)
+has 24 and is open for pre-built-image **previews**. Saved phrase searches returned
+172 Coolify and 80 Dokploy issues mentioning “build server”; these are overlapping
+text matches, not 252 independent requests. [Coolify](https://coolify.io/docs/core/infrastructure/servers/build-servers)
+already separates build/run roles and controls fallback. [Kamal](https://kamal-deploy.org/docs/configuration/builders/)
+already supports local builders.
+
+Start with explicit `--build-here` plus a documented CI image flow, using the same
+build plan and digest handoff. Later add opt-in automatic builder selection. An
+offline Mac must not silently trigger a build on a builds-disabled server. Apple
+Silicon to x86 needs an explicit `linux/amd64` build and qualification;
+[QEMU can be slower](https://docs.docker.com/build/building/multi-platform/).
+
+### 7.2 Isolated preview databases — split into two releases
+
+**Isolation is supported by demand; backup copying is an unvalidated extension.**
+[Dokploy #2462](https://github.com/Dokploy/dokploy/issues/2462) has 29 reactions and
+asks for isolated databases/schemas and migration hooks. Ship empty PostgreSQL
+preview DBs with migrations and optional synthetic seed data first. Use a dedicated
+preview PostgreSQL service, separate database and role per PR; isolate containers
+per PR only when stronger trust separation and sufficient capacity justify it.
+
+Later offer an explicit **backup-seeded copy**, not “Neon branching” or “at no cost.”
+It consumes storage, memory, I/O and administrator effort. Never restore a full
+`pg_dumpall` into a shared preview cluster. Sanitize in quarantine before preview
+code can connect; fail closed. Details and alternatives are in the engineering review.
+
+### 7.3 Private previews with guest links — useful, not exclusive
+
+[Dokploy previews inherit configured security](https://docs.dokploy.com/docs/core/applications/preview-deployments);
+its [application settings include basic auth](https://docs.dokploy.com/docs/core/applications/advanced).
+[Coolify also documents basic auth](https://coolify.io/docs/core/networking/proxy/traefik/basic-auth).
+Do not describe both as necessarily public and unprotected.
+
+Vercel's [$20/project/month Pro password-protection price](https://vercel.com/changelog/password-protection-now-costs-20-per-project-per-month-on-pro)
+is confirmed as of this review. However,
+[Vercel also supports sharable links, including a limited Hobby allowance](https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/sharable-links).
+Password protection is not the only comparison.
+
+First enforce mesh-only preview routes on all public ingress. Guest links require
+explicit public HTTPS ingress/tunnel, revocable scoped access and expiry enforcement.
+A signed URL supplies authorization; it does not make a private machine reachable.
+
+### 7.4 Deploy guard — harden existing code
+
+**Needed for trust; not a new exclusive feature.** [Dokploy documents automatic
+Swarm rollback](https://docs.dokploy.com/docs/core/applications/rollbacks). Our engine
+already has a three-minute post-live crash/restart watcher. Persist the watch and
+rollback outcome, detect configured health failures, prevent stale rollback over a
+newer deploy, and retain rollback images. Ten minutes is a proposed default to test,
+not evidence of superiority. App rollback does not undo a database migration.
+
+### 7.5 Memory admission — build on reservations
+
+Keep this early, but promise conservative admission and clear failure reasons,
+not “never OOM.” Include OS/platform headroom, old+new rollout overlap, pulls,
+database startup, restore jobs and builds. Reconcile reservations after restart.
+Display limits, working set and observed peaks separately. A Docker memory kill
+needs explicit evidence; exit 137 alone is not proof. **142 vs 624 MiB** is the
+provisional whole-platform comparison; **9 MiB** is only agent+mesh RSS.
+
+### 7.6 Restore verification — prioritize before backup-seeded previews
+
+[Coolify #2389](https://github.com/coollabsio/coolify/issues/2389) supports backup
+usability, not specifically monthly drill demand.
+[Dokploy #416](https://github.com/Dokploy/dokploy/issues/416) asks for more backup
+destinations, another indirect signal. Scheduled application restore checks remain
+a sensible reliability proposal. Do not claim nobody else tests
+restores: absence was not established. Repository integrity checks and opening a
+restored DB test different things. Record exactly which snapshot, DB and assertions
+passed; never imply every future restore is guaranteed.
+
+### 7.7 Battery resilience — qualify hardware, narrow the promise
+
+Add optional staged load shedding, hysteresis and recovery of only workloads the
+policy paused. A laptop battery protects the laptop, not the router or ISP. A
+software health check cannot universally read or set BIOS “power on after AC loss.”
+Use supported/manual/unknown and retain a physical qualification checklist. An
+unplug test is not a power-loss-plus-depleted-battery recovery test.
+
+### 7.8 Running cost — defer and label estimates
+
+[Linux powercap](https://docs.kernel.org/power/powercap/powercap.html) exposes energy
+for power zones. CPU/package energy is not whole-machine wall consumption; battery
+readings do not measure AC idle draw. Prefer user-entered wall-meter readings or a
+supported meter. Show source, coverage and assumed duty cycle. Hosted-price
+comparisons need dated plan assumptions and omit any claim of equivalent SLA.
+
+### 7.9 Share CLI and sleeping hosts — later, with corrected reasoning
+
+[Tailscale Funnel](https://tailscale.com/docs/features/tailscale-funnel) already shares
+local services publicly. No PaaS tracker evidence for `vfy share` does not mean no
+market demand; it means we lack segment-specific evidence. Wake-on-LAN is
+hardware/network-dependent and is unsuitable as an assumed wake path for critical
+services. Validate either with users before expanding scope.
+
+## 8. Small changes: keep, move or qualify
+
+These are task candidates, not reliable “one day each” estimates.
+
+| ID | Recommendation | Engineering constraint |
+| --- | --- | --- |
+| S1 | Move image-port detection into M1 | Explicit configured port wins; auto-select one unambiguous TCP `EXPOSE`; ask on none/multiple. Metadata is a hint, not proof of a listener |
+| S2 | Suggest log-reported port after a probe failure | Bounded parsing and redaction; confirm changes, never silently switch routing from log text |
+| S3 | Move structured log repair into M1 | Preserve multiline output and streams; redact secrets; fixture the observed garbling |
+| S4 | Variable names added/removed/changed | Compare deployment snapshots; use keyed fingerprints if comparing secrets, never expose raw or reversible low-entropy hashes |
+| S5 | Move variable provenance into M1/M5 | Show scope and build/runtime/preview policy; inherited is not permission to use production |
+| S6 | QR after safe routes/links | QR does not grant mesh membership; guest tokens are credentials, do not post them automatically to public PRs |
+| S7 | Duration and image-size delta | Distinguish compressed transfer bytes from unpacked/shared disk use; compare like architectures |
+| S8 | Memory card with M4 | Show full boundary: OS, platform, apps, databases, builds, headroom; distinguish missing from zero |
+| S9 | Optional status badge later | No private metadata leakage, endpoint cost bounded, no claim of historical uptime from current status |
+| S10 | OOM reason with M4 | Use explicit OOM evidence and timestamps; distinguish cap exhaustion from host pressure and manual kill |
+
+[Docker's EXPOSE reference](https://docs.docker.com/reference/dockerfile/#expose)
+explains why port metadata cannot replace a health probe.
+
+## 9. Revised delivery sequence (recommendation, not implementation approval)
+
 Milestones are intentionally smaller and independently useful. Numeric gates below
 are **proposed acceptance targets**, not measured results or market facts. Detailed
 failure tests and scope are in the companion review. Existing cross-platform host

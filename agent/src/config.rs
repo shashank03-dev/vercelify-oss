@@ -137,6 +137,8 @@ pub struct Config {
     pub build_memory: Option<String>,
     /// Builds at once (default 1; 0 = this server doesn't build).
     pub build_concurrency: u32,
+    /// Stop the dedicated BuildKit container after this many idle minutes; 0 disables.
+    pub builder_idle_minutes: u32,
     /// Let's Encrypt account e-mail (optional).
     pub acme_email: Option<String>,
     /// Metrics/ping port of the platform's proxy (127.0.0.1 only).
@@ -250,6 +252,7 @@ impl Default for Config {
             build_driver: "container".into(),
             build_memory: None,
             build_concurrency: 1,
+            builder_idle_minutes: 10,
             acme_email: None,
             proxy_metrics_port: 8082,
             mesh_coordinator: false,
@@ -650,6 +653,16 @@ pub mod anyhow_lite {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builder_idle_timeout_defaults_and_can_be_disabled() {
+        assert_eq!(Config::default().builder_idle_minutes, 10);
+        for minutes in [0, 1, 30] {
+            let cfg: Config = toml::from_str(&format!("builder_idle_minutes = {minutes}")).unwrap();
+            assert_eq!(cfg.builder_idle_minutes, minutes);
+        }
+        assert!(toml::from_str::<Config>("builder_idle_minutes = -1").is_err());
+    }
 
     #[test]
     fn backup_credentials_round_trip_shell_literals_without_expansion() {

@@ -1,0 +1,855 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-agent v1.0.0 (/Users/shashank/Desktop/VERCELIFY/agent)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 22.52s
+     Running unittests src/main.rs (target/debug/deps/vercelify_agent-6365cd5435a7854b)
+
+running 156 tests
+test auth::tests::role_policy ... ok
+test auth::tests::variables_at_every_scope ... ok
+test cli::tests::mistakes_are_explained ... ok
+test config::tests::role_from_install_env ... ok
+test cli::tests::commands_and_options ... ok
+test config::tests::parses_full_config ... ok
+test config::tests::backup_credentials_round_trip_shell_literals_without_expansion ... ok
+test config::tests::builder_idle_timeout_defaults_and_can_be_disabled ... ok
+test cron::tests::day_of_month_or_day_of_week ... ok
+test config::tests::unknown_keys_are_reported_not_fatal ... ok
+test cron::tests::parses_fields ... ok
+test cron::tests::rejects_bad_expressions ... ok
+test cron::tests::next_run ... ok
+test config::tests::shipped_config_has_no_unknown_keys ... ok
+test display::tests::backend_selection ... ok
+test display::tests::extra_args_before_url ... ok
+test display::tests::urls ... ok
+test display_session::tests::only_active_local_non_root_desktops ... ok
+test docker::tests::mem_units ... ok
+test docker::tests::refs ... ok
+test config::tests::power_guard_values ... ok
+test doctor::tests::a_proxy_without_port_80_is_not_running ... ok
+test doctor::tests::backups_set_up_by_the_installer_are_fine_until_the_first_run_is_overdue ... ok
+test doctor::tests::healthy_machine_is_all_ok_without_fixes ... ok
+test doctor::tests::a_worn_out_battery_is_flagged ... ok
+test doctor::tests::main_without_backups_is_warned ... ok
+test doctor::tests::oom_tracking ... ok
+test docker::tests::parses_ps_and_stats ... ok
+test doctor::tests::platform_database_check ... ok
+test doctor::tests::problems_come_with_fixes ... ok
+test doctor::tests::raspberry_pi_checks ... ok
+test doctor::tests::fstab_marker ... ok
+test doctor::tests::the_mesh ... ok
+test doctor::maintenance_tests::only_last_nights_reboot_check_counts ... ok
+test doctor::tests::smart_json ... ok
+test doctor::tests::workers_skip_backups_and_single_disk_is_a_warning ... ok
+test github::tests::comment_text ... ok
+test github::tests::compare_lists_files_and_messages ... ok
+test doctor::tests::thresholds_from_power_guard_conf ... ok
+test github::tests::contents_and_paths ... ok
+test github::tests::slugs ... ok
+test github::tests::pulls ... ok
+test github_app::tests::manifest_and_page ... ok
+test gitpoll::tests::globs ... ok
+test gitpoll::tests::ignored_build_step ... ok
+test events::tests::interrupted_jobs_are_closed_on_load_except_updates ... ok
+test gitpoll::tests::preview_plans ... ok
+test display::tests::playback_requires_configured_video_and_an_active_decoder ... ok
+test config::tests::shell_and_agent_read_the_installers_actual_credential_writer ... ok
+test gitpoll::tests::watch_paths_last_match_wins ... ok
+test http::tests::errors ... ok
+test http::tests::connect_refused ... ok
+test http::tests::urls ... ok
+test llm::tests::free_space ... ok
+test json::tests::statuses ... ok
+test llm::tests::meminfo ... ok
+test http::tests::round_trip ... ok
+test llm::tests::model_names ... ok
+test llm::tests::pull_progress ... ok
+test mesh::tests::away_from_home_needs_a_public_address ... ok
+test mesh::tests::control_address_from_config ... ok
+test llm::tests::tags_and_ps ... ok
+test mesh::tests::private_previews_answer_the_mesh_ranges ... ok
+test mesh::tests::hostnames_become_node_names ... ok
+test mesh_relay::tests::forwards_only_what_the_map_allows ... ok
+test events::tests::lifecycle_events_and_persistence ... ok
+test platform::tests::a_broken_key_is_reported_not_fatal ... ok
+test pairing::tests::one_time_claim ... ok
+test platform_git::tests::slugs_and_contexts ... ok
+test pairing::tests::expired_codes ... ok
+test pairing::tests::attempts_are_limited ... ok
+test platform_api::runtime_log_tests::filled_database_urls_are_redacted_in_runtime_logs ... ok
+test powerguard::tests::fallbacks_follow_the_guard_and_the_board ... ok
+test powerguard::tests::only_changed_keys_are_written_and_bad_values_refused ... ok
+test project::tests::bad_files ... ok
+test project::tests::conditions_become_rule_fragments ... ok
+test project::tests::covering ... ok
+test project::tests::a_typical_vercel_json ... ok
+test project::tests::destinations ... ok
+test project::tests::nets_and_their_regexes ... ok
+test pairing::tests::pake_claims ... ok
+test project::tests::named_parameters ... ok
+test project::tests::origin_targets ... ok
+test project::tests::rejects_what_the_proxy_cannot_run ... ok
+test project::tests::private_origins_are_not_proxied ... ok
+test project::tests::rewrites_by_name_are_pinned_to_public_addresses ... ok
+test project::tests::modifiers ... ok
+test github::tests::open_pulls_reads_every_page ... ok
+test project::tests::vercelify_json_overrides_and_adds_a_firewall ... ok
+test projects::tests::cron_requests_go_to_the_local_proxy ... ok
+test projects::tests::hosts_and_cron_address ... ok
+test project::tests::url_parts_stay_out_of_the_query ... ok
+test project::tests::unnamed_groups_and_catch_all ... ok
+test projects::tests::platform_base_routers ... ok
+test projects::tests::summary_counts ... ok
+test projects::tests::uploads ... ok
+test routing::tests::firewall_routes ... ok
+test project::tests::rule_limit ... ok
+test routing::tests::nothing_to_route ... ok
+test routing::tests::pinned_rewrites_connect_to_checked_addresses ... ok
+test routing::tests::redirect_with_a_query_and_conditions ... ok
+test routing::tests::rewrites_get_routers_in_order ... ok
+test routing::tests::redirect_order_across_conditions ... ok
+test routing::tests::redirect_regexes_keep_the_query ... ok
+test routing::tests::spa_with_headers_and_redirects ... ok
+test runtime_api::tests::queries ... ok
+test services::tests::sunshine_is_the_desktop_users ... ok
+test sleep::tests::containers_by_label ... ok
+test sleep::tests::counts_requests_per_app_and_preview ... ok
+test sleep::tests::platform_router_names ... ok
+test sleep::tests::private_hosts_wake_from_the_mesh_only ... ok
+test sleep::tests::wake_routes_only_add_https_where_used ... ok
+test sleep::tests::waking_page_escapes_the_host ... ok
+test standby::tests::superseded_marker ... ok
+test routing::tests::tidy_urls_regexes ... ok
+test github_app::tests::jwt_is_signed ... ok
+test sunshine::tests::reads_pending_pairings_and_names ... ok
+test sunshine::tests::pins_the_certificates_public_key ... ok
+test platform::tests::opens_only_for_the_platform_engine ... ok
+test projects::tests::store_lifecycle_and_stale_files ... ok
+test terminal::tests::a_shell_on_a_pty ... ok
+test terminal::tests::docker_exec_command ... ok
+test terminal::tests::into_a_container ... ignored, needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored
+test terminal::tests::pty_starts_with_requested_size ... ok
+test terminal::tests::backlog_for_late_readers_and_limits ... ok
+test tokens::tests::audit_log ... ok
+test projects::tests::reads_project_files_from_github ... ok
+test tokens::tests::corrupt_registry_is_not_overwritten_by_pairing_or_revocation ... ok
+test tokens::tests::device_tokens ... ok
+test tokens::tests::roles ... ok
+test update::tests::a_backup_job_only_counts_its_own_result ... ok
+test update::tests::backup_targets_are_masked ... ok
+test update::tests::quoting ... ok
+test update::tests::tails_and_strips_colours ... ok
+test update::tests::the_recovery_kit_has_what_a_restore_needs ... ok
+test update::tests::the_update_log_is_emptied_and_made_private ... ok
+test watch::tests::alerts_persist_and_dedupe ... ok
+test watch::tests::cleanup_threshold ... ok
+test tokens::tests::concurrent_pairings_preserve_every_device ... ok
+test watch::tests::only_changes_alert ... ok
+test watch::tests::oom_classes ... ok
+test watch::tests::urls ... ok
+test webhooks::tests::events_name_their_repository ... ok
+test webhooks::tests::hmac_matches_rfc_4231 ... ok
+test webhooks::tests::signatures_per_provider ... ok
+test worker::host_tests::the_real_computers_battery_and_heat_win ... ok
+test worker::tests::only_the_main_server_with_the_token ... ok
+test watch::tests::one_off_notices_and_resolving ... ok
+test events::tests::history_is_bounded_but_running_jobs_stay ... ok
+test display_session::tests::resolves_actual_session_environment_without_guessing_auth_paths ... ok
+test sunshine::tests::no_request_when_moonlight_never_asks ... ok
+test sunshine::tests::a_login_made_by_someone_else_is_left_alone ... ok
+test tokens::tests::a_pairing_token_never_used_in_time_stops_working_and_is_pruned ... ok
+test sunshine::tests::older_sunshine_takes_the_pin_without_an_id ... ok
+test sunshine::tests::refuses_bad_input_and_a_missing_desktop ... ok
+test sunshine::tests::sets_the_first_login_then_hands_over_the_pin ... ok
+
+test result: ok. 155 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 6.35s
+
+     Running tests/e2e.rs (target/debug/deps/e2e-389d67075eaeb79e)
+
+running 20 tests
+test concurrent_cli_pairings_preserve_every_device_token ... ok
+test an_ai_install_stops_before_downloading_when_another_program_holds_the_port ... ok
+test database_runtime_reports_missing_containers_instead_of_desired_running ... ok
+test database_creation_refuses_an_unmounted_storage_tier ... ok
+test only_an_owner_gets_the_backup_recovery_kit ... ok
+test oversized_json_is_rejected_without_creating_an_app ... ok
+test github_app_and_webhooks ... ok
+test remote_desktop_can_be_turned_on_from_the_app ... ok
+test retained_volumes_can_be_deleted_only_after_their_owner_is_removed ... ok
+test sunshine_on_the_desktop_users_systemd ... ok
+test protected_routes_reject_missing_wrong_and_revoked_tokens ... ok
+test update_requests_choose_a_channel_without_shell_injection ... ok
+test worker_role_and_missing_ollama ... ok
+test background_pass_raises_and_sends_alerts ... ok
+test agent_end_to_end ... ok
+test platform_api ... ok
+test pairing_llm_and_doctor ... ok
+test mesh_coordinator ... ok
+test events_jobs_power_guard_and_domain ... ok
+test cancelling_an_ai_install_stops_its_child_process ... ok
+
+test result: ok. 20 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.32s
+
+     Running unittests src/lib.rs (target/debug/deps/vercelify_cockpit_lib-eef56a68e817c0ad)
+
+running 29 tests
+test host::tests::only_host_paths ... ok
+test mesh::tests::mesh_hosts ... ok
+test mesh::tests::forwards_file_lines_per_owner ... ok
+test mesh::tests::a_failed_run_says_what_happened ... ok
+test http::tests::lines ... ok
+test mesh::tests::windows_task_runs_userspace_mode_with_quoted_paths ... ok
+test mesh::tests::status_file ... ok
+test discover::tests::picks_server_peers ... ok
+test release_tests::a_release_is_its_version_without_the_v_and_its_page ... ok
+test mesh::tests::stream_urls_through_a_forward ... ok
+test release_tests::anything_else_is_not_a_release ... ok
+test local::tests::detects_per_user_moonlight_installs ... ok
+test settings_tests::a_private_download_never_replaces_a_file_and_stays_in_its_folder ... ok
+test settings_tests::saving_credentials_replaces_a_public_file_with_a_private_one ... ok
+test tests::a_pending_code_is_taken_once ... ok
+test tests::agent_requests_choose_their_client_by_url ... ok
+test tray::tests::status_line_is_short_and_clean ... ok
+test vdisplay::tests::a_virtual_display_appears_and_goes ... ignored
+test vdisplay::tests::the_new_display_is_as_wide_as_the_main_screen_in_points ... ok
+test vdisplay::tests::the_new_display_sits_right_of_the_main_screen ... ok
+test tests::an_unreadable_settings_file_is_kept_aside_not_overwritten ... ok
+test settings_tests::saving_credentials_replaces_symlinks_without_overwriting_the_target ... ok
+test http::tests::cancellation_interrupts_a_server_that_never_sends_headers ... ok
+test procs::tests::exit_code_is_reported ... ok
+kill: 61973: No such process
+test procs::tests::start_status_stop ... ok
+kill: 62002: No such process
+test procs::tests::simultaneous_starts_cannot_leave_untracked_processes ... ok
+kill: 61981: No such process
+kill: 61981: No such process
+test procs::tests::watchdog_kills_orphan_when_parent_dies ... ok
+kill: 61972: No such process
+test procs::tests::an_empty_capture_is_stopped_without_polling ... ok
+test procs::tests::capture_with_output_survives_the_startup_watchdog ... ok
+
+test result: ok. 28 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 5.51s
+
+     Running unittests src/main.rs (target/debug/deps/vercelify_cockpit-a09bd3cf89934812)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/vercelify_core-03e7512a437ec2d7)
+
+running 207 tests
+test hardware::tests::throttling_bits ... ok
+test hardware::tests::profiles ... ok
+test disks::tests::filters_pseudo_mounts ... ok
+test disks::tests::roles ... ok
+test disks::tests::parent_devices ... ok
+test avfoundation::added_screen_tests::the_screen_a_new_display_added_is_found_by_name ... ok
+test hardware::tests::psi_and_oom ... ok
+test disks::tests::media_from_rotational ... ok
+test hardware::tests::reads_a_pi_fixture ... ok
+test avfoundation::export_bindings_capturescreen ... ok
+test host::export_bindings_environmentgrant ... ok
+test host::export_bindings_confirmedchange ... ok
+test host::export_bindings_environmentstate ... ok
+test host::export_bindings_environmentpairing ... ok
+test host::export_bindings_grantchange ... ok
+test host::export_bindings_hostos ... ok
+test host::export_bindings_hoststatus ... ok
+test host::export_bindings_changeenvironment ... ok
+test host::export_bindings_createenvironment ... ok
+test host::export_bindings_operationkind ... ok
+test host::tests::a_16_gb_mac_gets_a_comfortable_environment ... ok
+test host::tests::a_4_gb_machine_cannot_host ... ok
+test host::tests::a_full_disk_blocks_and_virtualization_off_blocks ... ok
+test host::tests::an_8_gb_windows_laptop_is_told_the_truth ... ok
+test host::tests::grant_changes ... ok
+test host::tests::hard_drives_and_batteries_warn ... ok
+test host::tests::host_status_freshness ... ok
+test host::tests::human_sizes ... ok
+test host::tests::lifecycle ... ok
+test host::export_bindings_operationstatus ... ok
+test host::export_bindings_setupstage ... ok
+test host::export_bindings_environmentrecommendation ... ok
+test host::tests::missing_measurements_are_not_zeros ... ok
+test host::tests::owner_choices_are_validated ... ok
+test host::export_bindings_startenvironment ... ok
+test host::export_bindings_virtualization ... ok
+test host::export_bindings_managedenvironment ... ok
+test model::export_bindings_auditentry ... ok
+test model::export_bindings_apierror ... ok
+test host::export_bindings_hostcapabilities ... ok
+test model::export_bindings_backupstatus ... ok
+test model::export_bindings_battery ... ok
+test model::export_bindings_checkstatus ... ok
+test model::export_bindings_alert ... ok
+test host::export_bindings_hostoperation ... ok
+test model::export_bindings_cockpitsettings ... ok
+test model::export_bindings_containerinfo ... ok
+test host::export_bindings_hostlocal ... ok
+test model::export_bindings_cpustats ... ok
+test model::export_bindings_croninfo ... ok
+test model::export_bindings_alertsstatus ... ok
+test model::export_bindings_cockpitconfig ... ok
+test model::export_bindings_cronrunrequest ... ok
+test model::export_bindings_discoveredserver ... ok
+test model::export_bindings_diskrole ... ok
+test model::export_bindings_doctorcheck ... ok
+test model::export_bindings_devicetoken ... ok
+test model::export_bindings_domaininfo ... ok
+test model::export_bindings_devicetokenrequest ... ok
+test model::export_bindings_agentevent ... ok
+test model::export_bindings_health ... ok
+test model::export_bindings_devicetokencreated ... ok
+test model::export_bindings_hostinfo ... ok
+test model::export_bindings_job ... ok
+test model::export_bindings_diskinfo ... ok
+test model::export_bindings_jobstatus ... ok
+test model::export_bindings_llmchatmessage ... ok
+test model::export_bindings_lanserver ... ok
+test model::export_bindings_doctorreport ... ok
+test model::export_bindings_hardwareinfo ... ok
+test model::export_bindings_llmloaded ... ok
+test model::export_bindings_llmmodel ... ok
+test model::export_bindings_llmmodelrequest ... ok
+test model::export_bindings_llmtask ... ok
+test model::export_bindings_llmchatrequest ... ok
+test model::export_bindings_llminstallrequest ... ok
+test model::export_bindings_mediakind ... ok
+test model::export_bindings_memorystats ... ok
+test model::export_bindings_meshpeer ... ok
+test model::export_bindings_metricpoint ... ok
+test model::export_bindings_displaystatus ... ok
+test model::export_bindings_pairclaimrequest ... ok
+test model::export_bindings_notifyconfigrequest ... ok
+test model::export_bindings_pairclaimresponse ... ok
+test model::export_bindings_powerguardsettings ... ok
+test model::export_bindings_meshlocal ... ok
+test model::export_bindings_powerguardstate ... ok
+test model::export_bindings_metricsresponse ... ok
+test model::export_bindings_pressure ... ok
+test model::export_bindings_processstatus ... ok
+test model::export_bindings_powerstatus ... ok
+test model::export_bindings_projectfile ... ok
+test model::export_bindings_powerguardstatus ... ok
+test model::export_bindings_projectinfo ... ok
+test model::export_bindings_projectsummary ... ok
+test model::export_bindings_servicestatus ... ok
+test model::export_bindings_llmstatus ... ok
+test model::export_bindings_sleeprequest ... ok
+test model::export_bindings_receiverconfig ... ok
+test model::export_bindings_proxymetricsresult ... ok
+test model::export_bindings_sleepsetting ... ok
+test model::export_bindings_sleeptarget ... ok
+test model::export_bindings_streamtransport ... ok
+test model::export_bindings_storagetier ... ok
+test model::export_bindings_sunshinepairrequest ... ok
+test model::export_bindings_sunshinepairoutcome ... ok
+test model::export_bindings_projectupload ... ok
+test model::export_bindings_sunshinepairresult ... ok
+test model::export_bindings_projectsstatus ... ok
+test model::export_bindings_updatestatus ... ok
+test model::export_bindings_thermalsensor ... ok
+test model::export_bindings_volumeentry ... ok
+test model::export_bindings_throttling ... ok
+test model::export_bindings_thermalstatus ... ok
+test pairing::export_bindings_pairing ... ok
+test model::export_bindings_sleepstatus ... ok
+test model::export_bindings_uptimecheck ... ok
+test model::export_bindings_volumeresult ... ok
+test model::export_bindings_toolstatus ... ok
+test platform::export_bindings_appdomain ... ok
+test platform::export_bindings_appkind ... ok
+test platform::export_bindings_appbuild ... ok
+test model::export_bindings_volumerequest ... ok
+test platform::export_bindings_appinstance ... ok
+test platform::export_bindings_appsource ... ok
+test platform::export_bindings_basicauthrequest ... ok
+test model::export_bindings_systemsnapshot ... ok
+test platform::export_bindings_apppatch ... ok
+test platform::export_bindings_appruntime ... ok
+test platform::export_bindings_certstatus ... ok
+test platform::export_bindings_buildpack ... ok
+test platform::export_bindings_deployhook ... ok
+test platform::export_bindings_appvolume ... ok
+test platform::export_bindings_appvolumerequest ... ok
+test platform::export_bindings_databasepatch ... ok
+test platform::export_bindings_database ... ok
+test platform::export_bindings_databasebackup ... ok
+test platform::export_bindings_deploymentkind ... ok
+test platform::export_bindings_desired ... ok
+test platform::export_bindings_deploymenttrigger ... ok
+test platform::export_bindings_deploymentstatus ... ok
+test platform::export_bindings_databasecreate ... ok
+test platform::export_bindings_environmentrequest ... ok
+test platform::export_bindings_databasekind ... ok
+test platform::export_bindings_domainrequest ... ok
+test platform::export_bindings_environment ... ok
+test platform::export_bindings_deployrequest ... ok
+test platform::export_bindings_envvarsput ... ok
+test platform::export_bindings_envvarinput ... ok
+test platform::export_bindings_envvar ... ok
+test platform::export_bindings_envprovenance ... ok
+test platform::export_bindings_gitauthkind ... ok
+test platform::export_bindings_githubappconvert ... ok
+test platform::export_bindings_deployment ... ok
+test platform::export_bindings_githubapprequest ... ok
+test platform::export_bindings_gitprovider ... ok
+test platform::export_bindings_appcreate ... ok
+test platform::export_bindings_app ... ok
+test platform::export_bindings_githubappstart ... ok
+test platform::export_bindings_effectivevar ... ok
+test platform::export_bindings_gitwatchstatus ... ok
+test platform::export_bindings_healthcheck ... ok
+test platform::export_bindings_meshinvite ... ok
+test platform::export_bindings_gitsource ... ok
+test platform::export_bindings_gitsourcerequest ... ok
+test platform::export_bindings_nodeheartbeat ... ok
+test platform::export_bindings_platformdomain ... ok
+test platform::export_bindings_meshinviterequest ... ok
+test platform::export_bindings_meshnode ... ok
+test platform::export_bindings_nodeheartbeatreply ... ok
+test platform::export_bindings_nodepatch ... ok
+test platform::export_bindings_previewaccess ... ok
+test platform::export_bindings_nodestatus ... ok
+test platform::export_bindings_projectrequest ... ok
+test platform::export_bindings_role ... ok
+test platform::export_bindings_platformnode ... ok
+test platform::export_bindings_rollbackrequest ... ok
+test platform::export_bindings_scheduledtask ... ok
+test platform::export_bindings_previewsettings ... ok
+test platform::export_bindings_scheduledtaskrequest ... ok
+test platform::export_bindings_standbyrequest ... ok
+test platform::export_bindings_servicetemplate ... ok
+test platform::export_bindings_project ... ok
+test platform::export_bindings_standbystatus ... ok
+test platform::tests::enums_use_their_wire_names ... ok
+test platform::tests::invalid_runtime_ports_name_the_supported_range ... ok
+test platform::tests::json_columns_tolerate_missing_fields ... ok
+test platform::export_bindings_templatecreate ... ok
+test platform::export_bindings_terminalrequest ... ok
+test platform::export_bindings_terminalsession ... ok
+test platform::export_bindings_varscope ... ok
+test platform::export_bindings_varorigin ... ok
+test stream::tests::an_ffmpeg_without_srt_output_is_noticed ... ok
+test stream::tests::capture_reports_output_bytes_for_the_startup_watchdog ... ok
+test stream::tests::moonlight ... ok
+test stream::tests::mac_hardware_sender ... ok
+test stream::tests::moonlight_pairs_with_a_given_pin ... ok
+test stream::tests::rejects_bad_input ... ok
+test platform::export_bindings_volumeowner ... ok
+test stream::tests::software_test_pattern ... ok
+test platform::export_bindings_webhooksetup ... ok
+test stream::export_bindings_capturesource ... ok
+test stream::export_bindings_moonlightlaunch ... ok
+test stream::export_bindings_videoencoder ... ok
+test platform::export_bindings_withheldvar ... ok
+test platform::export_bindings_volumeinfo ... ok
+test stream::export_bindings_senderconfig ... ok
+
+test result: ok. 207 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.75s
+
+     Running tests/core.rs (target/debug/deps/core-9facfd1d734dbd6d)
+
+running 14 tests
+test doctor_overall ... ok
+test pairing_without_role_still_decodes ... ok
+test power_desktop_without_supply ... ok
+test pairing_fixture_from_agent_cli ... ok
+test avfoundation_screens ... ok
+test pairing_roundtrip ... ok
+test cockpit_config_migrates_and_switches ... ok
+test short_codes ... ok
+test volume_vectors ... ok
+test doc_comments_survive_typescript_generation ... ok
+test power_on_ac ... ok
+test thermal_zones_and_hwmon ... ok
+test power_on_battery ... ok
+test live_snapshot_smoke ... ok
+
+test result: ok. 14 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.61s
+
+     Running unittests src/lib.rs (target/debug/deps/vercelify_host-14ce0767281684a8)
+
+running 33 tests
+test lima::tests::older_macs_use_qemu ... ok
+test lima::tests::list_output ... ok
+test guest::tests::health_needs_a_close_clock ... ok
+test guest::tests::hostile_values_never_reach_the_shell ... ok
+test lima::tests::config_is_closed_off_and_pinned ... ok
+test guest::tests::worker_script_joins_and_isolates ... ok
+test lima::tests::errors_come_from_error_lines ... ok
+test manager::tests::a_bad_invite_is_refused_before_anything_is_made ... ok
+test manager::tests::changed_measurements_ask_for_a_fresh_review ... ok
+test api::tests::mutations_check_their_body ... ok
+test api::tests::every_route_needs_the_owner_token ... ok
+test api::tests::bad_tokens_are_slowed_down ... ok
+test manager::tests::create_makes_one_environment_and_replays ... ok
+test measure::tests::diskutil ... ok
+test manager::tests::health_failures_end_in_failed_not_ready ... ok
+test measure::tests::pmset_battery ... ok
+test measure::tests::pmset_thermal ... ok
+test manager::tests::a_stopped_environment_stays_stopped ... ok
+test qemu::tests::cloud_init_has_only_our_key ... ok
+test manager::tests::pairing_is_for_a_ready_main_server_only ... ok
+test qemu::tests::command_line_is_accelerated_and_loopback_only ... ok
+test qemu::tests::qmp_talks_to_a_server_and_sees_none_when_off ... ok
+test state::tests::journal_is_bounded_but_keeps_running_ones ... ok
+test manager::tests::two_desktops_racing_get_one_creation ... ok
+test manager::tests::the_minute_check_leaves_an_operation_in_progress_alone ... ok
+test manager::tests::removal_gives_a_fresh_identity ... ok
+test state::tests::saves_atomically_and_privately ... ok
+test manager::tests::a_failed_step_is_reported_and_retry_is_safe ... ok
+test manager::tests::after_a_crash_mid_step_it_says_so_and_after_a_reboot_it_starts_again ... ok
+test state::tests::one_manager_per_machine ... ok
+test manager::tests::stop_start_and_resize_need_the_owners_word_and_the_right_revision ... ok
+test measure::tests::measures_this_computer ... ok
+test provider::tests::a_stuck_command_is_stopped ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.65s
+
+     Running unittests src/main.rs (target/debug/deps/vercelify_host-ff56efb895d8556a)
+
+running 3 tests
+test tests::hostnames ... ok
+test tests::sizes ... ok
+test tests::chunked_bodies ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/vercelify_mesh-c546187e39eb0212)
+
+running 72 tests
+test daemon::tests::a_lost_coordinator_is_checked_every_ten_seconds_at_first ... ok
+test daemon::tests::a_lost_coordinator_checks_its_signed_address_within_a_minute ... ok
+test addr::tests::prefixes_must_be_private_slash_16 ... ok
+test addr::tests::indexes_map_to_addresses ... ok
+test disco::tests::junk_bodies_are_rejected ... ok
+test disco::tests::private_addresses ... ok
+test daemon::tests::a_new_pairing_restarts_the_daemon_but_its_own_updates_dont ... ok
+test daemon::tests::specs_acl_and_paths ... ok
+test addr::tests::allocation ... ok
+test cert::tests::rejects_forgeries ... ok
+test cert::tests::issue_and_verify ... ok
+test dns::tests::answers_a_and_aaaa ... ok
+test daemon::tests::enrollment_answers_are_checked ... ok
+test beacon::tests::signed_found_and_forgeries_ignored ... ok
+test disco::tests::sealed_both_ways_and_only_for_the_pair ... ok
+test dns::tests::names_of_the_zone ... ok
+test dns::tests::refuses_and_fails_cleanly ... ok
+test gateway::tests::names_come_back_off_localhost ... ok
+test gateway::tests::a_websocket_upgrade_keeps_its_connection ... ok
+test gateway::tests::origin_and_referer_name_the_app_not_the_gateway ... ok
+test gateway::tests::sslip_names_carry_their_address ... ok
+test gateway::tests::cookies_for_the_app_s_own_domain_are_kept_by_the_browser ... ok
+test gateway::tests::the_host_header_is_found_case_insensitively ... ok
+test gateway::tests::redirects_to_the_app_itself_stay_on_the_gateway ... ok
+test gateway::tests::the_host_is_put_back_and_each_request_gets_its_own_connection ... ok
+test gateway::tests::the_response_head_is_rewritten_even_when_it_arrives_in_pieces ... ok
+test gateway::tests::http_round_trip_preserves_host_and_response ... ok
+test gateway::tests::websocket_round_trip_passes_binary_frames_both_ways ... ok
+test http::tests::urls ... ok
+test mdns::tests::other_services_and_junk ... ok
+test mdns::tests::query_and_answer_round_trip ... ok
+test net::tests::interfaces ... ok
+test keys::tests::base64_key_files_are_accepted ... ok
+test netstack::tests::a_fragmented_datagram_arrives_whole ... ok
+test netstack::tests::oversized_udp_egress_is_fragmented_and_arrives_whole ... ok
+test pair_client::tests::control_addresses ... ok
+test keys::tests::node_keys_persist_and_agree ... ok
+test keys::tests::signatures ... ok
+test proto::tests::names_and_endpoints ... ok
+test proto::tests::join_tokens ... ok
+test daemon::tests::its_own_updates_dont_overwrite_a_new_pairing ... ok
+test relay::tests::frames_and_rules ... ok
+test pair_client::tests::nothing_answering_names_a_network_that_keeps_devices_apart ... ok
+test proto::tests::visibility ... ok
+test proto::tests::signed_maps_and_ordering ... ok
+test socks::tests::forwards_file ... ok
+test socks::tests::forwards_file_rejects_empty_target_host ... ok
+test seal::tests::round_trip ... ok
+test socks::tests::forwards_parse ... ok
+test socks::tests::only_mesh_destinations ... ok
+test socks::tests::sslip_and_nip_names_resolve_without_public_dns ... ok
+test seal::tests::tampering_and_reflection_fail ... ok
+test stun::tests::parses_a_real_server_answer ... ok
+test stun::tests::request_answer_round_trip ... ok
+test state::tests::saved_privately ... ok
+test netstack::tests::a_video_burst_fits ... ok
+test pake::tests::the_right_code_opens_it_and_only_that ... ok
+test gateway::tests::zone_records_outside_the_mesh_are_refused ... ok
+test wg::tests::disco_confirms_the_direct_path_and_teaches_our_address ... ok
+test wg::tests::follows_a_peer_that_moved ... ok
+test wg::tests::answers_stun_and_learns_from_it ... ok
+test wg::tests::the_relay_carries_traffic_when_no_path_exists ... ok
+test relay_client::tests::an_unreachable_address_doesnt_hold_up_the_next ... ok
+test wg::tests::call_me_through_the_relay_finds_a_direct_path ... ok
+test wg::tests::key_rotation_keeps_the_link ... ok
+test netstack::tests::an_outgoing_video_burst_leaves_whole ... ok
+test wg::tests::a_relay_coming_back_handshakes_at_once ... ok
+test wg::tests::strangers_are_ignored ... ok
+test socks::tests::forwards_file_retries_after_listen_port_becomes_free ... ok
+test relay_client::tests::a_relay_gone_silent_is_dropped ... ok
+test daemon::tests::an_unreachable_address_doesnt_hold_up_the_next ... ok
+test wg::tests::two_nodes_talk_and_only_with_their_own_addresses ... ok
+
+test result: ok. 72 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.96s
+
+     Running unittests src/main.rs (target/debug/deps/vercelify_mesh-5909cab62e3c4362)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (target/debug/deps/vercelify_platform-1bb4e5b863d0a20a)
+
+running 175 tests
+test apps::tests::tunnel_mode_domains_are_edge_tls ... ok
+test apps::tests::git_apps_enable_previews_by_default ... ok
+test apps::tests::last_status_is_the_newest_production_deployment ... ok
+test build::tests::builds_fixture_apps_with_docker ... ignored, needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored
+test build::tests::emulation_needs_binfmt ... ok
+test apps::tests::app_creation_rejects_injection_payloads_without_writing_rows ... ok
+test apps::tests::cert_status_follows_the_proxys_certificates ... ok
+test build::tests::tags ... ok
+test build::tests::a_linked_context_never_reaches_docker ... ok
+test build::tests::project_files_skip_symlinks_and_big_files ... ok
+test compose::tests::alias_bombs_are_refused_before_loading ... ok
+test compose::tests::a_preview_checks_before_compose_reads_anything ... ok
+test compose::tests::compose_resolves_preview_volumes ... ignored, needs Docker Compose: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored
+test compose::tests::compose_up_and_down ... ignored, needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored
+test compose::tests::builds_read_only_the_checkout ... ok
+test compose::tests::names_and_env ... ok
+test compose::tests::override_file ... ok
+test apps::tests::patch_fields ... ok
+test apps::tests::an_app_with_volumes_stays_on_its_server ... ok
+test compose::tests::preview_storage ... ok
+test compose::tests::previews_read_no_server_files ... ok
+test compose::tests::previews_reject_host_privileges_and_direct_ingress ... ok
+test apps::tests::domains_keep_one_primary ... ok
+test compose::tests::routed_service ... ok
+test databases::tests::templates_cover_every_kind ... ok
+test apps::tests::create_get_list_delete ... ok
+test dbengine::tests::copy_tree_says_why_a_source_is_unreadable ... ok
+test dbengine::tests::overlapping_copy_paths_never_delete_volume_data ... ok
+test compose::tests::implicit_reads_stay_in_the_checkout ... ok
+test dbengine::tests::restic_settings ... ok
+test deploy::tests::names ... ok
+test deploy::tests::who_needs_a_chown ... ok
+test dbengine::tests::pipes_and_copies ... ok
+test compose::tests::compose_does_not_inherit_the_agents_environment ... ok
+test apps::tests::validation ... ok
+test databases::tests::public_ports ... ok
+test databases::tests::linking_a_second_database_never_overwrites_an_existing_connection ... ok
+test detect::tests::a_declared_package_manager_without_a_lockfile_still_installs ... ok
+test detect::tests::a_dockerfile_wins ... ok
+test detect::tests::build_env_file_is_shell_safe ... ok
+test databases::tests::create_link_resolve_delete ... ok
+test detect::tests::explicit_packs_contexts_images_and_compose ... ok
+test detect::tests::commands_reach_every_pack ... ok
+test deployments::tests::failure_reasons_do_not_store_terminal_escape_sequences ... ok
+test detect::tests::links_out_of_the_repository_are_refused ... ok
+test detect::tests::nextjs_with_pnpm_and_standalone ... ok
+test detect::tests::go_rust_deno_bun_ruby_php ... ok
+test detect::tests::plain_node_and_errors ... ok
+test detect::tests::node_versions ... ok
+test detect::tests::workspaces_copy_everything_first ... ok
+test docker::tests::container_lifecycle ... ignored, needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored
+test docker::tests::exposed_ports ... ok
+test docker::tests::logs_from_both_streams_are_in_time_order ... ok
+test docker::tests::ps_rows ... ok
+test docker::tests::pull_retries_only_what_may_pass ... ok
+test detect::tests::static_frameworks ... ok
+test detect::tests::python_frameworks ... ok
+test deployments::tests::interrupted_after_restart ... ok
+test deployments::tests::numbers_and_superseding ... ok
+test deployments::tests::state_machine ... ok
+test deployments::tests::only_old_unused_deployments_can_be_deleted ... ok
+test build::tests::existing_builder_is_bootstrapped_and_errors_are_not_recreated ... ok
+test engine::tests::preview_hosts_follow_their_access ... ok
+test engine::tests::cancel_does_not_wait_for_the_build_gate ... ok
+test env::tests::dotenv ... ok
+test env::tests::effective_production_variables ... ok
+test apps::tests::basic_auth_is_hashed ... ok
+test env::tests::existing_variables_become_production_only ... ok
+test env::tests::preview_only_cannot_resolve_production_database_credentials ... ok
+test env::tests::preview_only_wins_across_levels ... ok
+test env::tests::previews_get_only_what_is_shared ... ok
+test env::tests::replace_imports_a_dotenv ... ok
+test env::tests::resolution_order ... ok
+test fleet::tests::main_forwards_to_the_other_servers ... ok
+test fleet::tests::offline_servers_leave_the_main_route ... ok
+test env::tests::values_are_sealed_and_masked ... ok
+test gate::tests::concurrency_and_power_state ... ok
+test git::tests::credentials_stay_out_of_arguments ... ok
+test gate::tests::idle_maintenance_excludes_builds_and_counts_from_completion ... ok
+test git::tests::ls_remote_output ... ok
+test git::tests::rejects_local_and_option_like_inputs ... ok
+test engine::tests::deployment_errors_do_not_store_or_publish_secrets_from_log_tails ... ok
+test git::tests::hardened_env_still_runs_git ... ok
+test git_sources::tests::repositories_match_across_url_forms ... ok
+test git_sources::tests::deploy_keys ... ok
+test git_sources::tests::github_apps_and_webhooks ... ok
+test health::tests::a_crash_loop_is_given_up_on_without_waiting_for_the_timeout ... ok
+test git_sources::tests::tokens_are_sealed_and_resolved ... ok
+test health::tests::probes ... ok
+test ids::tests::ids_have_the_documented_shape ... ok
+test ids::tests::names_are_dns_labels ... ok
+test ids::tests::slugs ... ok
+test engine::tests::idle_builder_stops_only_when_safe_and_retries_errors ... ok
+test engine::tests::an_upgrade_retires_old_previews_before_new_work_and_survives_retry ... ok
+test logs::tests::short_secrets_are_redacted_too ... ok
+test logs::tests::terminal_output_is_kept_line_by_line ... ok
+test git_watch::tests::bookkeeping ... ok
+test hooks::tests::hooks ... ok
+test instances::tests::legacy_deployments_run_on_main ... ok
+test engine::tests::preview_does_not_join_the_production_database_network ... ok
+test mesh_registry::tests::invitations_expire_and_requests_age ... ok
+test nodes::tests::offline_after_two_minutes ... ok
+test nodes::tests::a_removed_worker_stays_removed_until_it_pairs_again ... ok
+test placement::tests::concurrent_deploys_do_not_spend_the_same_memory ... ok
+test placement::tests::most_free_memory_wins_ties_to_main ... ok
+test placement::tests::pinned_apps_stay_or_fail_over ... ok
+test placement::tests::replicas_spread_unless_volumes_or_compose ... ok
+test placement::tests::unusable_servers_are_skipped ... ok
+test preview_network::tests::isolation_requires_every_boundary ... ok
+test mesh_registry::tests::invite_enroll_revoke ... ok
+test logs::tests::write_follow_read_prune ... ok
+test nodes::tests::main_is_registered_once ... ok
+test proc::tests::captures_and_streams ... ok
+test nodes::tests::workers_register_by_heartbeat ... ok
+test previews::tests::lifecycle ... ok
+test proc::tests::invalid_utf8_and_long_lines_dont_end_the_stream ... ok
+test engine::tests::an_image_apps_port_comes_from_its_expose ... ok
+test engine::tests::the_commit_point_checks_the_preview_is_open ... ok
+test proxy::tests::basic_auth_and_dns_resolver ... ok
+test proxy::tests::a_proxy_folder_made_again_at_the_same_path_recreates_the_proxy ... ok
+test proxy::tests::files_are_written_atomically_and_listed ... ok
+test proxy::tests::mesh_only_hosts_check_the_source_first ... ok
+test proxy::tests::routes_render ... ok
+test proxy::tests::certificates_come_from_traefiks_acme_storage ... ok
+test proxy::tests::static_config_has_what_sleep_and_tls_need ... ok
+test reconcile::tests::decisions ... ok
+test reconcile::tests::nothing_to_do ... ok
+test reconcile::tests::orphans_are_found_on_a_server_outside_utc ... ok
+test projects::tests::default_target ... ok
+test registry::tests::names ... ok
+test registry::tests::push_list_delete ... ignored, needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored
+test runtime::tests::apply_round_trips ... ok
+test projects::tests::names_and_updates ... ok
+test runtime::tests::statuses_map_to_errors ... ok
+test secrets::tests::bound_to_its_cell_and_key ... ok
+test projects::tests::projects_start_with_production ... ok
+test secrets::tests::round_trip ... ok
+test secrets::tests::tokens ... ok
+test secrets::tests::key_file_is_created_private_and_reused ... ok
+test storage::tests::non_directory_volume_source_must_not_be_treated_as_empty ... ok
+test storage::tests::unreadable_volume_source_must_not_be_treated_as_empty ... ok
+test reconcile::tests::a_first_deploy_preserves_its_route_while_it_is_being_published ... ok
+test runtime::tests::older_workers_refuse_new_storage_without_breaking_legacy_starts ... ok
+test reconcile::tests::route_publication_waits_for_the_reconcilers_snapshot_and_apply ... ok
+test store::tests::async_calls ... ok
+test store::tests::constraints_map_to_api_errors ... ok
+test store::tests::control_plane_sqlite_omits_unused_search_extensions ... ok
+test standby::tests::choose_build_and_promote ... ok
+test store::tests::migration_versions_are_consecutive ... ok
+test store::tests::deployments_check_their_shape ... ok
+test store::tests::copy_without_migrating_keeps_the_schema ... ok
+test logs::tests::past_the_cap_the_engines_lines_still_go ... ok
+test store::tests::migrates_to_the_latest_version ... ok
+test store::tests::settings_round_trip ... ok
+test templates::tests::every_template_is_well_formed ... ok
+test validate::tests::env_keys ... ok
+test validate::tests::hosts ... ok
+test validate::tests::refs_images_paths ... ok
+test validate::tests::repositories ... ok
+test store::tests::file_database_backup_and_version_guard ... ok
+test store::tests::transactions_roll_back_on_error ... ok
+test proc::tests::timeouts_cancellation_and_missing_tools ... ok
+test tasks::tests::tasks ... ok
+test volumes::tests::deleting_an_app_keeps_discoverable_volume_identities ... ok
+test volumes::tests::legacy_preview_cannot_mount_another_apps_production_data ... ok
+test templates::tests::create_generates_secrets ... ok
+test store::tests::upgrading_lists_running_previews_for_retirement ... ok
+test volumes::tests::legacy_aliases_are_refused_before_mount_move_or_purge ... ok
+test volumes::tests::ambiguous_owner_names_must_not_share_storage ... ok
+test volumes::tests::volumes_per_owner ... ok
+test volumes::tests::production_previews_and_databases_have_separate_storage ... ok
+test volumes::tests::upgrading_v4_preserves_existing_ssd_hdd_and_preview_names ... ok
+test engine::tests::a_closed_preview_never_goes_live ... ok
+test dbengine::tests::a_database_image_is_pulled_once_in_the_background ... ok
+test proxy::tests::a_first_deployment_waits_until_the_proxy_routes_it ... ok
+
+test result: ok. 170 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 2.15s
+
+     Running tests/builder_idle.rs (target/debug/deps/builder_idle-0c79399f2f5d5ee8)
+
+running 1 test
+test idle_builder_retains_cache_and_restarts_for_repeated_builds ... ignored, owns the dedicated builder on a disposable Docker daemon
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/databases_docker.rs (target/debug/deps/databases_docker-1b2f28cebd92a2fa)
+
+running 1 test
+test databases_end_to_end ... ignored, needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/engine_docker.rs (target/debug/deps/engine_docker-e7974f1f953c72e8)
+
+running 1 test
+test deploy_redeploy_rollback_recover ... ignored, needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/preview_safety.rs (target/debug/deps/preview_safety-10bdb0954878843c)
+
+running 1 test
+test previews_have_no_production_credentials_network_or_public_bypass ... ignored, requires a disposable Docker daemon; run host/tests/contract/preview-safety.sh
+
+test result: ok. 0 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests vercelify_cockpit_lib
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests vercelify_core
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests vercelify_host
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests vercelify_mesh
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests vercelify_platform
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

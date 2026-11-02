@@ -143,6 +143,29 @@ impl Engine {
         })
     }
 
+    /// Stop only our dedicated idle builder. Holding all build slots across
+    /// inspect and stop excludes a concurrently starting build.
+    pub async fn stop_idle_builder(&self, timeout: Duration) -> Result<bool> {
+        if self.builder.driver != crate::build::Driver::Container {
+            return Ok(false);
+        }
+        let Some(_slots) = self.gate.try_idle(timeout) else {
+            return Ok(false);
+        };
+        let docker = crate::docker::Docker {
+            bin: self.builder.docker.clone(),
+        };
+        let Some(state) = docker.inspect(crate::build::BUILDER_CONTAINER).await? else {
+            return Ok(false);
+        };
+        if !state.running || state.paused || self.gate.held().is_some() {
+            return Ok(false);
+        }
+        // Stop retains the container and cache volume; never remove/prune.
+        docker.stop(crate::build::BUILDER_CONTAINER, 10).await?;
+        Ok(true)
+    }
+
     pub(crate) fn app_operation(&self, id: &str) -> Result<AppOperation<'_>> {
         if !lock(&self.busy).insert(id.to_string()) {
             return Err(Error::Conflict(
@@ -1678,6 +1701,60 @@ mod tests {
             BuildGate::new(concurrency, dir.join("power")).with_poll(Duration::from_millis(20)),
             LogHub::new(dir.join("logs")),
         )
+    }
+
+    #[tokio::test]
+    async fn idle_builder_stops_only_when_safe_and_retries_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut e = engine(dir.path(), 2);
+        Arc::get_mut(&mut e).unwrap().builder.driver = Driver::Container;
+        let bin = dir.path().join("builder-docker");
+        std::fs::write(
+            &bin,
+            format!(
+                r#"#!/bin/sh
+case "$1" in
+  container) cat '{d}/builder-state' ;;
+  stop) echo stop >> '{d}/builder-stops'; [ ! -f '{d}/fail-stop' ] ;;
+esac
+"#,
+                d = dir.path().display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Arc::get_mut(&mut e).unwrap().builder.docker = bin.display().to_string();
+        let timeout = Duration::from_millis(10);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        for state in [
+            r#"{"State":{"Running":false}}"#,
+            r#"{"State":{"Running":true,"Paused":true}}"#,
+        ] {
+            std::fs::write(dir.path().join("builder-state"), state).unwrap();
+            assert!(!e.stop_idle_builder(timeout).await.unwrap());
+        }
+        std::fs::write(
+            dir.path().join("builder-state"),
+            r#"{"State":{"Running":true,"Paused":false}}"#,
+        )
+        .unwrap();
+        let build = e.gate.acquire(&mut |_| {}).await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(!e.stop_idle_builder(timeout).await.unwrap());
+        drop(build);
+        assert!(!e.stop_idle_builder(timeout).await.unwrap());
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        std::fs::write(dir.path().join("fail-stop"), "").unwrap();
+        assert!(e.stop_idle_builder(timeout).await.is_err());
+        std::fs::remove_file(dir.path().join("fail-stop")).unwrap();
+        assert!(e.stop_idle_builder(timeout).await.unwrap());
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("builder-stops")).unwrap(),
+            "stop\nstop\n"
+        );
+        assert!(!e.stop_idle_builder(Duration::ZERO).await.unwrap());
+        Arc::get_mut(&mut e).unwrap().builder.driver = Driver::Docker;
+        assert!(!e.stop_idle_builder(timeout).await.unwrap());
     }
 
     fn image_app(e: &Engine) -> App {
