@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "/tmp/vfy-m3-amd64-handoff.py", line 51, in <module>
+    publish();time.sleep(3)
+  File "/tmp/vfy-m3-amd64-handoff.py", line 24, in publish
+    else: raise AssertionError('health deadline')
+AssertionError: health deadline

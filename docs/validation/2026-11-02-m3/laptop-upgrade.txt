@@ -1,0 +1,12 @@
+{"ok":true,"version":"1.0.0","hostname":"user-Inspiron-5567","role":"main","pairing_open":false,"api_version":2,"capabilities":["doctor","update","rollback","hardware","alerts","metrics","uptime","tokens","audit","backup","backup-recovery-kit","previews","auto-rollback","images","events","jobs","sleep","power-guard","domain","projects","roles","sunshine-pair","mesh","platform"]}fb4e6dd3d0193f672c7c949a676e1dd7231960fc34b8fbdcb2b04683b3e6b586  /usr/local/bin/vercelify-agent
+vfy-gw-pr1-re0wxze2 Up 2 hours
+vfy-db-gwdb Up 9 hours
+vfy-gw-2cv2ryfw Up 9 hours
+vercelify-proxy Up 9 hours
+voxbento-mediamtx-1 Up 9 hours
+Nov 02 09:27:55 user-Inspiron-5567 vercelify-agent[165820]: 2026-11-02T03:57:55.599579Z  INFO previews: gw: GitHub rate limit reached — add a token to check more often
+Nov 02 09:29:02 user-Inspiron-5567 vercelify-agent[165820]: 2026-11-02T03:59:02.739511Z  INFO previews: gw: GitHub rate limit reached — add a token to check more often
+Nov 02 09:30:05 user-Inspiron-5567 vercelify-agent[165820]: 2026-11-02T04:00:05.500452Z  INFO previews: gw: GitHub rate limit reached — add a token to check more often
+Nov 02 09:31:06 user-Inspiron-5567 vercelify-agent[165820]: 2026-11-02T04:01:06.512947Z  INFO previews: gw: GitHub rate limit reached — add a token to check more often
+Nov 02 09:31:24 user-Inspiron-5567 vercelify-agent[204335]: 2026-11-02T04:01:24.639738Z  INFO platform engine: /var/lib/vercelify/platform.db
+curl: (7) Failed to connect to 127.0.0.1 port 7420 after 0 ms: Connection refused

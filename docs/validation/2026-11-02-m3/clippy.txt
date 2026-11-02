@@ -1,0 +1,13 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+    Checking vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+    Checking vercelify-agent v1.0.0 (/Users/shashank/Desktop/VERCELIFY/agent)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 4.63s

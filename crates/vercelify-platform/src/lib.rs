@@ -6,6 +6,7 @@
 //! deployments and the reconciler build on those.
 
 pub mod apps;
+pub mod artifact;
 pub mod build;
 pub mod compose;
 pub mod databases;
@@ -29,6 +30,7 @@ pub mod instances;
 pub mod logs;
 pub mod mesh_registry;
 pub mod nodes;
+pub mod offhost;
 pub mod placement;
 pub mod preview_network;
 pub mod previews;

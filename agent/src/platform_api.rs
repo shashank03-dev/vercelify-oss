@@ -68,6 +68,13 @@ pub fn router() -> Router<AppState> {
         .route("/platform/apps/{app}/volumes/{name}", delete(app_volume_delete))
         .route("/platform/apps/{app}/deployments", get(app_deployments))
         .route("/platform/apps/{app}/deploy", post(app_deploy))
+        .route("/platform/apps/{app}/build-jobs", post(crate::offhost::create))
+        .route("/platform/build-jobs/{id}", get(crate::offhost::get))
+        .route("/platform/build-jobs/{id}/renew", post(crate::offhost::renew))
+        .route(
+            "/platform/build-jobs/{id}/image",
+            axum::routing::put(crate::offhost::upload),
+        )
         .route("/platform/apps/{app}/rollback", post(app_rollback))
         .route("/platform/apps/{app}/previews", get(app_previews))
         .route(
@@ -635,7 +642,7 @@ pub async fn node_heartbeat(
     }
     Ok(Json(NodeHeartbeatReply {
         node_id: n.id,
-        registry: format!("{main_ip}:{}", vercelify_platform::registry::PORT),
+        registry: format!("http://{main_ip}:{}/v1/mesh/registry", s.config.port),
     }))
 }
 
@@ -661,8 +668,14 @@ pub async fn run_fleet(
         if !ip.is_empty() {
             p.engine.set_registry(cfg.state_dir.join("registry"), vec![ip.clone()]);
         }
-        if workers > 0 && !ip.is_empty() {
-            let docker = &p.engine.deployer.docker;
+        let docker = &p.engine.deployer.docker;
+        let existing_registry = docker
+            .inspect(vercelify_platform::registry::CONTAINER)
+            .await
+            .ok()
+            .flatten()
+            .is_some();
+        if workers > 0 || existing_registry {
             match vercelify_platform::registry::ensure(docker, &cfg.state_dir.join("registry"), &[ip]).await {
                 Ok(()) if last_gc.elapsed() > std::time::Duration::from_secs(86_400) => {
                     last_gc = std::time::Instant::now();

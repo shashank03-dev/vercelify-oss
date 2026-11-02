@@ -1,0 +1,4 @@
+{"deployment_id": "dpl_pj67dv49pwq6qtr9", "archive_bytes": 222059008, "upload_to_healthy_seconds": 27.61, "status": "healthy"}
+{"deployment_id": "dpl_tcbs6kzk9rkfvgvt", "archive_bytes": 222059008, "upload_to_healthy_seconds": 21.09, "status": "healthy"}
+{"duration_seconds": 60, "concurrency": 4, "per_worker_interval_seconds": 0.25, "requests": 948, "failures": 0, "latency_ms_p50": 19.72, "latency_ms_p95": 42.99, "latency_ms_max": 134.33}
+PASS: emulated amd64 target initial import and rollout under declared request load

@@ -1,0 +1,26 @@
+network: main (this namespace, 192.168.88.1) — worker (vfyn-worker, 192.168.88.2)
+worker's Docker
+  [32m✓[0m two Docker daemons
+  [32m✓[0m main server: platform engine, coordinator on 10.77.0.1
+the worker joins
+  [32m✓[0m worker registered by heartbeat: online, Docker up, at 10.77.0.2
+  [32m✓[0m the worker runs its own proxy
+  [32m✓[0m the worker's runtime API refuses other tokens
+an app placed on the worker
+  [32m✓[0m deployed on the worker (vfy-web-g89nx9fv)
+  [32m✓[0m image pulled once here, served to the worker by the mesh registry
+  [32m✓[0m registry is loopback-only; enrolled worker reads succeed, device tokens and registry writes are refused
+  [32m✓[0m web.test answers through the main server's proxy → the worker's proxy → the container
+  [32m✓[0m the main server's route forwards over the mesh
+running it from the main server
+  [32m✓[0m logs come from the worker
+  [32m✓[0m restart reaches the worker
+  [32m✓[0m a terminal in the worker's container, relayed by the main server
+  [32m✓[0m scheduled tasks run in the worker's container, and say how they failed
+replicas on both servers
+  [32m✓[0m two replicas (main + worker) behind one route; the old instance retired
+a replica dies on the worker
+  [32m✓[0m a replica dying on the worker right after a deploy rolls the app back
+revocation
+  [32m✓[0m a revoked worker isn't called any more
+17 checks passed

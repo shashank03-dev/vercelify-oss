@@ -40,7 +40,7 @@ pub fn allowed(role: Role, method: &Method, path: &str) -> bool {
         ["v1", "platform", "projects" | "environments", _, "env", _] => true,
         // Creating an app from the catalogue is creating an app.
         ["v1", "platform", "templates", _] => !delete,
-        ["v1", "platform", "deployments", _, ..] => !delete,
+        ["v1", "platform", "deployments" | "build-jobs", _, ..] => !delete,
         // Terminals are the deployer's (design §12); a session is its opener's.
         ["v1", "platform", "terminals", ..] => true,
         ["v1", "autodeploy", ..] | ["v1", "projects", ..] | ["v1", "sleep", ..] => true,

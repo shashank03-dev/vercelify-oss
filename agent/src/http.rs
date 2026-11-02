@@ -50,6 +50,8 @@ pub struct Req<'a> {
     pub method: Method,
     pub url: &'a str,
     pub bearer: Option<&'a str>,
+    pub accept: Option<&'a str>,
+    pub range: Option<&'a str>,
     pub json: Option<Vec<u8>>,
     pub timeout: Duration,
 }
@@ -60,6 +62,8 @@ impl<'a> Req<'a> {
             method: Method::GET,
             url,
             bearer: None,
+            accept: None,
+            range: None,
             json: None,
             timeout: Duration::from_secs(15),
         }
@@ -113,13 +117,16 @@ async fn send(req: Req<'_>) -> Result<Response<Incoming>, HttpError> {
         .method(req.method)
         .uri(path)
         .header(hyper::header::HOST, &authority)
-        .header(hyper::header::ACCEPT, "application/json")
+        .header(hyper::header::ACCEPT, req.accept.unwrap_or("application/json"))
         .header(
             hyper::header::USER_AGENT,
             concat!("vercelify-agent/", env!("CARGO_PKG_VERSION")),
         );
     if let Some(t) = req.bearer {
         b = b.header(hyper::header::AUTHORIZATION, format!("Bearer {t}"));
+    }
+    if let Some(range) = req.range {
+        b = b.header(hyper::header::RANGE, range);
     }
     let body = match req.json {
         Some(j) => {

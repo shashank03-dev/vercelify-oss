@@ -10,7 +10,7 @@ import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 APPS = {
-    "blog": {"id": "app_blog0000000000001", "name": "blog", "desired": "running", "current_deployment_id": "dpl_3",
+    "blog": {"id": "app_blog0000000000001", "name": "blog", "kind":"git", "source":{"repository":"https://example.com/test.git"}, "build":{}, "runtime":{}, "node_id":None, "desired": "running", "current_deployment_id": "dpl_3",
              "last_status": "healthy", "url": "https://blog.example.com"},
     "api": {"id": "app_api00000000000001", "name": "api", "desired": "running", "current_deployment_id": None,
             "last_status": "failed", "url": None},
@@ -130,6 +130,8 @@ class H(BaseHTTPRequestHandler):
                 if "reveal=true" not in query:
                     return self.reply(200, [dict(v, value=None if v["secret"] else v["value"]) for v in ENV])
                 return self.reply(200, ENV)
+        if seg[0] == "nodes":
+            return self.reply(200,[{"id":"node_main", "role":"main", "arch":"aarch64"}])
         if seg[0] == "deployments":
             d = {"dpl_5": dict(DEPLOYMENTS[1], id="dpl_5", status="healthy"),
                  "dpl_9": dict(FAILED, id="dpl_9", status="failed", error="build failed: exit status 1"),

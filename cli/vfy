@@ -3,6 +3,8 @@
 #
 #   vfy apps                    every app with its status and URL
 #   vfy deploy APP [--no-follow]  deploy and stream the build log (exit 1 if it fails)
+#       --build-here            build exact source on this computer, then hand off the image
+#       --image REF@sha256:…    hand off a CI image (--commit SHA or OCI revision label)
 #   vfy logs APP [LINES] [-f]   the app's output; -f keeps following it
 #   vfy rollback APP COMMIT|#N  back to an earlier deployment (commit or number)
 #   vfy restart APP             restart the running app
@@ -346,6 +348,119 @@ pstate_jq='
 # A line of a log stream → text ([stderr] marked).
 log_text='(if .stream == "stderr" or .stream == "error" then "[stderr] " else "" end) + .text'
 
+# Explicit local build/CI handoff. A failure never calls the serving-host build API.
+vfy_local_deploy() (
+  set -euo pipefail
+  local app=$1 ci_image=${2:-} commit=${3:-} pack=${VFY_PACK_BIN:-vercelify-pack}
+  have docker && docker info >/dev/null 2>&1 || die "local Docker runtime is unavailable; start or explicitly select it (no server build was queued)"
+  [[ -n "$ci_image" ]] || have git || die "git is required for an exact-commit local build"
+  [[ -n "$ci_image" ]] || docker buildx version >/dev/null 2>&1 || die "Docker Buildx plugin is missing; install it in the selected local runtime before building"
+  [[ -n "$ci_image" ]] || have "$pack" || die "vercelify-pack is missing; install the shared build helper (see docs/PLATFORM.md)"
+  umask 077
+  local tmp id='' heartbeat='' active_command='' success=0 builder='' info nodes node arch platform sha repo rev source image digest port
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/vfy-build.XXXXXX")
+  run_local() {
+    local result=0
+    "$@" <&0 & active_command=$!
+    wait "$active_command" || result=$?
+    active_command=''
+    return "$result"
+  }
+  cleanup_local() {
+    [[ -z "$active_command" ]] || { kill "$active_command" 2>/dev/null || true; wait "$active_command" 2>/dev/null || true; }
+    [[ -z "$heartbeat" ]] || { kill "$heartbeat" 2>/dev/null || true; wait "$heartbeat" 2>/dev/null || true; }
+    if [[ -n "$id" && "$success" == 0 ]]; then (trap - EXIT; papi POST "/deployments/$id/cancel" >/dev/null 2>&1) || true; fi
+    rm -rf -- "$tmp"
+  }
+  trap cleanup_local EXIT
+  trap 'exit 130' INT TERM HUP
+  info=$(papi GET "/apps/$app")
+  [[ $(jq -r '.kind' <<<"$info") == git ]] || die "explicit build handoff needs a Git app; image apps can deploy a pinned registry digest directly"
+  nodes=$(papi GET /nodes)
+  node=$(jq -r '.node_id // empty' <<<"$info")
+  arch=$(jq -r --arg n "$node" '[.[] | select(if $n == "" then .role == "main" else .id == $n end)][0].arch // empty' <<<"$nodes")
+  case "$arch" in aarch64|arm64) platform=linux/arm64 ;; x86_64|amd64) platform=linux/amd64 ;; *) die "target architecture is unavailable; refresh the server before building" ;; esac
+  if [[ -z "$ci_image" ]]; then
+    repo=$(jq -r '.source.repository // empty' <<<"$info")
+    [[ -n "$repo" ]] || die "this app has no repository"
+    rev=${commit:-$(jq -r '.source.pinned_sha // .source.branch // "main"' <<<"$info")}
+    source="$tmp/source"
+    git -c core.hooksPath=/dev/null init -q "$source"
+    git -C "$source" remote add origin "$repo"
+    GIT_TERMINAL_PROMPT=0 run_local git -C "$source" -c core.hooksPath=/dev/null -c protocol.file.allow=never -c protocol.ext.allow=never fetch -q --depth 1 origin "$rev"
+    git -C "$source" -c core.hooksPath=/dev/null checkout -q --detach FETCH_HEAD
+    sha=$(git -C "$source" rev-parse HEAD)
+    # The source snapshot does not need remotes, credentials or Git objects.
+    rm -rf -- "$source/.git"
+    jq -c '.build' <<<"$info" | "$pack" plan "$source" > "$tmp/plan.json"
+  else
+    [[ "$ci_image" == *@sha256:* ]] || die "CI images must use an immutable IMAGE@sha256:DIGEST reference"
+    run_local docker pull --platform "$platform" "$ci_image" >&2
+    sha=${commit:-$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$ci_image")}
+    port=$(jq -r '.runtime.port // empty' <<<"$info")
+    if [[ -z "$port" ]]; then
+      port=$(docker image inspect --format '{{json .Config.ExposedPorts}}' "$ci_image" | jq -r '[(. // {}) | keys[] | select(endswith("/tcp")) | split("/")[0]] | if length == 1 then .[0] else empty end')
+    fi
+    [[ -n "$port" ]] || die "set the app port, or give the CI image exactly one TCP EXPOSE"
+    jq -nc --arg df "FROM $ci_image" --argjson p "$port" '{dockerfile:$df,generated:false,context:".",port:$p,framework:"pre-built CI image",notes:[],project_files:[]}' > "$tmp/plan.json"
+  fi
+  [[ ${#sha} == 40 && "$sha" != *[!0-9a-fA-F]* ]] || die "a full source commit is required (use --commit SHA or the OCI revision label)"
+  if [[ -z "$ci_image" ]]; then
+    local runtime endpoint
+    runtime=${DOCKER_CONTEXT:-${DOCKER_HOST:-$(docker context show)}}
+    [[ -n "$runtime" ]] || die "the selected Docker runtime has no endpoint"
+    builder="vfy-local-$(jq -r '.id' <<<"$info")"
+    if docker buildx inspect "$builder" > "$tmp/builder.txt" 2>/dev/null; then
+      endpoint=$(awk '$1 == "Endpoint:" {print $2}' "$tmp/builder.txt")
+      [[ "$endpoint" == "$runtime" ]] || die "the app builder belongs to another Docker runtime; remove it with docker buildx rm $builder, then retry in the selected context"
+    else
+      run_local docker buildx create --name "$builder" --driver docker-container --driver-opt image=moby/buildkit:v0.18.2 "$runtime" >/dev/null
+    fi
+  fi
+  jq -nc --arg sha "$sha" --arg p "$platform" --slurpfile plan "$tmp/plan.json" '{commit_sha:$sha,platform:$p,plan:$plan[0],pr_number:null}' > "$tmp/request.json"
+  papi POST "/apps/$app/build-jobs" "$(cat "$tmp/request.json")" > "$tmp/lease.json"
+  id=$(jq -r '.job.deployment_id' "$tmp/lease.json")
+  image=$(jq -r '.job.image' "$tmp/lease.json")
+  local generation
+  generation=$(jq -r '.job.generation' "$tmp/lease.json")
+  (
+    trap - EXIT
+    timer=''
+    trap '[[ -z "$timer" ]] || kill "$timer" 2>/dev/null; exit 0' TERM INT HUP
+    while :; do
+      sleep 45 & timer=$!
+      wait "$timer"
+      papi POST "/build-jobs/$id/renew" "{\"generation\":$generation}" >/dev/null || exit 1
+    done
+  ) >/dev/null 2>&1 & heartbeat=$!
+  printf '%sBuilding for %s on this computer; the serving host will only receive the image%s\n' "$D" "$platform" "$N" >&2
+  if [[ -z "$ci_image" ]]; then
+    run_local docker buildx inspect --bootstrap "$builder" >&2
+    jq -nc --argjson app "$info" --slurpfile lease "$tmp/lease.json" --arg p "$platform" '{build:$app.build,app_name:$app.name,deployment_id:$lease[0].job.deployment_id,variables:$lease[0].variables,platform:$p}' > "$tmp/build.json"
+    BUILDX_BUILDER="$builder" run_local "$pack" build "$source" < "$tmp/build.json" > "$tmp/built.json"
+    docker tag "$(jq -r '.image' "$tmp/built.json")" "$image"
+  else
+    docker tag "$ci_image" "$image"
+  fi
+  run_local docker save --output "$tmp/image.tar" "$image"
+  local config
+  config=$(tar -xOf "$tmp/image.tar" manifest.json | jq -er 'if length == 1 then .[0].Config else error("one image required") end')
+  if have sha256sum; then
+    digest="sha256:$(tar -xOf "$tmp/image.tar" "$config" | sha256sum | awk '{print $1}')"
+  else
+    digest="sha256:$(tar -xOf "$tmp/image.tar" "$config" | shasum -a 256 | awk '{print $1}')"
+  fi
+  local out code
+  out=$(printf 'header = "Authorization: Bearer %s"\n' "$(field agent_token)" |
+    xcurl -sS -X PUT -K - --max-time 2700 -w '\n%{http_code}' -H 'Content-Type: application/x-tar' --data-binary "@$tmp/image.tar" \
+      "$(field agent_url)/v1/platform/build-jobs/$id/image?generation=$generation&digest=$digest") || die "image upload interrupted; the current app is still serving"
+  code=${out##*$'\n'}; out=${out%$'\n'*}
+  [[ "$code" == 2* ]] || die "$(jq -r '.error // "image handoff failed"' <<<"$out") (HTTP $code)"
+  success=1
+  [[ -z "$builder" ]] || printf '%sLocal cache retained in builder %s (docker buildx rm %s removes it)%s\n' "$D" "$builder" "$builder" "$N" >&2
+  papi GET "/deployments/$id"
+)
+
 platform_cmd() {
   local cmd=$1
   shift
@@ -357,9 +472,23 @@ platform_cmd() {
         done
       ;;
     deploy)
-      local app=${1:?which app? (name or id)} follow=1 d id st
-      [[ "${2:-}" == --no-follow ]] && follow=0
-      d=$(papi POST "/apps/$app/deploy" '{"force_rebuild":false}')
+      local app=${1:?which app? (name or id)} follow=1 d id st local_build=0 ci_image='' commit=''
+      shift
+      while (( $# )); do
+        case "$1" in
+          --no-follow) follow=0 ;;
+          --build-here) local_build=1 ;;
+          --image) ci_image=${2:?--image needs an immutable reference}; local_build=1; shift ;;
+          --commit) commit=${2:?--commit needs a full SHA}; shift ;;
+          *) die "usage: vfy deploy APP [--build-here | --image IMAGE@sha256:DIGEST] [--commit SHA] [--no-follow]" ;;
+        esac
+        shift
+      done
+      if (( local_build )); then
+        d=$(vfy_local_deploy "$app" "$ci_image" "$commit")
+      else
+        d=$(papi POST "/apps/$app/deploy" "$(jq -nc --arg sha "$commit" '{force_rebuild:false} + (if $sha == "" then {} else {commit_sha:$sha} end)')")
+      fi
       id=$(jq -r .id <<<"$d")
       printf '%sDeploying %s (#%s)%s\n' "$B" "$app" "$(jq -r .number <<<"$d")" "$N"
       if (( follow == 0 )); then

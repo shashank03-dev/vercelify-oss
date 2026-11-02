@@ -284,6 +284,69 @@ detected values. The generated Dockerfile is printed at the start of the build l
 static server stage is a pinned `caddy:2-alpine` with a Caddyfile that honours `cleanUrls`
 and `trailingSlash`; redirects/rewrites/headers stay in Traefik (`routing.rs`) as today.
 
+### 6.4 Explicit computer and CI builds (competitive M3)
+
+`vercelify-pack` reuses the detector and builder on the selected computer's Docker
+runtime. `vfy deploy APP --build-here` fetches an exact commit into a private
+throwaway checkout; dirty working files and the developer's home/SSH agent are
+not mounted into build steps. Docker contexts are never switched; retained builders must match the selected
+endpoint, and new builders receive that endpoint explicitly. A named
+`vfy-local-<app id>` container builder isolates each app's cache; local handoffs
+rerun generated recipe steps using an opaque deployment ID build argument because
+BuildKit secret contents do not change its cache key. Package cache mounts remain
+reusable. Repository Dockerfiles use `--no-cache` conservatively, which also resets
+their cache mounts. The helper
+redacts build output and errors and handles cancellation before removing its
+private work directory. The CLI explicitly enables errexit inside its command
+substitution and cancels its lease on failure or signals.
+
+`--image IMAGE@sha256:DIGEST` hands off an image already built by CI, with a full
+source SHA supplied by `--commit` or the OCI revision label. It uses the same job
+and upload path, without forcing an image through a build pack. Git apps use this
+handoff; ordinary image apps can already deploy a pinned registry digest directly.
+No unattended fork scheduler or automatic desktop selection is introduced.
+
+Migration 0008 persists `build_jobs`, one per deployment: device-token owner,
+generation, exact commit (deployment), target platform, plan/version/hash,
+configuration/resolved-variable revision, soft/hard deadlines, phase and image
+config digest. The first explicit lease uses generation 1; retries create a new
+deployment/job identity rather than reassigning a running job. A lease lasts
+300 seconds, renewed by the CLI every 45 seconds, with a 90-minute hard limit.
+States are `leased → uploading → verified`, or `failed`. Public job metadata
+contains no variable values; only the authorized creation response supplies
+build-marked variables. Build-time DB references require an explicitly configured
+mesh port and resolve to the main server's mesh address. Runtime-only DB variables
+need no published port for a local app.
+
+Deployment and lease creation are one transaction. The dispatcher skips a queued
+job until verified; every five seconds it expires abandoned jobs. Restart fences
+incomplete jobs, while already verified artifacts may dispatch. Upload, renewal
+and publication check owner, generation, deadline, deployment status and preview
+head/open state. Publication additionally checks the immutable settings/variable
+revision. Newer deployment creation supersedes an older queued handoff. Revocation
+is checked again after load. No missing/failed off-host image falls back to a
+serving-host build. `build_concurrency = 0` now enforces a runtime-only host: normal
+Git/Compose work stays queued with “no permitted builder,” with cancellation and
+an explicit computer/CI retry available.
+
+The authenticated upload streams a declared tar (maximum 3 GiB) to mode-0600
+files, with disk headroom for the archive, its sanitized copy and 512 MiB reserve.
+Metadata is capped at 1 MiB, paths/regular entries/checksums/digests are validated,
+links/extensions/duplicate names rejected, and no archive entry is extracted onto
+the host. Only one job-owned tag, config and referenced layers reach `docker load`;
+alternate OCI indexes and unrelated objects are omitted. The protocol's digest is
+the SHA256 of the saved image config, not Docker 29's store-dependent `.Id` (which
+can name an OCI index). Layer content hashes, loaded rootfs diff IDs, architecture
+and runtime configuration are checked. Temporary guards survive a background
+sanitizer and clean up on interruption. An incomplete upload cannot dispatch.
+
+API (device-token authentication): `POST /v1/platform/apps/{app}/build-jobs`,
+`GET /v1/platform/build-jobs/{id}`, `POST …/{id}/renew`, `PUT …/{id}/image` (generation
+and config digest query parameters). Cancellation uses the deployment endpoint.
+The target node is pinned for the job; foreign worker images receive the existing
+architecture tag before registry distribution. Qualification and hardware limits
+are recorded with M3, not inferred from the presence of these APIs.
+
 ## 7. Deployments
 
 ### 7.1 State machine
@@ -444,11 +507,16 @@ server's invite prints). It keeps no platform state:
   (Basic Auth is checked on both). Servers that are offline leave the main route
   (unless none is online: a 502 says more than nothing).
 - **Images.** The main server builds and runs `vfy-registry` (pinned `registry:2`,
-  128 MB, published on 127.0.0.1:5055 and its mesh address:5055, data in
-  `<state>/registry`). Every server calls it `127.0.0.1:5055`: Docker trusts a
-  loopback registry without TLS, so no `daemon.json` changes and no Docker restart;
-  on a worker the agent forwards that port to the main server over the mesh
-  (WireGuard encrypts it). The engine starts the registry before the first push and
+  128 MB, published only on 127.0.0.1:5055, data in `<state>/registry`). Every
+  server calls it `127.0.0.1:5055`: Docker trusts a loopback registry without TLS,
+  so no `daemon.json` changes and no Docker restart. A worker serves read-only
+  requests on that local port and forwards them through the main agent's
+  `/v1/mesh/registry/v2/…` route, authenticating with its mesh node token.
+  Only active enrolled servers may read; device tokens and all registry writes
+  are refused. Accept/Range and response bodies stream without buffering layers.
+  WireGuard encrypts the node-to-node path. Upgrade recreates an existing raw
+  registry with loopback-only bindings, including when no workers remain; old
+  workers must be upgraded to use the authenticated reader. The engine starts the registry before the first push and
   waits for it. Built images go as `vfy/<app>:<dpl>`; image apps placed elsewhere are
   pulled here once (for the target's architecture) and pushed the same way, so
   workers need neither internet access nor registry credentials. Registry tags this

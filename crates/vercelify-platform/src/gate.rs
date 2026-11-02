@@ -12,6 +12,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 pub struct BuildGate {
     slots: Arc<Semaphore>,
     concurrency: usize,
+    builds_enabled: bool,
     power_state: PathBuf,
     poll: Duration,
     last_finished: Mutex<Instant>,
@@ -36,10 +37,12 @@ pub fn holds_builds(state: &str) -> bool {
 
 impl BuildGate {
     pub fn new(concurrency: usize, power_state: PathBuf) -> Self {
+        let builds_enabled = concurrency > 0;
         let concurrency = concurrency.max(1);
         Self {
             slots: Arc::new(Semaphore::new(concurrency)),
             concurrency,
+            builds_enabled,
             power_state,
             poll: Duration::from_secs(5),
             last_finished: Mutex::new(Instant::now()),
@@ -49,6 +52,10 @@ impl BuildGate {
     pub fn with_poll(mut self, poll: Duration) -> Self {
         self.poll = poll;
         self
+    }
+
+    pub fn builds_enabled(&self) -> bool {
+        self.builds_enabled
     }
 
     pub fn concurrency(&self) -> usize {

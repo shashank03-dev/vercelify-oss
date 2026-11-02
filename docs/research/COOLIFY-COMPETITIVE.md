@@ -309,6 +309,49 @@ its sample ranges do not overlap, but this is still one matched run. No new mini
 competitor claim follows. Raw samples, hashes, scripts, tests and boundaries are
 in [M2 validation](../validation/2026-11-02-m2/VALIDATION.md).
 
+### Re-measured for M3 off-host builds, 2 November 2026
+
+Same four-GiB VM and §6 method: twelve samples after a two-minute settle, five
+whoami apps plus the pinned Next.js app; BuildKit stopped and the disposable test
+daemon stopped. These are matched steady-state workloads, not build peaks.
+
+| Median MiB | M2 builder stopped | M3 builder stopped |
+| --- | ---: | ---: |
+| System used (range) | 656.5 (638–689) | 685.5 (674–705) |
+| Agent RSS | 7.74 | 8.38 |
+| Mesh RSS | 2.90 | 2.90 |
+| Traefik RSS | 91.68 | 91.74 |
+| dockerd / containerd RSS | 107.53 / 51.15 | 107.85 / 50.36 |
+| All shim RSS | 75.52 | 75.49 |
+| BuildKit RSS | 0 | 0 |
+
+The system-used medians differ by 29 MiB with overlapping ranges; agent RSS differs
+by 0.64 MiB. This one run does not establish a fixed memory cost or saving. The
+physical laptop went offline during qualification; its M3 steady state is
+**unmeasured**. A newly rebuilt safe PR preview also makes its current workload
+different from M2. The user chose to continue in the lab VM.
+
+A separate **one-GiB runtime-only** fixture used 956.1 MiB visible RAM, swap disabled,
+one pinned Next.js app, no database, builds disabled and no disposable daemon.
+It imported the complete off-host image and rolled out a second deployment under
+four concurrent clients paced at 250 ms each: 940 requests in 60 seconds, zero
+failures, 9.22 ms p95. After a real VM stop/start, the Next.js response was verified;
+a second 60-second run completed 948 requests, zero failures, 10.86 ms p95. Kernel
+OOM kills stayed zero. Across 1,168 samples at 200 ms over 239.9 seconds, minimum
+MemAvailable was 326.4 MiB; swap remained disabled. Container memory was uncapped.
+This is one named synthetic fixture and an **experimental** configuration, not a
+claim for arbitrary Next.js apps, databases or concurrent builds. Four-GiB VM,
+swap configuration and the original six apps were restored afterward.
+
+ARM→ARM and ARM→amd64 handoffs passed against separate target daemons; the
+amd64 target was emulated. Its pinned Next.js rollout served 948 requests with
+zero failures. The initial Ubuntu QEMU interpreter failed a minimal Node program;
+the successful lab run used the interpreter already bundled in pinned BuildKit.
+Physical x86 qualification remains unmeasured.
+
+Raw samples, workload scripts, binary hashes and qualification boundaries:
+[M3 validation](../validation/2026-11-02-m3/VALIDATION.md).
+
 ## 7. Feature verdicts after validation
 
 ### 7.1 Your computer builds, your server serves — build early

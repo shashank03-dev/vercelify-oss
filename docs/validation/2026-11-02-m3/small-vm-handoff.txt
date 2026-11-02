@@ -1,0 +1,4 @@
+{"deployment_id": "dpl_vjp2wtpscfnkmmfx", "archive_bytes": 214928896, "upload_to_healthy_seconds": 15.92, "status": "healthy"}
+{"deployment_id": "dpl_1544e0xgtf62raya", "archive_bytes": 214928896, "upload_to_healthy_seconds": 10.59, "status": "healthy"}
+{"duration_seconds": 60, "concurrency": 4, "per_worker_interval_seconds": 0.25, "requests": 940, "failures": 0, "latency_ms_p50": 4.9, "latency_ms_p95": 9.22, "latency_ms_max": 65.04}
+PASS: 1 GiB/no swap initial import and rollout under declared request load

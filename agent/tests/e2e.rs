@@ -339,6 +339,10 @@ fn protected_routes_reject_missing_wrong_and_revoked_tokens() {
         ("POST", "/v1/platform/apps"),
         ("GET", "/v1/platform/apps/app/env?reveal=true"),
         ("POST", "/v1/platform/apps/app/deploy"),
+        ("POST", "/v1/platform/apps/app/build-jobs"),
+        ("GET", "/v1/platform/build-jobs/id"),
+        ("POST", "/v1/platform/build-jobs/id/renew"),
+        ("PUT", "/v1/platform/build-jobs/id/image?generation=1&digest=sha256:bad"),
         ("POST", "/v1/platform/apps/app/terminal"),
         ("GET", "/v1/platform/deployments/id/logs"),
         ("POST", "/v1/platform/databases/db/restore"),
@@ -2531,4 +2535,51 @@ fn only_an_owner_gets_the_backup_recovery_kit() {
     assert!(kit["filename"].as_str().unwrap().starts_with("vercelify-recovery-"));
     let (_, audit) = get(&a, "/v1/audit");
     assert!(audit.to_string().contains("/v1/backup/recovery-kit"), "{audit}");
+}
+
+#[test]
+fn offhost_job_metadata_is_private_and_restart_fences_the_lease() {
+    let mut a = start_with(&[("VERCELIFY_ENGINE", "platform".into())]);
+    let (status, app) = post(
+        &a,
+        "/v1/platform/apps",
+        json!({"name":"external-job","kind":"git","source":{"repository":"https://example.com/app.git"}}),
+    );
+    assert_eq!(status, 200, "{app}");
+    let id = app["id"].as_str().unwrap();
+    let (status, _, _) = req(
+        &a,
+        "PUT",
+        &format!("/v1/platform/apps/{id}/env"),
+        Some(TOKEN),
+        Some(
+            json!({"vars":[{"key":"BUILD_SECRET","value":"offhost-only-secret","build":true,"secret":true}],"replace":false}),
+        ),
+    );
+    assert_eq!(status, 200);
+    let platform = if std::env::consts::ARCH == "aarch64" {
+        "linux/arm64"
+    } else {
+        "linux/amd64"
+    };
+    let (status, response) = post(
+        &a,
+        &format!("/v1/platform/apps/{id}/build-jobs"),
+        json!({"commit_sha":"a".repeat(40),"platform":platform,"plan":{"dockerfile":"FROM scratch","context":".","port":80}}),
+    );
+    assert_eq!(status, 200, "{response}");
+    assert!(response["variables"].to_string().contains("offhost-only-secret"));
+    let job = response["job"]["deployment_id"].as_str().unwrap().to_string();
+    let (_, metadata) = get(&a, &format!("/v1/platform/build-jobs/{job}"));
+    assert!(!metadata.to_string().contains("offhost-only-secret"));
+    assert!(metadata.get("variables").is_none());
+    a.restart_with(&[]);
+    let (_, d) = get(&a, &format!("/v1/platform/deployments/{job}"));
+    assert_eq!(d["status"], "failed");
+    let (status, _) = post(
+        &a,
+        &format!("/v1/platform/build-jobs/{job}/renew"),
+        json!({"generation":1}),
+    );
+    assert_eq!(status, 409);
 }

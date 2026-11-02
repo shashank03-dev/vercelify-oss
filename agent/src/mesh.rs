@@ -415,6 +415,7 @@ async fn enroll(
 pub fn node_router() -> Router<AppState> {
     Router::new()
         .route("/v1/mesh/map", get(map_stream))
+        .route("/v1/mesh/registry/{*path}", get(crate::registry_proxy::server_read))
         .route("/v1/mesh/endpoints", post(endpoints))
         .route("/v1/mesh/renew", post(renew))
         .route(

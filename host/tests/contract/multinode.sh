@@ -47,6 +47,14 @@ ok "deployed on the worker ($container)"
 wdocker inspect -f '{{.Config.Image}}' "$container" | grep -q '^127.0.0.1:5055/vfy/web:' || fail "the worker didn't pull from the mesh registry"
 docker inspect vfy-registry >/dev/null || fail "no registry on the main server"
 ok "image pulled once here, served to the worker by the mesh registry"
+docker inspect -f '{{json .HostConfig.PortBindings}}' vfy-registry | jq -e '."5000/tcp" | length > 0 and all(.HostIp == "127.0.0.1")' >/dev/null || fail "raw registry is exposed beyond loopback"
+if in_w curl -fsS -m 2 http://10.77.0.1:5055/v2/ >/dev/null 2>&1; then fail "worker can reach the raw mesh registry"; fi
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" "http://127.0.0.1:$PORT_AGENT/v1/mesh/registry/v2/")
+[[ "$code" == 401 || "$code" == 403 ]] || fail "device/owner token can read the server-only registry proxy ($code)"
+code=$(in_w curl -sS -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:5055/v2/vfy/unauthorized/blobs/uploads/)
+[[ "$code" == 405 ]] || fail "worker registry proxy allows writes ($code)"
+ok "registry is loopback-only; enrolled worker reads succeed, device tokens and registry writes are refused"
+
 # Not grep -q: it quits at the match, curl dies of SIGPIPE mid-page and pipefail fails the check.
 answer() { curl -sf -H "Host: web.test" "http://127.0.0.1:$PORT_HTTP/" | grep -i caddy >/dev/null; }
 until_ok 30 answer || fail "web.test doesn't answer through the main server's proxy: $(curl -s -H 'Host: web.test' "http://127.0.0.1:$PORT_HTTP/" | head -5)"

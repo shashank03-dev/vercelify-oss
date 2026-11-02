@@ -200,3 +200,117 @@ JSON
   [ "$status" -eq 0 ]
   [[ "$output" == *"Module not found"* ]]
 }
+
+@test "build-here refuses an unavailable local runtime before enqueueing a server build" {
+  mkdir -p "$T/local-bin"
+  printf '#!/bin/sh\nexit 1\n' > "$T/local-bin/docker"
+  chmod +x "$T/local-bin/docker"
+  run env PATH="$T/local-bin:$PATH" "$VFY" deploy blog --build-here
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"local Docker runtime"* ]]
+  ! grep -q 'POST /v1/platform/apps/.*/deploy ' "$T/requests.log"
+}
+
+@test "build-here requires Buildx before creating a handoff job" {
+  mkdir -p "$T/local-bin"
+  printf '#!/bin/sh\n[ "$1" = info ]\n' > "$T/local-bin/docker"
+  chmod +x "$T/local-bin/docker"
+  run env PATH="$T/local-bin:$PATH" VFY_PACK_BIN=/bin/true "$VFY" deploy blog --build-here
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"Buildx plugin"* ]]
+  ! grep -q 'POST /v1/platform/apps/.*/build-jobs ' "$T/requests.log"
+}
+
+@test "a failed exact-commit fetch stops before planning or creating a build job" {
+  mkdir -p "$T/local-bin"
+  cat > "$T/local-bin/docker" <<'SH'
+#!/bin/sh
+exit 0
+SH
+  cat > "$T/local-bin/git" <<SH
+#!/bin/sh
+for arg; do
+  if [ "\$arg" = fetch ]; then echo fetch-failed >&2; exit 42; fi
+  if [ "\$arg" = checkout ]; then touch '$T/checkout-ran'; fi
+done
+exit 0
+SH
+  cat > "$T/local-bin/pack" <<SH
+#!/bin/sh
+touch '$T/pack-ran'
+SH
+  chmod +x "$T/local-bin/"*
+  run env PATH="$T/local-bin:$PATH" VFY_PACK_BIN="$T/local-bin/pack" "$VFY" deploy blog --build-here
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"fetch-failed"* ]]
+  [ ! -e "$T/checkout-ran" ]
+  [ ! -e "$T/pack-ran" ]
+  ! grep -q 'POST /v1/platform/apps/.*/build-jobs ' "$T/requests.log"
+}
+
+@test "the build context excludes checkout credentials and Git metadata" {
+  mkdir -p "$T/local-bin"
+  printf '#!/bin/sh\nexit 0\n' > "$T/local-bin/docker"
+  cat > "$T/local-bin/git" <<'SH'
+#!/bin/sh
+for last; do :; done
+for arg; do
+  if [ "$arg" = init ]; then mkdir -p "$last/.git"; fi
+  if [ "$arg" = rev-parse ]; then printf '%040d\n' 1; fi
+done
+exit 0
+SH
+  cat > "$T/local-bin/pack" <<SH
+#!/bin/sh
+[ ! -e "\$2/.git" ] || exit 99
+touch '$T/no-git-metadata'
+exit 55
+SH
+  chmod +x "$T/local-bin/"*
+  run env PATH="$T/local-bin:$PATH" VFY_PACK_BIN="$T/local-bin/pack" "$VFY" deploy blog --build-here
+  [ "$status" -ne 0 ]
+  [ -e "$T/no-git-metadata" ]
+}
+
+@test "a retained builder cannot silently use a different Docker runtime" {
+  mkdir -p "$T/local-bin"
+  cat > "$T/local-bin/docker" <<'SH'
+#!/bin/sh
+case "$1 $2" in
+  'context show') echo selected-context ;;
+  'buildx inspect') echo 'Endpoint: previous-context' ;;
+esac
+exit 0
+SH
+  cat > "$T/local-bin/git" <<'SH'
+#!/bin/sh
+for arg; do
+  if [ "$arg" = rev-parse ]; then printf '%040d\n' 1; fi
+done
+exit 0
+SH
+  cat > "$T/local-bin/pack" <<'SH'
+#!/bin/sh
+cat >/dev/null
+printf '{"dockerfile":"FROM scratch","generated":false,"context":".","port":80,"framework":"fixture","notes":[],"project_files":[]}'
+SH
+  chmod +x "$T/local-bin/"*
+  run env -u DOCKER_CONTEXT -u DOCKER_HOST PATH="$T/local-bin:$PATH" VFY_PACK_BIN="$T/local-bin/pack" "$VFY" deploy blog --build-here
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"another Docker runtime"* ]]
+  ! grep -q 'POST /v1/platform/apps/.*/build-jobs ' "$T/requests.log"
+}
+
+@test "a CI image without EXPOSE asks for an app port before creating a job" {
+  mkdir -p "$T/local-bin"
+  cat > "$T/local-bin/docker" <<'SH'
+#!/bin/sh
+if [ "$1 $2" = 'image inspect' ]; then echo null; fi
+exit 0
+SH
+  chmod +x "$T/local-bin/docker"
+  run env PATH="$T/local-bin:$PATH" "$VFY" deploy blog --image "registry.test/image@sha256:$(printf '%064d' 1)" --commit "$(printf '%040d' 1)"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"set the app port"* ]]
+  ! grep -q 'POST /v1/platform/apps/.*/build-jobs ' "$T/requests.log"
+}

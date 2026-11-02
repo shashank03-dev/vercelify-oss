@@ -1,0 +1,9 @@
+Reboot recovery: HTTP 200, Next.js response validated; probe seconds 0.02
+{"duration_seconds": 60, "concurrency": 4, "per_worker_interval_seconds": 0.25, "requests": 948, "failures": 0, "latency_ms_p50": 6.22, "latency_ms_p95": 10.86, "latency_ms_max": 24.22}
+               total        used        free      shared  buff/cache   available
+Mem:             956         442          70           1         523         513
+Swap:              0           0           0
+Filename				Type		Size		Used		Priority
+oom_kill 0
+vfy-m3-small-next-tf62raya Up About a minute
+vercelify-proxy Up About a minute

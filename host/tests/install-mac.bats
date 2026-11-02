@@ -281,3 +281,14 @@ STUB
   [[ "$output" == *"Lima $LIMA_VERSION already here"* ]]
   grep -q "<string>$T/bin/vercelify-host</string>" "$T/agents/dev.vercelify.host.plist"
 }
+
+@test "local builds install the selected shared pack binary without touching Docker contexts" {
+  parse_args --with-builds
+  [ "$WITH_BUILDS" -eq 1 ]
+  printf '#!/bin/sh\necho shared-pack\n' > "$T/pack"
+  chmod +x "$T/pack"
+  VERCELIFY_PACK_BINARY="$T/pack" VFY_BIN_DIR="$T/bin" run install_pack
+  [ "$status" -eq 0 ]
+  [ -x "$T/bin/vercelify-pack" ]
+  [ "$("$T/bin/vercelify-pack")" = shared-pack ]
+}

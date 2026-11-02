@@ -1,0 +1,9 @@
+{
+  "samples": 1168,
+  "duration_seconds": 239.91,
+  "total_mib": 956.09765625,
+  "minimum_available_mib": 326.3515625,
+  "median_available_mib": 466.3828125,
+  "oom_kill_delta": 0,
+  "swap_always_disabled": true
+}

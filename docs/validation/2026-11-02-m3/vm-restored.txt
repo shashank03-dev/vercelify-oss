@@ -1,0 +1,11 @@
+               total        used        free      shared  buff/cache   available
+Mem:            3905         573        2122           1        1366        3331
+Swap:           4095           0        4095
+vfy-blog-cc5wwk9b Up About a minute
+vfy-w5-0xa84s17 Up About a minute
+vfy-w4-mzhcarvh Up About a minute
+vfy-w3-bban4zvy Up About a minute
+vfy-w2-e9vn93v5 Up About a minute
+vfy-w1-cdyp1kh9 Up About a minute
+vercelify-proxy Up About a minute
+843bab8ce03e9002a528592129de5c5def3b0142180cef83fcd14c18134e7f3f  /usr/local/bin/vercelify-agent

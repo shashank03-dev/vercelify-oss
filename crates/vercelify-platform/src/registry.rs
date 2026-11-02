@@ -50,14 +50,11 @@ pub fn arch_tag(image: &str, arch: &str, native: &str) -> String {
     }
 }
 
-/// Start (or keep) the registry, published on 127.0.0.1 and `binds`
-/// (the mesh address). Recreated when the addresses change.
-pub async fn ensure(docker: &Docker, dir: &Path, binds: &[String]) -> Result<()> {
+/// Start the loopback-only registry. Workers read through the authenticated
+/// agent proxy; no raw registry write endpoint is published on the mesh.
+pub async fn ensure(docker: &Docker, dir: &Path, _binds: &[String]) -> Result<()> {
     std::fs::create_dir_all(dir)?;
-    let mut publish = vec![format!("127.0.0.1:{PORT}:5000")];
-    for b in binds.iter().filter(|b| !b.is_empty() && b.as_str() != "127.0.0.1") {
-        publish.push(format!("{b}:{PORT}:5000"));
-    }
+    let publish = vec![format!("127.0.0.1:{PORT}:5000")];
     let hash = format!("{}|{}", publish.join(","), dir.display());
     if let Some(i) = docker.inspect(CONTAINER).await? {
         if docker.label(CONTAINER, "vercelify.publish").await.unwrap_or_default() == hash {
@@ -307,6 +304,41 @@ pub async fn collect_garbage(docker: &Docker) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn raw_registry_is_never_published_on_the_mesh() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("docker");
+        std::fs::write(
+            &bin,
+            format!(
+                r#"#!/bin/sh
+echo "$*" >> '{d}/calls'
+case "$1 $2" in 'container inspect') echo 'No such container' >&2;exit 1;; esac
+exit 0
+"#,
+                d = dir.path().display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        ensure(
+            &Docker {
+                bin: bin.display().to_string(),
+            },
+            &dir.path().join("registry"),
+            &["10.77.0.1".into()],
+        )
+        .await
+        .unwrap();
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert!(calls.contains("127.0.0.1:5055:5000"));
+        assert!(
+            !calls.contains("10.77.0.1:5055:5000"),
+            "mesh devices must use the authenticated API"
+        );
+    }
 
     #[test]
     fn names() {

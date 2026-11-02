@@ -5,6 +5,7 @@
 #   curl -fsSL https://raw.githubusercontent.com/shashank03-dev/vercelify-oss/main/install-mac.sh | bash
 #
 # Options
+#   --with-builds    install vercelify-pack for explicit local Docker/Buildx builds
 #   --with-display   also install ffmpeg + Moonlight (laptop screen as a monitor, remote desktop)
 #   --from-source    build the app here instead of downloading a release (needs Xcode CLT, Node 20+, Rust)
 #   --no-mesh        skip vercelify-mesh, Vercelify's network (needed to reach servers off your LAN)
@@ -27,6 +28,7 @@ GITHUB_API=${VERCELIFY_GITHUB_API:-https://api.github.com}
 APP_NAME=Vercelify
 BUNDLE_ID=dev.vercelify.cockpit
 
+WITH_BUILDS=0
 WITH_DISPLAY=0
 FROM_SOURCE=0
 SOURCE_DIR=''
@@ -83,6 +85,7 @@ usage() { sed -n '2,20p' "${BASH_SOURCE[0]:-/dev/null}" 2>/dev/null | sed 's/^# 
 parse_args() {
   while (( $# )); do
     case "$1" in
+      --with-builds) WITH_BUILDS=1 ;;
       --with-display) WITH_DISPLAY=1 ;;
       --from-source) FROM_SOURCE=1 ;;
       --no-mesh) WITH_MESH=0 ;;
@@ -324,6 +327,36 @@ obtain_mesh_binary() {
   cp "$src/target/release/vercelify-mesh" "$out"
 }
 
+# Shared build helper, optional so normal desktop installs need no Docker/Rust.
+install_pack() {
+  local bin=${VFY_BIN_DIR:-} out json url
+  if [[ -z "$bin" ]]; then
+    if [[ -w /usr/local/bin ]]; then bin=/usr/local/bin; else bin="$HOME/.local/bin"; fi
+  fi
+  mkdir -p "$bin"
+  out=$(mktemp)
+  if [[ -n "${VERCELIFY_PACK_BINARY:-}" ]]; then
+    cp "$VERCELIFY_PACK_BINARY" "$out"
+  elif [[ -n "${SOURCE_DIR:-}" ]]; then
+    (cd "$SOURCE_DIR" && ${CARGO:-cargo} build --release -q -p vercelify-platform --bin vercelify-pack) || { rm -f "$out"; return 1; }
+    cp "$SOURCE_DIR/target/release/vercelify-pack" "$out"
+  else
+    json=$(mktemp)
+    curl -fsSL --retry 3 -H 'Accept: application/vnd.github+json' -o "$json" "$GITHUB_API/repos/$REPO/releases/latest" || { rm -f "$json" "$out"; return 1; }
+    url=$(grep -o '"browser_download_url"[[:space:]]*:[[:space:]]*"[^"]*"' "$json" | sed 's/.*"\(https[^"]*\)"$/\1/' | { grep -E '/vercelify-pack-universal-apple-darwin$' || true; } | head -1)
+    rm -f "$json"
+    if [[ -z "$url" ]] || ! curl -fsSL --retry 3 -o "$out" "$url" || ! curl -fsSL --retry 3 -o "$out.sha256" "$url.sha256"; then
+      rm -f "$out" "$out.sha256"; return 1
+    fi
+    if [[ "$(shasum -a 256 "$out" | cut -d' ' -f1)" != "$(cut -d' ' -f1 "$out.sha256")" ]]; then
+      rm -f "$out" "$out.sha256"; die "vercelify-pack: checksum mismatch"
+    fi
+  fi
+  install -m 0755 "$out" "$bin/vercelify-pack"
+  rm -f "$out" "$out.sha256"
+  ok "vercelify-pack installed in $bin (uses your selected Docker runtime; no Docker context changed)"
+}
+
 : "${LAUNCHCTL:=launchctl}"
 
 # mesh_job_restart DOMAIN PLIST [sudo] — (re)load the launchd job and check it
@@ -553,6 +586,7 @@ main() {
   (( WITH_HOST )) && { install_host || MESH_FAILED=1; }
   (( WITH_DISPLAY )) && install_display_tools
   install_cli
+  if (( WITH_BUILDS )); then install_pack || warn "build helper unavailable; use --from-source --with-builds or cargo install --path crates/vercelify-platform --bin vercelify-pack"; fi
 
   if (( MESH_FAILED )); then
     printf '\n%s%sInstalled, but the network daemon is not running%s (see above). Opening %s…\n\n' "$B" "$Y" "$N" "$APP_NAME" >&2

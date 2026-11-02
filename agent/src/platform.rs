@@ -72,7 +72,7 @@ impl Platform {
                 .then(|| "vercelify.slice".to_string()),
             health_interval: Duration::from_secs(2),
         };
-        let gate = BuildGate::new(cfg.build_concurrency.max(1) as usize, cfg.power_guard_state.clone());
+        let gate = BuildGate::new(cfg.build_concurrency as usize, cfg.power_guard_state.clone());
         let logs = LogHub::new(cfg.state_dir.join("logs"));
         let engine = Engine::new(store.clone(), key.clone(), builder, deployer, gate, logs);
         let reconciler = Reconciler::new(engine.clone());
@@ -91,7 +91,7 @@ impl Platform {
     pub fn on_start(&self, cfg: &Config, host: &vercelify_core::HostInfo) {
         let url = format!("http://127.0.0.1:{}", cfg.port);
         let res = self.store.tx(|c| {
-            let n = vercelify_platform::deployments::fail_interrupted(c)?;
+            let n = vercelify_platform::deployments::fail_interrupted(c)? + vercelify_platform::offhost::interrupt(c)?;
             vercelify_platform::nodes::ensure_main(c, &host.hostname, &url, &host.arch)?;
             Ok(n)
         });

@@ -1,0 +1,6 @@
+               total        used        free      shared  buff/cache   available
+Mem:             956         492          71           1         483         463
+Swap:              0           0           0
+Filename				Type		Size		Used		Priority
+oom_kill 0
+/vfy-m3-small-next-tf62raya memory_limit=0 oom=false restarts=0

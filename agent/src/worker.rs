@@ -296,34 +296,19 @@ impl From<String> for Beat {
 /// 127.0.0.1:5055 → the main server's registry over the mesh, so Docker
 /// here pulls `127.0.0.1:5055/vfy/…` (a loopback registry needs no TLS).
 async fn forward_registry(cfg: Arc<Config>) {
-    let listen = registry::LOCAL;
-    let listener = loop {
-        match tokio::net::TcpListener::bind(listen).await {
-            Ok(l) => break l,
-            Err(e) => {
-                tracing::warn!("registry forwarder: bind {listen}: {e}; retrying in 30s");
-                tokio::time::sleep(Duration::from_secs(30)).await;
-            }
-        }
-    };
     loop {
-        let Ok((mut inbound, _)) = listener.accept().await else {
-            continue;
-        };
-        let cfg = cfg.clone();
-        tokio::spawn(async move {
-            let target = NodeState::load(&cfg.mesh_dir).ok().flatten().and_then(|s| {
-                let host = s.api_url.strip_prefix("http://")?.rsplit_once(':')?.0.to_string();
-                Some(format!("{host}:{}", registry::PORT))
-            });
-            let Some(target) = target else { return };
-            match tokio::net::TcpStream::connect(&target).await {
-                Ok(mut out) => {
-                    let _ = tokio::io::copy_bidirectional(&mut inbound, &mut out).await;
+        match tokio::net::TcpListener::bind(registry::LOCAL).await {
+            Ok(listener) => {
+                let router = axum::Router::new()
+                    .route("/{*path}", axum::routing::get(crate::registry_proxy::worker_read))
+                    .with_state(cfg.clone());
+                if let Err(e) = axum::serve(listener, router).await {
+                    tracing::warn!("registry forwarder: {e}");
                 }
-                Err(e) => tracing::warn!("registry forwarder: {target}: {e}"),
             }
-        });
+            Err(e) => tracing::warn!("registry forwarder: bind {}: {e}", registry::LOCAL),
+        }
+        tokio::time::sleep(Duration::from_secs(30)).await;
     }
 }
 

@@ -1,0 +1,11 @@
+PASS: local shared pack, secret redaction, authenticated archive, Docker load, verified serving; target builds disabled
+PASS: changed build variables cannot reuse stale application output
+PASS: duplicate completion rejected; existing production still serves
+PASS: stale generation cannot replace serving production
+PASS: wrong digest cannot replace serving production
+PASS: a newer commit fences an old upload
+PASS: zero target git/build commands; all upload temporary files released
+PASS: cancellation fences the artifact
+PASS: durable lease expiry refuses renew and publication
+PASS: interrupted upload cannot publish; current app remains reachable
+PASS: revoking the device during a complete valid upload fences publication

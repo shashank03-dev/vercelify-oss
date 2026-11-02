@@ -156,6 +156,20 @@ pub struct DirBuild<'a> {
     pub build_env: &'a [(String, String)],
 }
 
+/// Generated local recipes rerun with each job without discarding cache mounts.
+/// Only an opaque deployment ID enters the cache key, never a secret value.
+pub fn local_dockerfile(dockerfile: &str) -> String {
+    let mut output = String::new();
+    for line in dockerfile.lines() {
+        output.push_str(line);
+        output.push('\n');
+        if line.starts_with("FROM ") {
+            output.push_str("ARG VERCELIFY_BUILD_JOB\n");
+        }
+    }
+    output
+}
+
 struct BuildxArgs<'a> {
     image: &'a str,
     dockerfile: &'a Path,
@@ -166,6 +180,7 @@ struct BuildxArgs<'a> {
     build_args: Vec<String>,
     env: Vec<(String, String)>,
     pull: bool,
+    no_cache: bool,
     /// `linux/arm64` for a foreign architecture.
     platform: Option<String>,
 }
@@ -251,6 +266,9 @@ impl Builder {
         }
         if a.pull {
             args.push("--pull".into());
+        }
+        if a.no_cache {
+            args.push("--no-cache".into());
         }
         args.extend(proc::args(&[
             "--tag",
@@ -394,6 +412,7 @@ impl Builder {
                 build_args,
                 env: req.build_env.clone(),
                 pull: true,
+                no_cache: false,
                 platform: None,
             },
             cancel.clone(),
@@ -429,6 +448,7 @@ impl Builder {
                     },
                     env: req.build_env.clone(),
                     pull: true,
+                    no_cache: false,
                     platform: Some(format!("linux/{da}")),
                 },
                 cancel.clone(),
@@ -449,6 +469,20 @@ impl Builder {
     /// Build from a directory already on disk (uploads from `vfy deploy`,
     /// tests). The directory is left as it is.
     pub async fn build_dir(&self, req: DirBuild<'_>, cancel: Cancel, log: &mut LogWriter) -> Result<Built> {
+        self.build_dir_for(req, None, &[], false, cancel, log).await
+    }
+
+    /// Explicit platform and public ARG keys for the local shared-pack helper.
+    /// Secret values remain in the BuildKit secret file only.
+    pub async fn build_dir_for(
+        &self,
+        req: DirBuild<'_>,
+        platform: Option<String>,
+        public_args: &[String],
+        no_cache: bool,
+        cancel: Cancel,
+        log: &mut LogWriter,
+    ) -> Result<Built> {
         let DirBuild {
             dir,
             app_name,
@@ -456,7 +490,27 @@ impl Builder {
             build,
             build_env,
         } = req;
-        let plan = detect::plan(dir, AppKind::Git, &AppSource::default(), build)?;
+        let mut plan = detect::plan(dir, AppKind::Git, &AppSource::default(), build)?;
+        let fresh_generated = no_cache && matches!(plan.kind, PlanKind::Generated(_));
+        if fresh_generated {
+            if let PlanKind::Generated(df) = &mut plan.kind {
+                *df = local_dockerfile(df);
+            }
+        }
+        let mut args = if matches!(plan.kind, PlanKind::Dockerfile(_)) {
+            public_args.to_vec()
+        } else {
+            vec![]
+        };
+        let mut child_env: Vec<_> = build_env
+            .iter()
+            .filter(|(k, _)| public_args.contains(k))
+            .cloned()
+            .collect();
+        if fresh_generated {
+            args.push("VERCELIFY_BUILD_JOB".into());
+            child_env.push(("VERCELIFY_BUILD_JOB".into(), deployment_id.into()));
+        }
         log.info(&format!("detected: {}", plan.framework));
         let context = detect::context_dir(dir, &plan)?;
         let work = self.work_dir.join(format!("{deployment_id}-dir"));
@@ -479,10 +533,12 @@ impl Builder {
                     format!("vercelify.deployment={deployment_id}"),
                 ],
                 env_file: &env_file.0,
-                build_args: vec![],
-                env: vec![],
+                build_args: args,
+                env: child_env,
                 pull: false,
-                platform: None,
+                // User Dockerfiles cannot be safely rewritten with our nonce.
+                no_cache: no_cache && !fresh_generated,
+                platform,
             },
             cancel,
             log,

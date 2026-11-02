@@ -1,0 +1,4 @@
+linux/amd64
+running oom=false restarts=0
+5609 /tmp/vfy-offhost-contract/next-body.html
+PASS: actual amd64 image, Next response, no target Git/build commands

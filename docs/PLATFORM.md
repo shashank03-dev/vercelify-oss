@@ -141,6 +141,61 @@ URL that queues a deployment when called.
 Apps can **sleep** when idle to free memory (`sudo vercelify sleep on APP 30`, or the app's
 **Sleep** card); the next visit wakes them with a short "waking up" page.
 
+### Build on your computer or in CI
+
+Install the shared helper on the computer that builds: the Mac installer accepts
+`--with-builds` (or `--from-source --with-builds` before helper release assets exist).
+From a checkout, `cargo install --path crates/vercelify-platform --bin vercelify-pack`
+installs the same detector/build logic on macOS or Linux. You also need Git,
+Docker and its Buildx plugin, with a running compatible Linux runtime. Select an
+existing runtime with `DOCKER_CONTEXT`/`DOCKER_HOST`; Vercelify does not switch it
+or mount your home directory or SSH agent into builds. If no runtime is available,
+start one first; the existing Vercelify environment is managed from Servers.
+
+```bash
+vfy deploy blog --build-here --commit FULL_COMMIT_SHA
+vfy deploy blog --image ghcr.io/me/blog@sha256:DIGEST --commit FULL_COMMIT_SHA
+```
+
+The first command uses a fresh exact-commit checkout, honors `.dockerignore`,
+builds for the app's selected server architecture, then uploads through the
+agent's authenticated API. An ARM computer targeting x86 explicitly builds
+`linux/amd64`; emulation must be supported by the selected runtime and can be
+slower. The second command pulls an immutable CI image locally and hands it off;
+use the OCI revision label instead of `--commit` if it contains the full source
+SHA. Image apps can also deploy pinned registry references directly.
+
+Build-marked variables are supplied only to that build. Secret values use BuildKit
+secret mounts and are redacted from helper logs. A repository Dockerfile reads
+secrets from `RUN --mount=type=secret,id=env . /run/secrets/env; …`; only nonsecret
+build values become ARGs. A malicious build can still exfiltrate an authorized
+secret. Production DB references marked for builds need a database mesh port and
+a runtime that can reach that mesh address; runtime-only references do not.
+
+The serving host receives a complete, verified image before deployment. Failed,
+cancelled, expired, revoked or superseded handoffs leave the current app serving.
+A missing imported image fails with a computer/CI retry instruction. The local
+builder cache is per app and retained; the CLI prints its name and removal command.
+A retained builder must match the selected Docker endpoint; after switching runtimes,
+remove that app builder and retry to create it in the selected context.
+Generated recipes use a per-deployment build argument to rerun steps with current
+build variables while retaining package cache mounts. Repository Dockerfiles use
+`--no-cache` conservatively; their cache mounts reset for each handoff.
+
+For a runtime-only serving host, set `build_concurrency = 0` in
+`/etc/vercelify/agent.toml` and restart the agent. Normal Git/Compose deploys then
+remain queued with a no-permitted-builder reason; cancel them or retry explicitly
+from a computer/CI. No disconnected computer silently starts a target-side build.
+Small-RAM support still depends on runtime startup/pull/rollout measurements.
+
+The first release supports explicit CLI handoffs, not automatic desktop scheduling.
+The upload cap is 3 GiB with bounded metadata; save/upload/load consumes disk and
+I/O even though compilation runs elsewhere. Leases renew every 45 seconds and
+expire after five minutes without renewal (90-minute total limit). A sleeping Mac,
+interrupted connection or agent restart requires a new build attempt. Upgrade
+workers together with the main server: their registry reader now authenticates
+with a server node token; old workers cannot pull through the retired raw mesh port.
+
 ## 4. Environment variables
 
 - Variables live on the app (**Environment**), on its project, or on an environment

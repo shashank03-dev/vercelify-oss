@@ -227,6 +227,41 @@ impl Engine {
 
     /// Queue a deployment. Returns it as queued.
     pub fn enqueue(&self, app: &str, req: Enqueue) -> Result<Deployment> {
+        self.enqueue_with_build(app, req, None)
+    }
+
+    /// Enqueue and lease in the same transaction: no dispatcher can start a
+    /// target-side build between creation of the deployment and its job.
+    pub fn enqueue_external(
+        &self,
+        app: &str,
+        owner: &str,
+        req: &vercelify_core::platform::LocalBuildRequest,
+    ) -> Result<vercelify_core::platform::BuildJob> {
+        if req.plan.port == 0 || req.plan.dockerfile.is_empty() {
+            return Err(Error::Invalid(
+                "a build plan needs a Dockerfile and a nonzero port".into(),
+            ));
+        }
+        let d = self.enqueue_with_build(
+            app,
+            Enqueue {
+                commit_sha: Some(req.commit_sha.clone()),
+                pr_number: req.pr_number,
+                trigger: Some(DeploymentTrigger::Manual),
+                ..Default::default()
+            },
+            Some((owner, req)),
+        )?;
+        self.store.with(|c| crate::offhost::get(c, &d.id))
+    }
+
+    fn enqueue_with_build(
+        &self,
+        app: &str,
+        req: Enqueue,
+        external: Option<(&str, &vercelify_core::platform::LocalBuildRequest)>,
+    ) -> Result<Deployment> {
         let d = self.store.tx(|c| {
             let a = apps::find(c, app)?;
             let trigger = req.trigger.unwrap_or(DeploymentTrigger::Manual);
@@ -299,7 +334,7 @@ impl Engine {
             if let Some(pr) = req.pr_number {
                 previews::upsert(c, &a.id, pr, &commit, req.pr_title.as_deref().unwrap_or(""))?;
             }
-            deployments::create(
+            let d = deployments::create(
                 c,
                 &deployments::NewDeployment {
                     app_id: &a.id,
@@ -316,7 +351,35 @@ impl Engine {
                     image: &image,
                     node_id: a.node_id.as_deref(),
                 },
-            )
+            )?;
+            if let Some((owner, request)) = external {
+                if a.kind != AppKind::Git {
+                    return Err(Error::Invalid("off-host build jobs require a Git app".into()));
+                }
+                let node = match a.node_id.as_deref() {
+                    Some(id) => nodes::get(c, id)?,
+                    None => nodes::main(c)?,
+                };
+                let platform = format!("linux/{}", registry::docker_arch(&node.arch));
+                if request.platform != platform {
+                    return Err(Error::Invalid(format!("this app needs {platform}")));
+                }
+                c.execute(
+                    "UPDATE deployments SET node_id=?2 WHERE id=?1",
+                    rusqlite::params![d.id, node.id],
+                )?;
+                let revision = crate::offhost::revision(c, &self.key, &a.id, req.pr_number.is_some())?;
+                crate::offhost::create(
+                    c,
+                    &d.id,
+                    owner,
+                    &revision,
+                    &platform,
+                    &request.plan,
+                    crate::offhost::timestamp(),
+                )?;
+            }
+            Ok(d)
         })?;
         self.wake.notify_one();
         self.emit(EngineEvent::Changed);
@@ -354,9 +417,33 @@ impl Engine {
     /// The dispatcher: start every queued deployment whose app is free.
     pub async fn run(self: Arc<Self>) {
         loop {
+            if let Err(e) = self
+                .store
+                .tx(|c| crate::offhost::expire(c, crate::offhost::timestamp()))
+            {
+                tracing::warn!("off-host build expiry: {e}");
+            }
             match self.store.with(deployments::active) {
                 Ok(active) => {
                     for d in active.into_iter().filter(|d| d.status == DeploymentStatus::Queued) {
+                        if !self
+                            .store
+                            .with(|c| crate::offhost::dispatchable(c, &d.id))
+                            .unwrap_or(false)
+                        {
+                            continue;
+                        }
+                        if !self.gate.builds_enabled() && d.image.is_empty() {
+                            let waiting = self.store.tx(|c| {
+                                let a=apps::get(c,&d.app_id)?;
+                                if a.kind==AppKind::Image || crate::offhost::is_external(c,&d.id)? {return Ok(false);}
+                                c.execute("UPDATE deployments SET error='queued: no permitted builder; use vfy deploy APP --build-here or CI' WHERE id=?1 AND error NOT LIKE 'queued: no permitted builder%'",[&d.id])?;
+                                Ok(true)
+                            });
+                            if waiting.unwrap_or(true) {
+                                continue;
+                            }
+                        }
                         if !lock(&self.busy).insert(d.app_id.clone()) {
                             continue;
                         }
@@ -509,7 +596,7 @@ impl Engine {
                 .ok_or_else(|| Error::Unavailable("the main server isn't registered yet".into()))?;
             let vols = volumes::checked_list(c, VolumeOwner::App, &app.id)?;
             let need = placement::Need {
-                pinned: app.node_id.clone(),
+                pinned: d.node_id.clone().or_else(|| app.node_id.clone()),
                 replicas: if d.pr_number.is_some() { 1 } else { app.runtime.replicas },
                 memory_mb: app.runtime.memory_mb,
                 main_only: app.kind == AppKind::Compose,
@@ -636,6 +723,16 @@ impl Engine {
                 }
             }
         }
+        if self.store.with(|c| crate::offhost::is_external(c, &d.id))? {
+            if !reusable {
+                return Err(Error::Unavailable(
+                    "off-host image is missing; rebuild on the selected computer or CI (no serving-host fallback)"
+                        .into(),
+                ));
+            }
+            self.store
+                .with(|c| crate::offhost::verify_revision(c, &self.key, &d.id))?;
+        }
         let inline_compose = app.kind == AppKind::Compose && app.source.repository.is_none();
         if inline_compose {
             // A catalogue service: the compose file is part of the app.
@@ -663,6 +760,11 @@ impl Engine {
             self.store
                 .tx(|c| deployments::transition(c, &d.id, DeploymentStatus::Building, None))?;
             self.emit(EngineEvent::Changed);
+            if !self.gate.builds_enabled() {
+                return Err(Error::Unavailable(
+                    "no permitted builder; rebuild on the selected computer or CI".into(),
+                ));
+            }
             // Cancelling doesn't wait for the power guard or a free slot.
             let mut cancelled = cancel.clone();
             let mut waiting = |m: &str| log.info(m);
@@ -1701,6 +1803,60 @@ mod tests {
             BuildGate::new(concurrency, dir.join("power")).with_poll(Duration::from_millis(20)),
             LogHub::new(dir.join("logs")),
         )
+    }
+
+    #[tokio::test]
+    async fn a_builds_disabled_server_keeps_git_work_queued() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 0);
+        let app = e
+            .store
+            .tx(|c| apps::create(c, &apps::tests::git_app("waiting")))
+            .unwrap();
+        let d = e.enqueue(&app.id, Enqueue::default()).unwrap();
+        let queue = tokio::spawn(e.clone().run());
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let d = e.store.with(|c| deployments::get(c, &d.id)).unwrap();
+        assert_eq!(d.status, DeploymentStatus::Queued);
+        assert!(d.error.contains("no permitted builder"), "{}", d.error);
+        queue.abort();
+    }
+
+    #[tokio::test]
+    async fn an_external_job_waits_without_starting_a_target_build() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let app = e
+            .store
+            .tx(|c| apps::create(c, &apps::tests::git_app("offhost")))
+            .unwrap();
+        let request = vercelify_core::platform::LocalBuildRequest {
+            commit_sha: "a".repeat(40),
+            platform: "linux/amd64".into(),
+            pr_number: None,
+            plan: vercelify_core::platform::LocalBuildPlan {
+                dockerfile: "FROM scratch".into(),
+                context: ".".into(),
+                port: 80,
+                ..Default::default()
+            },
+        };
+        let job = e.enqueue_external(&app.id, "device", &request).unwrap();
+        let queue = tokio::spawn(e.clone().run());
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert_eq!(
+            e.store
+                .with(|c| deployments::get(c, &job.deployment_id))
+                .unwrap()
+                .status,
+            DeploymentStatus::Queued
+        );
+        queue.abort();
+        e.enqueue(&app.id, Enqueue::default()).unwrap();
+        assert!(e
+            .store
+            .with(|c| crate::offhost::authorize(c, &job.deployment_id, "device", 1, crate::offhost::timestamp()))
+            .is_err());
     }
 
     #[tokio::test]

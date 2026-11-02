@@ -33,13 +33,35 @@ jobs:
       - run: pip install cargo-zigbuild
       - run: cargo zigbuild --release --locked -p vercelify-agent --target ${{ matrix.target }}
       - run: cargo zigbuild --release --locked -p vercelify-mesh --features daemon --target ${{ matrix.target }}
+      - run: cargo zigbuild --release --locked -p vercelify-platform --bin vercelify-pack --target ${{ matrix.target }}
       - name: Package
         run: |
           mkdir -p out
-          for bin in vercelify-agent vercelify-mesh; do
+          for bin in vercelify-agent vercelify-mesh vercelify-pack; do
             cp "target/${{ matrix.target }}/release/$bin" "out/$bin-${{ matrix.target }}"
             (cd out && sha256sum "$bin-${{ matrix.target }}" > "$bin-${{ matrix.target }}.sha256")
           done
+      - uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: out/*
+
+  pack-macos:
+    name: Shared build helper for macOS (universal)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+      - run: |
+          for t in aarch64-apple-darwin x86_64-apple-darwin; do
+            cargo build --release --locked -p vercelify-platform --bin vercelify-pack --target "$t"
+          done
+          mkdir -p out
+          lipo -create -output out/vercelify-pack-universal-apple-darwin \
+            target/aarch64-apple-darwin/release/vercelify-pack target/x86_64-apple-darwin/release/vercelify-pack
+          cd out && shasum -a 256 vercelify-pack-universal-apple-darwin > vercelify-pack-universal-apple-darwin.sha256
       - uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
