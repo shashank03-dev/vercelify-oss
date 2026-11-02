@@ -305,10 +305,57 @@ impl Reconciler {
                         .collect()
                 })
                 .unwrap_or_default();
-            let p = plan(&wants, &routes, &actual, &desire.active, &keys, chrono::Utc::now());
+            let mut p = plan(&wants, &routes, &actual, &desire.active, &keys, chrono::Utc::now());
             for x in &p.recover {
                 if !recover.contains(x) {
                     recover.push(x.clone());
+                }
+            }
+            let mut start_permit = None;
+            if !p.start.is_empty() {
+                let admitted = self.engine.store.with(|c| {
+                    let sample = crate::capacity::sample(c, &n.id)?;
+                    let mut budgets = BTreeMap::<String, u64>::new();
+                    for name in &p.start {
+                        let owner = wants
+                            .iter()
+                            .find(|w| &w.container == name)
+                            .ok_or_else(|| crate::Error::Internal("restart has no workload owner".into()))?;
+                        let memory = sample
+                            .containers
+                            .iter()
+                            .find(|i| i.id == *name || i.owner == owner.deployment_id)
+                            .and_then(|i| i.limit_mb)
+                            .unwrap_or(256);
+                        *budgets.entry(owner.deployment_id.clone()).or_default() += memory;
+                    }
+                    Ok(budgets
+                        .into_iter()
+                        .map(|(owner, memory_mb)| crate::capacity::Request {
+                            node_id: n.id.clone(),
+                            owner,
+                            kind: "restart".into(),
+                            memory_mb,
+                            disk_mb: 0,
+                            heavy: false,
+                        })
+                        .collect::<Vec<_>>())
+                });
+                match admitted {
+                    Ok(requests) => match self.engine.admit(&crate::ids::new_id("task"), &requests).await {
+                        Ok(mut permit) => {
+                            permit.started();
+                            start_permit = Some(permit);
+                        }
+                        Err(e) => {
+                            r.errors.push(e.to_string());
+                            p.start.clear();
+                        }
+                    },
+                    Err(e) => {
+                        r.errors.push(e.to_string());
+                        p.start.clear();
+                    }
                 }
             }
             let batch = Apply {
@@ -341,6 +388,7 @@ impl Reconciler {
                 }
                 Err(e) => r.errors.push(e.to_string()),
             }
+            drop(start_permit);
         }
         drop(_operation);
         // What the domains say about HTTPS follows the certificates the

@@ -19,7 +19,8 @@ pub const MIB: u64 = 1 << 20;
 pub const POLICY_VERSION: u32 = 1;
 
 /// How long a [`HostStatus`] stays trustworthy. The host manager writes it
-/// every 20 s; three missed writes and the agent falls back to its own view.
+/// every 20 s; three missed writes make physical capacity unknown. Battery and
+/// thermal display may fall back to the guest, but admission waits for fresh data.
 pub const HOST_STATUS_MAX_AGE_SECS: i64 = 60;
 
 // ----- the real machine, as the guest sees it ---------------------------------
@@ -44,6 +45,17 @@ pub struct HostStatus {
     pub disk_free_bytes: Option<u64>,
     /// The computer is about to sleep or restart (an OS update), when known.
     pub going_down: Option<String>,
+    /// Fresh physical availability, not the guest's free RAM.
+    #[serde(default)]
+    #[ts(optional)]
+    pub memory_available_bytes: Option<u64>,
+    /// The accepted complete environment grant.
+    #[serde(default)]
+    #[ts(optional)]
+    pub environment_memory_bytes: Option<u64>,
+    #[serde(default)]
+    #[ts(optional)]
+    pub provider_overhead_bytes: Option<u64>,
 }
 
 impl HostStatus {

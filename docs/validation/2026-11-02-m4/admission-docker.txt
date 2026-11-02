@@ -1,0 +1,6 @@
+PASS: parallel requests cannot spend the same workload budget; other request remains queued
+PASS: Docker enforces memory, swap and CPU limits on admitted apps
+PASS: abrupt agent restart reconciles inventory and keeps unsafe queued work deferred
+PASS: unrelated host RAM pressure defers work, then release permits it without stopping production
+PASS: real ENOSPC on the isolated state disk starts no unsafe workload; restoring disk resumes its queue
+PASS: unchanged production served all 576 probes during contention, restart and pressure

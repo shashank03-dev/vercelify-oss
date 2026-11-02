@@ -211,6 +211,39 @@ impl Builder {
         }
     }
 
+    /// Refuse an active legacy builder before a deployment leaves the queue.
+    pub async fn check_running_budget(&self) -> Result<()> {
+        if self.driver != Driver::Container || self.memory.is_none() {
+            return Ok(());
+        }
+        let checked = proc::run(self.spec(
+            &proc::args(&["container", "inspect", "--format", "{{json .}}", BUILDER_CONTAINER]),
+            Duration::from_secs(30),
+        ))
+        .await?;
+        if !checked.success() {
+            // An absent builder will be created after admission.
+            if checked.stderr.contains("No such") {
+                return Ok(());
+            }
+            return Err(Error::Unavailable("could not inspect BuildKit resource limits".into()));
+        }
+        let state: serde_json::Value = serde_json::from_str(checked.stdout.trim())
+            .map_err(|_| Error::Unavailable("could not verify BuildKit resource limits".into()))?;
+        let bytes = crate::capacity::build_memory_mb(self.memory.as_deref())?.saturating_mul(1_048_576);
+        if state["State"]["Running"].as_bool() != Some(false)
+            && (state["HostConfig"]["Memory"].as_u64() != Some(bytes)
+                || state["HostConfig"]["MemorySwap"].as_u64() != Some(bytes)
+                || state["HostConfig"]["CpuQuota"].as_u64() != Some(100000)
+                || state["HostConfig"]["CpuPeriod"].as_u64() != Some(100000))
+        {
+            return Err(Error::Capacity(
+                "BuildKit needs bounded resources; waiting for its idle stop before updating it".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Create the BuildKit builder, or bootstrap its retained container/cache.
     pub async fn ensure_builder(&self, log: &mut LogWriter) -> Result<()> {
         if self.driver == Driver::Docker {
@@ -218,6 +251,53 @@ impl Builder {
         }
         let inspect = proc::args(&["buildx", "inspect", BUILDER]);
         if proc::run(self.spec(&inspect, Duration::from_secs(30))).await?.success() {
+            if let Some(memory) = &self.memory {
+                let checked = proc::run(self.spec(
+                    &proc::args(&["container", "inspect", "--format", "{{json .}}", BUILDER_CONTAINER]),
+                    Duration::from_secs(30),
+                ))
+                .await?;
+                let state: serde_json::Value = serde_json::from_str(checked.stdout.trim())
+                    .map_err(|_| Error::Unavailable("could not verify BuildKit resource limits".into()))?;
+                let bytes = crate::capacity::build_memory_mb(Some(memory))?.saturating_mul(1_048_576);
+                let bounded = state["HostConfig"]["Memory"].as_u64() == Some(bytes)
+                    && state["HostConfig"]["MemorySwap"].as_u64() == Some(bytes)
+                    && state["HostConfig"]["CpuQuota"].as_u64() == Some(100000)
+                    && state["HostConfig"]["CpuPeriod"].as_u64() == Some(100000);
+                if !checked.success() {
+                    return Err(Error::Unavailable("could not inspect BuildKit resource limits".into()));
+                }
+                if !bounded {
+                    if state["State"]["Running"].as_bool() != Some(false) {
+                        return Err(Error::Capacity(
+                            "BuildKit needs bounded resources; waiting for its idle stop before updating it".into(),
+                        ));
+                    }
+                    // Update only a stopped dedicated builder. Its container and
+                    // cache volume survive; active work is never capped mid-build.
+                    let updated = proc::run(self.spec(
+                        &proc::args(&[
+                            "update",
+                            "--memory",
+                            memory,
+                            "--memory-swap",
+                            memory,
+                            "--cpu-quota",
+                            "100000",
+                            "--cpu-period",
+                            "100000",
+                            BUILDER_CONTAINER,
+                        ]),
+                        Duration::from_secs(30),
+                    ))
+                    .await?;
+                    if !updated.success() {
+                        return Err(Error::Unavailable(
+                            "could not bound the stopped BuildKit builder".into(),
+                        ));
+                    }
+                }
+            }
             let bootstrap = proc::args(&["buildx", "inspect", "--bootstrap", BUILDER]);
             let out = proc::run(self.spec(&bootstrap, Duration::from_secs(300))).await?;
             if !out.success() {
@@ -231,7 +311,9 @@ impl Builder {
         log.info("creating the BuildKit builder (first build on this server)");
         let mut opts = format!("image={BUILDKIT_IMAGE}");
         if let Some(m) = &self.memory {
-            opts.push_str(&format!(",memory={m}"));
+            opts.push_str(&format!(
+                ",memory={m},memory-swap={m},cpu-quota=100000,cpu-period=100000"
+            ));
         }
         let create = proc::args(&[
             "buildx",
@@ -600,6 +682,54 @@ fi
             !calls.contains("create"),
             "do not replace a builder on bootstrap failure"
         );
+    }
+
+    #[tokio::test]
+    async fn old_builder_limits_change_only_while_stopped_and_keep_the_cache() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("docker");
+        std::fs::write(
+            &bin,
+            format!(
+                "#!/bin/sh\necho \"$*\" >> '{d}/calls'\nif [ \"$1\" = container ]; then cat '{d}/state'; fi\n",
+                d = dir.path().display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let builder = Builder {
+            docker: bin.display().to_string(),
+            git: "git".into(),
+            work_dir: dir.path().join("work"),
+            driver: Driver::Container,
+            memory: Some("2048m".into()),
+            timeout: Duration::from_secs(10),
+        };
+        let logs = LogHub::new(dir.path().join("logs"));
+        for running in [true, false] {
+            std::fs::write(dir.path().join("calls"), "").unwrap();
+            std::fs::write(
+                dir.path().join("state"),
+                serde_json::json!({"State":{"Running":running},"HostConfig":{"Memory":0}}).to_string(),
+            )
+            .unwrap();
+            let preflight = builder.check_running_budget().await;
+            assert_eq!(matches!(preflight, Err(Error::Capacity(_))), running);
+            let result = builder.ensure_builder(&mut logs.writer("app", "dpl_test")).await;
+            let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
+            if running {
+                assert!(matches!(result, Err(Error::Capacity(_))));
+                assert!(!calls.contains("update ") && !calls.contains("--bootstrap"));
+            } else {
+                result.unwrap();
+                assert!(
+                    calls.contains("update --memory 2048m --memory-swap 2048m --cpu-quota 100000 --cpu-period 100000")
+                );
+                assert!(calls.find("update ").unwrap() < calls.find("--bootstrap").unwrap());
+                assert!(!calls.contains(" rm ") && !calls.contains("prune"));
+            }
+        }
     }
 
     #[test]

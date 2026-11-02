@@ -14,12 +14,12 @@ use crate::ids::new_id;
 use crate::proc::{self, Spec};
 use crate::volumes;
 use crate::{now, Error, Result};
-use rusqlite::params;
+use rusqlite::{params, OptionalExtension};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::process::Command;
 use vercelify_core::platform::{Database, DatabaseBackup, DatabaseKind, Desired, VolumeOwner};
@@ -62,10 +62,14 @@ impl Restic {
 
 /// A hash of what a database container is made of: recreate when it changes.
 fn spec_hash(d: &Database, mesh_ip: Option<&str>, hdd: Option<&str>) -> String {
-    let h = Sha256::digest(format!(
+    let mut input = format!(
         "{}|{:?}|{}|{:?}|{:?}",
         d.image, d.public_port, d.public_bind, mesh_ip, hdd
-    ));
+    );
+    if let Some(memory) = d.memory_mb {
+        input.push_str(&format!("|memory={memory}|cpu=1|preset=1"));
+    }
+    let h = Sha256::digest(input);
     h.iter().take(6).map(|b| format!("{b:02x}")).collect()
 }
 
@@ -97,6 +101,9 @@ fn container_spec(engine: &Engine, d: &Database, cred: &Credentials) -> Result<(
         if vol.tier == StorageTier::Ssd {
             mount.source = storage_name;
         }
+    }
+    if d.memory_mb.is_some() {
+        spec.cgroup_parent = engine.deployer.cgroup_parent.clone();
     }
     spec.labels.insert("vercelify.spec".into(), hash.clone());
     Ok((spec, hash))
@@ -140,6 +147,10 @@ impl Engine {
     }
 
     async fn ensure_database_inner(&self, id: &str) -> Result<Database> {
+        self.ensure_database_with_resources(id, false).await
+    }
+
+    async fn ensure_database_with_resources(&self, id: &str, covered: bool) -> Result<Database> {
         let (d, cred) = self.database(id)?;
         let docker = &self.deployer.docker;
         if d.desired == Desired::Stopped {
@@ -147,9 +158,36 @@ impl Engine {
             return Ok(d);
         }
         let (spec, hash) = container_spec(self, &d, &cred)?;
-        docker.ensure_network(&spec.networks[0]).await?;
         let current = docker.inspect(&d.container).await?;
         let same = current.is_some() && docker.label(&d.container, "vercelify.spec").await.unwrap_or_default() == hash;
+        if same && current.as_ref().is_some_and(|i| i.running) {
+            return Ok(d);
+        }
+        let mut permit = if covered {
+            None
+        } else {
+            Some(
+                self.admit(
+                    &new_id("task"),
+                    &[crate::capacity::Request {
+                        node_id: self.store.with(crate::nodes::main)?.id,
+                        owner: d.id.clone(),
+                        kind: "database".into(),
+                        memory_mb: u64::from(d.memory_mb.unwrap_or(512)) + 128,
+                        disk_mb: 1024,
+                        heavy: true,
+                    }],
+                )
+                .await?,
+            )
+        };
+        if self.database(&d.id)?.0.desired == Desired::Stopped {
+            return Ok(self.database(&d.id)?.0);
+        }
+        if let Some(permit) = &mut permit {
+            permit.started();
+        }
+        docker.ensure_network(&spec.networks[0]).await?;
         if !same {
             if current.is_some() {
                 // Same volume, new container: like a restart.
@@ -172,7 +210,7 @@ impl Engine {
 
     /// One reconcile pass over databases: start what should run, recreate
     /// what changed or is missing, stop what is stopped.
-    pub async fn reconcile_databases(&self) -> Vec<String> {
+    pub async fn reconcile_databases(self: &Arc<Self>) -> Vec<String> {
         let list = match self.store.with(|c| databases::list(c, &self.key, None, false)) {
             Ok(l) => l,
             Err(e) => return vec![format!("databases: {e}")],
@@ -205,7 +243,7 @@ impl Engine {
                 // A first pull can take many minutes on home internet: it runs on
                 // its own, so this pass still brings every other app and database back.
                 if d.desired == Desired::Running && !self.deployer.docker.image_exists(&d.image).await.unwrap_or(true) {
-                    pull_in_background(&self.deployer.docker, &d.image);
+                    pull_in_background(self, &d.id);
                     continue;
                 }
                 if let Err(e) = self.ensure_database(&d.id).await {
@@ -435,6 +473,30 @@ impl Engine {
             BackupStyle::Dump => format!("{}.dump", d.name),
             _ => format!("{}.tar", d.name),
         };
+        let bytes: Option<u64> = self.store.with(|c| Ok(c.query_row(
+            "SELECT bytes FROM database_backups WHERE database_id=?1 AND snapshot=?2 AND status='succeeded' ORDER BY created_at DESC LIMIT 1",
+            params![d.id, snapshot], |r| r.get(0)).optional()?))?;
+        let bytes = bytes
+            .filter(|b| *b > 0 && *b <= 16 * 1024 * 1024 * 1024)
+            .ok_or_else(|| {
+                Error::Invalid(
+                    "restore requires a successful database backup with a recorded size (at most 16 GiB)".into(),
+                )
+            })?;
+        let mut permit = self
+            .admit(
+                &new_id("task"),
+                &[crate::capacity::Request {
+                    node_id: self.store.with(crate::nodes::main)?.id,
+                    owner: d.id.clone(),
+                    kind: "restore".into(),
+                    memory_mb: u64::from(d.memory_mb.unwrap_or(512)) + 256,
+                    disk_mb: bytes.saturating_mul(3).div_ceil(1_048_576).saturating_add(1024),
+                    heavy: true,
+                }],
+            )
+            .await?;
+        permit.started();
         let dump = proc::args(&["dump", snapshot, &format!("/{file}")]);
         // A missing/incomplete snapshot must never reach a consumer that
         // deletes live files. Stage on disk (bounded memory), check the entire
@@ -450,14 +512,20 @@ impl Engine {
             "sh",
             &proc::args(&[
                 "-c",
-                "umask 077; cat > \"$1\"",
+                "umask 077; head -c \"$2\" > \"$1\"",
                 "stage-restore",
                 &archive.to_string_lossy(),
+                &bytes.saturating_add(1).to_string(),
             ]),
             &restic.command_env(),
             Duration::from_secs(3 * 3600),
         )
         .await?;
+        if std::fs::metadata(&archive)?.len() != bytes {
+            return Err(Error::Invalid(
+                "backup size differs from its successful record; the database was not changed".into(),
+            ));
+        }
         if style != BackupStyle::Dump {
             let checked = proc::run(Spec {
                 bin: "sh",
@@ -482,7 +550,7 @@ impl Engine {
         let staged_args = proc::args(&[&archive.to_string_lossy()]);
         match style {
             BackupStyle::Dump => {
-                self.ensure_database_inner(&d.id).await?;
+                self.ensure_database_with_resources(&d.id, true).await?;
                 let mut consumer = proc::args(&["exec", "-i", &d.container]);
                 consumer.extend(databases::restore_command(d.kind).unwrap_or_default());
                 pipe(
@@ -503,6 +571,12 @@ impl Engine {
                     "run",
                     "--rm",
                     "-i",
+                    "--memory",
+                    "128m",
+                    "--memory-swap",
+                    "128m",
+                    "--cpus",
+                    "1",
                     "--volumes-from",
                     &d.container,
                     "--entrypoint",
@@ -520,7 +594,7 @@ impl Engine {
                     Duration::from_secs(3 * 3600),
                 )
                 .await;
-                self.ensure_database_inner(&d.id).await?;
+                self.ensure_database_with_resources(&d.id, true).await?;
                 res?;
             }
         }
@@ -625,20 +699,16 @@ static PULLING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
 /// Pull `image` unless a pull of it is already running; the next reconcile
 /// pass after it lands starts the database. Whether a pull was started.
-fn pull_in_background(docker: &Docker, image: &str) -> bool {
-    if !PULLING
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .insert(image.to_string())
-    {
+fn pull_in_background(engine: &Arc<Engine>, id: &str) -> bool {
+    if !PULLING.lock().unwrap_or_else(|e| e.into_inner()).insert(id.to_string()) {
         return false;
     }
-    let (docker, image) = (docker.clone(), image.to_string());
+    let (engine, id) = (engine.clone(), id.to_string());
     tokio::spawn(async move {
-        if let Err(e) = docker.pull(&image).await {
-            tracing::warn!("pulling {image}: {e}");
+        if let Err(e) = engine.ensure_database(&id).await {
+            tracing::warn!("starting database {id}: {e}");
         }
-        PULLING.lock().unwrap_or_else(|e| e.into_inner()).remove(&image);
+        PULLING.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
     });
     true
 }
@@ -727,35 +797,69 @@ mod tests {
         assert!(matches!(missing, Error::NotFound(_)), "{missing:?}");
     }
 
-    #[cfg(unix)]
     #[tokio::test]
-    async fn a_database_image_is_pulled_once_in_the_background() {
-        use std::os::unix::fs::PermissionsExt;
+    async fn unknown_capacity_refuses_database_work_before_docker_pull_or_start() {
         let temp = tempfile::tempdir().unwrap();
-        let calls = temp.path().join("calls");
-        let bin = temp.path().join("docker");
-        std::fs::write(&bin, format!("#!/bin/sh\necho \"$*\" >>{}\nsleep 1\n", calls.display())).unwrap();
-        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let docker = Docker {
-            bin: bin.to_string_lossy().into_owned(),
-        };
-        let started = std::time::Instant::now();
-        assert!(pull_in_background(&docker, "postgres:test-only"));
-        // Already pulling: no second pull, and neither call waits for it.
-        assert!(!pull_in_background(&docker, "postgres:test-only"));
-        assert!(started.elapsed() < Duration::from_millis(500));
-        for _ in 0..50 {
-            if !PULLING.lock().unwrap().contains("postgres:test-only") {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        let log = std::fs::read_to_string(&calls).unwrap();
-        assert_eq!(log.matches("pull --quiet postgres:test-only").count(), 1, "{log}");
-        assert!(
-            pull_in_background(&docker, "postgres:test-only"),
-            "pulls again once done"
-        );
+        let engine = crate::engine::tests::engine(temp.path(), 1);
+        engine
+            .store
+            .tx(|c| crate::capacity::invalidate(c, &crate::nodes::main(c)?.id))
+            .unwrap();
+        let database = engine
+            .store
+            .tx(|c| {
+                databases::create(
+                    c,
+                    &engine.key,
+                    &vercelify_core::platform::DatabaseCreate {
+                        name: "capacity-db".into(),
+                        kind: DatabaseKind::Postgresql,
+                        version: None,
+                        environment_id: None,
+                        project_id: None,
+                        public_port: None,
+                        tier: None,
+                        link_app: None,
+                    },
+                )
+            })
+            .unwrap();
+        let failure = engine.ensure_database(&database.id).await.unwrap_err();
+        assert!(matches!(failure, Error::Capacity(_)), "{failure}");
+        let calls = std::fs::read_to_string(temp.path().join("calls")).unwrap_or_default();
+        assert!(!calls.contains("pull "), "{calls}");
+        assert!(!calls.contains("create "), "{calls}");
+        assert!(!calls.contains("start "), "{calls}");
+    }
+
+    #[tokio::test]
+    async fn database_start_uses_the_registered_main_node_capacity() {
+        let temp = tempfile::tempdir().unwrap();
+        let engine = crate::engine::tests::engine(temp.path(), 1);
+        let database = engine
+            .store
+            .tx(|c| {
+                databases::create(
+                    c,
+                    &engine.key,
+                    &vercelify_core::platform::DatabaseCreate {
+                        name: "admitted-db".into(),
+                        kind: DatabaseKind::Postgresql,
+                        version: None,
+                        environment_id: None,
+                        project_id: None,
+                        public_port: None,
+                        tier: None,
+                        link_app: None,
+                    },
+                )
+            })
+            .unwrap();
+        engine.ensure_database(&database.id).await.unwrap();
+        let calls = std::fs::read_to_string(temp.path().join("calls")).unwrap();
+        assert!(calls.contains("create ") && calls.contains("--memory 256m"), "{calls}");
+        // The shared stub marks created containers running immediately.
+        assert!(calls.contains("pg_isready"), "{calls}");
     }
 
     #[test]

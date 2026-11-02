@@ -105,7 +105,16 @@ pub fn set_main_status(c: &Connection, mesh_ip: &str, status: &NodeStatus) -> Re
         "UPDATE nodes SET mesh_ip = ?1, status = ?2, last_seen_at = ?3 WHERE role = 'main'",
         params![mesh_ip, serde_json::to_string(status)?, now()],
     )?;
+    let id = main(c)?.id;
+    record_capacity(c, &id, status)?;
     Ok(())
+}
+
+fn record_capacity(c: &Connection, id: &str, status: &NodeStatus) -> Result<()> {
+    match &status.capacity {
+        Some(sample) => crate::capacity::record(c, id, sample),
+        None => crate::capacity::invalidate(c, id),
+    }
 }
 
 pub struct Heartbeat<'a> {
@@ -182,6 +191,7 @@ pub fn heartbeat(c: &Connection, key: &MasterKey, h: &Heartbeat) -> Result<Platf
         let sealed = key.seal_str(&aad("nodes", "token", &id), h.runtime_token);
         c.execute("UPDATE nodes SET token = ?2 WHERE id = ?1", params![id, sealed])?;
     }
+    record_capacity(c, &id, h.status)?;
     get(c, &id)
 }
 

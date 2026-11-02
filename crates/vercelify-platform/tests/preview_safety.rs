@@ -1,5 +1,6 @@
 //! Real engine/SQLite/Docker/Traefik qualification. Run only on a disposable
 //! Docker daemon: this suite owns its proxy. host/tests/contract/preview-safety.sh.
+mod common;
 use std::{path::Path, sync::Arc, time::Duration};
 use vercelify_core::platform::*;
 use vercelify_platform::{
@@ -107,7 +108,7 @@ async fn denied_tcp(d: &Docker, container: &str, host: &str, port: u16) {
     );
 }
 
-async fn engine(d: &Docker, root: &Path) -> Arc<Engine> {
+async fn engine(d: &Docker, root: &Path) -> (Arc<Engine>, common::InventoryTask) {
     let cfg = ProxyConfig {
         dir: root.join("proxy"),
         http_port: 18080,
@@ -147,6 +148,7 @@ async fn engine(d: &Docker, root: &Path) -> Arc<Engine> {
         )
     })
     .unwrap();
+    let _inventory = common::inventory(s.clone(), root).await;
     let key = Arc::new(MasterKey::from_bytes(&[7; 32]).unwrap());
     let e = Engine::new(
         s,
@@ -170,7 +172,7 @@ async fn engine(d: &Docker, root: &Path) -> Arc<Engine> {
         LogHub::new(root.join("logs")),
     );
     tokio::spawn(e.clone().run());
-    e
+    (e, _inventory)
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -191,7 +193,7 @@ async fn previews_have_no_production_credentials_network_or_public_bypass() {
     for image in ["traefik/whoami:v1.11", "node:22-slim", "alpine:3.22"] {
         d.pull(image).await.unwrap();
     }
-    let e = engine(&d, root.path()).await;
+    let (e, _inventory) = engine(&d, root.path()).await;
     let image = app(
         &e,
         "expose-contract",

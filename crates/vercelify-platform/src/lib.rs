@@ -8,6 +8,7 @@
 pub mod apps;
 pub mod artifact;
 pub mod build;
+pub mod capacity;
 pub mod compose;
 pub mod databases;
 pub mod dbengine;

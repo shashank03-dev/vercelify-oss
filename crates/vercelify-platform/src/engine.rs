@@ -76,6 +76,7 @@ pub struct Engine {
     minter: Mutex<Option<TokenMinter>>,
     /// Memory held for deployments being placed (placement.rs).
     pub reservations: placement::Reservations,
+    pub capacity_refresh: Arc<Notify>,
 }
 
 pub(crate) struct AppOperation<'a> {
@@ -122,6 +123,8 @@ impl Engine {
         gate: BuildGate,
         logs: Arc<LogHub>,
     ) -> Arc<Self> {
+        let capacity_refresh = Arc::new(Notify::new());
+        let reservations = placement::Reservations::new(store.clone()).with_refresh(capacity_refresh.clone());
         Arc::new(Self {
             store,
             key,
@@ -139,8 +142,59 @@ impl Engine {
             private_ip: Mutex::default(),
             registry: Mutex::default(),
             minter: Mutex::default(),
-            reservations: placement::Reservations::default(),
+            reservations,
+            capacity_refresh,
         })
+    }
+
+    pub fn capacity_updated(&self) {
+        self.wake.notify_one();
+    }
+
+    pub async fn admit(
+        &self,
+        operation: &str,
+        requests: &[crate::capacity::Request],
+    ) -> Result<crate::capacity::Permit> {
+        for attempt in 0..10 {
+            match self
+                .store
+                .tx(|c| crate::capacity::reserve(c, operation, requests, chrono::Utc::now().timestamp()))
+            {
+                Ok(()) => {
+                    return Ok(crate::capacity::Permit::after_reserved(
+                        self.store.clone(),
+                        operation.into(),
+                        self.capacity_refresh.clone(),
+                    ))
+                }
+                Err(e) if matches!(&e, Error::Capacity(_)) && attempt < 9 => {
+                    self.capacity_refresh.notify_one();
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        unreachable!("admission loop returns on its last attempt")
+    }
+
+    fn limited_app(&self, app: &App, d: &Deployment) -> Result<App> {
+        let node = self.store.with(|c| match d.node_id.as_ref().or(app.node_id.as_ref()) {
+            Some(id) => nodes::get(c, id),
+            None => nodes::main(c),
+        })?;
+        let total = node
+            .status
+            .capacity
+            .as_ref()
+            .map(|s| s.total_mb.min(s.host_grant_mb.unwrap_or(s.total_mb)))
+            .unwrap_or(node.status.memory_total_mb);
+        let mut app = app.clone();
+        app.runtime
+            .memory_mb
+            .get_or_insert(crate::capacity::default_app_mb(total));
+        app.runtime.cpus.get_or_insert(1.0);
+        Ok(app)
     }
 
     /// Stop only our dedicated idle builder. Holding all build slots across
@@ -434,18 +488,30 @@ impl Engine {
                             continue;
                         }
                         if !self.gate.builds_enabled() && d.image.is_empty() {
-                            let waiting = self.store.tx(|c| {
-                                let a=apps::get(c,&d.app_id)?;
-                                if a.kind==AppKind::Image || crate::offhost::is_external(c,&d.id)? {return Ok(false);}
-                                c.execute("UPDATE deployments SET error='queued: no permitted builder; use vfy deploy APP --build-here or CI' WHERE id=?1 AND error NOT LIKE 'queued: no permitted builder%'",[&d.id])?;
-                                Ok(true)
-                            });
-                            if waiting.unwrap_or(true) {
+                            let no_builder = match self.store.with(|c| apps::get(c, &d.app_id)) {
+                                Ok(app) => self.needs_build(&app, &d).await.unwrap_or(true),
+                                Err(_) => false,
+                            };
+                            if no_builder {
+                                let _=self.store.tx(|c| {c.execute("UPDATE deployments SET error='queued: no permitted builder; use vfy deploy APP --build-here or CI' WHERE id=?1 AND error NOT LIKE 'queued: no permitted builder%'",[&d.id])?;Ok(())});
                                 continue;
                             }
                         }
                         if !lock(&self.busy).insert(d.app_id.clone()) {
                             continue;
+                        }
+                        let prepared = match self.store.with(|c| apps::get(c, &d.app_id)) {
+                            Ok(a) => self.choose(&a, &d).await,
+                            Err(e) => Err(e),
+                        };
+                        if let Err(e) = prepared {
+                            if matches!(&e, Error::Capacity(_) | Error::Unavailable(_)) {
+                                let reason = format!("queued: {e}");
+                                let _=self.store.tx(|c| {c.execute("UPDATE deployments SET error=?2 WHERE id=?1 AND status='queued' AND coalesce(error,'')!=?2",rusqlite::params![d.id,reason])?;Ok(())});
+                                self.capacity_refresh.notify_one();
+                                lock(&self.busy).remove(&d.app_id);
+                                continue;
+                            }
                         }
                         let me = self.clone();
                         tokio::spawn(async move {
@@ -466,12 +532,16 @@ impl Engine {
         // It may have been cancelled or superseded since it was listed.
         let d = match self.store.with(|c| deployments::get(c, &d.id)) {
             Ok(d) if d.status == DeploymentStatus::Queued => d,
-            _ => return,
+            _ => {
+                self.reservations.finish(&d.id, false);
+                return;
+            }
         };
         let app = match self.store.with(|c| apps::get(c, &d.app_id)) {
             Ok(a) => a,
             Err(e) => {
                 tracing::warn!("deployment {} of a missing app: {e}", d.id);
+                self.reservations.finish(&d.id, false);
                 return;
             }
         };
@@ -487,12 +557,10 @@ impl Engine {
         ));
         let res = self.steps(&app, &d, cancel, &mut log).await;
         lock(&self.running).remove(&d.id);
-        let started = self
-            .store
-            .with(|c| instances::of(c, &d.id))
-            .map(|i| !i.is_empty())
-            .unwrap_or(false);
-        self.reservations.finish(&d.id, started);
+        // Git, image pulls and failed starts can consume resources before an
+        // instance is recorded. A fresh inventory, not the instances table,
+        // decides when this operation's physical demand can be released.
+        self.reservations.finish(&d.id, true);
         match res {
             Ok((done, url, previous)) => {
                 log.info(&format!(
@@ -584,32 +652,77 @@ impl Engine {
         m(source.to_string(), repo.to_string()).await
     }
 
+    async fn needs_build(&self, app: &App, d: &Deployment) -> Result<bool> {
+        if app.kind == AppKind::Image || self.store.with(|c| crate::offhost::is_external(c, &d.id))? {
+            return Ok(false);
+        }
+        if app.kind == AppKind::Compose {
+            if app.source.repository.is_none() {
+                if let Some(raw) = &app.source.compose_content {
+                    return compose::requires_build(raw);
+                }
+            }
+            return Ok(true);
+        }
+        Ok(d.image.is_empty() || !self.deployer.docker.image_exists(&d.image).await?)
+    }
+
     /// Where a deployment's instances go (design §8.3): the main server,
     /// and (server, replica) for each instance.
-    fn choose(&self, app: &App, d: &Deployment) -> Result<(PlatformNode, Vec<(PlatformNode, u8)>)> {
-        self.store.with(|c| {
-            let all = nodes::list(c)?;
-            let main = all
-                .iter()
-                .find(|n| n.role == "main")
-                .cloned()
-                .ok_or_else(|| Error::Unavailable("the main server isn't registered yet".into()))?;
-            let vols = volumes::checked_list(c, VolumeOwner::App, &app.id)?;
-            let need = placement::Need {
-                pinned: d.node_id.clone().or_else(|| app.node_id.clone()),
-                replicas: if d.pr_number.is_some() { 1 } else { app.runtime.replicas },
-                memory_mb: app.runtime.memory_mb,
-                main_only: app.kind == AppKind::Compose,
-                one_node: !vols.is_empty(),
-                failover: app.runtime.failover,
-            };
-            let slots = self.reservations.place(&d.id, &all, &need)?;
-            let targets = slots
-                .into_iter()
-                .filter_map(|s| all.iter().find(|n| n.id == s.node_id).map(|n| (n.clone(), s.replica)))
-                .collect();
-            Ok((main, targets))
-        })
+    async fn choose(&self, app: &App, d: &Deployment) -> Result<(PlatformNode, Vec<(PlatformNode, u8)>)> {
+        let app = self.limited_app(app, d)?;
+        let (all, vols) = self
+            .store
+            .with(|c| Ok((nodes::list(c)?, volumes::checked_list(c, VolumeOwner::App, &app.id)?)))?;
+
+        let main = all
+            .iter()
+            .find(|n| n.role == "main")
+            .cloned()
+            .ok_or_else(|| Error::Unavailable("the main server isn't registered yet".into()))?;
+        let mut extra = Vec::new();
+        if self.needs_build(&app, d).await? {
+            if !self.gate.builds_enabled() || !main.builds {
+                return Err(Error::Capacity(
+                    "no permitted builder; use the selected computer or CI".into(),
+                ));
+            }
+            if self.builder.driver != crate::build::Driver::Container {
+                return Err(Error::Capacity("this serving-host builder cannot enforce its memory budget; select the container driver or build on the selected computer/CI".into()));
+            }
+            self.builder.check_running_budget().await?;
+            extra.push(crate::capacity::Request {
+                node_id: main.id.clone(),
+                owner: "builder".into(),
+                kind: "build".into(),
+                memory_mb: crate::capacity::build_memory_mb(self.builder.memory.as_deref())?,
+                disk_mb: 2048,
+                heavy: true,
+            });
+        }
+        let total = main
+            .status
+            .capacity
+            .as_ref()
+            .map(|s| s.total_mb.min(s.host_grant_mb.unwrap_or(s.total_mb)))
+            .unwrap_or(main.status.memory_total_mb);
+        let need = placement::Need {
+            pinned: d.node_id.clone().or_else(|| app.node_id.clone()),
+            replicas: if d.pr_number.is_some() { 1 } else { app.runtime.replicas },
+            memory_mb: app.runtime.memory_mb,
+            overhead_mb: crate::capacity::transfer_mb(total),
+            disk_mb: 1024,
+            extra,
+            main_only: app.kind == AppKind::Compose,
+            one_node: !vols.is_empty(),
+            failover: app.runtime.failover,
+        };
+        let slots = self.reservations.place(&d.id, &all, &need)?;
+        let targets = slots
+            .into_iter()
+            .filter_map(|s| all.iter().find(|n| n.id == s.node_id).map(|n| (n.clone(), s.replica)))
+            .collect();
+        Ok((main, targets))
     }
 
     /// The port of an image app nobody set one for: the image's one TCP
@@ -645,8 +758,10 @@ impl Engine {
         cancel: crate::proc::Cancel,
         log: &mut LogWriter,
     ) -> Result<(Deployment, Option<String>, Option<String>)> {
+        let limited = self.limited_app(app, d)?;
+        let app = &limited;
         let preview = d.pr_number.is_some();
-        let (main, targets) = self.choose(app, d)?;
+        let (main, targets) = self.choose(app, d).await?;
         let remote = targets.iter().any(|(n, _)| n.role != "main");
         if remote || targets.len() > 1 {
             let names: Vec<&str> = targets.iter().map(|(n, _)| n.name.as_str()).collect();
@@ -898,8 +1013,30 @@ impl Engine {
             Some((file, checkout)) => {
                 let _cleanup = CheckoutGuard(checkout.parent().map(PathBuf::from).unwrap_or_else(|| checkout.clone()));
                 let project = compose::project_name(&app.name, d.pr_number);
+                let build = compose::requires_build(&std::fs::read_to_string(checkout.join(file))?)?;
+                let _compose_permit = if build {
+                    if !self.gate.builds_enabled() {
+                        return Err(Error::Unavailable("no permitted builder".into()));
+                    }
+                    let mut cancelled = cancel.clone();
+                    let mut waiting = |m: &str| log.info(m);
+                    let permit = tokio::select! {
+                        permit = self.gate.acquire(&mut waiting) => permit,
+                        () = cancelled.cancelled() => return Err(Error::Conflict("cancelled".into())),
+                    };
+                    self.builder.ensure_builder(log).await?;
+                    Some(permit)
+                } else {
+                    None
+                };
                 let res = compose::up(
                     compose::Up {
+                        limits: compose::Limits {
+                            memory_mb: app.runtime.memory_mb.expect("deployment budget"),
+                            cpus: app.runtime.cpus.expect("deployment CPU budget"),
+                            cgroup_parent: self.deployer.cgroup_parent.as_deref(),
+                        },
+                        build,
                         docker,
                         dir: checkout,
                         file,
@@ -1707,7 +1844,7 @@ fn pin(c: &rusqlite::Connection, a: &App, source: AppSource) -> Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::{apps::DomainSettings, build::Driver, docker::Docker, proxy::ProxyConfig};
     use std::os::unix::fs::PermissionsExt;
@@ -1742,10 +1879,33 @@ mod tests {
         bin.display().to_string()
     }
 
-    fn engine(dir: &Path, concurrency: usize) -> Arc<Engine> {
+    pub(crate) fn engine(dir: &Path, concurrency: usize) -> Arc<Engine> {
         let store = Arc::new(Store::open_in_memory().unwrap());
         store
-            .with(|c| nodes::ensure_main(c, "main", "http://127.0.0.1:7420", "x86_64"))
+            .with(|c| {
+                let node = nodes::ensure_main(c, "main", "http://127.0.0.1:7420", "x86_64")?;
+                nodes::set_main_status(
+                    c,
+                    "",
+                    &vercelify_core::platform::NodeStatus {
+                        memory_total_mb: 8192,
+                        memory_available_mb: 7000,
+                        docker_ok: true,
+                        capacity: Some(crate::capacity::Sample {
+                            epoch: "test".into(),
+                            measured_at: chrono::Utc::now().timestamp(),
+                            total_mb: 8192,
+                            available_mb: 7000,
+                            workload_limit_mb: 7168,
+                            disk_free_mb: Some(20000),
+                            host_ready: true,
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    },
+                )?;
+                Ok(node)
+            })
             .unwrap();
         store
             .with(|c| {
@@ -1780,7 +1940,7 @@ mod tests {
                 docker: docker.clone(),
                 git: "/nonexistent/git".into(),
                 work_dir: dir.join("work"),
-                driver: Driver::Docker,
+                driver: Driver::Container,
                 memory: None,
                 timeout: Duration::from_secs(10),
             },
@@ -1803,6 +1963,26 @@ mod tests {
             BuildGate::new(concurrency, dir.join("power")).with_poll(Duration::from_millis(20)),
             LogHub::new(dir.join("logs")),
         )
+    }
+
+    #[tokio::test]
+    async fn missing_capacity_keeps_an_image_deployment_queued() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        e.store
+            .with(|c| crate::nodes::set_main_status(c, "", &vercelify_core::platform::NodeStatus::default()))
+            .unwrap();
+        let mut request = apps::tests::git_app("capacity-wait");
+        request.kind = AppKind::Image;
+        request.source.image = Some("test:one".into());
+        let app = e.store.tx(|c| apps::create(c, &request)).unwrap();
+        let d = e.enqueue(&app.id, Enqueue::default()).unwrap();
+        let task = tokio::spawn(e.clone().run());
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        let d = e.store.with(|c| deployments::get(c, &d.id)).unwrap();
+        task.abort();
+        assert_eq!(d.status, DeploymentStatus::Queued);
+        assert!(d.error.contains("capacity"), "{}", d.error);
     }
 
     #[tokio::test]
@@ -1925,6 +2105,19 @@ esac
             ..Default::default()
         });
         e.store.tx(|c| apps::create(c, &req)).unwrap()
+    }
+
+    fn fresh_capacity(e: &Engine) {
+        // Stub Docker creates no real processes. A new empty report acknowledges
+        // completed work; this fixture deliberately has ample measured capacity.
+        e.store
+            .tx(|c| {
+                let mut status = nodes::main(c)?.status;
+                status.capacity.as_mut().unwrap().measured_at = chrono::Utc::now().timestamp() + 1;
+                nodes::set_main_status(c, "", &status)
+            })
+            .unwrap();
+        e.capacity_updated();
     }
 
     async fn until(what: &str, mut f: impl FnMut() -> bool) {
@@ -2103,7 +2296,10 @@ esac
         let e = engine(dir.path(), 1);
         let app = image_app(&e);
         tokio::spawn(e.clone().run());
-        let run = |e: &Arc<Engine>| e.enqueue(&app.id, Enqueue::default()).unwrap();
+        let run = |e: &Arc<Engine>| {
+            fresh_capacity(e);
+            e.enqueue(&app.id, Enqueue::default()).unwrap()
+        };
         let done = |e: &Engine, id: &str| matches!(status(e, id), DeploymentStatus::Healthy | DeploymentStatus::Failed);
 
         let d = run(&e);
@@ -2177,6 +2373,7 @@ esac
         let created = dir.path().join("created");
         std::fs::write(&hold, "").unwrap();
         let _ = std::fs::remove_file(&created);
+        fresh_capacity(&e);
         let d = e.enqueue(&app.id, preview(2)).unwrap();
         until("container creation", || created.exists()).await;
         assert_eq!(status(&e, &d.id), DeploymentStatus::Deploying);
@@ -2263,6 +2460,7 @@ esac
 
         // Too hot to build.
         std::fs::write(dir.path().join("power"), r#"{"state":"thermal_paused"}"#).unwrap();
+        fresh_capacity(&e);
         let d = e.enqueue(&app.id, Enqueue::default()).unwrap();
         until("building", || status(&e, &d.id) == DeploymentStatus::Building).await;
         e.cancel(&d.id).unwrap();
@@ -2275,6 +2473,7 @@ esac
         // Cool, but the only slot is taken.
         std::fs::write(dir.path().join("power"), r#"{"state":"ok"}"#).unwrap();
         let slot = e.gate.acquire(&mut |_| {}).await;
+        fresh_capacity(&e);
         let d = e.enqueue(&app.id, Enqueue::default()).unwrap();
         until("building", || status(&e, &d.id) == DeploymentStatus::Building).await;
         e.cancel(&d.id).unwrap();
@@ -2283,6 +2482,7 @@ esac
         })
         .await;
         // The app is free: the next deployment starts (and waits its turn).
+        fresh_capacity(&e);
         let next = e.enqueue(&app.id, Enqueue::default()).unwrap();
         until("the next one starts", || {
             status(&e, &next.id) == DeploymentStatus::Building

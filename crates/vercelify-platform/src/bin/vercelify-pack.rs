@@ -93,6 +93,10 @@ async fn run(args: &[String]) -> Result<()> {
     {
         return Err(Error::Invalid("invalid app or deployment identifier".into()));
     }
+    for variable in &request.variables {
+        vercelify_platform::validate::env_key(&variable.key)?;
+        vercelify_platform::validate::env_value(&variable.key, &variable.value)?;
+    }
     let work = tempfile::tempdir()?;
     let hub = LogHub::new(work.path().join("logs"));
     let mut log = hub.writer(&request.app_name, &request.deployment_id);

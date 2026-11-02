@@ -68,3 +68,49 @@ fn rejects_unauthorized_tags_links_truncation_and_digest_mismatch() {
     std::fs::write(&input, evil).unwrap();
     assert!(artifact::sanitize(&input, &output, tag, &format!("sha256:{hex}"), "linux/arm64").is_err());
 }
+
+#[test]
+fn measures_expanded_layers_and_verifies_their_uncompressed_identity() {
+    use sha2::{Digest, Sha256};
+    use std::io::Write;
+    let plain = vec![b'x'; 2 * 1024 * 1024];
+    let mut gzip = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gzip.write_all(&plain).unwrap();
+    let gzip = gzip.finish().unwrap();
+    let zstd = zstd::stream::encode_all(&plain[..], 1).unwrap();
+    for layer in [&plain, &gzip, &zstd] {
+        let dir = tempfile::tempdir().unwrap();
+        let layer_name = format!("blobs/sha256/{:x}", Sha256::digest(layer));
+        let diff_id = format!("sha256:{:x}", Sha256::digest(&plain));
+        for expected_diff in [&diff_id, &format!("sha256:{}", "0".repeat(64))] {
+            let config = serde_json::json!({"architecture":"arm64","os":"linux","rootfs":{"type":"layers","diff_ids":[expected_diff]}}).to_string();
+            let config_hash = format!("{:x}", Sha256::digest(config.as_bytes()));
+            let config_name = format!("blobs/sha256/{config_hash}");
+            let tag = "vfy/offhost:dpl_layers-1";
+            let manifest =
+                serde_json::json!([{"Config":config_name,"RepoTags":[tag],"Layers":[layer_name]}]).to_string();
+            let mut archive = Vec::new();
+            entry(&mut archive, &config_name, config.as_bytes(), b'0');
+            entry(&mut archive, &layer_name, layer, b'0');
+            entry(&mut archive, "manifest.json", manifest.as_bytes(), b'0');
+            archive.extend([0; 1024]);
+            let input = dir.path().join("input");
+            std::fs::write(&input, archive).unwrap();
+            let result = artifact::sanitize(
+                &input,
+                &dir.path().join("output"),
+                tag,
+                &format!("sha256:{config_hash}"),
+                "linux/arm64",
+            );
+            if expected_diff == &diff_id {
+                assert_eq!(result.unwrap().unpacked_bytes, plain.len() as u64);
+            } else {
+                assert!(
+                    result.is_err(),
+                    "compressed content must match the declared rootfs identity"
+                );
+            }
+        }
+    }
+}

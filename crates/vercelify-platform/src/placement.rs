@@ -9,119 +9,117 @@
 //! - Replicas spread over usable servers, the app's own first; apps with
 //!   volumes keep every replica on their server (the data is there).
 //! - Compose apps run on the main server (their checkout is there).
-//! - Servers report every minute, so two deploys close together would both
-//!   see the same free memory: [`Reservations`] holds what each placed
-//!   deployment needs until the servers' reports can include it.
+//! - [`Reservations`] shares the durable capacity ledger with other operations.
+//!   Concurrent placements cannot spend the same measured headroom; completion
+//!   waits for fresh inventory before releasing unseen allocations.
 
-use crate::{Error, Result};
-use std::collections::HashMap;
-use std::sync::Mutex;
-use std::time::{Duration, Instant};
+use crate::{capacity, Error, Result, Store};
+use rusqlite::{params, OptionalExtension};
+use serde::{Deserialize, Serialize};
+use std::{collections::HashMap, sync::Arc};
 use vercelify_core::platform::PlatformNode;
 
-/// How long a finished deployment's reservation outlives it: past the next
-/// report from its servers (every minute), which then counts it.
-pub const RESERVATION_GRACE: Duration = Duration::from_secs(90);
-
-/// Memory promised to deployments being placed or just started, by server.
-/// In memory on purpose: after a restart nothing is mid-placement and the
-/// servers' reports are the truth again.
-#[derive(Default)]
+/// Placement promises use the engine's durable Store, shared with other jobs.
 pub struct Reservations {
-    held: Mutex<HashMap<String, Held>>,
+    store: Arc<Store>,
+    refresh: Option<Arc<tokio::sync::Notify>>,
 }
-
-struct Held {
-    /// (server, MB) per instance.
-    slots: Vec<(String, u64)>,
-    /// None while the deployment runs.
-    until: Option<Instant>,
+impl Default for Reservations {
+    fn default() -> Self {
+        Self::new(Arc::new(Store::open_in_memory().expect("standalone placement store")))
+    }
 }
-
 impl Reservations {
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Held>> {
-        self.held.lock().unwrap_or_else(|p| p.into_inner())
+    pub fn new(store: Arc<Store>) -> Self {
+        Self { store, refresh: None }
     }
-
-    /// Place `deployment` against the servers' reports minus what others
-    /// hold, and hold its share, in one step: a second deploy placed at the
-    /// same moment sees it.
+    pub fn with_refresh(mut self, refresh: Arc<tokio::sync::Notify>) -> Self {
+        self.refresh = Some(refresh);
+        self
+    }
     pub fn place(&self, deployment: &str, nodes: &[PlatformNode], need: &Need) -> Result<Vec<Slot>> {
-        self.place_at(deployment, nodes, need, Instant::now())
+        self.place_at(deployment, nodes, need, chrono::Utc::now().timestamp())
     }
-
-    fn place_at(&self, deployment: &str, nodes: &[PlatformNode], need: &Need, now: Instant) -> Result<Vec<Slot>> {
-        let mut held = self.lock();
-        held.retain(|_, h| h.until.is_none_or(|u| u > now));
-        let mut by_node: HashMap<&str, u64> = HashMap::new();
-        for (id, h) in held.iter() {
-            if id == deployment {
-                continue;
+    fn place_at(&self, deployment: &str, nodes: &[PlatformNode], need: &Need, now: i64) -> Result<Vec<Slot>> {
+        self.store.tx(|c| {
+            for node in nodes {
+                match &node.status.capacity {
+                    Some(sample) => capacity::record(c,&node.id,sample)?,
+                    None => capacity::invalidate(c,&node.id)?,
+                }
             }
-            for (n, mb) in &h.slots {
-                *by_node.entry(n.as_str()).or_default() += mb;
+            let plan:Option<(String,String)>=c.query_row("SELECT need,slots FROM resource_placements WHERE operation=?1",[deployment],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
+            let slots=if let Some((old,slots))=plan {
+                if serde_json::from_str::<Need>(&old)?!=*need {return Err(Error::Conflict("the deployment's resource plan changed; retry it".into()));}
+                serde_json::from_str::<Vec<Slot>>(&slots)?
+            } else {
+                let mut adjusted=nodes.to_vec();
+                let mut unavailable=None;
+                for node in &mut adjusted {
+                    match capacity::account(c,&node.id,None,now) {
+                        Ok(a) => {node.status.memory_available_mb=a.available_mb.min(a.workload_remaining_mb).saturating_sub(need.overhead_mb);}
+                        Err(e) => {node.status.memory_total_mb=0;unavailable=Some(e);}
+                    }
+                }
+                match place(&adjusted,need) {
+                    Ok(slots) => slots,
+                    Err(e) => return Err(if adjusted.iter().all(|n|n.status.memory_total_mb==0) { unavailable.unwrap_or(e) } else { e }),
+                }
+            };
+            let mut per_node:HashMap<String,u64>=HashMap::new();
+            let mb=need.memory_mb.map(u64::from).unwrap_or(DEFAULT_MEMORY_MB);
+            for slot in &slots { *per_node.entry(slot.node_id.clone()).or_default()+=mb; }
+            let mut requests:Vec<_>=per_node.into_iter().map(|(node_id,memory_mb)|capacity::Request {
+                node_id,owner:deployment.into(),kind:"deploy".into(),memory_mb,disk_mb:0,heavy:false
+            }).collect();
+            for slot in &slots {
+                let owner=format!("transient:{deployment}");
+                if requests.iter().any(|r|r.node_id==slot.node_id && r.owner==owner) {continue;}
+                if need.overhead_mb>0 || need.disk_mb>0 {
+                    requests.push(capacity::Request {node_id:slot.node_id.clone(),owner,kind:"deploy".into(),memory_mb:need.overhead_mb,disk_mb:need.disk_mb,heavy:true});
+                }
             }
-        }
-        let adjusted: Vec<PlatformNode> = nodes
-            .iter()
-            .map(|n| {
-                let mut n = n.clone();
-                let r = by_node.get(n.id.as_str()).copied().unwrap_or(0);
-                n.status.memory_available_mb = n.status.memory_available_mb.saturating_sub(r);
-                n
-            })
-            .collect();
-        let slots = place(&adjusted, need)?;
-        let mb = need.memory_mb.map(u64::from).unwrap_or(DEFAULT_MEMORY_MB);
-        held.insert(
-            deployment.to_string(),
-            Held {
-                slots: slots.iter().map(|s| (s.node_id.clone(), mb)).collect(),
-                until: None,
-            },
-        );
-        Ok(slots)
+            requests.extend(need.extra.iter().cloned());
+            capacity::reserve(c,deployment,&requests,now)?;
+            c.execute("INSERT INTO resource_placements(operation,need,slots) VALUES(?1,?2,?3) ON CONFLICT(operation) DO NOTHING",params![deployment,serde_json::to_string(need)?,serde_json::to_string(&slots)?])?;
+            Ok(slots)
+        })
     }
-
-    /// The deployment finished (any outcome): keep its share a little longer
-    /// if it started containers, else drop it now.
     pub fn finish(&self, deployment: &str, started: bool) {
-        self.finish_at(deployment, started, Instant::now())
+        self.finish_at(deployment, started, chrono::Utc::now().timestamp());
     }
-
-    fn finish_at(&self, deployment: &str, started: bool, now: Instant) {
-        let mut held = self.lock();
-        if started {
-            if let Some(h) = held.get_mut(deployment) {
-                h.until = Some(now + RESERVATION_GRACE);
-            }
-        } else {
-            held.remove(deployment);
+    fn finish_at(&self, deployment: &str, started: bool, now: i64) {
+        if let Err(e) = self.store.tx(|c| capacity::finish(c, deployment, started, now)) {
+            tracing::warn!("capacity reservation retained after completion: {e}");
+        }
+        if let Some(refresh) = &self.refresh {
+            refresh.notify_one();
         }
     }
-
-    /// MB held on a server now (for tests and diagnostics).
-    pub fn on(&self, node_id: &str) -> u64 {
-        let now = Instant::now();
-        self.lock()
-            .values()
-            .filter(|h| h.until.is_none_or(|u| u > now))
-            .flat_map(|h| h.slots.iter())
-            .filter(|(n, _)| n == node_id)
-            .map(|(_, mb)| mb)
-            .sum()
+    pub fn on(&self, node: &str) -> Result<u64> {
+        self.store.with(|c| {
+            Ok(c.query_row(
+                "SELECT coalesce(sum(memory_mb),0) FROM resource_reservations WHERE node_id=?1",
+                [node],
+                |r| r.get(0),
+            )?)
+        })
     }
 }
 
 /// Memory an app is assumed to need when it sets no limit.
 pub const DEFAULT_MEMORY_MB: u64 = 256;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default)]
 pub struct Need {
     /// `apps.node_id`.
     pub pinned: Option<String>,
     pub replicas: u8,
     pub memory_mb: Option<u32>,
+    pub overhead_mb: u64,
+    pub disk_mb: u64,
+    pub extra: Vec<capacity::Request>,
     /// Compose apps.
     pub main_only: bool,
     /// The app has volumes: one server holds them all.
@@ -130,7 +128,7 @@ pub struct Need {
     pub failover: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Slot {
     pub node_id: String,
     pub replica: u8,
@@ -141,8 +139,11 @@ pub fn unusable(n: &PlatformNode) -> Option<String> {
     if !n.online {
         return Some(format!("{} is offline (not heard from in 2 minutes)", n.name));
     }
-    if n.role != "main" && !n.status.docker_ok {
+    if !n.status.docker_ok {
         return Some(format!("Docker isn't running on {}", n.name));
+    }
+    if n.status.memory_total_mb == 0 {
+        return Some(format!("{} has no measured memory capacity yet", n.name));
     }
     if n.status.thermal_paused {
         return Some(format!("{} is too hot (the power guard paused it)", n.name));
@@ -153,14 +154,23 @@ pub fn unusable(n: &PlatformNode) -> Option<String> {
     None
 }
 
-fn score(n: &PlatformNode, need: &Need) -> i64 {
-    // The main server before its first report: it wins, as it did when it
-    // was the only one.
-    if n.role == "main" && n.status.memory_total_mb == 0 && n.status.memory_available_mb == 0 {
-        return i64::MAX / 4;
+fn score(n: &PlatformNode, need: &Need) -> i128 {
+    let want = need.memory_mb.map(u64::from).unwrap_or(DEFAULT_MEMORY_MB);
+    i128::from(n.status.memory_available_mb) - i128::from(want)
+}
+
+fn capacity(n: &PlatformNode, need: &Need, instances: u8) -> Result<()> {
+    if let Some(why) = unusable(n) {
+        return Err(Error::Unavailable(why));
     }
-    let want = need.memory_mb.map(u64::from).unwrap_or(DEFAULT_MEMORY_MB) as i64;
-    n.status.memory_available_mb as i64 - want
+    let want = need.memory_mb.map(u64::from).unwrap_or(DEFAULT_MEMORY_MB) * u64::from(instances);
+    if want > n.status.memory_available_mb {
+        return Err(Error::Unavailable(format!(
+            "{} needs {want} MiB for this operation, but only {} MiB is available after reservations; queued until capacity is available",
+            n.name, n.status.memory_available_mb
+        )));
+    }
+    Ok(())
 }
 
 /// Usable, undrained servers, best first (ties: the main server, then name).
@@ -190,6 +200,7 @@ pub fn place(nodes: &[PlatformNode], need: &Need) -> Result<Vec<Slot>> {
             .collect()
     };
     if need.main_only {
+        capacity(main, need, 1)?;
         return Ok(vec![Slot {
             node_id: main.id.clone(),
             replica: 0,
@@ -219,16 +230,34 @@ pub fn place(nodes: &[PlatformNode], need: &Need) -> Result<Vec<Slot>> {
             .ok_or_else(|| Error::Unavailable("no server can take the app right now".into()))?,
     };
     if need.one_node {
+        capacity(primary, need, replicas)?;
         return Ok(one(&primary.id));
     }
+    capacity(primary, need, 1)?;
     let mut order: Vec<&PlatformNode> = vec![primary];
     order.extend(ranked.iter().filter(|n| n.id != primary.id));
-    Ok((0..replicas)
-        .map(|r| Slot {
-            node_id: order[r as usize % order.len()].id.clone(),
-            replica: r,
-        })
-        .collect())
+    let want = need.memory_mb.map(u64::from).unwrap_or(DEFAULT_MEMORY_MB);
+    let mut remaining: HashMap<&str, u64> = order
+        .iter()
+        .map(|n| (n.id.as_str(), n.status.memory_available_mb))
+        .collect();
+    let mut slots = Vec::with_capacity(usize::from(replicas));
+    for replica in 0..replicas {
+        let node = (0..order.len())
+            .map(|offset| order[(usize::from(replica) + offset) % order.len()])
+            .find(|n| remaining[n.id.as_str()] >= want)
+            .ok_or_else(|| {
+                Error::Unavailable(
+                    "not enough measured memory for all replicas; queued until capacity is available".into(),
+                )
+            })?;
+        *remaining.get_mut(node.id.as_str()).unwrap() -= want;
+        slots.push(Slot {
+            node_id: node.id.clone(),
+            replica,
+        });
+    }
+    Ok(slots)
 }
 
 #[cfg(test)]
@@ -250,6 +279,16 @@ mod tests {
             online: true,
             drained: false,
             status: NodeStatus {
+                capacity: (mem > 0).then(|| capacity::Sample {
+                    epoch: "test".into(),
+                    measured_at: chrono::Utc::now().timestamp(),
+                    total_mb: mem + 512,
+                    available_mb: mem,
+                    workload_limit_mb: mem + 512 - capacity::os_reserve(mem + 512),
+                    host_ready: true,
+                    ..Default::default()
+                }),
+                memory_total_mb: if mem == 0 { 0 } else { mem + 512 },
                 memory_available_mb: mem,
                 docker_ok: true,
                 ..NodeStatus::default()
@@ -270,23 +309,26 @@ mod tests {
             ..Need::default()
         };
         let r = Reservations::default();
-        let t0 = Instant::now();
+        let t0 = chrono::Utc::now().timestamp();
         assert_eq!(ids(&r.place_at("d1", &nodes, &need, t0).unwrap()), ["main"]);
         assert_eq!(ids(&r.place_at("d2", &nodes, &need, t0).unwrap()), ["pi"]);
-        assert_eq!(r.on("main"), 512);
+        assert_eq!(r.on("main").unwrap(), 512);
 
         // Placing the same deployment again doesn't count itself.
         assert_eq!(ids(&r.place_at("d1", &nodes, &need, t0).unwrap()), ["main"]);
 
-        // A failed deploy frees its share at once; a started one after the
-        // grace period (by then the servers' reports include it).
+        // Failed work releases immediately; started work waits for inventory.
         r.finish_at("d2", false, t0);
-        assert_eq!(r.on("pi"), 0);
+        assert_eq!(r.on("pi").unwrap(), 0);
         r.finish_at("d1", true, t0);
         assert_eq!(ids(&r.place_at("d3", &nodes, &need, t0).unwrap()), ["pi"]);
         r.finish_at("d3", false, t0);
-        let later = t0 + RESERVATION_GRACE + Duration::from_secs(1);
-        assert_eq!(ids(&r.place_at("d4", &nodes, &need, later).unwrap()), ["main"]);
+        let later = t0 + 1;
+        let mut fresh = nodes.clone();
+        for node in &mut fresh {
+            node.status.capacity.as_mut().unwrap().measured_at = later;
+        }
+        assert_eq!(ids(&r.place_at("d4", &fresh, &need, later).unwrap()), ["main"]);
     }
 
     fn ids(s: &[Slot]) -> Vec<&str> {
@@ -318,7 +360,7 @@ mod tests {
         drained.drained = true;
         let mut nodocker = node("nodocker", "worker", 9000);
         nodocker.status.docker_ok = false;
-        let nodes = vec![node("main", "main", 100), hot, off, low, drained, nodocker];
+        let nodes = vec![node("main", "main", 512), hot, off, low, drained, nodocker];
         let need = Need {
             replicas: 1,
             ..Need::default()
@@ -391,6 +433,61 @@ mod tests {
             )
             .unwrap()),
             ["main"]
+        );
+    }
+
+    #[test]
+    fn admission_refuses_unknown_main_capacity() {
+        let nodes = vec![node("main", "main", 0)];
+        let error = place(
+            &nodes,
+            &Need {
+                replicas: 1,
+                ..Need::default()
+            },
+        );
+        assert!(error.is_err(), "unmeasured main must not be treated as unlimited");
+    }
+
+    #[test]
+    fn admission_checks_pinned_and_compose_memory_shortfalls() {
+        let mut main = node("main", "main", 64);
+        main.status.memory_total_mb = 1024;
+        let nodes = vec![main];
+        for need in [
+            Need {
+                pinned: Some("main".into()),
+                memory_mb: Some(256),
+                replicas: 1,
+                ..Need::default()
+            },
+            Need {
+                main_only: true,
+                memory_mb: Some(256),
+                replicas: 1,
+                ..Need::default()
+            },
+        ] {
+            assert!(
+                place(&nodes, &need).is_err(),
+                "explicit placement cannot bypass capacity"
+            );
+        }
+    }
+
+    #[test]
+    fn admission_counts_all_replicas_on_a_volume_owner() {
+        let mut main = node("main", "main", 400);
+        main.status.memory_total_mb = 2048;
+        let need = Need {
+            one_node: true,
+            replicas: 2,
+            memory_mb: Some(256),
+            ..Need::default()
+        };
+        assert!(
+            place(&[main], &need).is_err(),
+            "two instances need more than one instance's memory"
         );
     }
 }

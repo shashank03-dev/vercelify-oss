@@ -81,6 +81,35 @@ impl Engine {
         let Some((dep, placed, sidecars)) = serving(self, app_id, pr).await? else {
             return Err(Error::Conflict(format!("{} has no deployment to wake", app.name)));
         };
+        // Promise the whole wake before starting a sidecar or a replica.
+        let mut counts = std::collections::BTreeMap::<String, u64>::new();
+        for p in &placed {
+            *counts.entry(p.node.id.clone()).or_default() += 1;
+        }
+        let requests = self.store.with(|c| {
+            counts
+                .iter()
+                .map(|(node, count)| {
+                    let sample = crate::capacity::sample(c, node)?;
+                    let declared = sample
+                        .containers
+                        .iter()
+                        .filter(|i| i.owner == dep && !i.running)
+                        .fold(0u64, |sum, i| sum.saturating_add(i.limit_mb.unwrap_or(256)));
+                    Ok(crate::capacity::Request {
+                        node_id: node.clone(),
+                        owner: dep.clone(),
+                        kind: "wake".into(),
+                        memory_mb: declared.max(u64::from(app.runtime.memory_mb.unwrap_or(256)) * count)
+                            + crate::capacity::transfer_mb(sample.total_mb),
+                        disk_mb: 0,
+                        heavy: false,
+                    })
+                })
+                .collect::<Result<Vec<_>>>()
+        })?;
+        let mut permit = self.admit(&crate::ids::new_id("task"), &requests).await?;
+        permit.started();
         // Sidecars first, the routed containers last.
         for n in sidecars.iter().rev() {
             self.deployer.docker.start(n).await?;

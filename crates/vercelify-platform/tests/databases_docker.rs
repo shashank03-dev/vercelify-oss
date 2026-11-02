@@ -2,6 +2,7 @@
 //! create, health, backup, restore, tier moves, public ports, removal.
 //! Opt in with `VERCELIFY_DOCKER_TESTS=1`.
 
+mod common;
 use std::sync::Arc;
 use std::time::Duration;
 use vercelify_core::platform::*;
@@ -61,6 +62,7 @@ async fn databases_end_to_end() {
     store
         .tx(|c| vercelify_platform::nodes::ensure_main(c, "test", "http://127.0.0.1:7420", std::env::consts::ARCH))
         .unwrap();
+    let _inventory = common::inventory(store.clone(), dir.path()).await;
     let key = Arc::new(MasterKey::from_bytes(&[6u8; 32]).unwrap());
     let docker = Docker::default();
     let engine = Engine::new(
@@ -147,6 +149,9 @@ async fn databases_end_to_end() {
         ))
     };
     psql("CREATE TABLE notes (t text); INSERT INTO notes VALUES ('kept');");
+    // A restore must recreate real table/index work within the small PG preset,
+    // not only restore an empty schema or a single row.
+    psql("CREATE TABLE restore_load AS SELECT n, repeat(md5(n::text),64) AS payload FROM generate_series(1,20000) n; CREATE INDEX restore_load_n ON restore_load(n);");
     let b = engine.backup_database(&pg.id, &restic).await.expect("backup");
     assert_eq!(b.status, "succeeded");
     assert!(!b.snapshot.is_empty() && b.bytes > 0, "{b:?}");
@@ -156,6 +161,10 @@ async fn databases_end_to_end() {
         .await
         .expect("restore");
     assert_eq!(psql("SELECT t FROM notes;"), "kept");
+    assert_eq!(
+        psql("SELECT count(*) FROM restore_load WHERE n BETWEEN 1 AND 20000;"),
+        "20000"
+    );
     assert_eq!(
         store
             .with(|c| vercelify_platform::dbengine::backups(c, &pg.id))

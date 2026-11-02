@@ -165,6 +165,11 @@ slower. The second command pulls an immutable CI image locally and hands it off;
 use the OCI revision label instead of `--commit` if it contains the full source
 SHA. Image apps can also deploy pinned registry references directly.
 
+Server-tool control keys (PATH/HOME, loader/shell controls and names starting with
+DOCKER_, BUILDX_, BUILDKIT_, COMPOSE_ or GIT_) are reserved. Use an app-specific
+name and map it inside your container when needed; deployment errors name the key,
+never its value. Existing containers continue serving.
+
 Build-marked variables are supplied only to that build. Secret values use BuildKit
 secret mounts and are redacted from helper logs. A repository Dockerfile reads
 secrets from `RUN --mount=type=secret,id=env . /run/secrets/env; …`; only nonsecret
@@ -276,8 +281,29 @@ server's state on a worker, refreshed every 5 minutes. If the main server dies, 
   and paused builders are skipped. The next build starts it again with its
   cache intact. The daemon's `docker` build driver is unaffected. Restarting
   the agent starts a fresh idle grace period.
-- All containers share a memory-capped slice below the machine's RAM, so a leaking app
-  can't starve the agent, the network or SSH.
+- New deployments have enforced app budgets: 256 MiB and one CPU by default;
+  the experimental 1 GiB runtime-only profile defaults to 192 MiB and refuses
+  local builds/databases. Old and new instances both count during rollout.
+  Configure `runtime.memory_mb`/`cpus` for your actual workload. Compose shares
+  the declared app budget over one container per service, including sidecars.
+- Admission uses fresh RAM, accepted host grants, existing caps and their unused
+  growth, operation reservations and temporary disk. Pressure queues new work;
+  production is left serving. Missing/stale readings defer work. Swap is not
+  treated as more guaranteed RAM. Health's **Memory budget** card explains
+  measured use, unknown readings, commitments, reservations and headroom.
+  Older workers without capacity reports keep serving but need upgrading before
+  receiving new work. Managed VMs also need an updated host manager with fresh
+  grant and physical-memory reports.
+- New PostgreSQL databases use a 256 MiB/one-CPU small preset (20 connections,
+  32 MiB shared buffers, 2 MiB work memory and 32 MiB maintenance memory). Other
+  new database templates use 512 MiB/one CPU. Existing databases keep their
+  configuration. An explicit `PATCH /v1/platform/databases/{id}` with
+  `{ "memory_mb": 512 }` requests a different cap; applying it passes admission
+  and can restart that database. Cap exhaustion is possible; size for your load.
+- The serving agent uses a bounded dedicated BuildKit builder (default 2048 MiB,
+  one CPU), rather than the unbounded daemon build driver. Runtime-only hosts use
+  `build_concurrency = 0` and a selected computer/CI (§4). Existing unlimited
+  workloads are shown as estimates, without being stopped solely to lower caps.
 - Let rarely used apps **sleep**.
 - The engine cleans old images and build caches by itself, keeping what rollbacks need.
 - Turn on alerts (**Settings → Alerts** in the app) to hear about failed deployments,

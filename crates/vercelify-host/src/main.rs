@@ -157,7 +157,11 @@ fn serve() -> Result<(), String> {
         .build()
         .map_err(|e| e.to_string())?;
     rt.block_on(async move {
-        let status = Arc::new(Mutex::new(measure::host_status(&home, None)));
+        let status = Arc::new(Mutex::new(measure::host_status(
+            &home,
+            None,
+            m.environment().grant.as_ref(),
+        )));
         {
             let (m, status, home) = (m.clone(), status.clone(), home.clone());
             tokio::spawn(async move {
@@ -168,7 +172,7 @@ fn serve() -> Result<(), String> {
                         // bring the environment back to what the owner
                         // asked for, after a reboot or a crash.
                         m2.reconcile();
-                        measure::host_status(&h2, None)
+                        measure::host_status(&h2, None, m2.environment().grant.as_ref())
                     })
                     .await;
                     if let Ok(s) = s {

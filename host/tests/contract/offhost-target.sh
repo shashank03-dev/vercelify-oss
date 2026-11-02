@@ -5,15 +5,27 @@ here=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib-guard.sh
 . "$here/lib-guard.sh"
 work=/tmp/vfy-offhost-contract
+# Docker-in-Docker may put /tmp on tmpfs; image handoff staging belongs on disk.
+state=/var/lib/vfy-offhost-contract-state
 if [[ ${1:-} == stop ]]; then
-  [[ ! -f $work/pid ]] || kill "$(cat "$work/pid")" 2>/dev/null || true
+  if [[ -f $work/pid ]]; then
+    pid=$(cat "$work/pid")
+    if [[ $pid =~ ^[0-9]+$ && -r /proc/$pid/comm && $(cat "/proc/$pid/comm") == vercelify-agent ]]; then
+      kill "$pid" 2>/dev/null || true
+    fi
+  fi
   docker ps -aq --filter label=vercelify.app-name=offhost-contract | xargs -r docker rm -f >/dev/null
   docker rm -f vercelify-proxy >/dev/null 2>&1 || true
-  rm -rf "$work"
+  rm -rf "$work" "$state"
   exit
 fi
 : "${AGENT_BIN:?candidate agent binary required}"
-mkdir -p "$work/state" "$work/run"
+mkdir -p "$state" "$work/run"
+if [[ -e $work/state && ! -L $work/state ]]; then
+  echo 'Stop the old disposable target before restarting with persistent staging.' >&2
+  exit 1
+fi
+[[ -L $work/state ]] || ln -s "$state" "$work/state"
 cat > "$work/config.toml" <<CONF
 build_concurrency = 0
 docker_bin = "$work/docker"

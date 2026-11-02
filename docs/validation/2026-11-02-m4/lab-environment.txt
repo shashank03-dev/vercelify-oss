@@ -1,0 +1,9 @@
+Linux 6.8.0-147-generic aarch64 GNU/Linux
+Ubuntu 24.04.5 LTS
+Docker 29.9.2
+Next fixture sha256:35387f82398b559356ce1ac066122b31dc928fb3b8fb9b408f56d1f2587b1166 ["vfy/blog@sha256:35387f82398b559356ce1ac066122b31dc928fb3b8fb9b408f56d1f2587b1166"]
+Restart=always
+RestartUSec=3s
+               total        used        free      shared  buff/cache   available
+Mem:            3905         663         774           1        2659        3241
+Swap:           4095           0        4095

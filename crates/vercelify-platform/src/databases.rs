@@ -298,6 +298,7 @@ fn row(r: &Row, project_id: String) -> rusqlite::Result<Database> {
         image: r.get("image")?,
         node_id: r.get("node_id")?,
         internal_url: None,
+        memory_mb: r.get("memory_mb")?,
         public_port: r.get("public_port")?,
         public_bind: r.get("public_bind")?,
         desired: if r.get::<_, String>("desired")? == "stopped" {
@@ -409,8 +410,8 @@ fn insert(
     let ts = now();
     c.execute(
         "INSERT INTO databases (id, environment_id, name, kind, version, image, credentials, public_port, public_bind,
-                                container, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
+                                container, created_at, updated_at, memory_mb)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, ?12)",
         params![
             id,
             env.id,
@@ -424,7 +425,8 @@ fn insert(
             req.public_port,
             if req.public_port.is_some() { bind } else { "mesh" },
             container_name(name),
-            ts
+            ts,
+            if req.kind == DatabaseKind::Postgresql { 256 } else { 512 }
         ],
     )?;
     let tier = match req.tier.unwrap_or(StorageTier::Ssd) {
@@ -481,6 +483,17 @@ pub fn link(c: &Connection, key: &MasterKey, app: &str, db_name: &str, var: &str
 pub fn patch(c: &Connection, key: &MasterKey, id: &str, p: &DatabasePatch) -> Result<Database> {
     let d = get(c, key, id, false)?;
     let t = now();
+    if let Some(memory) = p.memory_mb {
+        if !(64..=65536).contains(&memory) {
+            return Err(Error::Invalid(
+                "database memory_mb must be between 64 and 65536 MiB".into(),
+            ));
+        }
+        c.execute(
+            "UPDATE databases SET memory_mb=?2,updated_at=?3 WHERE id=?1",
+            params![d.id, memory, t],
+        )?;
+    }
     if let Some(desired) = p.desired {
         let v = if desired == Desired::Stopped {
             "stopped"
@@ -635,7 +648,27 @@ pub fn spec(d: &Database, cred: &Credentials, mesh_ip: Option<&str>, hdd_path: O
         env: env(d.kind, cred),
         networks: vec![crate::deploy::project_network(&d.project_id)],
         aliases: vec![d.name.clone()],
-        command: command(d.kind),
+        memory_mb: d.memory_mb,
+        cpus: d.memory_mb.map(|_| 1.0),
+        command: if d.kind == DatabaseKind::Postgresql && d.memory_mb.is_some() {
+            Some(
+                [
+                    "postgres",
+                    "-c",
+                    "max_connections=20",
+                    "-c",
+                    "shared_buffers=32MB",
+                    "-c",
+                    "work_mem=2MB",
+                    "-c",
+                    "maintenance_work_mem=32MB",
+                ]
+                .map(String::from)
+                .to_vec(),
+            )
+        } else {
+            command(d.kind)
+        },
         mounts: vec![Mount {
             source: hdd_path.unwrap_or_else(|| volume_name(&d.name)),
             target: t.data_path.into(),
@@ -667,6 +700,32 @@ mod tests {
             tier: None,
             link_app: None,
         }
+    }
+
+    #[test]
+    fn new_postgres_is_capped_and_tuned_but_legacy_records_stay_unlimited() {
+        let store = Store::open_in_memory().unwrap();
+        let key = key();
+        let d = store
+            .tx(|c| create(c, &key, &req("small-pg", DatabaseKind::Postgresql)))
+            .unwrap();
+        let cred = store.with(|c| credentials(c, &key, &d.id)).unwrap();
+        let bounded = spec(&d, &cred, None, None);
+        assert_eq!(bounded.memory_mb, Some(256));
+        assert_eq!(bounded.cpus, Some(1.0));
+        let arguments = bounded.command.unwrap().join(" ");
+        assert!(arguments.contains("max_connections=20"));
+        assert!(arguments.contains("shared_buffers=32MB"));
+        store
+            .tx(|c| {
+                c.execute("UPDATE databases SET memory_mb=NULL WHERE id=?1", [&d.id])?;
+                Ok(())
+            })
+            .unwrap();
+        let legacy = store.with(|c| get(c, &key, &d.id, false)).unwrap();
+        let legacy = spec(&legacy, &cred, None, None);
+        assert_eq!(legacy.memory_mb, None);
+        assert_eq!(legacy.command, command(DatabaseKind::Postgresql));
     }
 
     #[test]

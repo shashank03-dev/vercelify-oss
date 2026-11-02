@@ -1,0 +1,13 @@
+{
+  "workspace_suites": 25,
+  "rust_passed": 749,
+  "rust_failed": 0,
+  "rust_ignored": 11,
+  "capacity_contracts": 15,
+  "linux_bats": 231,
+  "cockpit_unit": 135,
+  "demo_browser": 30,
+  "clippy": "passed",
+  "fmt": "passed",
+  "shellcheck": "passed"
+}

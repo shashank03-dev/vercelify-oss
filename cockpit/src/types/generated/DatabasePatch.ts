@@ -3,6 +3,10 @@ import type { Desired } from "./Desired";
 
 export type DatabasePatch = { desired?: Desired, 
 /**
+ * Explicitly change the enforced memory budget (MiB); starts/restarts pass admission.
+ */
+memory_mb?: number, 
+/**
  * 0 closes the public port.
  */
 public_port?: number, public_bind?: string, backup_schedule?: string, };

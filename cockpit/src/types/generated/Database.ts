@@ -15,7 +15,11 @@ public_port: number | null,
 /**
  * `mesh` or `all`.
  */
-public_bind: string, desired: Desired, container: string, 
+public_bind: string, 
+/**
+ * Enforced budget for new databases; legacy records remain uncapped.
+ */
+memory_mb?: number, desired: Desired, container: string, 
 /**
  * Cron schedule of its own backups (empty: only the nightly server backup).
  */

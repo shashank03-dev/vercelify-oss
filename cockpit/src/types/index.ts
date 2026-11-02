@@ -176,3 +176,8 @@ export type * from "./generated/OperationStatus";
 export type * from "./generated/Virtualization";
 export type * from "./generated/GrantChange";
 export type * from "./generated/EnvironmentPairing";
+
+export type * from "./generated/CapacityInventory";
+export type * from "./generated/CapacitySample";
+export type * from "./generated/MemoryAccount";
+export type * from "./generated/MemoryReport";

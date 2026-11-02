@@ -60,6 +60,7 @@ fn allowed_name(name: &str) -> bool {
 }
 
 pub struct ImageIdentity {
+    pub unpacked_bytes: u64,
     config: serde_json::Value,
     diff_ids: Vec<String>,
 }
@@ -234,7 +235,46 @@ pub fn sanitize(input: &Path, output: &Path, tag: &str, expected: &str, platform
     if diff_ids.len() != manifest.layers.len() {
         return Err(bad());
     }
+    // Hash the decoded rootfs too. A compressed archive's byte size alone
+    // cannot bound the space Docker will need to unpack it.
+    let mut unpacked_bytes = 0u64;
+    for (name, expected_diff) in manifest.layers.iter().zip(&diff_ids) {
+        let entry = entries.get(name).ok_or_else(bad)?;
+        file.seek(SeekFrom::Start(entry.offset))?;
+        let mut magic = [0; 4];
+        if entry.size >= 4 {
+            file.read_exact(&mut magic)?;
+        }
+        file.seek(SeekFrom::Start(entry.offset))?;
+        let input = (&mut file).take(entry.size);
+        let mut reader: Box<dyn Read + '_> = if magic[..2] == [0x1f, 0x8b] {
+            Box::new(flate2::read::MultiGzDecoder::new(input))
+        } else if magic == [0x28, 0xb5, 0x2f, 0xfd] {
+            let mut decoder = zstd::stream::read::Decoder::new(input)?;
+            // Bound decompressor allocations even for hostile large-window frames.
+            decoder.window_log_max(23)?;
+            Box::new(decoder)
+        } else {
+            Box::new(input)
+        };
+        let mut hash = Sha256::new();
+        loop {
+            let count = reader.read(&mut buffer)?;
+            if count == 0 {
+                break;
+            }
+            unpacked_bytes = unpacked_bytes.checked_add(count as u64).ok_or_else(bad)?;
+            if unpacked_bytes > 16 * 1024 * 1024 * 1024 {
+                return Err(Error::Invalid("image layers exceed the 16 GiB unpacked limit".into()));
+            }
+            hash.update(&buffer[..count]);
+        }
+        if format!("sha256:{:x}", hash.finalize()) != *expected_diff {
+            return Err(bad());
+        }
+    }
     Ok(ImageIdentity {
+        unpacked_bytes,
         config: config["config"].clone(),
         diff_ids,
     })

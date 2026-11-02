@@ -317,6 +317,13 @@ pub fn implicit_reads(dir: &Path, file: &str) -> Result<Vec<PathBuf>> {
         if !resolves_inside(dir, r) {
             return Err(outside("the file", r));
         }
+        // These files affect Compose itself before any container exists.
+        // Inspect keys only; never include their values in diagnostics.
+        let metadata = std::fs::metadata(r)?;
+        if metadata.len() > MAX_COMPOSE_TEXT as u64 {
+            return Err(Error::Invalid("Compose environment file exceeds 1 MiB".into()));
+        }
+        crate::env::parse_dotenv(&std::fs::read_to_string(r)?)?;
     }
     Ok(reads)
 }
@@ -602,7 +609,50 @@ fn server_file(what: String) -> Error {
     ))
 }
 
+#[derive(Clone, Copy)]
+pub struct Limits<'a> {
+    /// Aggregate budget for all services, including sidecars.
+    pub memory_mb: u32,
+    pub cpus: f32,
+    pub cgroup_parent: Option<&'a str>,
+}
+fn bounded_override(
+    services: &[String],
+    routed: &str,
+    env_file: &Path,
+    labels: &Labels,
+    project: &str,
+    volumes: &[String],
+    limits: Limits<'_>,
+) -> Result<String> {
+    let count = services.len() as u32;
+    if count == 0 || limits.memory_mb / count < 16 || !limits.cpus.is_finite() || limits.cpus <= 0.0 {
+        return Err(Error::Invalid(
+            "Compose budget must provide at least 16 MiB per service and a positive CPU limit".into(),
+        ));
+    }
+    let memory = limits.memory_mb / count;
+    let cpus = (f64::from(limits.cpus) * 1000.0 / f64::from(count)).floor() / 1000.0;
+    if cpus < 0.001 {
+        return Err(Error::Invalid(
+            "Compose CPU budget is too small for its services".into(),
+        ));
+    }
+    let mut yaml = override_yaml(services, routed, env_file, labels, project, volumes);
+    for service in services {
+        let header = format!("  {}:\n", q(service));
+        let mut bounded = format!("{header}    mem_limit: {memory}m\n    memswap_limit: {memory}m\n    cpus: {cpus:.3}\n    scale: 1\n    deploy:\n      replicas: 1\n      resources:\n        limits:\n          memory: {memory}m\n          cpus: '{cpus:.3}'\n");
+        if let Some(parent) = limits.cgroup_parent {
+            let _ = writeln!(bounded, "    cgroup_parent: {}", q(parent));
+        }
+        yaml = yaml.replacen(&header, &bounded, 1);
+    }
+    Ok(yaml)
+}
+
 pub struct Up<'a> {
+    pub limits: Limits<'a>,
+    pub build: bool,
     pub docker: &'a Docker,
     /// The checkout (repository root).
     pub dir: &'a Path,
@@ -725,6 +775,28 @@ pub fn check_build_inputs(config: &serde_json::Value, dir: &Path) -> Result<()> 
     Ok(())
 }
 
+/// Inline, image-only Compose does not need a serving-host builder. Unknown
+/// includes/extends remain conservative until the full resolved plan is checked.
+pub fn requires_build(raw: &str) -> Result<bool> {
+    use yaml_rust2::{Yaml, YamlLoader};
+    let docs = YamlLoader::load_from_str(raw).map_err(|e| Error::Invalid(e.to_string()))?;
+    if docs.len() != 1 {
+        return Err(Error::Invalid("Compose needs one document".into()));
+    }
+    let root = resolve_merges(&docs[0]);
+    if !matches!(root["include"], Yaml::BadValue | Yaml::Null) {
+        return Ok(true);
+    }
+    let Some(services) = root["services"].as_hash() else {
+        return Ok(true);
+    };
+    Ok(services.values().any(|s| {
+        !matches!(s["build"], Yaml::BadValue | Yaml::Null)
+            || !matches!(s["extends"], Yaml::BadValue | Yaml::Null)
+            || s["image"].as_str().is_none()
+    }))
+}
+
 /// Which service gets the domains: the app's choice; else one that publishes
 /// or exposes a port; else one called web/app/server/frontend; else the first
 /// by name.
@@ -826,7 +898,7 @@ async fn up_inner(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + 
     let override_path = work.join("compose.override.yml");
     std::fs::write(
         &override_path,
-        override_yaml(&services, &routed, &env_path, &u.labels, u.project, &volumes),
+        bounded_override(&services, &routed, &env_path, &u.labels, u.project, &volumes, u.limits)?,
     )?;
     if u.labels.pr.is_some() {
         let override_file = override_path.to_string_lossy();
@@ -858,17 +930,21 @@ async fn up_inner(u: Up<'_>, cancel: Cancel, log: &mut (dyn FnMut(&str, &str) + 
         &override_path.to_string_lossy(),
         "up",
         "--detach",
-        "--build",
+        if u.build { "--build" } else { "--no-build" },
         "--remove-orphans",
         "--wait",
         "--wait-timeout",
         &u.timeout.as_secs().to_string(),
     ]);
+    let mut command_env = u.env.to_vec();
+    if u.build {
+        command_env.push(("BUILDX_BUILDER".into(), crate::build::BUILDER.into()));
+    }
     let res = proc::stream_clean(
         Spec {
             bin: &u.docker.bin,
             args: &args,
-            env: u.env,
+            env: &command_env,
             cwd: Some(u.dir),
             timeout: u.timeout + Duration::from_secs(900),
         },
@@ -975,6 +1051,41 @@ mod tests {
         assert_eq!(container_of("vfy-shop", "web"), "vfy-shop-web-1");
         assert_eq!(env_line("A", "plain $x"), "A='plain $x'\n");
         assert_eq!(env_line("B", "it's\nme \"q\""), "B=\"it's\\nme \\\"q\\\"\"\n");
+    }
+
+    #[test]
+    fn compose_services_share_one_aggregate_budget() {
+        let services = vec!["web".into(), "worker".into(), "db".into()];
+        let labels = Labels {
+            app_id: "app_1",
+            app_name: "shop",
+            deployment_id: "dpl_1",
+            project_id: "prj_1",
+            pr: None,
+        };
+        let yaml = bounded_override(
+            &services,
+            "web",
+            Path::new("/app.env"),
+            &labels,
+            "vfy-shop",
+            &[],
+            Limits {
+                memory_mb: 512,
+                cpus: 1.0,
+                cgroup_parent: Some("vercelify.slice"),
+            },
+        )
+        .unwrap();
+        let docs = yaml_rust2::YamlLoader::load_from_str(&yaml).unwrap();
+        for name in services {
+            let service = &docs[0]["services"][name.as_str()];
+            assert_eq!(service["mem_limit"].as_str(), Some("170m"));
+            assert_eq!(service["memswap_limit"].as_str(), Some("170m"));
+            assert_eq!(service["deploy"]["replicas"].as_i64(), Some(1));
+            assert_eq!(service["deploy"]["resources"]["limits"]["cpus"].as_str(), Some("0.333"));
+            assert_eq!(service["cgroup_parent"].as_str(), Some("vercelify.slice"));
+        }
     }
 
     #[test]
@@ -1153,6 +1264,18 @@ mod tests {
     /// What Compose would read besides the compose file, found in the files
     /// themselves: the review's `.env` symlink, `include` and `extends` out
     /// of the checkout, however they are spelled.
+    #[test]
+    fn preview_dotenv_cannot_redirect_host_tools() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("compose.yml"), "services:\n  web:\n    image: alpine\n").unwrap();
+        for key in ["DOCKER_HOST", "BUILDX_BUILDER", "PATH", "LD_PRELOAD", "COMPOSE_FILE"] {
+            std::fs::write(dir.path().join(".env"), format!("{key}=private-test-value\n")).unwrap();
+            let e = implicit_reads(dir.path(), "compose.yml").unwrap_err();
+            assert!(e.to_string().contains(key));
+            assert!(!e.to_string().contains("private-test-value"));
+        }
+    }
+
     #[test]
     fn implicit_reads_stay_in_the_checkout() {
         use std::os::unix::fs::symlink;
@@ -1343,6 +1466,12 @@ mod tests {
         };
         let e = up(
             Up {
+                limits: Limits {
+                    memory_mb: 256,
+                    cpus: 1.0,
+                    cgroup_parent: None,
+                },
+                build: false,
                 docker: &docker,
                 dir: &checkout,
                 file: "docker-compose.yml",
@@ -1547,6 +1676,12 @@ mod tests {
         let env = vec![("GREETING".to_string(), "hi there".to_string())];
         let name = up(
             Up {
+                limits: Limits {
+                    memory_mb: 256,
+                    cpus: 1.0,
+                    cgroup_parent: None,
+                },
+                build: false,
                 docker: &docker,
                 dir: dir.path(),
                 file: "docker-compose.yml",

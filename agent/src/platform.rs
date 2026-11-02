@@ -57,7 +57,7 @@ impl Platform {
             git: cfg.git_bin.clone(),
             work_dir: cfg.state_dir.join("builds"),
             driver: Driver::parse(&cfg.build_driver),
-            memory: cfg.build_memory.clone(),
+            memory: Some(cfg.build_memory.clone().unwrap_or_else(|| "2048m".into())),
             timeout: Duration::from_secs(45 * 60),
         };
         let deployer = Deployer {
@@ -91,6 +91,7 @@ impl Platform {
     pub fn on_start(&self, cfg: &Config, host: &vercelify_core::HostInfo) {
         let url = format!("http://127.0.0.1:{}", cfg.port);
         let res = self.store.tx(|c| {
+            vercelify_platform::capacity::recover(c, chrono::Utc::now().timestamp())?;
             let n = vercelify_platform::deployments::fail_interrupted(c)? + vercelify_platform::offhost::interrupt(c)?;
             vercelify_platform::nodes::ensure_main(c, &host.hostname, &url, &host.arch)?;
             Ok(n)

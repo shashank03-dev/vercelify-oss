@@ -552,17 +552,66 @@ removed (`DELETE`). Removing a worker marks its mesh identity
 asks every 10 minutes) instead of registering it again as a new, undrained worker.
 Pairing the machine again clears the mark; revoking it on the mesh is separate.
 
-Servers report every minute, so two deploys close together would both see the same
-free memory. `placement::Reservations` places each deployment against the reports
-minus what other deployments hold, and holds its own share in the same step: released
-at once if the deploy started nothing, else 90 s after it ends (past the next report,
-which counts it). It lives in memory: after a restart nothing is mid-placement.
+Capacity admission (competitive M4) extends `placement::Reservations` with one
+SQLite ledger (`0009_capacity.sql`); builders, placement, uploads, database starts,
+restores, wakes and reconciler starts use the same ownership records. The main
+reports every 30 seconds and on requested refresh, independently of optional
+watching; workers report on their heartbeat. Samples older than 90 seconds,
+unknown memory/Docker state and stale configured host-manager grants defer new
+work. Pinned nodes, Compose and aggregate replicas have the same checks.
 
-Inside a Vercelify environment (§19) the agent's own battery and thermal readings are
-of virtual hardware. With `VERCELIFY_HOST_STATUS` set, the agent replaces them with the
-host manager's fresh (≤ 60 s) report of the physical computer; memory and processors
-stay the guest's. Compose apps run on the main server; previews run one instance on
-the app's server.
+Admission checks measured `MemAvailable` and a configured workload ceiling
+separately. Policy 1 keeps 384 MiB for OS/platform below 2500 MiB visible RAM,
+1024 MiB otherwise, plus 128 MiB safety; swap is not capacity. Existing workload
+caps/estimates include their unused growth above observed working memory. An
+in-flight promise receives credit for its matching visible containers, so observed
+usage and future cap growth are not charged twice. Old and new instances both
+count throughout a rollout. Idle BuildKit counts observed use; an active build
+promises its full configured budget. Temporary disk includes a 512 MiB recovery
+allowance, and one heavy operation per node uses the CPU/I/O slot.
+
+Reservations and placement identities survive restart. A completion or cancellation
+that may have started physical work waits for a newer inventory frame before
+release; interrupted heavy processes additionally reconcile against live inventory.
+No timer simply forgets a live allocation. Rejected work leaves serving services
+alone and explains the remaining budget. Work is queued or refused before its
+expensive stage; a capacity decision cannot predict arbitrary future workload peaks.
+
+New app deployments default to a real 256 MiB/one-CPU limit (192 MiB on the
+experimental 1 GiB profile). Compose divides the aggregate budget over its services,
+with one container per service, matching deployment/resource limits and a selected
+bounded BuildKit builder. New PostgreSQL databases use 256 MiB, one CPU,
+`max_connections=20`, `shared_buffers=32MB`, `work_mem=2MB` and
+`maintenance_work_mem=32MB`; other new database templates use 512 MiB/one CPU.
+Legacy databases retain their old spec hash and unlimited configuration until an
+explicit change. `DatabasePatch.memory_mb` changes a cap through admission; the
+engine never raises it automatically. Existing unlimited apps remain identified as
+estimates until a deployment explicitly recreates them. App/DB limits do not add
+swap allowance. A stopped dedicated builder can have its limits corrected without
+removing its retained cache; a running builder is left alone until its idle stop.
+
+Inside a Vercelify environment (§19), guest readings are bounded by the accepted
+host grant and fresh physical available memory/provider allowance, rather than
+treating the VM's RAM as the physical computer's spare RAM. Native Linux also
+honors the installed workload slice. No operation silently changes a host grant.
+`GET /v1/platform/capacity` and Health's memory card separate measured working use,
+cap commitments/growth, additional reservations, system availability and policy
+headroom. Missing observations stay unknown; explicit Docker/cgroup OOM evidence
+and timestamps are shown, without interpreting exit 137 as an OOM.
+
+Image uploads reserve archive copies before receiving bytes, stream-validate plain,
+gzip and bounded-window zstd layers against their uncompressed rootfs identities,
+then atomically resize the same promise before Docker load. The declared disk peak
+includes compressed content storage plus unpacked layers. Unpacked input is bounded
+to 16 GiB; a failed resize retains its previous promise and cannot publish the image.
+Restores require a successful database backup's recorded size, reserve staging and
+runtime overhead, and verify the staged byte count before changing live data.
+
+Application variables cannot override server-tool authority: PATH/HOME, loader/shell
+control keys and DOCKER_/BUILDX_/BUILDKIT_/COMPOSE_/GIT_ names are reserved. The API,
+legacy deployment resolution, local pack helper and preview Compose dotenv inputs
+validate this boundary without logging values. Ordinary multiline secrets remain
+supported. Serving production containers are not recreated solely for this policy.
 
 Replicas (`runtime.replicas`, 1–32): spread over usable servers, the app's own
 first, round robin; apps with volumes keep every replica on their server. Each replica
@@ -1190,7 +1239,13 @@ each deserializer; axum's `json` feature is off), the command line is parsed by 
 instead of with clap, and the worker's runtime API is one handler dispatching on the path
 (each axum handler costs several KiB). After M9c the agent measures 7.65 MiB as CI builds
 it (`cargo zigbuild`; other linkers give larger numbers, so budgets are checked that way).
-`panic = "abort"` would save more but turns a panicking task into a dead agent; not taken. `vercelify-mesh` measures 3.2 MiB, 1.1 MiB of it rustls with
+The competitive-roadmap M4 release profile uses `panic = "abort"` to keep admission
+and bounded archive decoding within the static budget. An unexpected Rust panic
+terminates the process; installed daemons rely on their service supervisor to
+restart and reconcile durable state. Docker workloads remain independent of the
+agent process. Development/tests retain unwinding. This policy does not guarantee
+an interrupted control-plane request succeeds; clients must retry after recovery.
+`vercelify-mesh` measures 3.2 MiB, 1.1 MiB of it rustls with
 webpki roots for `wss://` and `https://` through a tunnel, 0.3 MiB the userspace stack. CI builds the binaries of every pull request with
 `cargo zigbuild` and fails over budget, so growth shows up the commit it happens.
 

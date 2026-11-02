@@ -23,4 +23,12 @@ disk_free_bytes: number | null,
 /**
  * The computer is about to sleep or restart (an OS update), when known.
  */
-going_down: string | null, };
+going_down: string | null, 
+/**
+ * Fresh physical availability, not the guest's free RAM.
+ */
+memory_available_bytes?: number, 
+/**
+ * The accepted complete environment grant.
+ */
+environment_memory_bytes?: number, provider_overhead_bytes?: number, };

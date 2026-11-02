@@ -5,6 +5,8 @@
 
 import type {
   App,
+  CapacityInventory,
+  MemoryReport,
   AppCreate,
   AppDomain,
   AppPatch,
@@ -564,6 +566,34 @@ export function platformRoute(req: HttpRequest): unknown {
   const extra = runtimeRoute(seg, m, body, params);
   if (extra !== undefined) return extra;
 
+  if (seg[0] === "capacity" && m === "GET") {
+    return nodes.map((n): MemoryReport => {
+      const containers: CapacityInventory[] = apps.flatMap((a) => demoInstances(a).filter((i) => i.node_id === n.id).map((i): CapacityInventory => ({
+        id: i.container, owner: a.current_deployment_id!, category: "app", running: i.state === "running",
+        usage_mb: n.role === "main" ? 64 : null, limit_mb: a.runtime.memory_mb ?? 256,
+        oom_killed: false, finished_at: null, peak_mb: null, oom_events: null, cap_events: null,
+      })));
+      if (n.role === "main") for (const d of databases) containers.push({
+        id: d.container, owner: d.id, category: "database", running: d.desired === "running", usage_mb: 64,
+        limit_mb: 256, oom_killed: false, finished_at: null, peak_mb: null, oom_events: null, cap_events: null,
+      });
+      containers.push({ id: `${n.id}-proxy`, owner: "proxy", category: "platform", running: true, usage_mb: 24,
+        limit_mb: null, oom_killed: false, finished_at: null, peak_mb: null, oom_events: null, cap_events: null });
+      const total = n.status.memory_total_mb;
+      const available = n.status.memory_available_mb;
+      const reserve = total < 2500 ? 384 : 1024;
+      const committed = containers.filter((c) => c.running && ["app", "database"].includes(c.category)).reduce((sum, c) => sum + (c.limit_mb ?? 256), 0);
+      const growth = containers.filter((c) => c.running && ["app", "database"].includes(c.category)).reduce((sum, c) => sum + Math.max(0, (c.limit_mb ?? 256) - (c.usage_mb ?? 0)), 0);
+      return { node_id: n.id, name: n.name, policy_version: 1, profile: "Custom capacity", sample_age_secs: 2,
+        os_reserve_mb: reserve, safety_mb: 128, reason: null,
+        sample: { epoch: "demo", measured_at: Math.floor(Date.now() / 1000) - 2, total_mb: total, available_mb: available,
+          workload_limit_mb: total - reserve, disk_free_mb: 20 * 1024, host_ready: true, external_heavy: false, containers,
+          host_grant_mb: null, host_available_mb: null, provider_overhead_mb: null, host_oom_kills: null },
+        account: { available_mb: Math.max(0, available - 128 - growth), workload_remaining_mb: Math.max(0, total - reserve - 128 - committed),
+          reserved_mb: 0, growth_mb: growth, committed_mb: committed, disk_remaining_mb: 20 * 1024 - 512, heavy: false },
+      };
+    });
+  }
   if (seg[0] === "projects" && m === "GET") {
     return [{ ...project, app_count: apps.length, database_count: databases.length }];
   }

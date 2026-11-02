@@ -13,6 +13,8 @@ pub enum Error {
     Invalid(String),
     /// 503: a dependency (Docker, a worker, the disk) is not available.
     Unavailable(String),
+    /// 503: new work waits for measured resource capacity.
+    Capacity(String),
     /// 500: a bug or an unexpected failure.
     Internal(String),
 }
@@ -25,7 +27,7 @@ impl Error {
             Error::NotFound(_) => 404,
             Error::Conflict(_) => 409,
             Error::Invalid(_) => 400,
-            Error::Unavailable(_) => 503,
+            Error::Unavailable(_) | Error::Capacity(_) => 503,
             Error::Internal(_) => 500,
         }
     }
@@ -36,6 +38,7 @@ impl Error {
             | Error::Conflict(m)
             | Error::Invalid(m)
             | Error::Unavailable(m)
+            | Error::Capacity(m)
             | Error::Internal(m) => m,
         }
     }

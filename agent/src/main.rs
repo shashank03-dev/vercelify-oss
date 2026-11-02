@@ -9,6 +9,7 @@ pub const VERSION: &str = match option_env!("VERCELIFY_BUILD") {
     Some(v) => v,
     None => env!("CARGO_PKG_VERSION"),
 };
+mod capacity;
 mod cli;
 mod config;
 mod cron;
@@ -316,12 +317,14 @@ async fn serve(cfg: Config) {
                 }
             }
         });
+        // Admission always needs fresh inventory, including when optional
+        // background watching is disabled for an isolated deployment target.
+        tokio::spawn(platform_api::run_fleet(
+            p.clone(),
+            state.config.clone(),
+            state.collector.clone(),
+        ));
         if state.config.watch_interval_secs > 0 {
-            tokio::spawn(platform_api::run_fleet(
-                p.clone(),
-                state.config.clone(),
-                state.collector.clone(),
-            ));
             tokio::spawn(standby::run(p.clone(), state.config.clone()));
         }
     }

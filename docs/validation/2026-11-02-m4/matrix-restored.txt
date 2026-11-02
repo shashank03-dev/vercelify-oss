@@ -1,0 +1,13 @@
+total        used        free      shared  buff/cache   available
+Mem:            3905         550        2539           1         966        3355
+Swap:           4095           0        4095
+vfy-blog-cc5wwk9b Up 1 second
+vfy-w5-0xa84s17 Up Less than a second
+vfy-w4-mzhcarvh Up Less than a second
+vfy-w3-bban4zvy Up Less than a second
+vfy-w2-e9vn93v5 Up Less than a second
+vfy-w1-cdyp1kh9 Up 1 second
+vercelify-proxy Up 12 seconds
+cc4692eb0e5f529b88b4f0f538674037a39376d7029ba1c9ca3fd888bc6bc57e  /usr/local/bin/vercelify-agent
+
+Verified original routes: [{"app": "blog", "http": 200}, {"app": "w1", "http": 200}, {"app": "w2", "http": 200}, {"app": "w3", "http": 200}, {"app": "w4", "http": 200}, {"app": "w5", "http": 200}]

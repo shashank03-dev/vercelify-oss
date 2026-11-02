@@ -31,3 +31,7 @@ tempfile = "3"
 # What a compose file makes Compose read (include, extends, .env), checked
 # before Compose runs for a preview. 1.65 MSRV; no encoding_rs.
 yaml-rust2 = { version = "0.10.4", default-features = false }
+
+# Bounded streaming layer verification before Docker allocates unpack storage.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+zstd = { version = "0.13.3", default-features = false }

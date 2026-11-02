@@ -232,7 +232,12 @@ impl Docker {
             }
         }
         if let Some(m) = spec.memory_mb {
-            args.extend(["--memory".into(), format!("{m}m")]);
+            args.extend([
+                "--memory".into(),
+                format!("{m}m"),
+                "--memory-swap".into(),
+                format!("{m}m"),
+            ]);
         }
         if let Some(c) = spec.cpus {
             args.extend(["--cpus".into(), format!("{c}")]);

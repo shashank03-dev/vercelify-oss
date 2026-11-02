@@ -880,11 +880,80 @@ pub struct PlatformNode {
     pub instances: u32,
 }
 
+/// One observed container. Working memory and configured caps are different.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct CapacityInventory {
+    pub id: String,
+    pub owner: String,
+    pub category: String,
+    pub usage_mb: Option<u64>,
+    pub limit_mb: Option<u64>,
+    pub running: bool,
+    pub oom_killed: Option<bool>,
+    pub finished_at: Option<String>,
+    pub peak_mb: Option<u64>,
+    pub oom_events: Option<u64>,
+    pub cap_events: Option<u64>,
+}
+
+/// Complete capacity report from one agent epoch. Missing samples never mean zero.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
+#[serde(default)]
+#[ts(export)]
+pub struct CapacitySample {
+    pub epoch: String,
+    pub measured_at: i64,
+    pub total_mb: u64,
+    pub available_mb: u64,
+    pub workload_limit_mb: u64,
+    pub disk_free_mb: Option<u64>,
+    pub host_ready: bool,
+    pub external_heavy: bool,
+    pub containers: Vec<CapacityInventory>,
+    pub host_grant_mb: Option<u64>,
+    pub host_available_mb: Option<u64>,
+    pub provider_overhead_mb: Option<u64>,
+    pub host_oom_kills: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct MemoryAccount {
+    pub available_mb: u64,
+    pub workload_remaining_mb: u64,
+    pub reserved_mb: u64,
+    /// Unused portions of existing workload caps/estimates, above observed usage.
+    pub growth_mb: u64,
+    pub committed_mb: u64,
+    pub disk_remaining_mb: Option<u64>,
+    pub heavy: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[ts(export)]
+pub struct MemoryReport {
+    pub node_id: String,
+    pub name: String,
+    pub policy_version: u32,
+    pub profile: String,
+    pub sample_age_secs: Option<i64>,
+    pub os_reserve_mb: Option<u64>,
+    pub safety_mb: u64,
+    pub sample: Option<CapacitySample>,
+    pub account: Option<MemoryAccount>,
+    pub reason: Option<String>,
+}
+
 /// A server's resources and condition, from its heartbeat (design §8.3).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, TS)]
 #[serde(default)]
 #[ts(export)]
 pub struct NodeStatus {
+    /// Absent on older agents: new operations wait for an upgraded report.
+    #[ts(optional)]
+    pub capacity: Option<CapacitySample>,
     pub cpus: u32,
     pub memory_total_mb: u64,
     pub memory_available_mb: u64,
@@ -1219,6 +1288,10 @@ pub struct Database {
     pub public_port: Option<u16>,
     /// `mesh` or `all`.
     pub public_bind: String,
+    /// Enforced budget for new databases; legacy records remain uncapped.
+    #[serde(default)]
+    #[ts(optional)]
+    pub memory_mb: Option<u32>,
     pub desired: Desired,
     pub container: String,
     /// Cron schedule of its own backups (empty: only the nightly server backup).
@@ -1255,6 +1328,9 @@ pub struct DatabaseCreate {
 pub struct DatabasePatch {
     #[ts(optional)]
     pub desired: Option<Desired>,
+    /// Explicitly change the enforced memory budget (MiB); starts/restarts pass admission.
+    #[ts(optional)]
+    pub memory_mb: Option<u32>,
     /// 0 closes the public port.
     #[ts(optional)]
     pub public_port: Option<u16>,

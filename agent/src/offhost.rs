@@ -16,7 +16,7 @@ use serde_json::json;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use vercelify_core::platform::{BuildJob, LocalBuildRequest};
-use vercelify_platform::{artifact, deployments, offhost, proc};
+use vercelify_platform::{artifact, capacity, deployments, ids::new_id, offhost, proc};
 
 #[derive(Deserialize)]
 pub struct Lease {
@@ -99,6 +99,21 @@ pub async fn upload(
         .and_then(|v| v.strip_prefix("Bearer "))
         .unwrap_or("")
         .to_string();
+    p.store
+        .with(|c| offhost::authorize(c, &id, &actor.id, query.generation, offhost::timestamp()))?;
+    let main_id = p.store.with(vercelify_platform::nodes::main)?.id;
+    let total = p.store.with(|c| capacity::sample(c, &main_id))?.total_mb;
+    let mut resources = capacity::Request {
+        node_id: main_id,
+        owner: format!("upload:{id}:{}", query.generation),
+        kind: "upload".into(),
+        memory_mb: if total <= 1280 { 240 } else { 256 },
+        disk_mb: bytes.saturating_mul(2).div_ceil(1_048_576),
+        heavy: true,
+    };
+    // Each HTTP attempt owns a distinct guard. A failed duplicate attempt
+    // must never release the promise belonging to the original connection.
+    let mut permit = p.engine.admit(&new_id("task"), &[resources.clone()]).await?;
     let dir = s.config.state_dir.join("build-uploads");
     tokio::fs::create_dir_all(&dir)
         .await
@@ -127,6 +142,7 @@ pub async fn upload(
     let job = p
         .store
         .tx(|c| offhost::begin_upload(c, &id, &actor.id, query.generation, offhost::timestamp()))?;
+    permit.started();
     let result = async {
         let raw = artifact::private_upload(&dir)?;
         let safe = artifact::private_upload(&dir)?;
@@ -168,14 +184,19 @@ pub async fn upload(
         let platform = job.platform.clone();
         // Move the guards too: a disconnected HTTP future cannot leave a
         // background sanitizer creating a new file after its guard was dropped.
-        let (_raw, safe, identity) = tokio::task::spawn_blocking(move || -> vercelify_platform::Result<_> {
+        let (_raw, safe, identity, permit) = tokio::task::spawn_blocking(move || -> vercelify_platform::Result<_> {
             let identity = artifact::sanitize(raw.path(), safe.path(), &tag, &digest, &platform)?;
-            Ok((raw, safe, identity))
+            Ok((raw, safe, identity, permit))
         })
         .await
         .map_err(|e| AppError::internal(e.to_string()))??;
         p.store
             .with(|c| offhost::authorize(c, &id, &actor.id, query.generation, offhost::timestamp()))?;
+        resources.disk_mb = bytes
+            .saturating_mul(3)
+            .saturating_add(identity.unpacked_bytes.saturating_mul(2))
+            .div_ceil(1_048_576);
+        permit.resize(&[resources])?;
         let loaded = p
             .engine
             .deployer

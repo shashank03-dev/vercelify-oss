@@ -352,6 +352,51 @@ Physical x86 qualification remains unmeasured.
 Raw samples, workload scripts, binary hashes and qualification boundaries:
 [M3 validation](../validation/2026-11-02-m3/VALIDATION.md).
 
+### Re-measured for M4 admission, 3 November 2026 (Asia/Kolkata)
+
+Same four-GiB ARM lab VM, six original apps and §6 sampling method: two-minute
+settle, twelve samples at six-second intervals (plus collection time), BuildKit
+and the disposable Docker daemon stopped. Existing app containers were preserved;
+new default caps do not silently recreate legacy apps for this comparison.
+
+| Median MiB | M3 builder stopped | M4 builder stopped |
+| --- | ---: | ---: |
+| System used (range) | 685.5 (674–705) | 633.5 (623–650) |
+| Agent RSS | 8.38 | 7.70 |
+| Mesh RSS | 2.90 | 2.90 |
+| Traefik RSS | 91.74 | 79.45 |
+| dockerd / containerd RSS | 107.85 / 50.36 | 101.23 / 48.34 |
+| All shim RSS | 75.49 | 73.85 |
+| BuildKit RSS | 0 | 0 |
+
+This is one matched-workload observation. Several unchanged daemon RSS values
+also fell; the 52 MiB system-used difference cannot be attributed to admission or
+promised as a saving. Physical laptop M4 measurements remain **unmeasured**: it
+is offline, and the user selected lab continuation. Declared runtime-only 1/2/4
+GiB qualification is recorded separately from this steady-state comparison;
+cached-image results do not qualify cold downloads, arbitrary apps or local builds.
+
+Each separate runtime profile ran three 60-second rollouts and one 60-second
+post-reboot load run, four clients paced at 250 ms, one cached pinned Next app,
+192 MiB per instance, one CPU and the default ten-second drain. Builds, swap and
+databases were disabled.
+
+| VM RAM | Requests across four runs | Failures | Minimum sampled available MiB | Kernel OOM-kill delta |
+| --- | ---: | ---: | ---: | ---: |
+| 1 GiB (experimental) | 3,792 | 0 | 318.5 | 0 |
+| 2 GiB | 3,780 | 0 | 1,255.7 | 0 |
+| 4 GiB | 3,743 | 0 | 3,094.1 | 0 |
+
+This qualifies the recorded cached-image serving/load observations only. Reboot
+retained a superseded version alongside the current one; admission counted both
+192 MiB caps. M6 must address this cleanup gap. A separate one-GiB zero-drain
+attempt had four failures in its second 948-request rollout and is not qualified.
+The one-GiB configuration remains experimental. Four-GiB RAM, original swap/config
+and all six original HTTP routes were verified restored after the matrix.
+
+Scripts, raw samples, binary hashes, Docker regressions and profile boundaries:
+[M4 validation](../validation/2026-11-02-m4/VALIDATION.md).
+
 ## 7. Feature verdicts after validation
 
 ### 7.1 Your computer builds, your server serves — build early

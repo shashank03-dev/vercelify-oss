@@ -35,3 +35,7 @@ lto = "fat"
 codegen-units = 1
 strip = true
 opt-level = "z"
+# Release processes terminate on an unexpected Rust panic. Supervised daemons
+# recover their journaled state on restart; Docker apps keep serving separately.
+# Omitting the unwinder keeps the full platform within the static-agent budget.
+panic = "abort"

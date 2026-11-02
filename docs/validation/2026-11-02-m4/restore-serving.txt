@@ -1,0 +1,10 @@
+a65591d352f864dae445b3d7e99343dae427d9827615329a95e43238e8c76011
+
+running 1 test
+test databases_end_to_end ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 24.39s
+
+{"requests": 234, "failures": 0, "minimum_available_mib": 3146.671875, "oom_kill_delta": 0, "host_samples": [{"time": 1793650865.1177397, "available_kib": 3388636, "oom_kill": 0}, {"time": 1793650866.140124, "available_kib": 3328528, "oom_kill": 0}, {"time": 1793650867.1671515, "available_kib": 3326512, "oom_kill": 0}, {"time": 1793650868.1870668, "available_kib": 3326512, "oom_kill": 0}, {"time": 1793650869.2030113, "available_kib": 3354080, "oom_kill": 0}, {"time": 1793650870.2501712, "available_kib": 3321892, "oom_kill": 0}, {"time": 1793650871.278948, "available_kib": 3287832, "oom_kill": 0}, {"time": 1793650872.321322, "available_kib": 3262308, "oom_kill": 0}, {"time": 1793650873.3513436, "available_kib": 3349084, "oom_kill": 0}, {"time": 1793650874.4220634, "available_kib": 3348580, "oom_kill": 0}, {"time": 1793650875.5009344, "available_kib": 3307748, "oom_kill": 0}, {"time": 1793650876.547845, "available_kib": 3299136, "oom_kill": 0}, {"time": 1793650877.6028173, "available_kib": 3323112, "oom_kill": 0}, {"time": 1793650878.6525366, "available_kib": 3300964, "oom_kill": 0}, {"time": 1793650879.7162244, "available_kib": 3300976, "oom_kill": 0}, {"time": 1793650880.7870634, "available_kib": 3300672, "oom_kill": 0}, {"time": 1793650881.8533804, "available_kib": 3271684, "oom_kill": 0}, {"time": 1793650882.918811, "available_kib": 3290544, "oom_kill": 0}, {"time": 1793650883.9616244, "available_kib": 3295952, "oom_kill": 0}, {"time": 1793650885.014614, "available_kib": 3308232, "oom_kill": 0}, {"time": 1793650886.0530913, "available_kib": 3264748, "oom_kill": 0}, {"time": 1793650887.0927823, "available_kib": 3258936, "oom_kill": 0}, {"time": 1793650888.1228518, "available_kib": 3222192, "oom_kill": 0}, {"time": 1793650889.1662204, "available_kib": 3246596, "oom_kill": 0}]}
+PASS: PostgreSQL table/index and Valkey restores preserve the unchanged serving app
+vfy-m4-restore-serving

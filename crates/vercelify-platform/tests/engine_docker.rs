@@ -3,6 +3,7 @@
 //! container. Opt in with `VERCELIFY_DOCKER_TESTS=1` (needs Docker and the
 //! node, caddy and traefik images or network access to pull them).
 
+mod common;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -173,6 +174,12 @@ async fn deploy_redeploy_rollback_recover() {
             )
         })
         .unwrap();
+    let _inventory = common::inventory(store_.clone(), dir.path()).await;
+    // This fixture builds tiny static/Node images, with a declared 1 GiB
+    // dedicated builder so admission and Docker enforce the same budget.
+    let mut builder = builder;
+    builder.driver = Driver::Container;
+    builder.memory = Some("1024m".into());
     let engine = Engine::new(
         store_.clone(),
         key.clone(),
@@ -721,6 +728,38 @@ async fn deploy_redeploy_rollback_recover() {
     body_of("kv.test.localhost", "inline http://kv.test.localhost tok").await;
     let kv = store_.tx(|c| apps::delete(c, &inline.id)).unwrap();
     engine.cleanup_app(&kv, true, &[]).await;
+
+    // A wake storm shares the same durable resource account. Duplicate callers
+    // may be refused while the first start settles; they must not multiply it.
+    let expected_replicas = store_.with(|c| apps::get(c, &app.id)).unwrap().runtime.replicas as usize;
+    engine.sleep(&app.id, None).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(4)).await;
+    let mut wakes = tokio::task::JoinSet::new();
+    for _ in 0..16 {
+        let engine = engine.clone();
+        let id = app.id.clone();
+        wakes.spawn(async move { engine.wake(&id, None).await });
+    }
+    let mut succeeded = 0;
+    while let Some(result) = wakes.join_next().await {
+        match result.unwrap() {
+            Ok(()) => succeeded += 1,
+            Err(vercelify_platform::Error::Capacity(_) | vercelify_platform::Error::Conflict(_)) => {}
+            other => panic!("unexpected wake result: {other:?}"),
+        }
+    }
+    assert!(succeeded > 0, "at least one wake must finish");
+    body_of("web.test.localhost", "version two").await;
+    assert_eq!(
+        docker
+            .list_managed()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|c| c.name.starts_with("vfy-web-") && c.state == "running")
+            .count(),
+        expected_replicas
+    );
 
     // Clean up.
     for c in docker.list_managed().await.unwrap() {

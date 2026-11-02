@@ -1,0 +1,25 @@
+START 1 GiB: three cached runtime rollout runs, then reboot
+PASS 1 GiB runtime run 1: {"requests": 948, "failures": 0, "duration_seconds": 60, "concurrency": 4, "per_worker_interval_seconds": 0.25, "latency_ms_median": 5.633145500006265, "latency_ms_p95": 12.613666999996553}
+Traceback (most recent call last):
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-02-m4/profile-matrix.py", line 142, in <module>
+    runs.append(serving.result())
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/concurrent/futures/_base.py", line 445, in result
+    return self.__get_result()
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/concurrent/futures/_base.py", line 390, in __get_result
+    raise self._exception
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/concurrent/futures/thread.py", line 52, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-02-m4/profile-matrix.py", line 96, in load
+    assert result['failures'] == 0, result
+AssertionError: {'requests': 948, 'failures': 4, 'duration_seconds': 60, 'concurrency': 4, 'per_worker_interval_seconds': 0.25, 'latency_ms_median': 5.38881250000145, 'latency_ms_p95': 11.322624999991149}
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-02-m4/profile-matrix.py", line 164, in <module>
+    boot(4)
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-02-m4/profile-matrix.py", line 60, in boot
+    until('fresh capacity', lambda: next((r for r in api('/capacity')
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-02-m4/profile-matrix.py", line 46, in until
+    time.sleep(1)
+KeyboardInterrupt

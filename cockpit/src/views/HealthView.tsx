@@ -16,6 +16,8 @@ import {
   Thermometer,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { MemoryCard } from "../components/Memory";
+import { platform } from "../lib/platform";
 import { ActivityCard } from "../components/Activity";
 import { HardwareCard, HistoryCard, UptimeCard } from "../components/Hardware";
 import { useToast } from "../components/Toast";
@@ -30,6 +32,7 @@ export function HealthView() {
   // `docker stats` samples every container for ~2 s: keep it modest on a Pi.
   const containers = usePoll(() => agent.containers(true), 15_000);
   const services = usePoll(() => agent.services(), 10_000);
+  const memory = usePoll(() => platform.memory(), 15_000);
   const s = sys.data;
   const history = useHistory(s);
 
@@ -55,6 +58,7 @@ export function HealthView() {
       <ErrorNote error={sys.error} className="mb-4" />
 
       <Vitals s={s} history={history} />
+      <MemoryCard reports={memory.data} error={memory.error} loading={memory.loading} />
 
       <div className="mb-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
         <HardwareCard s={s} />

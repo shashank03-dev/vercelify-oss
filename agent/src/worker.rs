@@ -54,7 +54,8 @@ pub async fn node_status(cfg: &Config, collector: &vercelify_core::collect::Coll
         .status()
         .await
         .is_ok_and(|s| s.success());
-    let own = NodeStatus {
+    let mut own = NodeStatus {
+        capacity: None,
         cpus: cpu.cores,
         memory_total_mb: mem.total_bytes / 1_048_576,
         memory_available_mb: mem.available_bytes / 1_048_576,
@@ -65,6 +66,7 @@ pub async fn node_status(cfg: &Config, collector: &vercelify_core::collect::Coll
         http_port: cfg.proxy_http_port,
         agent_version: crate::VERSION.into(),
     };
+    own.capacity = crate::capacity::collect(cfg, &own).await;
     match &cfg.host_status {
         Some(src) => with_host(
             own,
@@ -92,17 +94,40 @@ async fn read_host_status(src: &str) -> Option<HostStatus> {
 }
 
 /// Inside a VM the battery and thermal readings are of virtual hardware:
-/// the computer's own (fresh) ones replace them. Memory and processors stay
-/// the guest's, which is what apps here can use. A missing or stale report
-/// (the host manager stopped) leaves the guest's own view.
+/// the computer's own fresh ones replace them. Observed guest memory stays
+/// unchanged; the accepted grant and actual physical availability additionally
+/// bound admission. Missing host-manager data defers new work.
 fn with_host(mut own: NodeStatus, host: Option<&HostStatus>, now: i64) -> NodeStatus {
     match host.filter(|h| h.fresh(now)) {
         Some(h) => {
             own.on_battery = h.on_battery;
             own.battery_percent = h.battery_percent;
             own.thermal_paused |= h.thermal_pressure;
+            if let Some(capacity) = &mut own.capacity {
+                capacity.host_ready = h.going_down.is_none()
+                    && h.memory_available_bytes.is_some()
+                    && h.environment_memory_bytes.is_some_and(|m| m > 0)
+                    && h.provider_overhead_bytes.is_some();
+                capacity.host_grant_mb = h.environment_memory_bytes.map(|b| b / 1_048_576);
+                capacity.host_available_mb = h.memory_available_bytes.map(|b| b / 1_048_576);
+                capacity.provider_overhead_mb = h.provider_overhead_bytes.map(|b| b.div_ceil(1_048_576));
+                if let Some(grant) = capacity.host_grant_mb {
+                    capacity.workload_limit_mb = capacity
+                        .workload_limit_mb
+                        .min(grant.saturating_sub(vercelify_platform::capacity::os_reserve(grant)));
+                }
+                capacity.disk_free_mb = capacity
+                    .disk_free_mb
+                    .zip(h.disk_free_bytes)
+                    .map(|(guest, physical)| guest.min(physical / 1_048_576));
+            }
         }
-        None => tracing::debug!("no fresh report from the host manager"),
+        None => {
+            if let Some(capacity) = &mut own.capacity {
+                capacity.host_ready = false;
+            }
+            tracing::debug!("no fresh report from the host manager");
+        }
     }
     own
 }
@@ -149,6 +174,51 @@ mod host_tests {
 
         assert_eq!(with_host(own.clone(), Some(&host), 2_000), own, "stale: ignored");
         assert_eq!(with_host(own.clone(), None, 1_010), own);
+    }
+
+    fn capacity_node() -> NodeStatus {
+        NodeStatus {
+            memory_total_mb: 2048,
+            memory_available_mb: 1024,
+            capacity: Some(vercelify_core::platform::CapacitySample {
+                epoch: "boot".into(),
+                measured_at: 100,
+                total_mb: 2048,
+                available_mb: 1024,
+                workload_limit_mb: 1664,
+                host_ready: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn admission_cannot_use_guest_ram_when_the_host_report_is_missing_or_stale() {
+        let own = capacity_node();
+        assert!(!with_host(own.clone(), None, 100).capacity.unwrap().host_ready);
+        let old = HostStatus {
+            measured_at: 1,
+            ..Default::default()
+        };
+        assert!(!with_host(own, Some(&old), 100).capacity.unwrap().host_ready);
+    }
+
+    #[test]
+    fn accepted_grant_and_physical_availability_bound_guest_admission() {
+        let host = HostStatus {
+            measured_at: 100,
+            memory_available_bytes: Some(512 * 1_048_576),
+            environment_memory_bytes: Some(1024 * 1_048_576),
+            provider_overhead_bytes: Some(256 * 1_048_576),
+            ..Default::default()
+        };
+        let s = with_host(capacity_node(), Some(&host), 100).capacity.unwrap();
+        assert!(s.host_ready);
+        assert_eq!(s.available_mb, 1024, "observed guest availability is not rewritten");
+        assert_eq!(s.host_available_mb, Some(512));
+        assert_eq!(s.workload_limit_mb, 640);
+        assert_eq!(s.provider_overhead_mb, Some(256));
     }
 }
 

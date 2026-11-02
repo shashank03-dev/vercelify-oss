@@ -44,6 +44,15 @@ pub fn env_key(k: &str) -> Result<()> {
         && k.len() <= 256
         && k.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
         && !k.as_bytes()[0].is_ascii_digit();
+    if matches!(k, "PATH" | "HOME" | "BASH_ENV" | "ENV" | "IFS")
+        || ["LD_", "DYLD_", "DOCKER_", "BUILDX_", "BUILDKIT_", "COMPOSE_", "GIT_"]
+            .iter()
+            .any(|prefix| k.starts_with(prefix))
+    {
+        return invalid(format!(
+            "{k} is reserved for server tools; use an app-specific variable name"
+        ));
+    }
     if ok {
         Ok(())
     } else {
@@ -225,7 +234,23 @@ mod tests {
         for ok in ["A", "DATABASE_URL", "_X", "a1"] {
             env_key(ok).unwrap();
         }
-        for bad in ["", "1A", "A-B", "A B", "A=B"] {
+        for bad in [
+            "",
+            "1A",
+            "A-B",
+            "A B",
+            "A=B",
+            "PATH",
+            "HOME",
+            "LD_PRELOAD",
+            "DYLD_LIBRARY_PATH",
+            "DOCKER_HOST",
+            "DOCKER_CONTEXT",
+            "BUILDX_BUILDER",
+            "BUILDKIT_HOST",
+            "GIT_CONFIG_GLOBAL",
+            "BASH_ENV",
+        ] {
             assert!(env_key(bad).is_err(), "{bad}");
         }
         assert!(env_value("K", &"x".repeat(MAX_ENV_VALUE + 1)).is_err());

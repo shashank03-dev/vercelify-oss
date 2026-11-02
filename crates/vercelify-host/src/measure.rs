@@ -212,7 +212,13 @@ pub fn capabilities(data_dir: &Path, virtualization: Virtualization, provider: O
 }
 
 /// What the guest's agent is told (every 20 s).
-pub fn host_status(data_dir: &Path, going_down: Option<String>) -> HostStatus {
+pub fn host_status(
+    data_dir: &Path,
+    going_down: Option<String>,
+    grant: Option<&vercelify_core::host::EnvironmentGrant>,
+) -> HostStatus {
+    let mut sys = sysinfo::System::new();
+    sys.refresh_memory();
     let (on_battery, battery_percent) = power();
     HostStatus {
         measured_at: chrono::Utc::now().timestamp(),
@@ -221,6 +227,9 @@ pub fn host_status(data_dir: &Path, going_down: Option<String>) -> HostStatus {
         thermal_pressure: thermal_pressure(),
         disk_free_bytes: disk_free(data_dir),
         going_down,
+        memory_available_bytes: (sys.total_memory() > 0).then_some(sys.available_memory()),
+        environment_memory_bytes: grant.map(|g| g.memory_bytes),
+        provider_overhead_bytes: grant.map(|_| vercelify_core::host::PROVIDER_OVERHEAD),
     }
 }
 

@@ -333,6 +333,7 @@ pub fn resolve_for_deploy(
         check_preview(&res.vars)?;
     }
     for (k, v) in res.vars.iter_mut() {
+        validate::env_key(k)?;
         if database_reference(&v.value) {
             let filled = crate::databases::resolve_references_at(c, key, &v.value, main_ip)
                 .map_err(|e| Error::Invalid(format!("{k}: {}", e.message())))?;
@@ -607,6 +608,39 @@ mod tests {
         // Another master key can't read them.
         let other = MasterKey::from_bytes(&[1u8; 32]).unwrap();
         assert!(s.with(|c| list(c, &other, VarScope::App, &app, true)).is_err());
+    }
+
+    #[test]
+    fn legacy_variables_cannot_redirect_deployment_tools() {
+        let (store, app, _, _) = setup();
+        let key = key();
+        store
+            .tx(|c| {
+                put(
+                    c,
+                    &key,
+                    VarScope::App,
+                    &app,
+                    &EnvVarsPut {
+                        vars: vec![input("APP_ENDPOINT", "private-test-value")],
+                        replace: false,
+                    },
+                )
+            })
+            .unwrap();
+        store
+            .tx(|c| {
+                c.execute("UPDATE env_vars SET key='DOCKER_HOST'", [])?;
+                Ok(())
+            })
+            .unwrap();
+        let error = store
+            .with(|c| resolve_for_deploy(c, &key, &app, false, None))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(error.contains("DOCKER_HOST"));
+        assert!(!error.contains("private-test-value"));
     }
 
     #[test]

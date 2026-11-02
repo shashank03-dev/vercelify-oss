@@ -6,6 +6,7 @@ import type { CockpitSettings } from "../types";
 import { call, streamLines, type HttpRequest } from "./transport";
 import type {
   App,
+  MemoryReport,
   AppCreate,
   AppInstance,
   AppDomain,
@@ -221,6 +222,7 @@ export function platformOn(server?: string) {
     convertGithubApp: (code: string, state: string) => req<GitSource>("POST", "/github-app/convert", { code, state }),
     domain: () => req<PlatformDomain>("GET", "/settings/domain"),
     setDomain: (d: PlatformDomain) => req<PlatformDomain>("PUT", "/settings/domain", d),
+    memory: () => req<MemoryReport[]>("GET", "/capacity"),
     nodes: () => req<PlatformNode[]>("GET", "/nodes"),
     patchNode: (id: string, p: NodePatch) => req<PlatformNode>("PATCH", `/nodes/${q(id)}`, p),
     removeNode: (id: string) => req<unknown>("DELETE", `/nodes/${q(id)}`),

@@ -30,7 +30,7 @@ impl From<vercelify_platform::Error> for AppError {
             E::NotFound(m) => AppError::not_found(m),
             E::Conflict(m) => AppError::conflict(m),
             E::Invalid(m) => AppError::bad_request(m),
-            E::Unavailable(m) => AppError::unavailable(m),
+            E::Unavailable(m) | E::Capacity(m) => AppError::unavailable(m),
             E::Internal(m) => AppError::internal(m),
         }
     }
@@ -38,6 +38,7 @@ impl From<vercelify_platform::Error> for AppError {
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .route("/platform/capacity", get(memory_report))
         .route("/platform/projects", get(project_list).post(project_create))
         .route(
             "/platform/projects/{id}",
@@ -172,6 +173,15 @@ fn changed(s: &AppState, topic: &str) {
             }
         }
     }
+}
+
+async fn memory_report(State(s): State<AppState>) -> ApiResult<Vec<vercelify_core::platform::MemoryReport>> {
+    Ok(Json(
+        platform(&s)?
+            .store
+            .call(|c| vercelify_platform::capacity::reports(c, chrono::Utc::now().timestamp()))
+            .await?,
+    ))
 }
 
 // ----- projects -------------------------------------------------------------
@@ -687,7 +697,15 @@ pub async fn run_fleet(
                 Err(e) => tracing::warn!("image registry: {e}"),
             }
         }
-        tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        p.engine.capacity_updated();
+        tokio::select! {
+            () = p.engine.capacity_refresh.notified() => {
+                // Coalesce pressure/wake storms instead of continuously spawning
+                // Docker metadata processes while a request cannot fit.
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            },
+            () = tokio::time::sleep(std::time::Duration::from_secs(30)) => {},
+        }
     }
 }
 
