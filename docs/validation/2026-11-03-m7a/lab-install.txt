@@ -1,0 +1,1 @@
+{"ready": true, "schema": 12, "backup": "/var/lib/vercelify/validation-backups/m7a-20261103T113653306264Z", "binary_sha256": "407504939294f46fb5987998e68596aa4db6a76d6ba8c4e8b37af433b13d0503"}

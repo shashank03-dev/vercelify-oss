@@ -38,6 +38,7 @@ mod powerguard;
 mod project;
 mod projects;
 mod registry_proxy;
+mod restore_drills;
 mod routes;
 mod routing;
 mod runtime_api;
@@ -288,6 +289,7 @@ async fn serve(cfg: Config) {
         // Tests run with the background loops off (watch interval 0).
         let every = if state.config.watch_interval_secs == 0 { 0 } else { 30 };
         p.spawn(Duration::from_secs(every));
+        tokio::spawn(restore_drills::run(p.clone(), state.config.clone()));
         if every > 0 {
             tokio::spawn(platform_api::run_tasks(p.clone(), state.config.clone()));
             let terminals = state.terminals.clone();

@@ -38,6 +38,7 @@ impl From<vercelify_platform::Error> for AppError {
 
 pub fn router() -> Router<AppState> {
     Router::new()
+        .merge(crate::restore_drills::router())
         .route("/platform/capacity", get(memory_report))
         .route("/platform/projects", get(project_list).post(project_create))
         .route(
@@ -1445,7 +1446,14 @@ async fn db_get(
     Query(q): Query<EnvQuery>,
 ) -> ApiResult<Database> {
     check_reveal(&actor, &q)?;
-    Ok(Json(tx(&s, move |c, k| databases::get(c, k, &db, q.reveal)).await?))
+    Ok(Json(
+        tx(&s, move |c, k| {
+            let d = databases::get(c, k, &db, q.reveal)?;
+            databases::require_non_drill(c, &d.id)?;
+            Ok(d)
+        })
+        .await?,
+    ))
 }
 
 async fn db_runtime_status(State(s): State<AppState>, Path(db): Path<String>) -> ApiResult<Value> {
@@ -1998,7 +2006,12 @@ async fn db_terminal(
     body: Option<Json<TerminalRequest>>,
 ) -> ApiResult<TerminalSession> {
     let req = body.map(|b| b.0).unwrap_or_default();
-    let d = tx(&s, move |c, k| databases::get(c, k, &db, false)).await?;
+    let d = tx(&s, move |c, k| {
+        let d = databases::get(c, k, &db, false)?;
+        databases::require_non_drill(c, &d.id)?;
+        Ok(d)
+    })
+    .await?;
     let command = req.console.unwrap_or(true).then(|| databases::console_command(d.kind));
     open_terminal(&s, &actor, d.container, command, &req)
 }

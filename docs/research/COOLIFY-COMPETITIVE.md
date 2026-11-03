@@ -456,6 +456,35 @@ the PostgreSQL preview regression passed another 369. Static agents remain below
 unmeasured. [M6 validation](../validation/2026-11-03-m6/VALIDATION.md) contains raw
 measurements, narrow support scope, expected outage and qualification corrections.
 
+### Re-measured for M7a isolated restore drills, 3 November 2026
+
+Same original six apps and four-GiB ARM lab, twelve samples six seconds apart
+plus collection time after a two-minute settle. BuildKit and the disposable
+Docker daemon were stopped, and both temporary restore/source databases were
+removed. This run followed VM restart; cache/process histories differ.
+
+| Median MiB | M6 builder stopped | M7a builder stopped |
+| --- | ---: | ---: |
+| System used (range) | 588 (580–616) | 589.5 (581–599) |
+| Agent RSS | 8.42 | 9.02 |
+| Mesh RSS | 2.81 | 2.80 |
+| Traefik RSS | 93.27 | 88.20 |
+| dockerd / containerd RSS | 99.70 / 45.07 | 101.70 / 46.50 |
+| All shim RSS | 73.77 | 73.16 |
+| BuildKit RSS | 0 | 0 |
+
+This is an idle matched-workload observation, not restore peak memory or a causal
+overhead estimate. Restore destinations/readers have separate 256/512 MiB ceilings
+and require M4 admission. The live fault matrix passed with 853 unchanged serving
+probes and zero failures. The installed-agent API/background-runner check passed
+with another 438 probes and zero failures, using a separately supplied recovery
+key and complete cleanup. The copied-repository/new-control-key fixture establishes
+logical recovery on the lab VM; off-device physical machine-loss qualification,
+remote repositories and physical laptop measurements remain **unmeasured**.
+
+Raw samples, binaries, limits and reproduction:
+[M7a validation](../validation/2026-11-03-m7a/VALIDATION.md).
+
 ## 7. Feature verdicts after validation
 
 ### 7.1 Your computer builds, your server serves — build early

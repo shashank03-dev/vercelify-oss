@@ -1,0 +1,59 @@
+   Compiling vercelify-core v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-core)
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-cockpit v1.0.0 (/Users/shashank/Desktop/VERCELIFY/cockpit/src-tauri)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 06s
+     Running unittests src/lib.rs (target/debug/deps/vercelify_cockpit_lib-2dfc5527a652aa1f)
+
+running 29 tests
+test mesh::tests::mesh_hosts ... ok
+test mesh::tests::a_failed_run_says_what_happened ... ok
+test host::tests::only_host_paths ... ok
+test discover::tests::picks_server_peers ... ok
+test http::tests::lines ... ok
+test mesh::tests::status_file ... ok
+test mesh::tests::windows_task_runs_userspace_mode_with_quoted_paths ... ok
+test mesh::tests::stream_urls_through_a_forward ... ok
+test mesh::tests::forwards_file_lines_per_owner ... ok
+test release_tests::a_release_is_its_version_without_the_v_and_its_page ... ok
+test release_tests::anything_else_is_not_a_release ... ok
+test http::tests::cancellation_interrupts_a_server_that_never_sends_headers ... ok
+test settings_tests::a_private_download_never_replaces_a_file_and_stays_in_its_folder ... ok
+test settings_tests::saving_credentials_replaces_a_public_file_with_a_private_one ... ok
+test local::tests::detects_per_user_moonlight_installs ... ok
+test tests::agent_requests_choose_their_client_by_url ... ok
+test tray::tests::status_line_is_short_and_clean ... ok
+test vdisplay::tests::a_virtual_display_appears_and_goes ... ignored
+test tests::a_pending_code_is_taken_once ... ok
+test vdisplay::tests::the_new_display_sits_right_of_the_main_screen ... ok
+test settings_tests::saving_credentials_replaces_symlinks_without_overwriting_the_target ... ok
+test vdisplay::tests::the_new_display_is_as_wide_as_the_main_screen_in_points ... ok
+test tests::an_unreadable_settings_file_is_kept_aside_not_overwritten ... ok
+test procs::tests::exit_code_is_reported ... ok
+kill: 78394: No such process
+test procs::tests::start_status_stop ... ok
+kill: 78424: No such process
+test procs::tests::simultaneous_starts_cannot_leave_untracked_processes ... ok
+kill: 78414: No such process
+kill: 78414: No such process
+test procs::tests::watchdog_kills_orphan_when_parent_dies ... ok
+test procs::tests::capture_with_output_survives_the_startup_watchdog ... ok
+kill: 78392: No such process
+test procs::tests::an_empty_capture_is_stopped_without_polling ... ok
+
+test result: ok. 28 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 5.52s
+
+     Running unittests src/main.rs (target/debug/deps/vercelify_cockpit-0590184f37bbc872)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests vercelify_cockpit_lib
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

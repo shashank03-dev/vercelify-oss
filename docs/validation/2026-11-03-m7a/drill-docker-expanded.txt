@@ -1,0 +1,18 @@
+
+running 1 test
+PASS: selected PostgreSQL snapshot, catalog/index, known row count/migration, bounded helpers and cleanup
+PASS: wrong-key fails without modifying production
+PASS: missing-key fails without modifying production
+PASS: failed known assertion cannot become verified
+PASS: fresh control key/store uses independent provided recovery credentials, not host credentials
+PASS: cancellation during verification cannot publish success
+PASS: SIGKILL controller, reopen journal, clean unverified temporary dataset
+PASS: missing-dump stays unverified
+PASS: invalid-dump stays unverified
+PASS: incompatible extension catalog cannot become verified
+PASS: simulated low-battery report defers heavy work and cancellation cleans ownership
+PASS: 481 unchanged production probes, zero failures
+test isolated_restore_drills_verify_selected_snapshots_and_fail_safely has been running for over 60 seconds
+test isolated_restore_drills_verify_selected_snapshots_and_fail_safely ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 60.08s

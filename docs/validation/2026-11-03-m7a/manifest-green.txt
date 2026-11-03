@@ -1,0 +1,14 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.38s
+     Running tests/restore_drill.rs (target/debug/deps/restore_drill-6d3eff8df45c23b6)
+
+running 2 tests
+test assertion_inputs_are_bounded_and_do_not_accept_obvious_write_commands ... ok
+test an_isolated_drill_requires_an_exact_supported_manifest ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

@@ -809,6 +809,71 @@ Templates in `crates/vercelify-platform/templates/databases.toml` (versioned wit
   shell (`psql`, `mysql`, `mongosh`, `valkey-cli`, `clickhouse-client`) logged in from the
   container's environment, so the password never crosses the API.
 
+### 10.0 Isolated restore drills (competitive roadmap M7a)
+
+Schema 12 journals `restore_drills`, exact owned temporary services and schedules;
+new successful PostgreSQL 17 backups optionally carry a version-1 manifest of
+source identity, custom dump filename/bytes, start time, database-size estimate,
+server major, extension versions and relation/index catalog. Legacy or unsupported
+backups remain unverified. Concurrent DDL may cause a conservative catalog mismatch;
+no live row count captured after backup becomes its expected value.
+
+One serial runner handles on-demand jobs, restart cleanup and disabled-by-default
+monthly UTC schedules. Missed schedules coalesce into one catch-up job. Missing
+supported backups preserve overdue status. Doctor/the existing watcher warns about
+failed latest drills, overdue schedules and deferral/cleanup beyond five minutes.
+It deduplicates unchanged status; it never treats scheduling health as restore proof.
+
+A drill restores into its own PostgreSQL 17 service, random sealed credentials and
+volume, with no host port, source credentials or app environment. Its internal
+Docker 28+ bridge uses isolated gateway mode and a distinct restore-only label;
+preview/proxy recovery never connects it. Generic patch/delete/start/backup/restore/
+move, terminal and connection-variable paths cannot repurpose the destination.
+Dump content itself may include sensitive data and executable database definitions;
+it remains quarantined. Production-data preview copying stays disabled.
+
+A separate pinned official restic helper reads an absolute local repository mounted
+read-only or a supported S3/REST/B2/Azure backend. `--no-lock --no-cache` avoids source
+repository writes. Metadata integrity and optional full `--read-data` verification
+are recorded separately; concurrent repository pruning can safely make a check
+incomplete. Selected dump data is always decrypted, byte-bounded and streamed into
+`pg_restore --single-transaction --exit-on-error --no-owner --no-acl`; plaintext dump
+files are never staged. Helper and destination use Docker log driver `none` so a
+streamed dump cannot enter Docker logs. Remote backends remain unqualified in the lab.
+
+M4 admission reserves 384 MiB for destination/overhead plus 512 MiB for the reader,
+with estimated disk headroom of max(3× dump bytes, 2× recorded database bytes) +
+1024 MiB. Destination is capped at 256 MiB/1 CPU and the helper at 512 MiB/1 CPU,
+with equal memory/swap ceilings. Power/thermal/low-disk checks stop long work and
+clean before deferral. Mid-work retries cap at three; operators may cancel pending
+work. These are bounded trusted-backup operations, not a hostile-dump sandbox or
+a hard storage quota against arbitrary executable database definitions.
+
+Verification compares restored catalog, server major and extension versions and
+runs a read smoke test. Optional known-result assertions execute under a fresh
+non-superuser read role, in read-only transactions with a five-second statement
+limit and bounded output. Stacked statements and psql metacommands are rejected.
+Neither expected values, observed rows nor repository credentials appear in public
+job metadata. Assertion specifications and supplied recovery settings are sealed
+with per-job AAD; terminal outcomes clear their sealed copies.
+
+`verified_at` is recorded only after checks; success additionally requires exact
+container/volume/network cleanup. Restart discards an interrupted unverified
+restore and resumes its journaled cleanup. Source deletion cannot erase ownership
+or the immutable job manifest. Observed snapshot age and elapsed check/restore time
+are measurements, never RPO/RTO guarantees. Host-key checks prove that selected
+host credential works. Imported manifests and explicitly supplied recovery settings
+also work with a new control store/master key; the copied-repository/recovery-artifact
+lab fixture is logical recovery evidence on one VM, not physical machine-loss proof.
+
+Capability `postgres-restore-drills` gates cockpit controls. Metadata GETs are readable
+by paired viewers. Create/import/cancel and schedule GET/PUT require Owner in both
+middleware and handlers; schedule GET contains private assertion specifications.
+Routes are `/v1/platform/databases/{db}/restore-drills`,
+`/v1/platform/databases/{db}/restore-drill-schedule`,
+`/v1/platform/restore-drills/{id}` and `/{id}/cancel`; independent recovery import is
+`POST /v1/platform/restore-drills/import`. Queued/active jobs cap globally at twenty.
+
 ### 10.1 Service catalogue
 
 `vercelify-platform::templates` holds the one-click services: Umami, Plausible,

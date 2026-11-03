@@ -305,6 +305,33 @@ the HDD, another server or any S3 bucket. They hold the engine's state, the mast
 dumps of every database and the apps' volumes. A database's **Backups** tab also runs
 and restores its own dumps. More in [BACKUPS.md](BACKUPS.md).
 
+### Check a backup with an isolated restore
+
+For PostgreSQL 17, open the database's **Restore drills** card after taking a new
+backup. Select its snapshot and optionally enter a read query with a result known
+for that backup (for example its migration marker). **Run restore drill** creates
+a temporary isolated database, checks relations/indexes, extensions and queries,
+then removes its container, volume and network. Production keeps serving throughout.
+An interrupted, failed or cleanup-pending job is visible and is never labelled a
+successful verified restore. Cancel requests also wait for cleanup.
+
+**Also read all repository data** adds restic's full-data integrity check, with
+extra time/bandwidth. Otherwise repository metadata is checked and the selected
+dump is still fully read/restored. These are separate results. A successful check
+covers that snapshot and the displayed assertions; it does not prove every backup
+or guarantee a recovery objective. The displayed backup age and duration are observed.
+Older backups without a recorded manifest require a new supported backup.
+
+Owners can enable a five-field UTC schedule, monthly by default (`0 3 1 * *`). It
+starts disabled. Low battery, thermal/disk pressure or insufficient capacity defer
+heavy work; the existing alerts surface overdue and persistently deferred checks.
+The server serializes restores and resumes cleanup after restart. Other database
+engines, PostgreSQL majors and remote-repository qualification remain outside the
+first tested scope. A drill using the host key is labelled accordingly; losing the
+machine still requires an independently retained recovery kit and encrypted backup.
+The recovery-import API accepts supplied recovery settings with a fresh control
+store. Same-VM copied-repository qualification is not a physical disaster-recovery test.
+
 ## 6. More servers: workers and a standby
 
 A worker (another old laptop or a Raspberry Pi 4/5) runs apps the main server places on

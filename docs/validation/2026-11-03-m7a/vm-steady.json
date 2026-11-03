@@ -1,0 +1,45 @@
+{
+  "samples": 12,
+  "system_used_mib": {
+    "median": 589.5,
+    "min": 581,
+    "max": 599
+  },
+  "rss_mib": {
+    "vercelify-agent": {
+      "median": 9.01953125,
+      "min": 9.015625,
+      "max": 9.03125
+    },
+    "vercelify-mesh": {
+      "median": 2.8046875,
+      "min": 2.8046875,
+      "max": 2.8046875
+    },
+    "traefik": {
+      "median": 88.19921875,
+      "min": 88.19921875,
+      "max": 88.19921875
+    },
+    "dockerd": {
+      "median": 101.6953125,
+      "min": 101.39453125,
+      "max": 101.7578125
+    },
+    "containerd": {
+      "median": 46.501953125,
+      "min": 46.12890625,
+      "max": 47.08984375
+    },
+    "containerd-shim": {
+      "median": 73.162109375,
+      "min": 72.09375,
+      "max": 74.79296875
+    },
+    "buildkitd": {
+      "median": 0.0,
+      "min": 0,
+      "max": 0
+    }
+  }
+}

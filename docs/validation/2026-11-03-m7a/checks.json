@@ -1,0 +1,30 @@
+{
+  "rust": {
+    "passed": 779,
+    "failed": 0,
+    "ignored": 14,
+    "method": "workspace crates plus host/cockpit; platform restore-drill test binary rerun with 9 cases after the earlier 7-case suite"
+  },
+  "clippy": "passed",
+  "fmt": "passed",
+  "linux_bats": {
+    "passed": 234,
+    "method": "229 unprivileged Linux cases plus five root-only installer cases; installer binary rerun root with all six passing"
+  },
+  "shellcheck": "passed",
+  "ui_types": "passed",
+  "ui_unit": 146,
+  "ui_build": "passed",
+  "demo_browser": 32,
+  "docker_restore_drills": {
+    "production_probes": 853,
+    "failures": 0
+  },
+  "installed_agent_api": {
+    "production_probes": 438,
+    "failures": 0,
+    "integrity": "full_data_checked",
+    "provided_recovery_key": true,
+    "cleanup_complete": true
+  }
+}

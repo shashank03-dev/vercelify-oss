@@ -1,3 +1,4 @@
+import type { RestoreDrill, RestoreSchedule } from "./platform";
 // Demo backend of the platform engine (`/v1/platform/…`) for the demo server
 // `optiplex-7050`: an in-memory stand-in for the agent's API, so the platform
 // screens can be designed and tested without a host. Deployments move through
@@ -306,6 +307,8 @@ function newDb(name: string, kind: DatabaseKind, minsAgo = 60 * 24 * 12): Databa
   };
 }
 const databases: Database[] = [newDb("shop-db", "postgresql"), newDb("cache", "redis")];
+const restoreDrills = new Map<string, RestoreDrill[]>();
+const restoreSchedules = new Map<string, RestoreSchedule>();
 const backups = new Map<string, DatabaseBackup[]>([
   [
     databases[0]!.id,
@@ -838,6 +841,12 @@ export function platformRoute(req: HttpRequest): unknown {
     }
   }
 
+  if (seg[0] === "restore-drills" && seg[2] === "cancel") {
+    const job = [...restoreDrills.values()].flat().find(j => j.id === seg[1]);
+    if (!job) throw new Error("No restore drill");
+    job.state = "cancelled"; job.cancel_requested = true; job.cleanup_pending = false;
+    return clone(job);
+  }
   if (seg[0] === "databases") {
     if (!seg[1]) {
       if (m === "POST") return createDatabase(body as unknown as DatabaseCreate);
@@ -865,6 +874,28 @@ export function platformRoute(req: HttpRequest): unknown {
       }
       case "move":
         return job("volume-move", `Move ${db.name} to the ${String(body.tier).toUpperCase()}`, db.id, `${db.name} now keeps its data on the ${String(body.tier).toUpperCase()}`);
+      case "restore-drill-schedule": {
+        const previous = restoreSchedules.get(db.id) ?? { schedule: { enabled: false, schedule: "0 3 1 * *", assertions: [], error: "", last_job: null }, next_due: null, overdue: false };
+        if (m === "PUT") {
+          const value = { ...previous, schedule: { ...previous.schedule, ...body } } as RestoreSchedule;
+          restoreSchedules.set(db.id, value); return clone(value);
+        }
+        return clone(previous);
+      }
+      case "restore-drills": {
+        const list = restoreDrills.get(db.id) ?? [];
+        if (m === "POST") {
+          if (list.some(j => !["succeeded", "failed", "cancelled"].includes(j.state))) throw new Error("A drill is already pending");
+          const backup = backups.get(db.id)?.find(b => b.id === body.backup_id);
+          if (!backup) throw new Error("Choose a successful backup");
+          const assertions = (body.assertions ?? []) as { name: string }[];
+          const drill: RestoreDrill = { id: id("task"), backup_id: backup.id, snapshot: backup.snapshot, state: "queued", error: "", integrity: "unknown", assertion_names: assertions.map(a => a.name), credential_source: "host", verified_at: null, cleanup_pending: true, cancel_requested: false, restore_seconds: null, rpo_seconds: null, created_at: isoNow() };
+          list.unshift(drill); restoreDrills.set(db.id, list);
+          setTimeout(() => { if (drill.state === "cancelled") return; drill.state = "succeeded"; drill.integrity = body.full_integrity ? "full_data_checked" : "metadata_checked"; drill.cleanup_pending = false; drill.verified_at = isoNow(); drill.restore_seconds = 2; drill.rpo_seconds = Math.max(0, Math.floor((Date.now() - Date.parse(backup.created_at)) / 1000)); changed("restore-drills"); }, 2000);
+          return clone(drill);
+        }
+        return clone(list);
+      }
       case "backups": {
         if (m === "POST") {
           return job("backup", `Back up ${db.name}`, db.id, "backed up", () => {

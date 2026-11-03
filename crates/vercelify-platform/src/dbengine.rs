@@ -115,6 +115,22 @@ fn container_spec(engine: &Engine, d: &Database, cred: &Credentials) -> Result<(
         spec.isolated_preview = true;
         hash.push_str(&format!("|preview-db={network}"));
     }
+    if let Some(network) = engine.store.with(|c| crate::restore_drill::service_network(c, &d.id))? {
+        if d.kind != DatabaseKind::Postgresql || d.public_port.is_some() {
+            return Err(Error::Invalid(
+                "quarantine must remain PostgreSQL with no published port".into(),
+            ));
+        }
+        spec.networks = vec![network.clone()];
+        spec.isolated_preview = true;
+        spec.discard_logs = true;
+        spec.restart = "no".into();
+        spec.labels.insert(
+            "vercelify.restore-drill".into(),
+            network.trim_start_matches("vfy-preview-drill-").into(),
+        );
+        hash.push_str(&format!("|restore-drill={network}"));
+    }
     spec.labels.insert("vercelify.spec".into(), hash.clone());
     Ok((spec, hash))
 }
@@ -151,6 +167,17 @@ impl Engine {
     /// Make the database's container match its record: create (or recreate
     /// after a change), start, wait until it accepts connections.
     pub async fn ensure_database(&self, id: &str) -> Result<Database> {
+        let resource_id = self.database(id)?.0.id;
+        if self
+            .store
+            .with(|c| crate::restore_drill::service_network(c, &resource_id))?
+            .is_some()
+        {
+            return Err(Error::Invalid(
+                "quarantined restore services are managed only by their drill".into(),
+            ));
+        }
+
         let (d, _) = self.database(id)?;
         let _operation = self.database_operation(&d.id).await;
         self.ensure_database_inner(&d.id).await
@@ -170,10 +197,10 @@ impl Engine {
         let (spec, hash) = container_spec(self, &d, &cred)?;
         let current = docker.inspect(&d.container).await?;
         if current.is_some()
-            && self
-                .store
-                .with(|c| crate::preview_db::service_network(c, &d.id))?
-                .is_some()
+            && self.store.with(|c| {
+                Ok(crate::preview_db::service_network(c, &d.id)?.is_some()
+                    || crate::restore_drill::service_network(c, &d.id)?.is_some())
+            })?
             && docker.label(&d.container, "vercelify.database").await? != d.id
         {
             return Err(Error::Conflict(
@@ -209,6 +236,12 @@ impl Engine {
             permit.started();
         }
         if self
+            .store
+            .with(|c| crate::restore_drill::service_network(c, &d.id))?
+            .is_some()
+        {
+            crate::restore_network::ensure(docker, &spec.networks[0]).await?;
+        } else if self
             .store
             .with(|c| crate::preview_db::service_network(c, &d.id))?
             .is_some()
@@ -320,6 +353,14 @@ impl Engine {
         let (d, _) = self.database(id)?;
         if self
             .store
+            .with(|c| crate::restore_drill::service_network(c, &d.id))?
+            .is_some()
+        {
+            return Err(Error::Invalid("restore quarantine cannot move storage".into()));
+        }
+
+        if self
+            .store
             .with(|c| crate::preview_db::service_network(c, &d.id))?
             .is_some()
         {
@@ -374,6 +415,17 @@ impl Engine {
 
     /// Back up one database into the restic repository.
     pub async fn backup_database(&self, id: &str, restic: &Restic) -> Result<DatabaseBackup> {
+        let resource_id = self.database(id)?.0.id;
+        if self
+            .store
+            .with(|c| crate::restore_drill::service_network(c, &resource_id))?
+            .is_some()
+        {
+            return Err(Error::Invalid(
+                "quarantined restore services are managed only by their drill".into(),
+            ));
+        }
+
         if !restic.configured() {
             return Err(Error::Unavailable(
                 "backups aren't set up on this server (sudo vercelify backup setup)".into(),
@@ -395,6 +447,14 @@ impl Engine {
             )?;
             Ok(())
         })?;
+        // Schema identity is captured around this backup; a concurrent DDL
+        // change must fail the drill's exact catalog comparison, never compare
+        // restored data with a later live row count.
+        let drill_metadata = if d.kind == DatabaseKind::Postgresql {
+            self.restore_drill_metadata(&d).await.ok()
+        } else {
+            None
+        };
         let res = self.backup_stream(&d, restic).await;
         let (status, bytes, snapshot, error) = match &res {
             Ok((bytes, snap)) => ("succeeded", *bytes as i64, snap.clone(), String::new()),
@@ -409,6 +469,16 @@ impl Engine {
             Ok(())
         })?;
         res?;
+        if let Some(mut manifest) = drill_metadata.filter(|m| m.server_major == 17) {
+            manifest.bytes = bytes as u64;
+            manifest.backup_started_at = t;
+            if let Err(error) = self
+                .store
+                .tx(|c| crate::restore_drill::attach_manifest(c, &bid, &manifest))
+            {
+                tracing::warn!("backup succeeded without supported drill metadata: {error}");
+            }
+        }
         self.store.with(|c| backup(c, &bid))
     }
 
@@ -506,6 +576,17 @@ impl Engine {
 
     /// Restore a backup (by snapshot) over the database's current data.
     pub async fn restore_database(&self, id: &str, snapshot: &str, restic: &Restic) -> Result<()> {
+        let resource_id = self.database(id)?.0.id;
+        if self
+            .store
+            .with(|c| crate::restore_drill::service_network(c, &resource_id))?
+            .is_some()
+        {
+            return Err(Error::Invalid(
+                "quarantined restore services are managed only by their drill".into(),
+            ));
+        }
+
         if !restic.configured() {
             return Err(Error::Unavailable("backups aren't set up on this server".into()));
         }

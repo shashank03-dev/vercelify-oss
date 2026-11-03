@@ -1,0 +1,16 @@
+
+> vercelify-cockpit@1.0.0 test
+> vitest run
+
+
+ RUN  v5.0.5 /Users/shashank/Desktop/VERCELIFY/cockpit
+
+
+ Test Files  36 passed (36)
+      Tests  146 passed (146)
+   Start at  16:53:00
+   Duration  13.82s (environment 47%, tests 26%, import 19%, setup 6%, worker 1%, transform 1%)
+
+Environment  jsdom was created 36 times · 46.24s total, 47% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments

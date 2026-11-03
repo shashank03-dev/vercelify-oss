@@ -16,6 +16,13 @@ use vercelify_core::platform::Role;
 /// Infrastructure (tokens, updates, backups, servers, storage moves, the
 /// mesh, the power guard) stays with owners.
 pub fn allowed(role: Role, method: &Method, path: &str) -> bool {
+    if role != Role::Owner
+        && (path.ends_with("/restore-drill-schedule")
+            || path.starts_with("/v1/platform/restore-drills/") && *method != Method::GET
+            || path.ends_with("/restore-drills") && *method != Method::GET)
+    {
+        return false;
+    }
     if role == Role::Owner || method == Method::GET || method == Method::HEAD {
         return true;
     }

@@ -37,6 +37,8 @@ pub struct Mount {
 pub struct ContainerSpec {
     /// Drop raw sockets and prevent privilege escalation in isolated previews.
     pub isolated_preview: bool,
+    /// Internal archive pipelines must not persist data bytes in Docker logs.
+    pub discard_logs: bool,
     pub name: String,
     pub image: String,
     pub labels: BTreeMap<String, String>,
@@ -213,14 +215,18 @@ impl Docker {
             &spec.restart
         };
         args.extend(proc::args(&["--restart", restart, "--pids-limit", "4096"]));
-        args.extend(proc::args(&[
-            "--log-driver",
-            "local",
-            "--log-opt",
-            "max-size=10m",
-            "--log-opt",
-            "max-file=3",
-        ]));
+        if spec.discard_logs {
+            args.extend(proc::args(&["--log-driver", "none"]));
+        } else {
+            args.extend(proc::args(&[
+                "--log-driver",
+                "local",
+                "--log-opt",
+                "max-size=10m",
+                "--log-opt",
+                "max-file=3",
+            ]));
+        }
         for (k, v) in &spec.labels {
             args.extend(["--label".into(), format!("{k}={v}")]);
         }

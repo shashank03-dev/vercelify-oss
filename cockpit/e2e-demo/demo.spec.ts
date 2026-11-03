@@ -419,6 +419,14 @@ test("platform engine: deploy with a live log, roll back, variables, domains, da
   await expect(page.getByTestId("db-url")).toContainText("postgres://notes-db:••••@vfy-db-notes-db:5432/notes-db");
   await page.getByTestId("db-backup").click();
   await expect(page.getByTestId("db-backups")).toContainText("just now", { timeout: 10_000 });
+  // Isolated restore verification is distinct from replacing production data.
+  const drills = page.getByTestId("restore-drills");
+  await expect(drills).toContainText("No verified restore yet.");
+  await drills.getByLabel("Read query", { exact: true }).fill("SELECT version FROM migrations");
+  await drills.getByLabel("Expected result", { exact: true }).fill("20261103");
+  await drills.getByRole("button", { name: "Run restore drill", exact: true }).click();
+  await expect(drills).toContainText("Last verified", { timeout: 12_000 });
+  await expect(drills).toContainText("Known result");
   await page.getByTestId("db-backups").getByRole("button", { name: "Restore", exact: true }).first().click();
   await expect(page.getByTestId("db-restore-confirm")).toBeVisible();
   await expect(page.getByTestId("db-restore-run")).toBeDisabled();

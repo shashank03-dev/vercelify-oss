@@ -1,0 +1,61 @@
+   Compiling vercelify-core v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-core)
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-host v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-host)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 31.94s
+     Running unittests src/lib.rs (target/debug/deps/vercelify_host-8be0a6da53974c61)
+
+running 33 tests
+test lima::tests::older_macs_use_qemu ... ok
+test lima::tests::config_is_closed_off_and_pinned ... ok
+test lima::tests::list_output ... ok
+test lima::tests::errors_come_from_error_lines ... ok
+test guest::tests::health_needs_a_close_clock ... ok
+test guest::tests::hostile_values_never_reach_the_shell ... ok
+test guest::tests::worker_script_joins_and_isolates ... ok
+test manager::tests::a_bad_invite_is_refused_before_anything_is_made ... ok
+test api::tests::mutations_check_their_body ... ok
+test manager::tests::changed_measurements_ask_for_a_fresh_review ... ok
+test api::tests::every_route_needs_the_owner_token ... ok
+test api::tests::bad_tokens_are_slowed_down ... ok
+test manager::tests::health_failures_end_in_failed_not_ready ... ok
+test measure::tests::diskutil ... ok
+test manager::tests::a_stopped_environment_stays_stopped ... ok
+test measure::tests::pmset_battery ... ok
+test manager::tests::create_makes_one_environment_and_replays ... ok
+test measure::tests::pmset_thermal ... ok
+test manager::tests::pairing_is_for_a_ready_main_server_only ... ok
+test qemu::tests::cloud_init_has_only_our_key ... ok
+test manager::tests::the_minute_check_leaves_an_operation_in_progress_alone ... ok
+test qemu::tests::command_line_is_accelerated_and_loopback_only ... ok
+test manager::tests::two_desktops_racing_get_one_creation ... ok
+test qemu::tests::qmp_talks_to_a_server_and_sees_none_when_off ... ok
+test state::tests::journal_is_bounded_but_keeps_running_ones ... ok
+test manager::tests::removal_gives_a_fresh_identity ... ok
+test manager::tests::a_failed_step_is_reported_and_retry_is_safe ... ok
+test manager::tests::after_a_crash_mid_step_it_says_so_and_after_a_reboot_it_starts_again ... ok
+test state::tests::saves_atomically_and_privately ... ok
+test state::tests::one_manager_per_machine ... ok
+test manager::tests::stop_start_and_resize_need_the_owners_word_and_the_right_revision ... ok
+test provider::tests::a_stuck_command_is_stopped ... ok
+test measure::tests::measures_this_computer ... ok
+
+test result: ok. 33 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.77s
+
+     Running unittests src/main.rs (target/debug/deps/vercelify_host-4b273dd480fdebe1)
+
+running 3 tests
+test tests::chunked_bodies ... ok
+test tests::hostnames ... ok
+test tests::sizes ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests vercelify_host
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

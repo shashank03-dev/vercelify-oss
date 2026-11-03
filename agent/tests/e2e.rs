@@ -2583,3 +2583,83 @@ fn offhost_job_metadata_is_private_and_restart_fences_the_lease() {
     );
     assert_eq!(status, 409);
 }
+
+#[test]
+fn restore_drills_keep_assertions_owner_only_and_expose_scoped_metadata() {
+    let a = start_with(&[("VERCELIFY_ENGINE", "platform".into())]);
+    let (status, health) = get(&a, "/v1/health");
+    assert_eq!(status, 200);
+    assert!(health["capabilities"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v == "postgres-restore-drills"));
+    let (status, db) = post(
+        &a,
+        "/v1/platform/databases",
+        json!({"name":"restore-api","kind":"postgresql","version":"17"}),
+    );
+    assert_eq!(status, 200, "{db}");
+    let db = db["id"].as_str().unwrap();
+    let root = format!("/v1/platform/databases/{db}");
+    let (status, value) = get(&a, &format!("{root}/restore-drill-schedule"));
+    assert_eq!(status, 200);
+    assert_eq!(value["schedule"]["enabled"], false);
+    for role in ["viewer", "deployer"] {
+        let (_, token) = post(&a, "/v1/tokens", json!({"name":role,"role":role}));
+        let token = token["secret"].as_str().unwrap();
+        for (method, path, body) in [
+            ("GET", format!("{root}/restore-drill-schedule"), None),
+            (
+                "PUT",
+                format!("{root}/restore-drill-schedule"),
+                Some(json!({"enabled":true,"schedule":"0 3 1 * *"})),
+            ),
+            (
+                "POST",
+                format!("{root}/restore-drills"),
+                Some(json!({"backup_id":"bak_missing"})),
+            ),
+            ("POST", "/v1/platform/restore-drills/import".into(), Some(json!({}))),
+            (
+                "POST",
+                "/v1/platform/restore-drills/task_missing/cancel".into(),
+                Some(json!({})),
+            ),
+        ] {
+            let (status, _) = send(&a, method, &path, token, body);
+            assert_eq!(status, 403, "{role}: {method} {path}");
+        }
+        let (status, value) = send(&a, "GET", &format!("{root}/restore-drills"), token, None);
+        assert_eq!(status, 200);
+        assert_eq!(value, json!([]));
+    }
+    let (status, _) = send(
+        &a,
+        "PUT",
+        &format!("{root}/restore-drill-schedule"),
+        TOKEN,
+        Some(json!({"enabled":true,"schedule":"99 3 1 * *"})),
+    );
+    assert_eq!(status, 400);
+    let (status, value) = send(
+        &a,
+        "PUT",
+        &format!("{root}/restore-drill-schedule"),
+        TOKEN,
+        Some(
+            json!({"enabled":true,"schedule":"0 3 1 * *","assertions":[{"name":"marker","query":"SELECT 'private-schedule-marker'","expected":"private-schedule-marker"}]}),
+        ),
+    );
+    assert_eq!(status, 200, "{value}");
+    assert_eq!(
+        value["schedule"]["assertions"][0]["expected"],
+        "private-schedule-marker"
+    );
+    let (status, _) = post(
+        &a,
+        &format!("{root}/restore-drills"),
+        json!({"backup_id":"bak_missing"}),
+    );
+    assert_eq!(status, 404);
+}

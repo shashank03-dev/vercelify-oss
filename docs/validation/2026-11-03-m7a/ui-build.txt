@@ -1,0 +1,30 @@
+
+> vercelify-cockpit@1.0.0 build
+> tsc -b && vite build
+
+vite v8.3.4 building client environment for production...
+transforming...
+✓ 2456 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                                   0.53 kB │ gzip:   0.32 kB
+dist/assets/geist-mono-symbols2-wght-normal-CO5SzqOn.woff2        5.81 kB
+dist/assets/geist-mono-cyrillic-ext-wght-normal-X_5orZeX.woff2    6.17 kB
+dist/assets/geist-cyrillic-ext-wght-normal-DjL33-gN.woff2         7.42 kB
+dist/assets/geist-mono-vietnamese-wght-normal-DadHysG0.woff2      7.69 kB
+dist/assets/geist-vietnamese-wght-normal-6IgcOCM7.woff2           8.00 kB
+dist/assets/geist-mono-cyrillic-wght-normal-DiZS0aHC.woff2       12.94 kB
+dist/assets/geist-mono-latin-ext-wght-normal-Bwz-egvJ.woff2      14.69 kB
+dist/assets/geist-cyrillic-wght-normal-BEAKL7Jp.woff2            15.08 kB
+dist/assets/geist-latin-ext-wght-normal-DC-KSUi6.woff2           16.51 kB
+dist/assets/geist-mono-latin-wght-normal-XN7g48iV.woff2          23.12 kB
+dist/assets/geist-latin-wght-normal-BgDaEnEv.woff2               29.40 kB
+dist/assets/xterm-kHJ-D0s7.css                                    2.85 kB │ gzip:   0.77 kB
+dist/assets/index-DBwarNAl.css                                   61.84 kB │ gzip:  11.60 kB
+dist/assets/dist-js-XdgVfA-u.js                                   0.13 kB │ gzip:   0.13 kB
+dist/assets/addon-fit-1xmStPxw.js                                 1.48 kB │ gzip:   0.64 kB
+dist/assets/dist-js-81ZqyplQ.js                                   2.29 kB │ gzip:   0.83 kB
+dist/assets/xterm-DJ5fcVdH.js                                   287.06 kB │ gzip:  67.82 kB
+dist/assets/index-3Uayl7t3.js                                   771.67 kB │ gzip: 234.63 kB
+
+✓ built in 545ms

@@ -40,6 +40,7 @@ import {
   Webhook,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { RestoreDrills } from "../components/RestoreDrills";
 import { DatabaseStatus } from "../components/DatabaseStatus";
 import { DeployGuardCard } from "../components/DeployGuard";
 import { PreviewDatabaseCard } from "../components/PreviewDatabase";
@@ -2110,6 +2111,7 @@ function DatabaseDetail({ db, apps, client, onChanged, onClose }: { db: Database
           </div>
         </Card>
 
+        <RestoreDrills db={db} backups={backups.data ?? []} client={client} />
         <Card
           flush
           title="Backups"

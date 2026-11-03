@@ -256,6 +256,7 @@ pub fn capabilities(s: &AppState) -> Vec<String> {
         caps.push("preview-databases".into());
         caps.push("deployment-guards".into());
         caps.push("serving-checks".into());
+        caps.push("postgres-restore-drills".into());
     }
     caps
 }

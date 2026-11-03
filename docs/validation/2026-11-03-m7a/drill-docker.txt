@@ -1,0 +1,12 @@
+
+running 1 test
+PASS: selected PostgreSQL snapshot, catalog/index, known row count/migration, bounded helpers and cleanup
+PASS: wrong-key fails without modifying production
+PASS: missing-key fails without modifying production
+PASS: failed known assertion cannot become verified
+PASS: fresh control key/store uses independent provided recovery credentials, not host credentials
+PASS: simulated low-battery report defers heavy work and cancellation cleans ownership
+PASS: 220 unchanged production probes, zero failures
+test isolated_restore_drills_verify_selected_snapshots_and_fail_safely ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 36.23s

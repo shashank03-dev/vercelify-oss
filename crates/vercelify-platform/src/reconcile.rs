@@ -229,6 +229,12 @@ impl Reconciler {
             busy_apps: active.iter().map(|d| d.app_id.clone()).collect(),
             ..Desire::default()
         };
+        out.active.extend(
+            e.store
+                .with(|c| crate::restore_drill::list(c, None, true))?
+                .into_iter()
+                .map(|job| job.id),
+        );
         for d in &active {
             let app = e.store.with(|c| apps::get(c, &d.app_id))?;
             out.busy_keys.insert(deploy::route_key(&app.name, d.pr_number));

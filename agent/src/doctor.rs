@@ -846,10 +846,14 @@ pub fn read_maintenance(cfg: &Config) -> Option<(String, String)> {
 
 pub async fn report(s: &AppState) -> DoctorReport {
     let facts = gather(s).await;
+    let mut checks = evaluate(&facts);
+    if let Some(p) = &s.platform {
+        checks.push(crate::restore_drills::check(p));
+    }
     DoctorReport {
         role: facts.role.clone(),
         agent_version: crate::VERSION.into(),
-        checks: evaluate(&facts),
+        checks,
     }
 }
 

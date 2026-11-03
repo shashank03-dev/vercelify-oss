@@ -319,7 +319,7 @@ const SELECT: &str =
 /// With `reveal`, `internal_url` carries the password.
 pub fn list(c: &Connection, key: &MasterKey, project_id: Option<&str>, reveal: bool) -> Result<Vec<Database>> {
     let mut st = c.prepare(&format!(
-        "{SELECT} WHERE (?1 IS NULL OR e.project_id = ?1) ORDER BY d.name"
+        "{SELECT} WHERE (?1 IS NULL OR e.project_id = ?1) AND NOT EXISTS(SELECT 1 FROM restore_drill_services r WHERE r.database_id=d.id) ORDER BY d.name"
     ))?;
     let mut rows = st.query([project_id])?;
     let mut out = vec![];
@@ -448,6 +448,11 @@ fn insert(
 /// Point an app's variable at a database: `${{db.<name>.url}}`, resolved at
 /// every deploy (a new password needs only a redeploy).
 pub fn link(c: &Connection, key: &MasterKey, app: &str, db_name: &str, var: &str) -> Result<()> {
+    match get(c, key, db_name, false) {
+        Ok(database) => require_non_drill(c, &database.id)?,
+        Err(Error::NotFound(_)) => {}
+        Err(error) => return Err(error),
+    }
     let a = crate::apps::find(c, app)?;
     let reference = format!("${{{{db.{db_name}.url}}}}");
     let vars = crate::env::list(c, key, vercelify_core::platform::VarScope::App, &a.id, true)?;
@@ -482,6 +487,12 @@ pub fn link(c: &Connection, key: &MasterKey, app: &str, db_name: &str, var: &str
 
 pub fn patch(c: &Connection, key: &MasterKey, id: &str, p: &DatabasePatch) -> Result<Database> {
     let d = get(c, key, id, false)?;
+    if crate::restore_drill::service_network(c, &d.id)?.is_some() {
+        return Err(Error::Conflict(
+            "quarantined restore services are managed only by their drill".into(),
+        ));
+    }
+
     if crate::preview_db::service_network(c, &d.id)?.is_some()
         && (p.public_port.is_some_and(|port| port != 0)
             || p.public_bind.as_deref().is_some_and(|bind| bind != "mesh")
@@ -549,6 +560,12 @@ pub fn patch(c: &Connection, key: &MasterKey, id: &str, p: &DatabasePatch) -> Re
 /// Refused while an app's variable references it.
 pub fn delete(c: &Connection, key: &MasterKey, id: &str) -> Result<Database> {
     let d = get(c, key, id, false)?;
+    if crate::restore_drill::service_network(c, &d.id)?.is_some() {
+        return Err(Error::Conflict(
+            "quarantined restore services are managed only by their drill".into(),
+        ));
+    }
+
     let needle = format!("${{{{db.{}.url}}}}", d.name);
     let mut st = c.prepare("SELECT id, value, scope_id FROM env_vars WHERE scope = 'app'")?;
     let rows: Vec<(String, Vec<u8>, String)> = st
@@ -604,6 +621,7 @@ pub fn resolve_references_at(c: &Connection, key: &MasterKey, value: &str, main_
             .ok_or_else(|| Error::Invalid(format!("`${{{{db.{reference}}}}}` names no field (.url)")))?;
         let d = get(c, key, name, false)
             .map_err(|_| Error::Invalid(format!("a variable refers to the database {name}, which doesn't exist")))?;
+        require_non_drill(c, &d.id)?;
         let cred = credentials(c, key, &d.id)?;
         let (host, port) = match main_ip {
             None => (d.name.clone(), template(d.kind).port),
@@ -687,6 +705,16 @@ pub fn spec(d: &Database, cred: &Credentials, mesh_ip: Option<&str>, hdd_path: O
         restart: "unless-stopped".into(),
         ..ContainerSpec::default()
     }
+}
+
+/// Generic controls must never repurpose the drill's disposable service.
+pub fn require_non_drill(c: &Connection, id: &str) -> Result<()> {
+    if crate::restore_drill::service_network(c, id)?.is_some() {
+        return Err(Error::Conflict(
+            "restore quarantine is accessible only through its drill".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]

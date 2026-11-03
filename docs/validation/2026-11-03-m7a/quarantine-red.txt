@@ -1,0 +1,29 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.84s
+     Running tests/restore_drill.rs (target/debug/deps/restore_drill-6d3eff8df45c23b6)
+
+running 1 test
+test quarantine_is_journaled_hidden_and_cannot_be_exposed_or_repurposed ... FAILED
+
+failures:
+
+---- quarantine_is_journaled_hidden_and_cannot_be_exposed_or_repurposed stdout ----
+
+thread 'quarantine_is_journaled_hidden_and_cannot_be_exposed_or_repurposed' (15327468) panicked at crates/vercelify-platform/tests/restore_drill.rs:120:5:
+assertion failed: s.with(|c|
+                    databases::list(c, &key, None,
+                        false)).unwrap().iter().all(|d| d.id != service.database_id)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+
+failures:
+    quarantine_is_journaled_hidden_and_cannot_be_exposed_or_repurposed
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p vercelify-platform --test restore_drill`

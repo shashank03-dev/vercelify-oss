@@ -97,6 +97,18 @@ export interface PreviewDatabaseStatus {
   error: string;
 }
 
+export interface RestoreAssertion { name: string; query: string; expected: string }
+export interface RestoreDrill {
+  id: string; backup_id: string; snapshot: string; state: string; error: string;
+  integrity: string; assertion_names: string[]; credential_source: string;
+  verified_at: string | null; cleanup_pending: boolean; cancel_requested: boolean;
+  restore_seconds: number | null; rpo_seconds: number | null; created_at: string;
+}
+export interface RestoreSchedule {
+  schedule: { enabled: boolean; schedule: string; assertions: RestoreAssertion[]; error: string; last_job: string | null };
+  next_due: string | null; overdue: boolean;
+}
+
 export function platformOn(server?: string) {
   const req = <T>(method: HttpRequest["method"], path: string, body?: unknown, timeout?: number) =>
     call<T>("agent_request", { request: { method, path: `/v1/platform${path}`, body, timeout }, server });
@@ -184,6 +196,11 @@ export function platformOn(server?: string) {
     deleteDatabase: (db: string, purge = false) => req<unknown>("DELETE", `/databases/${q(db)}${purge ? "?purge=true" : ""}`),
     linkDatabase: (db: string, app: string) => req<{ variable: string }>("POST", `/databases/${q(db)}/link`, { app }),
     moveDatabase: (db: string, tier: StorageTier) => req<Job>("POST", `/databases/${q(db)}/move`, { tier }),
+    restoreDrills: (db: string) => req<RestoreDrill[]>("GET", `/databases/${q(db)}/restore-drills`),
+    startRestoreDrill: (db: string, backup_id: string, assertions: RestoreAssertion[], full_integrity = false) => req<RestoreDrill>("POST", `/databases/${q(db)}/restore-drills`, { backup_id, assertions, full_integrity }),
+    cancelRestoreDrill: (id: string) => req<RestoreDrill>("POST", `/restore-drills/${q(id)}/cancel`, {}),
+    restoreDrillSchedule: (db: string) => req<RestoreSchedule>("GET", `/databases/${q(db)}/restore-drill-schedule`),
+    setRestoreDrillSchedule: (db: string, enabled: boolean, schedule: string, assertions: RestoreAssertion[]) => req<RestoreSchedule>("PUT", `/databases/${q(db)}/restore-drill-schedule`, { enabled, schedule, assertions }),
     backups: (db: string) => req<DatabaseBackup[]>("GET", `/databases/${q(db)}/backups`),
     backup: (db: string) => req<Job>("POST", `/databases/${q(db)}/backups`, {}),
     restore: (db: string, snapshot: string) => req<Job>("POST", `/databases/${q(db)}/restore`, { snapshot }),
