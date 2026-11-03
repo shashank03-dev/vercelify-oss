@@ -1,0 +1,13 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.03s
+     Running unittests src/lib.rs (target/debug/deps/vercelify_platform-efc4f6d72736babd)
+
+running 1 test
+test engine::tests::a_guard_enqueues_one_rollback_and_new_work_fences_it_atomically ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 192 filtered out; finished in 0.05s

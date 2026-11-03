@@ -299,7 +299,7 @@ fn check_runtime(r: &AppRuntime) -> Result<()> {
     }
     if let Some(h) = &r.health {
         if let Some(p) = &h.path {
-            if !p.starts_with('/') || p.len() > 400 || p.contains([' ', '\n']) {
+            if !p.starts_with('/') || p.len() > 400 || p.contains([' ', '\n', '\r', '\0']) {
                 return Err(Error::Invalid(format!("health check path `{p}` must start with /")));
             }
         }
@@ -314,6 +314,11 @@ fn check_runtime(r: &AppRuntime) -> Result<()> {
     }
     if r.drain_secs > 300 {
         return Err(Error::Invalid("the drain time is at most 300 seconds".into()));
+    }
+    if r.rollback_grace_secs > 120 || !(1..=10).contains(&r.rollback_failures) {
+        return Err(Error::Invalid(
+            "rollback grace must be at most 120 seconds and failures must be 1–10".into(),
+        ));
     }
     if let Some(cmd) = &r.command {
         if cmd.is_empty() || cmd.len() > 100 {

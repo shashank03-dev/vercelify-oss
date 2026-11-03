@@ -97,7 +97,7 @@ function newApp(name: string, kind: App["kind"], over: Partial<App> = {}): App {
     kind,
     source: { repository: null, branch: null, git_source_id: null, image: null, compose_file: null, compose_content: null, pinned_sha: null },
     build: { pack: "auto", dockerfile: null, context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] },
-    runtime: { port: null, command: null, replicas: 1, memory_mb: null, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, service: null, failover: false },
+    runtime: { port: null, command: null, replicas: 1, memory_mb: null, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, rollback_compatible: false, rollback_grace_secs: 10, rollback_failures: 3, service: null, failover: false },
     previews: { enabled: kind === "git", max: 3, access: "private" },
     node_id: "node_demomain00000000",
     desired: "running",
@@ -118,7 +118,7 @@ const apps: App[] = [
     source: git("notes-api"),
     build: { pack: "dockerfile", dockerfile: "Dockerfile", context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] },
     node_id: "node_demopi5000000000",
-    runtime: { port: null, command: null, replicas: 2, memory_mb: 256, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, service: null, failover: true },
+    runtime: { port: null, command: null, replicas: 2, memory_mb: 256, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, rollback_compatible: false, rollback_grace_secs: 10, rollback_failures: 3, service: null, failover: true },
   }),
   newApp("umami", "image", { source: { repository: null, branch: null, git_source_id: null, image: "ghcr.io/umami-software/umami:postgresql-latest", compose_file: null, compose_content: null, pinned_sha: null } }),
   newApp("wiki", "git", { source: git("wiki"), desired: "sleeping" }),
@@ -793,6 +793,8 @@ export function platformRoute(req: HttpRequest): unknown {
         if (m === "DELETE") previews.set(app.id, (previews.get(app.id) ?? []).filter((p) => p.pr_number !== Number(seg[3])));
         return clone(previews.get(app.id) ?? []);
       }
+      case "deployment-guards":
+        return [];
       case "preview-databases":
         return app.previews.database ? clone((previews.get(app.id) ?? []).filter(p=>!p.closed_at).map(p=>({id:`preview-db-${p.id}`,pr_number:p.pr_number,state:"ready",error:""}))) : [];
       case "git": {

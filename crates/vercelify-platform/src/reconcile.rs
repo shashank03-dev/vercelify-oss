@@ -305,7 +305,47 @@ impl Reconciler {
                         .collect()
                 })
                 .unwrap_or_default();
-            let mut p = plan(&wants, &routes, &actual, &desire.active, &keys, chrono::Utc::now());
+            let now = chrono::Utc::now();
+            let retirements = self.engine.store.with(|c| {
+                let mut q = c.prepare(
+                    "SELECT container,deployment_id,not_before FROM deployment_retirements WHERE node_id=?1",
+                )?;
+                let rows = q
+                    .query_map([&n.id], |r| {
+                        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, i64>(2)?))
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })?;
+            let mut protected = desire.active.clone();
+            for (_, deployment, not_before) in &retirements {
+                if *not_before > now.timestamp() {
+                    protected.insert(deployment.clone());
+                }
+            }
+            let mut p = plan(&wants, &routes, &actual, &protected, &keys, now);
+            for (container, deployment, not_before) in &retirements {
+                if wants.iter().any(|w| w.container == *container) || desire.active.contains(deployment) {
+                    continue;
+                }
+                match actual.iter().find(|c| c.name == *container) {
+                    Some(c) if c.labels.get(LABEL_DEPLOYMENT) == Some(deployment) => {
+                        if *not_before <= now.timestamp() && !p.remove.contains(container) {
+                            p.remove.push(container.clone());
+                        }
+                    }
+                    _ => {
+                        // Gone or replaced by another owner: metadata retirement
+                        // cannot authorize removal of that other generation.
+                        self.engine.store.tx(|c| {
+                            c.execute("DELETE FROM deployment_retirements WHERE node_id=?1 AND container=?2",rusqlite::params![n.id,container])?;
+                            c.execute("DELETE FROM instances WHERE node_id=?1 AND container=?2 AND deployment_id=?3",rusqlite::params![n.id,container,deployment])?;
+                            c.execute("UPDATE deployments SET container='' WHERE id=?1 AND container=?2 AND NOT EXISTS(SELECT 1 FROM apps WHERE current_deployment_id=?1)",rusqlite::params![deployment,container])?;
+                            Ok(())
+                        })?;
+                    }
+                }
+            }
             for x in &p.recover {
                 if !recover.contains(x) {
                     recover.push(x.clone());

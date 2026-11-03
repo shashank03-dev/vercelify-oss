@@ -83,6 +83,13 @@ export interface Preview {
   closed_at: string | null;
 }
 
+export interface DeploymentGuard {
+  deployment_id: string;
+  state: "watching" | "requested" | "verified" | "failed" | "cancelled" | "expired";
+  reason: string;
+  rollback_id: string | null;
+}
+
 export interface PreviewDatabaseStatus {
   id: string;
   pr_number: number;
@@ -152,6 +159,7 @@ export function platformOn(server?: string) {
     removeVolume: (app: string, name: string) => req<unknown>("DELETE", `/apps/${q(app)}/volumes/${q(name)}`),
 
     previews: (app: string) => req<Preview[]>("GET", `/apps/${q(app)}/previews`),
+    deploymentGuards: (app: string) => req<DeploymentGuard[]>("GET", `/apps/${q(app)}/deployment-guards`),
     previewDatabases: (app: string) => req<PreviewDatabaseStatus[]>("GET", `/apps/${q(app)}/preview-databases`),
     removePreview: (app: string, pr: number) => req<unknown>("DELETE", `/apps/${q(app)}/previews/${pr}`),
 

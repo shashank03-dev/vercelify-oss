@@ -1,0 +1,13 @@
+
+running 1 test
+PASS: http: verified with 1 rollback job(s)
+PASS: crash: verified with 1 rollback job(s)
+PASS: missing: failed with 0 rollback job(s)
+test running_http_failure_crash_loop_and_failed_recovery_are_durable has been running for over 60 seconds
+PASS: changed: cancelled with 0 rollback job(s)
+PASS: newer: cancelled with 0 rollback job(s)
+PASS: failed: failed with 1 rollback job(s)
+PASS: 871 unchanged production probes, zero failures
+test running_http_failure_crash_loop_and_failed_recovery_are_durable ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 94.15s

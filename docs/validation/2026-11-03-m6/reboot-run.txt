@@ -1,0 +1,18 @@
+Traceback (most recent call last):
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-03-m6/reboot-lab.py", line 123, in <module>
+    until('all own containers removed',lambda:all(not rows(a['id']) for a in owned))
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-03-m6/reboot-lab.py", line 29, in until
+    value=predicate()
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-03-m6/reboot-lab.py", line 123, in <lambda>
+    until('all own containers removed',lambda:all(not rows(a['id']) for a in owned))
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-03-m6/reboot-lab.py", line 123, in <genexpr>
+    until('all own containers removed',lambda:all(not rows(a['id']) for a in owned))
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-03-m6/reboot-lab.py", line 40, in rows
+    data=json.loads(guest(['docker','inspect','--format','{{json .}}',*ids]).replace('}\n{','},{').join(['[',']']))
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-03-m6/reboot-lab.py", line 19, in guest
+    def guest(args): return command(['limactl','shell','vfybench','--','sudo',*args])
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-03-m6/reboot-lab.py", line 18, in command
+    def command(args): return subprocess.run(args,check=True,capture_output=True,text=True).stdout.strip()
+  File "/Library/Developer/CommandLineTools/Library/Frameworks/Python3.framework/Versions/3.9/lib/python3.9/subprocess.py", line 528, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['limactl', 'shell', 'vfybench', '--', 'sudo', 'docker', 'inspect', '--format', '{{json .}}', 'c3533ad170ce']' returned non-zero exit status 1.

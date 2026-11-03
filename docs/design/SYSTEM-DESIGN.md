@@ -392,9 +392,47 @@ none or several stop the deployment at once, naming the ports and asking for one
 6. On failure before step 4: remove the new container, keep the old one, deployment `failed`
    with the reason and the last 50 lines of the container's log, alert.
 
-Automatic rollback (today's feature): a deployment that becomes unhealthy (container exited
-or health failing 3 times) within 3 minutes after step 4 triggers a rollback deployment of
-the previous healthy one.
+M6 deploy recovery is explicit: `runtime.rollback_compatible` defaults false and
+means older images remain compatible with current migrations and persistent data.
+It never restores a production database or volume. Every production publication
+records a hash of declared runtime, resolved variables, placement, volume identity
+and effective port. A matching previous snapshot plus a retained generated build
+image or immutable image ID/digest can arm the three-minute observation journal.
+Legacy snapshots and mutable external tags require manual recovery. Compose remains
+manual. Startup grace defaults to ten seconds (0–120), failure threshold to three
+(1–10); two additional restarts also qualify. Baselines are collected before
+publication, not at the first poll. API policy changes and production publication
+share a commit gate; an enqueue during publication may ask its caller to retry.
+
+`0011_deploy_guard.sql` persists original deadline, restart baselines, consecutive
+known probe failures, prior image/config identity, evidence, one rollback job and
+watching/requested/verified/failed/cancelled/expired outcomes. Unknown remote state,
+missing containers and paused workloads never count as defective-image evidence.
+Missing containers remain the reconciler's work. Healthy-but-running failures use
+the declared health policy. A new job, stop/sleep or changed configuration fences
+the watch. Guard request and rollback enqueue are one transaction; work and
+publication recheck that authority, so a queued rollback cannot override a later
+stop or manual deploy. Automatic rollbacks do not recursively arm another guard.
+
+A requested rollback is reported as requested. Only healthy/current rollback,
+direct runtime health and a successful local ingress probe mark verified. Recovery
+has a five-minute verification deadline and never spins indefinitely. Protected or
+custom ingress may need manual verification; this is local readiness, not ISP or
+external DNS/TLS availability. Metadata/error classifications contain no environment
+values or raw health-command output. `deployment-guards` and `serving-checks` health
+capabilities gate the UI and update checks. Authenticated GETs expose per-app
+`deployment-guards` (latest 100) and a read-only `serving-check` result; stopped or
+sleeping apps are never started to test readiness.
+
+Publication also records exact node/container/deployment retirement ownership and
+an absolute drain deadline. A minimum two-second propagation allowance applies even
+when requested drain is zero; default drain stays ten seconds. Reconciliation
+protects an unexpired drain, then removes the exact superseded generation after
+restart and clears its stale instance metadata. A reused name with a different
+owner is never adopted for deletion. Image pruning/deployment deletion preserve
+active guard targets. Starting/healthy transitions clear obsolete queue reasons.
+Shared project bridge removal checks stored app/database ownership, including
+stopped peers, and preserves the bridge if ownership is unknown.
 
 Compose apps: `docker compose -p vfy-<app> -f <file> -f <generated override> up -d --wait`,
 where the override adds our labels, networks, limits and the env file. The routed service is
@@ -1238,7 +1276,7 @@ the user chose to deploy.
 | Coordinator offline | Mesh keeps the last map; joins/revokes wait; certificates are valid for 10 more days at the earliest |
 | Relay offline | Direct paths unaffected; peers without a direct path are unreachable until it returns (doctor explains) |
 | Clock wrong | Certificates checked with 5 min skew; the existing clock-sync doctor check alerts |
-| Migration to a newer schema, then agent rollback | Newer `user_version` refuses to open. `vercelify update` takes a fresh consistent copy of the live database first (`vercelify-agent db-backup`, SQLite's backup API, no migration; an older agent is stopped for a plain copy), not the 5-minute `.bak`. `rollback` and a failed update's self-undo stop the agent (checkpointing the WAL), restore that copy when the live schema is newer, start the agent again and check the engine answers (`platform` in `/v1/health`); if it doesn't, they say `sudo vercelify restore-state …` |
+| Migration to a newer schema, then agent rollback | Newer `user_version` refuses to open. Updates save a fresh consistent control snapshot. Automatic binary rollback is allowed only without a schema rewind; otherwise current candidate/control writes are retained and repair or explicit `vercelify rollback --restore-control-state` is required. The explicit flag rewinds control metadata to the update snapshot, preserving the replaced file and warning that later control writes are lost. Application volume data is never restored as a side effect. Before/after update, capable agents record equivalent runtime/local-ingress and intentional stop/sleep state; changed workload intent preserves the candidate for review. A healthy control plane with failed workloads tries only compatible previous binaries and verifies the recorded scope. Legacy readiness remains explicitly unmeasured. |
 
 ## 16. Resource budgets
 

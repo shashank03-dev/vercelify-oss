@@ -141,6 +141,37 @@ URL that queues a deployment when called.
 Apps can **sleep** when idle to free memory (`sudo vercelify sleep on APP 30`, or the app's
 **Sleep** card); the next visit wakes them with a short "waking up" page.
 
+### Verified deploy recovery
+
+In **Settings → Deploy recovery**, enable automatic image rollback only after
+confirming older images remain compatible with the app's current data and migrations.
+The default is off. A production version is observed for three minutes, with a
+ten-second startup grace and three consecutive health failures by default. Two
+additional restarts also trigger recovery. The original window survives an agent
+restart. A newer deployment, stop/sleep or changed runtime, variables, storage or
+placement cancels stale recovery; a queued rollback cannot undo a later stop.
+
+Recovery needs a matching prior configuration snapshot and retained immutable image
+(a generated build tag, image ID or pinned digest). Older deployments without that
+snapshot and mutable external tags need manual recovery. Compose recovery is manual.
+A rollback request is shown as pending until the old image passes runtime health and
+local ingress. Missing images, failed rollback or verification timeout remain visible
+as needing attention. This does not restore database/volume writes, reverse migrations
+or prove external DNS/TLS/ISP availability. Protected/custom ingress may need manual
+verification. A minimum two-second route propagation allowance applies to old-version
+retirement even with zero requested drain; the normal default drain is ten seconds.
+
+Host updates save control state and, when the installed agent supports it, record
+local runtime/ingress readiness and intentionally stopped/sleeping apps. Checks never
+wake those apps. A healthy control API alone is insufficient for a qualified update.
+Legacy agents without the capability report workload verification as unmeasured.
+An intentional workload change during update preserves current state for review.
+If automatic binary rollback would require a schema rewind, the candidate and later
+control writes are retained. Repair it, or explicitly run
+`sudo vercelify rollback --restore-control-state` to rewind control metadata to the
+update snapshot. That flag discards subsequent control changes; app volume data stays
+unchanged. Keep the reported snapshot/replaced-state files for recovery.
+
 ### Fresh PostgreSQL for PR previews
 
 For trusted same-repository PRs, enable **Previews → Fresh PostgreSQL** and save

@@ -1,0 +1,14 @@
+{
+  "rust": {
+    "passed": 767,
+    "failed": 0,
+    "ignored": 13
+  },
+  "clippy": "passed",
+  "linux_bats": 234,
+  "shellcheck": "passed",
+  "ui_types": "passed",
+  "ui_unit": 142,
+  "ui_build": "passed",
+  "demo_browser": 32
+}

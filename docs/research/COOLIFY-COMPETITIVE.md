@@ -425,6 +425,37 @@ and the user chose lab continuation. No one-GiB PostgreSQL support is establishe
 Raw samples, binary hashes, limits, regression evidence and reproduction:
 [M5 validation](../validation/2026-11-03-m5/VALIDATION.md).
 
+### Re-measured for M6 durable recovery, 3 November 2026
+
+Same original six apps, four-GiB ARM lab, disposable daemon/BuildKit stopped,
+two-minute settle and twelve samples six seconds apart plus collection time.
+This run followed the explicitly tested VM reboot; cache/process histories differ.
+
+| Median MiB | M5 builder stopped | M6 builder stopped |
+| --- | ---: | ---: |
+| System used (range) | 642.5 (622–655) | 588 (580–616) |
+| Agent RSS | 8.03 | 8.42 |
+| Mesh RSS | 3.20 | 2.81 |
+| Traefik RSS | 89.24 | 93.27 |
+| dockerd / containerd RSS | 101.83 / 47.61 | 99.70 / 45.07 |
+| All shim RSS | 75.10 | 73.77 |
+| BuildKit RSS | 0 | 0 |
+
+Do not attribute this single observation's difference to recovery code or promise
+fixed savings. All six original routes returned 200 after cleanup. Real installed
+agent restart retained the watch deadline/baseline and passed 132 serving probes.
+The deliberate VM stop/start and SSH-forward recovery took 21.59 seconds, with
+504/510 phase probes failing during the expected outage; all 1,260 post-recovery
+probes passed. A pending drain completed, declared stopped/sleeping fixtures stayed
+physically stopped, and deleting a fixture preserved its stopped peers' bridge.
+This is recovery evidence, not zero-downtime reboot or idle-detection qualification.
+
+The final real Docker guard matrix passed 871 production probes without failures;
+the PostgreSQL preview regression passed another 369. Static agents remain below
+8 MiB. Physical laptop/x86 runtime and external DNS/TLS/ISP availability remain
+unmeasured. [M6 validation](../validation/2026-11-03-m6/VALIDATION.md) contains raw
+measurements, narrow support scope, expected outage and qualification corrections.
+
 ## 7. Feature verdicts after validation
 
 ### 7.1 Your computer builds, your server serves — build early

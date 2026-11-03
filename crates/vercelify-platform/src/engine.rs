@@ -65,6 +65,8 @@ pub struct Engine {
     /// closing don't interleave: a deployment of a closed pull request
     /// never goes live after `remove_preview` closed it.
     preview_commit: tokio::sync::Mutex<()>,
+    /// Serializes API control changes/queue intent with production publication.
+    pub publication: tokio::sync::Mutex<()>,
     database_ops: Mutex<HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>,
     listener: Mutex<Option<Listener>>,
     /// This server's private address (mesh): where databases'
@@ -107,6 +109,8 @@ pub struct Enqueue {
     pub pr_title: Option<String>,
     /// Roll back to this deployment.
     pub rollback_of: Option<String>,
+    /// Internal durable guard identity; atomically fenced with rollback enqueue.
+    pub guard_request: Option<String>,
     pub force_rebuild: bool,
 }
 
@@ -138,6 +142,7 @@ impl Engine {
             database_ops: Mutex::default(),
             app_runtime: tokio::sync::Mutex::new(()),
             preview_commit: tokio::sync::Mutex::new(()),
+            publication: tokio::sync::Mutex::new(()),
             listener: Mutex::default(),
             private_ip: Mutex::default(),
             registry: Mutex::default(),
@@ -316,9 +321,29 @@ impl Engine {
         req: Enqueue,
         external: Option<(&str, &vercelify_core::platform::LocalBuildRequest)>,
     ) -> Result<Deployment> {
+        let _publication = if req.pr_number.is_none() {
+            Some(
+                self.publication
+                    .try_lock()
+                    .map_err(|_| Error::Conflict("a deployment is publishing; retry the request".into()))?,
+            )
+        } else {
+            None
+        };
         let d = self.store.tx(|c| {
             let a = apps::find(c, app)?;
             let trigger = req.trigger.unwrap_or(DeploymentTrigger::Manual);
+            if let Some(id) = &req.guard_request {
+                let guard = crate::deploy_guard::requestable(c, id, chrono::Utc::now().timestamp())?;
+                if req.pr_number.is_some()
+                    || guard.app_id != a.id
+                    || req.rollback_of.as_deref() != Some(&guard.previous_id)
+                    || trigger != DeploymentTrigger::AutoRollback
+                    || !crate::deploy_guard::compatible(c, &self.key, &guard)?
+                {
+                    return Err(Error::Conflict("rollback configuration or guard changed".into()));
+                }
+            }
             if let Some(sha) = &req.commit_sha {
                 crate::validate::commit_sha(sha)?;
                 // A git server fetches a commit by its full id only.
@@ -433,6 +458,9 @@ impl Engine {
                     crate::offhost::timestamp(),
                 )?;
             }
+            if let Some(id) = &req.guard_request {
+                crate::deploy_guard::requested(c, id, &d.id, chrono::Utc::now().timestamp())?;
+            }
             Ok(d)
         })?;
         self.wake.notify_one();
@@ -470,6 +498,7 @@ impl Engine {
 
     /// The dispatcher: start every queued deployment whose app is free.
     pub async fn run(self: Arc<Self>) {
+        tokio::spawn(self.clone().run_deploy_guards());
         loop {
             if let Err(e) = self
                 .store
@@ -562,21 +591,11 @@ impl Engine {
         // decides when this operation's physical demand can be released.
         self.reservations.finish(&d.id, true);
         match res {
-            Ok((done, url, previous)) => {
+            Ok((done, url, _previous)) => {
                 log.info(&format!(
                     "healthy{}",
                     url.as_deref().map(|u| format!(": {u}")).unwrap_or_default()
                 ));
-                let watched = matches!(
-                    done.trigger,
-                    DeploymentTrigger::Push
-                        | DeploymentTrigger::Manual
-                        | DeploymentTrigger::Hook
-                        | DeploymentTrigger::Webhook
-                );
-                if let (Some(prev), true, None) = (previous, watched, done.pr_number) {
-                    tokio::spawn(self.clone().watch_after_deploy(app.clone(), done.clone(), prev));
-                }
                 self.emit(EngineEvent::Succeeded {
                     app: app.name.clone(),
                     deployment: done,
@@ -784,9 +803,24 @@ impl Engine {
         cancel: crate::proc::Cancel,
         log: &mut LogWriter,
     ) -> Result<(Deployment, Option<String>, Option<String>)> {
+        if d.trigger == DeploymentTrigger::AutoRollback
+            && !self
+                .store
+                .with(|c| crate::deploy_guard::rollback_allowed(c, &self.key, &d.id))?
+        {
+            return Err(Error::Conflict("cancelled".into()));
+        }
         let limited = self.limited_app(app, d)?;
         let app = &limited;
         let preview = d.pr_number.is_some();
+        let guard_config = if preview {
+            None
+        } else {
+            Some(
+                self.store
+                    .with(|c| crate::deploy_guard::fingerprint_base(c, &self.key, &app.id))?,
+            )
+        };
         let (main, targets) = self.choose(app, d).await?;
         let remote = targets.iter().any(|(n, _)| n.role != "main");
         if remote || targets.len() > 1 {
@@ -1169,8 +1203,31 @@ impl Engine {
                 }
                 Some(guard)
             }
-            None => None,
+            None => Some(self.publication.lock().await),
         };
+        if d.trigger == DeploymentTrigger::AutoRollback
+            && !self
+                .store
+                .with(|c| crate::deploy_guard::rollback_allowed(c, &self.key, &d.id))?
+        {
+            self.remove_placed(&started).await;
+            return Err(Error::Conflict("cancelled".into()));
+        }
+        // Capture restarts before publication, so early failures cannot become
+        // the baseline at the first poll. Incomplete inventory never arms a guard.
+        let mut guard_baseline = std::collections::BTreeMap::new();
+        if !preview && app.runtime.rollback_compatible {
+            for p in &started {
+                if let Ok(rt) = self.node_runtime(&p.node) {
+                    if let Ok(Some(i)) = rt.inspect(&p.instance.container).await {
+                        guard_baseline.insert(format!("{}/{}", p.node.id, p.instance.container), i.restart_count);
+                    }
+                }
+            }
+            if guard_baseline.len() != started.len() {
+                guard_baseline.clear();
+            }
+        }
         // Commit point: route, then record. A crash in between leaves the
         // route on healthy containers; the reconciler adopts them.
         let base = RouteBase {
@@ -1193,8 +1250,28 @@ impl Engine {
         let pr = d.pr_number;
         let list: Vec<Instance> = started.iter().map(|p| p.instance.clone()).collect();
         let primary = targets.first().map(|(n, _)| n.id.clone());
+        let retirements: Vec<_> = previous_placed
+            .iter()
+            .filter(|old| {
+                !list
+                    .iter()
+                    .any(|new| old.node.id == new.node_id && old.instance.container == new.container)
+            })
+            .map(|old| {
+                (
+                    old.node.id.clone(),
+                    old.instance.container.clone(),
+                    previous.clone().unwrap_or_default(),
+                )
+            })
+            .collect();
+        let guard_previous = previous.clone();
         let done = self.store.tx(move |c| {
             instances::set(c, &id, &list)?;
+            for (node,container,old) in &retirements {
+                c.execute("INSERT OR REPLACE INTO deployment_retirements(node_id,container,deployment_id,app_id,not_before) VALUES(?1,?2,?3,?4,?5)",
+                    rusqlite::params![node,container,old,app_id,chrono::Utc::now().timestamp()+i64::from(app.runtime.drain_secs.max(2))])?;
+            }
             deployments::transition(c, &id, DeploymentStatus::Healthy, None)?;
             match pr {
                 Some(n) => {
@@ -1220,8 +1297,25 @@ impl Engine {
                     }
                 }
             }
-            deployments::get(c, &id)
+            let done = deployments::get(c, &id)?;
+            if let Some(config) = &guard_config {
+                crate::deploy_guard::published(
+                    c,
+                    &done,
+                    guard_previous.as_deref(),
+                    &crate::deploy_guard::with_port(config, port),
+                    &guard_baseline,
+                    crate::deploy_guard::Policy {
+                        compatible: app.runtime.rollback_compatible,
+                        grace_secs: app.runtime.rollback_grace_secs,
+                        failure_limit: app.runtime.rollback_failures,
+                    },
+                    chrono::Utc::now().timestamp(),
+                )?;
+            }
+            Ok(done)
         })?;
+        drop(_commit);
         self.retire_previous(
             &base.key,
             &previous_placed,
@@ -1379,6 +1473,7 @@ impl Engine {
         drain: Duration,
         log: &mut LogWriter,
     ) {
+        let drain = drain.max(Duration::from_secs(2));
         let new: HashSet<&str> = started.iter().map(|p| p.instance.container.as_str()).collect();
         let new_nodes: HashSet<&str> = started.iter().map(|p| p.node.id.as_str()).collect();
         let old: Vec<Placed> = previous
@@ -1432,6 +1527,11 @@ impl Engine {
     async fn prune_after(&self, app: &str, image: &str, native: &str, started: &[Placed]) {
         let mut done: HashSet<String> = HashSet::new();
         let mut keep: Vec<String> = vec![image.to_string()];
+        keep.extend(
+            self.store
+                .with(|c| crate::deploy_guard::retained_images(c, app))
+                .unwrap_or_default(),
+        );
         for p in started {
             keep.push(registry::arch_tag(image, &p.node.arch, native));
         }
@@ -1492,81 +1592,7 @@ impl Drop for CheckoutGuard {
     }
 }
 
-/// How long a new production deployment is watched for automatic rollback.
-pub const WATCH_AFTER_DEPLOY: Duration = Duration::from_secs(180);
-
 impl Engine {
-    /// Automatic rollback (design §7.2): a deployment that crashes or keeps
-    /// restarting within 3 minutes of going live is replaced by the one before.
-    async fn watch_after_deploy(self: Arc<Self>, app: App, d: Deployment, previous: String) {
-        let placed = match self.placed(&d.id) {
-            Ok(p) if !p.is_empty() => p,
-            _ => return,
-        };
-        let start = std::time::Instant::now();
-        let mut base_restarts: HashMap<String, u64> = HashMap::new();
-        while start.elapsed() < WATCH_AFTER_DEPLOY {
-            tokio::time::sleep(Duration::from_secs(10)).await;
-            // Something else took over (a newer deploy, a manual rollback, a stop).
-            let current = self
-                .store
-                .with(|c| apps::get(c, &app.id))
-                .ok()
-                .filter(|a| a.desired == vercelify_core::platform::Desired::Running)
-                .and_then(|a| a.current_deployment_id);
-            if current.as_deref() != Some(d.id.as_str()) {
-                return;
-            }
-            let mut crashed = None;
-            for p in &placed {
-                let Ok(rt) = self.node_runtime(&p.node) else { continue };
-                let i = match rt.inspect(&p.instance.container).await {
-                    Ok(Some(i)) => i,
-                    Ok(None) => return, // removed: the reconciler's business
-                    Err(_) => continue, // its server is unreachable: not the app's fault
-                };
-                if i.paused {
-                    continue;
-                }
-                let base = *base_restarts
-                    .entry(p.instance.container.clone())
-                    .or_insert(i.restart_count);
-                if !i.running || i.restart_count >= base + 2 {
-                    crashed = Some((i, base));
-                    break;
-                }
-            }
-            let Some((i, base)) = crashed else { continue };
-            let why = if i.oom_killed {
-                "ran out of memory".to_string()
-            } else if !i.running {
-                format!("exited with code {}", i.exit_code)
-            } else {
-                format!("restarted {} times", i.restart_count - base)
-            };
-            tracing::warn!("{}: deployment #{} {why}; rolling back", app.name, d.number);
-            let mut log = self.logs.writer(&app.name, &d.id);
-            log.error(&format!("after going live the app {why}: rolling back automatically"));
-            drop(log);
-            match self.enqueue(
-                &app.id,
-                Enqueue {
-                    trigger: Some(DeploymentTrigger::AutoRollback),
-                    rollback_of: Some(previous.clone()),
-                    ..Enqueue::default()
-                },
-            ) {
-                Ok(rb) => self.emit(EngineEvent::Failed {
-                    app: app.name.clone(),
-                    deployment: d.clone(),
-                    error: format!("{why} after going live; rolled back (deployment #{})", rb.number),
-                }),
-                Err(e) => tracing::error!("{}: automatic rollback failed: {e}", app.name),
-            }
-            return;
-        }
-    }
-
     /// Take a preview down: container(s), route, its own volumes, and the
     /// preview record (closed). It is closed first, so its deployments still
     /// under way are cancelled and can't go live; the teardown waits for
@@ -1787,14 +1813,24 @@ impl Engine {
         if let Err(e) = crate::preview_network::remove_for_app(docker, &app.id).await {
             tracing::warn!("cleaning preview networks of {}: {e}", app.name);
         }
-        // Its project's network, unless other apps or databases still use it
-        // (Docker refuses then).
-        let _ = docker
-            .run(
-                &crate::proc::args(&["network", "rm", &deploy::project_network(&app.project_id)]),
-                Duration::from_secs(30),
-            )
-            .await;
+        // Stopped containers don't protect a bridge from Docker removal.
+        // Stored ownership includes intentionally stopped apps/databases;
+        // an unknown inventory conservatively retains the shared bridge.
+        let project_in_use = self.store.with(|c| {
+            Ok(c.query_row(
+                "SELECT EXISTS(SELECT 1 FROM apps a JOIN environments e ON e.id=a.environment_id WHERE e.project_id=?1
+                 UNION ALL SELECT 1 FROM databases d JOIN environments e ON e.id=d.environment_id WHERE e.project_id=?1)",
+                [&app.project_id], |r| r.get::<_,bool>(0),
+            )?)
+        }).unwrap_or(true);
+        if !project_in_use {
+            let _ = docker
+                .run(
+                    &crate::proc::args(&["network", "rm", &deploy::project_network(&app.project_id)]),
+                    Duration::from_secs(30),
+                )
+                .await;
+        }
         for key in crate::proxy::route_keys(&self.deployer.proxy) {
             if key == app.name || key.starts_with(&format!("{}-pr-", app.name)) {
                 let _ = crate::proxy::remove_route(&self.deployer.proxy, &key);
@@ -1923,6 +1959,7 @@ pub(crate) mod tests {
                  touch {d}/containers/$3; prev=''; for a; do [ \"$prev\" != --network ] || echo \"$a\" > {d}/network-$3; prev=$a; done; echo cid ;;\n  \
                  network) case \"$2\" in inspect) echo '{{\"Driver\":\"bridge\",\"Internal\":true,\"EnableIPv6\":false,\"Options\":{{\"com.docker.network.bridge.gateway_mode_ipv4\":\"isolated\"}},\"Labels\":{{\"vercelify.preview-network\":\"true\",\"vercelify.managed\":\"platform\"}}}}' ;; esac ;;\n  \
                  rm) rm -f {d}/containers/$last ;;\n  \
+                 ps) cat {d}/managed-list 2>/dev/null ;;\n  \
                  image) case \"$4\" in *ExposedPorts*) cat {d}/exposed 2>/dev/null || echo '{{\"80/tcp\":{{}}}}' ;; esac ;;\n  \
                  container) [ -f {d}/containers/$last ] || {{ echo \"Error: No such container: $last\" >&2; exit 1; }}; \
                  net=$(cat {d}/network-$last 2>/dev/null || echo vfy-proxy); \
@@ -2252,6 +2289,217 @@ esac
     /// M1 release gate: withholding variables must not leave PR code on the
     /// network used by production databases. This fixture records Docker
     /// arguments; a passing result still requires a real network contract.
+    #[tokio::test]
+    async fn a_guard_enqueues_one_rollback_and_new_work_fences_it_atomically() {
+        for newer in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let e = engine(dir.path(), 1);
+            let mut app = image_app(&e);
+            let mut source = app.source.clone();
+            source.image = Some(format!("sha256:{}", "1".repeat(64)));
+            let mut runtime = app.runtime.clone();
+            runtime.rollback_compatible = true;
+            app = e
+                .store
+                .tx(|c| {
+                    apps::patch(
+                        c,
+                        &app.id,
+                        &AppPatch {
+                            source: Some(source),
+                            runtime: Some(runtime),
+                            ..Default::default()
+                        },
+                    )
+                })
+                .unwrap();
+            let now = chrono::Utc::now().timestamp();
+            let mut previous = None;
+            for _ in 0..2 {
+                let d = e.enqueue(&app.id, Enqueue::default()).unwrap();
+                e.store
+                    .tx(|c| {
+                        deployments::set_port(c, &d.id, 8080)?;
+                        deployments::transition(c, &d.id, DeploymentStatus::Deploying, None)?;
+                        let done = deployments::transition(c, &d.id, DeploymentStatus::Healthy, None)?;
+                        deployments::promote(c, &app.id, &d.id)?;
+                        let fingerprint = crate::deploy_guard::fingerprint(c, &e.key, &app.id, 8080)?;
+                        crate::deploy_guard::published(
+                            c,
+                            &done,
+                            previous.as_deref(),
+                            &fingerprint,
+                            &std::collections::BTreeMap::from([("node/container".into(), 0)]),
+                            crate::deploy_guard::Policy {
+                                compatible: true,
+                                grace_secs: 0,
+                                failure_limit: 3,
+                            },
+                            now,
+                        )?;
+                        Ok(())
+                    })
+                    .unwrap();
+                previous = Some(d.id);
+            }
+            let id = previous.unwrap();
+            let g = e.store.with(|c| crate::deploy_guard::get(c, &id)).unwrap().unwrap();
+            e.store
+                .tx(|c| {
+                    crate::deploy_guard::observe(
+                        c,
+                        &id,
+                        crate::deploy_guard::Observation::Failed {
+                            reason: "crash loop".into(),
+                            crash_loop: true,
+                        },
+                        now,
+                    )
+                })
+                .unwrap();
+            if newer {
+                e.enqueue(&app.id, Enqueue::default()).unwrap();
+            }
+            let request = Enqueue {
+                trigger: Some(DeploymentTrigger::AutoRollback),
+                rollback_of: Some(g.previous_id),
+                guard_request: Some(id.clone()),
+                ..Default::default()
+            };
+            assert_eq!(e.enqueue(&app.id, request.clone()).is_ok(), !newer);
+            assert!(e.enqueue(&app.id, request).is_err());
+            let count = e
+                .store
+                .with(|c| {
+                    Ok(c.query_row(
+                        "SELECT count(*) FROM deployments WHERE trigger='auto-rollback'",
+                        [],
+                        |r| r.get::<_, u32>(0),
+                    )?)
+                })
+                .unwrap();
+            assert_eq!(count, u32::from(!newer));
+            if !newer {
+                let rollback = e.store.with(|c| deployments::list(c, &app.id, 1)).unwrap().remove(0);
+                e.store
+                    .tx(|c| {
+                        apps::patch(
+                            c,
+                            &app.id,
+                            &AppPatch {
+                                desired: Some(vercelify_core::platform::Desired::Stopped),
+                                ..Default::default()
+                            },
+                        )
+                    })
+                    .unwrap();
+                let dispatcher = tokio::spawn(e.clone().run());
+                until("stopped rollback", || {
+                    matches!(
+                        status(&e, &rollback.id),
+                        DeploymentStatus::Healthy | DeploymentStatus::Cancelled | DeploymentStatus::Failed
+                    )
+                })
+                .await;
+                assert_eq!(
+                    status(&e, &rollback.id),
+                    DeploymentStatus::Cancelled,
+                    "an intentional stop must fence a previously queued rollback"
+                );
+                dispatcher.abort();
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_durable_retirement_preserves_drain_then_reconciles_without_its_timer() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let app = image_app(&e);
+        let dispatcher = tokio::spawn(e.clone().run());
+        let first = e.enqueue(&app.id, Enqueue::default()).unwrap();
+        until("first", || status(&e, &first.id) == DeploymentStatus::Healthy).await;
+        let old = e.store.with(|c| deployments::container(c, &first.id)).unwrap();
+        let mut runtime = app.runtime.clone();
+        runtime.drain_secs = 60;
+        e.store
+            .tx(|c| {
+                apps::patch(
+                    c,
+                    &app.id,
+                    &AppPatch {
+                        runtime: Some(runtime),
+                        ..Default::default()
+                    },
+                )
+            })
+            .unwrap();
+        fresh_capacity(&e);
+        let second = e.enqueue(&app.id, Enqueue::default()).unwrap();
+        until("second", || status(&e, &second.id) == DeploymentStatus::Healthy).await;
+        let current = e.store.with(|c| deployments::container(c, &second.id)).unwrap();
+        let row = |name: &str, deployment: &str| {
+            serde_json::json!({"ID":name,"Names":name,"Image":"nginx:1.27","State":"running","Labels":format!("vercelify.app={},vercelify.deployment={}",app.id,deployment),"CreatedAt":"2026-10-25 05:00:00 +0000 UTC"}).to_string()
+        };
+        let current_row = row(&current, &second.id);
+        std::fs::write(
+            dir.path().join("managed-list"),
+            format!("{}\n{}\n", row(&old, &first.id), current_row),
+        )
+        .unwrap();
+        let reconciler = crate::reconcile::Reconciler::new(e.clone());
+        let report = reconciler.once().await.unwrap();
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert!(
+            e.deployer.docker.inspect(&old).await.unwrap().is_some(),
+            "draining instance must remain"
+        );
+        e.store
+            .tx(|c| {
+                c.execute("UPDATE deployment_retirements SET not_before=0", [])?;
+                Ok(())
+            })
+            .unwrap();
+        let report = reconciler.once().await.unwrap();
+        assert!(report.errors.is_empty(), "{:?}", report.errors);
+        assert!(
+            e.deployer.docker.inspect(&old).await.unwrap().is_none(),
+            "durable deadline removes it without waiting for the in-memory timer"
+        );
+        std::fs::write(dir.path().join("managed-list"), format!("{current_row}\n")).unwrap();
+        reconciler.once().await.unwrap();
+        assert!(e.store.with(|c| instances::of(c, &first.id)).unwrap().is_empty());
+        dispatcher.abort();
+    }
+
+    #[tokio::test]
+    async fn deleting_an_app_preserves_the_bridge_of_a_stopped_peer() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let removed = image_app(&e);
+        let peer = e
+            .store
+            .tx(|c| {
+                let peer = apps::create(c, &apps::tests::git_app("stopped-peer"))?;
+                apps::patch(
+                    c,
+                    &peer.id,
+                    &AppPatch {
+                        desired: Some(vercelify_core::platform::Desired::Stopped),
+                        ..Default::default()
+                    },
+                )
+            })
+            .unwrap();
+        assert_eq!(removed.project_id, peer.project_id);
+        e.store.tx(|c| apps::delete(c, &removed.id)).unwrap();
+        e.cleanup_app(&removed, false, &[]).await;
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert!(!calls
+            .lines()
+            .any(|line| line == format!("network rm {}", deploy::project_network(&peer.project_id))));
+    }
+
     #[tokio::test]
     async fn preview_does_not_join_the_production_database_network() {
         let dir = tempfile::tempdir().unwrap();

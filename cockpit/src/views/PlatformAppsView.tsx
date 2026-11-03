@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DatabaseStatus } from "../components/DatabaseStatus";
+import { DeployGuardCard } from "../components/DeployGuard";
 import { PreviewDatabaseCard } from "../components/PreviewDatabase";
 import { GithubAppModal, WebhookModal } from "../components/GitIntegrations";
 import { TerminalView } from "../components/Terminal";
@@ -431,7 +432,7 @@ function NewAppModal({ open, client, onClose, onCreated }: { open: boolean; clie
             ? { pack, dockerfile: null, context: null, install_command: null, build_command: null, output_directory: null, watch_paths: [] }
             : undefined,
         runtime: portNum
-          ? { port: portNum, command: null, replicas: 1, memory_mb: null, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, service: null, failover: false }
+          ? { port: portNum, command: null, replicas: 1, memory_mb: null, cpus: null, health: null, health_timeout_secs: 120, drain_secs: 10, rollback_compatible: false, rollback_grace_secs: 10, rollback_failures: 3, service: null, failover: false }
           : undefined,
         domains: [],
       });
@@ -1660,6 +1661,8 @@ function SettingsTab({ app, client, onChanged, onDeleted }: { app: App; client: 
           </Button>
         </div>
       </Card>
+
+      <DeployGuardCard app={app} client={client} onChanged={onChanged} />
 
       <PlacementCard app={app} client={client} onChanged={onChanged} />
 

@@ -1,0 +1,20 @@
+import { expect, test } from "@playwright/test";
+test("automatic image recovery requires explicit compatibility", async ({ page }) => {
+  await page.goto("/");
+  const server = page.getByTestId("found-optiplex-7050");
+  await server.getByRole("button", { name: "Connect" }).click();
+  await server.getByTestId("short-code").fill("K7QF-M2XD");
+  await server.getByTestId("short-submit").click();
+  await page.getByTestId("papp-shop").getByRole("button", { name: /shop/ }).first().click();
+  await page.getByTestId("tab-settings").click();
+  const card = page.getByTestId("deploy-guard-card");
+  await expect(card.getByTestId("deploy-guard-enabled")).not.toBeChecked();
+  await card.getByTestId("deploy-guard-enabled").check();
+  await card.getByLabel("Rollback startup grace").fill("20");
+  await card.getByTestId("save-deploy-guard").click();
+  await expect(page.getByText("Deploy recovery saved", { exact: true })).toBeVisible();
+  await page.getByTestId("tab-deployments").click();
+  await page.getByTestId("tab-settings").click();
+  await expect(card.getByTestId("deploy-guard-enabled")).toBeChecked();
+  await expect(card.getByLabel("Rollback startup grace")).toHaveValue("20");
+});

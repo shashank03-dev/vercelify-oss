@@ -1,0 +1,117 @@
+{
+  "guard_before": {
+    "deployment_id": "dpl_269tasy09scez4ds",
+    "app_id": "app_q1mp8932nfwk1xgg",
+    "previous_id": "dpl_z4eqdn2vmef5gxry",
+    "deadline": 1793701092,
+    "grace_until": 1793700912,
+    "failure_limit": 3,
+    "failures": 0,
+    "baseline": {
+      "node_7ktm1b8ek8sgadwn/vfy-m6-reboot-9scez4ds": 0
+    },
+    "state": "watching",
+    "reason": "",
+    "rollback_id": null,
+    "requested_at": null
+  },
+  "guard_after_agent_restart": {
+    "deployment_id": "dpl_269tasy09scez4ds",
+    "app_id": "app_q1mp8932nfwk1xgg",
+    "previous_id": "dpl_z4eqdn2vmef5gxry",
+    "deadline": 1793701092,
+    "grace_until": 1793700912,
+    "failure_limit": 3,
+    "failures": 0,
+    "baseline": {
+      "node_7ktm1b8ek8sgadwn/vfy-m6-reboot-9scez4ds": 0
+    },
+    "state": "watching",
+    "reason": "",
+    "rollback_id": null,
+    "requested_at": null
+  },
+  "boot_and_forward_recovery_seconds": 21.589802082999995,
+  "guard_after_vm_reboot": {
+    "deployment_id": "dpl_269tasy09scez4ds",
+    "app_id": "app_q1mp8932nfwk1xgg",
+    "previous_id": "dpl_z4eqdn2vmef5gxry",
+    "deadline": 1793701092,
+    "grace_until": 1793700912,
+    "failure_limit": 3,
+    "failures": 0,
+    "baseline": {
+      "node_7ktm1b8ek8sgadwn/vfy-m6-reboot-9scez4ds": 0
+    },
+    "state": "watching",
+    "reason": "",
+    "rollback_id": null,
+    "requested_at": null
+  },
+  "quiet_peers": {
+    "m6-stopped": {
+      "containers": [
+        {
+          "container": "vfy-m6-stopped-sy4cyc9n",
+          "running": false,
+          "restart": "unless-stopped",
+          "deployment": "dpl_gg33dhrhsy4cyc9n"
+        }
+      ],
+      "check": {
+        "app_id": "app_cv8rpcd2aqf64nsx",
+        "deployment_id": "dpl_gg33dhrhsy4cyc9n",
+        "desired": "stopped",
+        "runtime": null,
+        "ingress": null
+      }
+    },
+    "m6-sleeping": {
+      "containers": [
+        {
+          "container": "vfy-m6-sleeping-4g9vvs8n",
+          "running": false,
+          "restart": "unless-stopped",
+          "deployment": "dpl_tey5actx4g9vvs8n"
+        }
+      ],
+      "check": {
+        "app_id": "app_qxm1q8np1x31vmkw",
+        "deployment_id": "dpl_tey5actx4g9vvs8n",
+        "desired": "sleeping",
+        "runtime": null,
+        "ingress": null
+      }
+    }
+  },
+  "current_generation": [
+    {
+      "container": "vfy-m6-reboot-9scez4ds",
+      "running": true,
+      "restart": "unless-stopped",
+      "deployment": "dpl_269tasy09scez4ds"
+    }
+  ],
+  "serving_check": {
+    "app_id": "app_q1mp8932nfwk1xgg",
+    "deployment_id": "dpl_269tasy09scez4ds",
+    "desired": "running",
+    "runtime": true,
+    "ingress": true
+  },
+  "stopped_peer_bridge_preserved": true,
+  "probes": {
+    "agent": {
+      "requests": 132,
+      "failures": 0
+    },
+    "reboot": {
+      "requests": 510,
+      "failures": 504
+    },
+    "recovered": {
+      "requests": 1260,
+      "failures": 0
+    }
+  }
+}

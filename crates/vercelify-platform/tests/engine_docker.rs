@@ -142,6 +142,22 @@ async fn deploy_redeploy_rollback_recover() {
         .await
         .expect("fixture image");
     drop(w);
+    let built_reference = docker
+        .run(
+            &[
+                "image".into(),
+                "inspect".into(),
+                "--format".into(),
+                "{{.Id}}".into(),
+                built.image.clone(),
+            ],
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap()
+        .stdout
+        .trim()
+        .to_string();
 
     let proxy_cfg = ProxyConfig {
         dir: dir.path().join("proxy"),
@@ -206,13 +222,14 @@ async fn deploy_redeploy_rollback_recover() {
                     environment_id: None,
                     project_id: None,
                     source: AppSource {
-                        image: Some(built.image.clone()),
+                        image: Some(built_reference.clone()),
                         ..AppSource::default()
                     },
                     build: None,
                     runtime: Some(AppRuntime {
                         port: Some(3000),
                         drain_secs: 2,
+                        rollback_compatible: true,
                         health_timeout_secs: 60,
                         ..AppRuntime::default()
                     }),
@@ -411,6 +428,22 @@ async fn deploy_redeploy_rollback_recover() {
         .await
         .unwrap();
     drop(w);
+    let crash_reference = docker
+        .run(
+            &[
+                "image".into(),
+                "inspect".into(),
+                "--format".into(),
+                "{{.Id}}".into(),
+                crash.image.clone(),
+            ],
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap()
+        .stdout
+        .trim()
+        .to_string();
     let good = store_
         .with(|c| apps::get(c, &app.id))
         .unwrap()
@@ -423,7 +456,7 @@ async fn deploy_redeploy_rollback_recover() {
                 &app.id,
                 &AppPatch {
                     source: Some(AppSource {
-                        image: Some(crash.image.clone()),
+                        image: Some(crash_reference.clone()),
                         ..AppSource::default()
                     }),
                     ..AppPatch::default()
@@ -459,7 +492,7 @@ async fn deploy_redeploy_rollback_recover() {
                         ..AppRuntime::default()
                     }),
                     source: Some(AppSource {
-                        image: Some(built.image.clone()),
+                        image: Some(built_reference.clone()),
                         ..AppSource::default()
                     }),
                     ..AppPatch::default()
@@ -756,7 +789,7 @@ async fn deploy_redeploy_rollback_recover() {
             .await
             .unwrap()
             .iter()
-            .filter(|c| c.name.starts_with("vfy-web-") && c.state == "running")
+            .filter(|c| c.labels.get(vercelify_platform::deploy::LABEL_APP) == Some(&app.id) && c.state == "running")
             .count(),
         expected_replicas
     );

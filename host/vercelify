@@ -65,7 +65,8 @@ Usage: sudo vercelify <command> [args]
   update [--edge|--stable|--ref TAG]
                          Install the latest release (keeps your data); rolls back by
                          itself if the new agent doesn't come up
-  rollback               Go back to the version installed before the last update
+  rollback [--restore-control-state]
+                         Go back to the previous version; state rewind requires the explicit flag
   uninstall              Remove Vercelify's agent, network, guard, firewall and CLI (apps'
                          containers and all data stay)
   version
@@ -425,18 +426,24 @@ snapshot_platform_db() {
 }
 
 restore_rollback() {
+  local restore_control=${1:-0}
   [[ -d "$ROLLBACK_DIR" ]] || die "nothing to roll back to ($ROLLBACK_DIR is missing)"
   # Stopped first: a clean stop checkpoints the WAL, so the schema read below
   # is the database's real one (the file header lags while the agent runs).
   systemctl stop vercelify-agent 2>/dev/null || true
+  if [[ -f "$ROLLBACK_DIR/platform.db" && -f "$PLATFORM_DB" ]] &&
+     (( $(sqlite_user_version "$PLATFORM_DB") > $(sqlite_user_version "$ROLLBACK_DIR/platform.db") )) && (( ! restore_control )); then
+    systemctl start vercelify-agent
+    warn "the live control schema changed; current binaries and post-update state were retained"
+    warn "repair the candidate, or explicitly rewind control state: sudo vercelify rollback --restore-control-state"
+    return 1
+  fi
   [[ -f "$ROLLBACK_DIR/vercelify-agent" ]] && install -m 0755 "$ROLLBACK_DIR/vercelify-agent" "$AGENT_BIN"
   [[ -f "$ROLLBACK_DIR/vercelify-mesh" ]] && install -m 0755 "$ROLLBACK_DIR/vercelify-mesh" "$MESH_BIN"
-  # The old agent can't open a database a newer one migrated: back to the copy
-  # taken before the update (changes made since then are lost, and said so).
-  if [[ -f "$ROLLBACK_DIR/platform.db" && -f "$PLATFORM_DB" ]] &&
-     (( $(sqlite_user_version "$PLATFORM_DB") > $(sqlite_user_version "$ROLLBACK_DIR/platform.db") )); then
+  # Rewinding control metadata may discard post-update writes and is explicit.
+  if (( restore_control )) && [[ -f "$ROLLBACK_DIR/platform.db" ]]; then
     restore_state_file "$ROLLBACK_DIR/platform.db"
-    warn "the engine's state is back to before the update: changes made since then are gone"
+    warn "control state explicitly rewound: changes made since the update are gone; app volume data is unchanged"
   fi
   if [[ -d "$ROLLBACK_DIR/host" ]]; then
     mkdir -p "$VERCELIFY_LIB/host"
@@ -542,19 +549,30 @@ cmd_update() {
   else fetch "https://raw.githubusercontent.com/$VERCELIFY_REPO/main/install.sh" "$tmp" || die "download failed"; fi
   snapshot_for_rollback
   info "previous version kept for rollback (vercelify rollback)"
+  update_workloads_snapshot "$ROLLBACK_DIR/workloads-before.json" || die "could not record workload readiness; installer was not run"
   local args=(-y)
   [[ $ROLE == worker ]] && args+=(--worker)
   VERCELIFY_NONINTERACTIVE=1 VERCELIFY_CHANNEL=$chan VERCELIFY_REF=$ref bash "$installer" "${args[@]}" || rc=$?
   rm -f "$tmp"
+  local failed=0 workload_rc=0
   if (( rc != 0 )) || ! agent_healthy "${UPDATE_HEALTH_SECS:-60}" || ! engine_up "${UPDATE_ENGINE_SECS:-15}"; then
-    err "update failed (exit $rc) — restoring the previous agent and scripts"
-    restore_rollback
+    failed=1
+  else
+    update_workloads_verify "$ROLLBACK_DIR/workloads-before.json" || workload_rc=$?
+    (( workload_rc == 2 )) && die "workload intent changed; candidate and current state retained for review"
+    (( workload_rc == 1 )) && failed=1
+  fi
+  if (( failed )); then
+    err "update failed (exit $rc, workload $workload_rc) — restoring the previous agent when schema compatible"
+    restore_rollback || die "automatic binary rollback would require a control-state rewind; candidate retained"
     if ! agent_healthy "${UPDATE_HEALTH_SECS:-60}"; then
       err "the previous agent did not come back either — see: journalctl -u vercelify-agent -n 50"
     elif ! engine_up "${UPDATE_ENGINE_SECS:-15}"; then
-      err "the agent runs but its engine can't open its state — put back the copy taken before the update: sudo vercelify restore-state $ROLLBACK_DIR/platform.db"
+      err "the agent runs but its engine can't open its state — explicit recovery: sudo vercelify restore-state $ROLLBACK_DIR/platform.db"
+    elif update_workloads_verify "$ROLLBACK_DIR/workloads-before.json"; then
+      ok "rolled back; previous control plane is healthy; see the recorded workload check scope"
     else
-      ok "rolled back; the previous version is running again"
+      err "previous binaries restored, but workload serving is not verified; manual recovery required"
     fi
     die "update failed; full log: $VERCELIFY_LOG"
   fi
@@ -563,11 +581,20 @@ cmd_update() {
 
 cmd_rollback() {
   need_root rollback
-  restore_rollback
+  [[ -d $ROLLBACK_DIR ]] || die "nothing to roll back to ($ROLLBACK_DIR is missing)"
+  (( $# <= 1 )) || die "usage: vercelify rollback [--restore-control-state]"
+  local restore_control=0 checks="$ROLLBACK_DIR/workloads-before-rollback.json"
+  case "${1:-}" in
+    '') ;;
+    --restore-control-state) restore_control=1; checks="$ROLLBACK_DIR/workloads-before.json" ;;
+    *) die "usage: vercelify rollback [--restore-control-state]" ;;
+  esac
+  if (( ! restore_control )); then update_workloads_snapshot "$checks" || die "could not record current workload readiness"; fi
+  restore_rollback "$restore_control" || die "control schema changed: use --restore-control-state only to explicitly rewind metadata"
   agent_healthy 30 || die "the agent did not come back — see: journalctl -u vercelify-agent -n 50"
-  engine_up "${UPDATE_ENGINE_SECS:-15}" ||
-    die "the agent runs but its engine can't open its state — put back the copy taken before the update: sudo vercelify restore-state $ROLLBACK_DIR/platform.db"
-  ok "rolled back to the version installed before the last update (Docker, apps and their data are unchanged)"
+  engine_up "${UPDATE_ENGINE_SECS:-15}" || die "the engine cannot open its state — explicit recovery: sudo vercelify restore-state $ROLLBACK_DIR/platform.db"
+  update_workloads_verify "$checks" || die "previous binaries restored, but workload serving is not verified"
+  ok "rolled back to the previous version; see the recorded workload check scope (app volume data unchanged)"
 }
 
 cmd_uninstall() {
@@ -666,7 +693,7 @@ main() {
     demote) cmd_demote "$@" ;;
     tokens) need_root tokens; "$AGENT_BIN" --config "$VERCELIFY_ETC/agent.toml" tokens "$@" ;;
     update) cmd_update "$@" ;;
-    rollback) cmd_rollback ;;
+    rollback) cmd_rollback "$@" ;;
     uninstall) cmd_uninstall ;;
     version|--version|-v) echo "vercelify ${version:-dev} ($ROLE)"; "$AGENT_BIN" --version 2>/dev/null || true ;;
     -h|--help|help) usage ;;

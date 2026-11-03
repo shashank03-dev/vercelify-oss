@@ -15,6 +15,10 @@ command: Array<string> | null, replicas: number, memory_mb: number | null, cpus:
  */
 drain_secs: number, 
 /**
+ * Explicitly declare image rollback compatible with persisted data/migrations.
+ */
+rollback_compatible: boolean, rollback_grace_secs: number, rollback_failures: number, 
+/**
  * Compose apps: the service the domains route to.
  */
 service: string | null, 

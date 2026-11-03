@@ -149,7 +149,8 @@ pub fn transition(c: &Connection, id: &str, to: DeploymentStatus, error: Option<
         "UPDATE deployments SET status = ?2,
            started_at = CASE WHEN ?3 AND started_at IS NULL THEN ?5 ELSE started_at END,
            finished_at = CASE WHEN ?4 THEN ?5 ELSE finished_at END,
-           error = CASE WHEN ?6 IS NOT NULL THEN ?6 ELSE error END
+           error = CASE WHEN ?6 IS NOT NULL THEN ?6
+             WHEN ?2 IN ('building','deploying','healthy') THEN '' ELSE error END
          WHERE id = ?1",
         params![id, to.as_str(), started, finished, t, error],
     )?;
@@ -292,6 +293,16 @@ pub fn delete(c: &Connection, id: &str) -> Result<Deployment> {
             d.number
         )));
     }
+    let guarded: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM deployment_guards WHERE previous_id=?1 AND state IN ('watching','requested'))",
+        [id],
+        |r| r.get(0),
+    )?;
+    if guarded {
+        return Err(Error::Conflict(
+            "this image is retained by an active deployment guard".into(),
+        ));
+    }
     let busy: i64 = c.query_row(
         "SELECT count(*) FROM deployments WHERE app_id = ?1 AND status IN ('queued', 'building', 'deploying')",
         [&d.app_id],
@@ -346,6 +357,26 @@ mod tests {
             image: "",
             node_id: None,
         }
+    }
+
+    #[test]
+    fn a_started_and_healthy_deployment_does_not_keep_a_queue_refusal() {
+        let s = Store::open_in_memory().unwrap();
+        let a = s
+            .tx(|c| apps::create(c, &apps::tests::git_app("queue-reason")))
+            .unwrap();
+        let d = s.tx(|c| create(c, &new(&a.id, None))).unwrap();
+        s.tx(|c| {
+            c.execute(
+                "UPDATE deployments SET error='queued: waiting for capacity' WHERE id=?1",
+                [&d.id],
+            )?;
+            assert!(transition(c, &d.id, Building, None)?.error.is_empty());
+            transition(c, &d.id, Deploying, None)?;
+            assert!(transition(c, &d.id, Healthy, None)?.error.is_empty());
+            Ok(())
+        })
+        .unwrap();
     }
 
     #[test]

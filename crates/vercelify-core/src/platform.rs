@@ -201,6 +201,10 @@ pub struct AppRuntime {
     pub health_timeout_secs: u32,
     /// How long the old version keeps serving after the switch.
     pub drain_secs: u32,
+    /// Explicitly declare image rollback compatible with persisted data/migrations.
+    pub rollback_compatible: bool,
+    pub rollback_grace_secs: u32,
+    pub rollback_failures: u8,
     /// Compose apps: the service the domains route to.
     pub service: Option<String>,
     /// Stateless apps may be started on another server when theirs is offline.
@@ -218,6 +222,9 @@ impl Default for AppRuntime {
             health: None,
             health_timeout_secs: 180,
             drain_secs: 10,
+            rollback_compatible: false,
+            rollback_grace_secs: 10,
+            rollback_failures: 3,
             service: None,
             failover: false,
         }

@@ -13,6 +13,8 @@ pub mod compose;
 pub mod databases;
 pub mod dbengine;
 pub mod deploy;
+pub mod deploy_guard;
+pub mod deploy_guard_engine;
 pub mod deployments;
 pub mod detect;
 pub mod docker;

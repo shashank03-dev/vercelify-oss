@@ -1,0 +1,11 @@
+1..10
+ok 1 a failed installer run is rolled back to the previous agent and scripts
+ok 2 explicit control-state rollback uses the fresh update snapshot
+ok 3 an agent without db-backup is stopped for the copy and started again
+ok 4 an update whose engine doesn't open is rolled back, and the way out is named
+ok 5 an agent that doesn't come up after the update is rolled back too
+ok 6 a good update keeps the new version; rollback goes back on request
+ok 7 a local installer runs in place, so it installs the checkout it lives in
+ok 8 an automatic update failure preserves post-update control writes
+ok 9 a broken workload with a healthy control plane rolls back compatible binaries and verifies serving
+ok 10 an intentional workload change during update preserves current binaries and state

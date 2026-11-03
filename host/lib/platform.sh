@@ -116,3 +116,52 @@ platform_webhook() {
   printf '  Secret:      %s   (shown once)\n  Content type: %s; events: %s\n' \
     "$(jq -r .secret <<<"$out")" "$(jq -r .content_type <<<"$out")" "$(jq -r '.events | join(", ")' <<<"$out")" >&2
 }
+
+# Update readiness is an explicit, read-only local scope. A legacy agent's
+# missing capability stays unmeasured; it never becomes "all apps verified".
+update_workloads_snapshot() {
+  local dest=$1 health apps rows id check failed=0
+  health=$(agent_try GET /v1/health) || health='{}'
+  if [[ $ROLE != main ]] || ! jq -e '.capabilities | index("serving-checks")' <<<"$health" >/dev/null 2>&1; then
+    (umask 077; printf '%s\n' '{"qualified":false,"apps":[]}' >"$dest")
+    warn "workload readiness is unmeasured: this agent has no serving-checks capability"
+    return 0
+  fi
+  apps=$(agent_try GET /v1/platform/apps) || return 1
+  rows=$(mktemp "$dest.rows.XXXXXX")
+  while IFS= read -r id; do
+    check=$(agent_try GET "/v1/platform/apps/$id/serving-check") || { failed=1; break; }
+    printf '%s\n' "$check" >>"$rows"
+  done < <(jq -r '.[].id' <<<"$apps")
+  if (( failed )); then rm -f "$rows"; return 1; fi
+  (umask 077; jq -s '{qualified:true,apps:.}' "$rows" >"$dest")
+  rm -f "$rows"
+}
+
+# 0 verified recorded scope (or explicitly unmeasured legacy scope), 1 failed,
+# 2 changed user/deployment intent: preserve the candidate rather than undo it.
+update_workloads_verify() {
+  local file=$1 before id check end wanted
+  [[ -f $file ]] || return 1
+  jq -e '.qualified == true' "$file" >/dev/null || return 0
+  end=$(( $(date +%s) + ${UPDATE_WORKLOAD_SECS:-60} ))
+  while IFS= read -r before; do
+    id=$(jq -r .app_id <<<"$before")
+    wanted=$(jq -r '.runtime == true and .ingress == true' <<<"$before")
+    while :; do
+      check=$(API_TIMEOUT=10 agent_try GET "/v1/platform/apps/$id/serving-check") || check='{}'
+      if jq -e --argjson before "$before" 'has("app_id") and (.desired != $before.desired or .deployment_id != $before.deployment_id)' <<<"$check" >/dev/null; then
+        warn "workload $id changed intent during the update; current state is retained"
+        return 2
+      fi
+      if [[ $wanted == true ]]; then
+        jq -e '.runtime == true and .ingress == true' <<<"$check" >/dev/null && break
+      elif jq -e --argjson before "$before" '.app_id == $before.app_id and .desired == $before.desired' <<<"$check" >/dev/null; then
+        break
+      fi
+      if (( $(date +%s) >= end )); then err "workload $id did not regain its recorded local readiness"; return 1; fi
+      sleep 1
+    done
+  done < <(jq -c '.apps[]' "$file")
+  ok "recorded workload runtime, local ingress and intentional stop/sleep state verified"
+}

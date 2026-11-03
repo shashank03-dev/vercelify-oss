@@ -79,6 +79,8 @@ pub fn router() -> Router<AppState> {
         .route("/platform/apps/{app}/rollback", post(app_rollback))
         .route("/platform/apps/{app}/previews", get(app_previews))
         .route("/platform/apps/{app}/preview-databases", get(app_preview_databases))
+        .route("/platform/apps/{app}/deployment-guards", get(app_deployment_guards))
+        .route("/platform/apps/{app}/serving-check", get(app_serving_check))
         .route(
             "/platform/deployments/{id}",
             get(deployment_get).delete(deployment_delete),
@@ -160,6 +162,7 @@ where
         + 'static,
 {
     let p = platform(s)?;
+    let _publication = p.engine.publication.lock().await;
     let key = p.key.clone();
     Ok(p.store.call(move |c| f(c, &key)).await?)
 }
@@ -879,6 +882,28 @@ async fn app_previews(State(s): State<AppState>, Path(app): Path<String>) -> Api
         tx(&s, move |c, _| {
             let id = apps::find(c, &app)?.id;
             previews::list(c, &id, false)
+        })
+        .await?,
+    ))
+}
+
+async fn app_serving_check(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+) -> ApiResult<vercelify_platform::deploy_guard_engine::ServingCheck> {
+    let p = platform(&s)?;
+    let app = p.store.with(|c| apps::find(c, &app))?;
+    Ok(Json(p.engine.serving_check(&app).await?))
+}
+
+async fn app_deployment_guards(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+) -> ApiResult<Vec<vercelify_platform::deploy_guard::Guard>> {
+    Ok(Json(
+        tx(&s, move |c, _| {
+            let app = apps::find(c, &app)?;
+            vercelify_platform::deploy_guard::list(c, Some(&app.id), false)
         })
         .await?,
     ))
