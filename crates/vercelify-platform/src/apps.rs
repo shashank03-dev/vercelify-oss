@@ -336,6 +336,26 @@ fn check_previews(p: &PreviewSettings) -> Result<()> {
     if !(1..=20).contains(&p.max) {
         return Err(Error::Invalid("previews: max must be between 1 and 20".into()));
     }
+    if let Some(db) = &p.database {
+        crate::validate::env_key(&db.variable)?;
+        if db.variable == "PORT" || db.variable == "SOURCE_COMMIT" || db.variable.starts_with("VERCELIFY_") {
+            return Err(Error::Invalid(
+                "preview database variable must not override platform runtime variables".into(),
+            ));
+        }
+        if p.max > 3 {
+            return Err(Error::Invalid(
+                "PostgreSQL previews support at most 3 active PRs per app".into(),
+            ));
+        }
+        for command in [&db.migration, &db.seed].into_iter().flatten() {
+            if command.trim().is_empty() || command.len() > 4096 || command.contains('\0') {
+                return Err(Error::Invalid(
+                    "preview database commands must be nonempty, at most 4096 bytes and contain no NUL".into(),
+                ));
+            }
+        }
+    }
     Ok(())
 }
 
@@ -381,6 +401,11 @@ pub fn create(c: &Connection, req: &AppCreate) -> Result<App> {
         ..PreviewSettings::default()
     });
     check_previews(&previews)?;
+    if req.kind == AppKind::Compose && previews.database.is_some() {
+        return Err(Error::Invalid(
+            "built-in PostgreSQL previews require an image or Git app".into(),
+        ));
+    }
     let node = check_node(c, req.node_id.as_deref())?;
     let name = req.name.trim();
     let id = new_id("app");
@@ -439,6 +464,11 @@ pub fn patch(c: &Connection, id: &str, p: &AppPatch) -> Result<App> {
     }
     if let Some(pr) = &p.previews {
         check_previews(pr)?;
+        if app.kind == AppKind::Compose && pr.database.is_some() {
+            return Err(Error::Invalid(
+                "built-in PostgreSQL previews require an image or Git app".into(),
+            ));
+        }
         set("previews", json(pr))?;
     }
     if let Some(d) = p.desired {

@@ -1,0 +1,10 @@
+{
+  "aarch64": {
+    "bytes": 6062800,
+    "sha256": "234d69132d77fec984a7716c78d507097661b51b5ade4be246fa8005291efd4f"
+  },
+  "x86_64": {
+    "bytes": 7306440,
+    "sha256": "a21e11dbfb07bd9d3eef73cf4289a3f1fab2b014505d2350d040d2ba45d0ecff"
+  }
+}

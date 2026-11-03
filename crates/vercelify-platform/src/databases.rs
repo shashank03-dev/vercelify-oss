@@ -482,6 +482,15 @@ pub fn link(c: &Connection, key: &MasterKey, app: &str, db_name: &str, var: &str
 
 pub fn patch(c: &Connection, key: &MasterKey, id: &str, p: &DatabasePatch) -> Result<Database> {
     let d = get(c, key, id, false)?;
+    if crate::preview_db::service_network(c, &d.id)?.is_some()
+        && (p.public_port.is_some_and(|port| port != 0)
+            || p.public_bind.as_deref().is_some_and(|bind| bind != "mesh")
+            || p.desired.is_some())
+    {
+        return Err(Error::Invalid(
+            "preview PostgreSQL networking and lifecycle are managed by its PRs; close previews instead".into(),
+        ));
+    }
     let t = now();
     if let Some(memory) = p.memory_mb {
         if !(64..=65536).contains(&memory) {

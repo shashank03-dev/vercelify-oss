@@ -397,6 +397,34 @@ and all six original HTTP routes were verified restored after the matrix.
 Scripts, raw samples, binary hashes, Docker regressions and profile boundaries:
 [M4 validation](../validation/2026-11-02-m4/VALIDATION.md).
 
+### Re-measured for M5 fresh PostgreSQL previews, 3 November 2026
+
+Same four-GiB ARM VM and six original apps, unchanged app definitions, two-minute
+settle and twelve samples six seconds apart plus collection time. BuildKit and the
+disposable daemon were stopped. Database previews stay off on these baseline apps;
+this comparison measures the platform at the same workload, not PostgreSQL under load.
+
+| Median MiB | M4 builder stopped | M5 builder stopped |
+| --- | ---: | ---: |
+| System used (range) | 633.5 (623–650) | 642.5 (622–655) |
+| Agent RSS | 7.70 | 8.03 |
+| Mesh RSS | 2.90 | 3.20 |
+| Traefik RSS | 79.45 | 89.24 |
+| dockerd / containerd RSS | 101.23 / 48.34 | 101.83 / 47.61 |
+| All shim RSS | 73.85 | 75.10 |
+| BuildKit RSS | 0 | 0 |
+
+Unchanged components also vary; this is not a causal feature-overhead estimate or
+saving claim. Fresh preview PostgreSQL is an additional on-demand 256 MiB-capped
+service, shared by at most three trusted PRs. The actual conflicting-migration and
+isolation contract passed with 381 unchanged production probes and zero failures.
+All six original lab routes returned 200 after the candidate installation. Physical
+laptop and x86 runtime qualification remain **unmeasured**; the laptop is offline
+and the user chose lab continuation. No one-GiB PostgreSQL support is established.
+
+Raw samples, binary hashes, limits, regression evidence and reproduction:
+[M5 validation](../validation/2026-11-03-m5/VALIDATION.md).
+
 ## 7. Feature verdicts after validation
 
 ### 7.1 Your computer builds, your server serves — build early

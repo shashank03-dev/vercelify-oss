@@ -792,6 +792,33 @@ needs, so the cockpit can say "about 2 GB" for Plausible before it is created.
   point takes (check open → route → record), so a deployment of it under way can't go
   live afterwards; its running deployments are cancelled and the teardown waits for them.
   A failed teardown opens the row again for the next check to retry.
+- M5 opt-in fresh PostgreSQL previews (`PreviewSettings.database`): one bounded,
+  separate PostgreSQL 17 service per app on main, max three active PRs, no Compose.
+  Each PR gets a logical database, a restricted LOGIN (four connections) and a
+  hidden NOLOGIN database owner. The login owns its schema objects but cannot
+  grant another PR database CONNECT. PUBLIC access to preview and maintenance
+  databases is revoked; database creation starts at CONNECTION LIMIT 0 before ACL
+  installation. Dedicated internal base and M1 PR bridges are its only networks;
+  production/proxy networks and host ports are refused. This is trusted-PR isolation,
+  not a hostile-tenant resource sandbox. The default service cap is 256 MiB/one CPU;
+  M4 reserves service, deployment overlap and temporary migration work together.
+- `0010_preview_db.sql` journals exact app/preview/service/database/role ownership
+  before external work. Sealed random credentials use resource-specific AAD;
+  metadata survives app deletion. Ownership comments fence SQL adoption/deletion.
+  A new SHA retains the open PR database and reruns migration/optional synthetic
+  seed in the built image, capped and on the PR bridge, before route publication.
+  The configured URL overrides only its explicit runtime binding, never build
+  variables; all other production DB reference denial remains. SQL is supplied on
+  stdin and both credential and URL are redacted. Off-host job revision hashes
+  include preview database policy, fencing uploads made against old commands.
+- PostgreSQL close is durable: mark closed/closing, cancel work, remove the exact
+  PR runtime/helpers, revoke LOGIN, terminate its sessions and drop its database
+  and roles. Reconcile retries failures after restart or app deletion; reopening
+  waits for old cleanup and rotates identity. Last close journals service retirement
+  before removing its owned container, volume, networks and SQL metadata. No
+  production data copy or backup seed. App sleep retains preview DBs; unexpected
+  disposable volume loss requires redeploying migrations/seed. The authenticated
+  preview-databases GET exposes metadata only, with the matching health capability.
 - Webhooks (M9): `POST /v1/webhooks/{github|gitlab|gitea}[/{source}]` on the control
   listener, reachable through the tunnel's public URL (`mesh_public_url`) or on the LAN
   (a self-hosted Gitea). `POST /v1/platform/git-sources/{id}/webhook` (`vercelify

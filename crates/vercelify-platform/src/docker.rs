@@ -49,6 +49,8 @@ pub struct ContainerSpec {
     pub memory_mb: Option<u32>,
     pub cpus: Option<f32>,
     pub command: Option<Vec<String>>,
+    /// Internal task runner override; app entrypoints otherwise stay intact.
+    pub entrypoint: Option<String>,
     pub mounts: Vec<Mount>,
     /// host_ip:host_port:container_port
     pub publish: Vec<String>,
@@ -258,6 +260,9 @@ impl Docker {
         }
         for h in &spec.extra_hosts {
             args.extend(["--add-host".into(), h.clone()]);
+        }
+        if let Some(entrypoint) = &spec.entrypoint {
+            args.extend(["--entrypoint".into(), entrypoint.clone()]);
         }
         args.push(spec.image.clone());
         if let Some(cmd) = &spec.command {

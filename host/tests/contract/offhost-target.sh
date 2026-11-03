@@ -49,8 +49,11 @@ VERCELIFY_WATCH_INTERVAL=0 VERCELIFY_AUTODEPLOY_INTERVAL=0 VERCELIFY_WAKE_LISTEN
 VERCELIFY_TOKENS_FILE="$work/state/tokens.json" VERCELIFY_AUDIT_LOG="$work/state/audit.log" \
 "$AGENT_BIN" serve > "$work/agent.txt" 2>&1 &
 echo $! > "$work/pid"
-for _ in $(seq 30); do
-  curl -fsS http://127.0.0.1:17425/v1/health >/dev/null 2>&1 && exit 0
+for _ in $(seq 60); do
+  # Listening precedes the first complete inventory. Image admission correctly
+  # refuses an unknown sample, so readiness includes the budget, not just HTTP.
+  capacity=$(curl -fsS -K "$work/curl.conf" http://127.0.0.1:17425/v1/platform/capacity 2>/dev/null || true)
+  [[ $capacity == *'"sample":{'* ]] && exit 0
   sleep 1
 done
 cat "$work/agent.txt" >&2

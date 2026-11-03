@@ -33,6 +33,8 @@ pub mod mesh_registry;
 pub mod nodes;
 pub mod offhost;
 pub mod placement;
+pub mod preview_db;
+mod preview_db_engine;
 pub mod preview_network;
 pub mod previews;
 pub mod proc;

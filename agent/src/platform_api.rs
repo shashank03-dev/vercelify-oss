@@ -78,6 +78,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/platform/apps/{app}/rollback", post(app_rollback))
         .route("/platform/apps/{app}/previews", get(app_previews))
+        .route("/platform/apps/{app}/preview-databases", get(app_preview_databases))
         .route(
             "/platform/deployments/{id}",
             get(deployment_get).delete(deployment_delete),
@@ -878,6 +879,19 @@ async fn app_previews(State(s): State<AppState>, Path(app): Path<String>) -> Api
         tx(&s, move |c, _| {
             let id = apps::find(c, &app)?.id;
             previews::list(c, &id, false)
+        })
+        .await?,
+    ))
+}
+
+async fn app_preview_databases(
+    State(s): State<AppState>,
+    Path(app): Path<String>,
+) -> ApiResult<Vec<vercelify_platform::preview_db::Resource>> {
+    Ok(Json(
+        tx(&s, move |c, _| {
+            let app = apps::find(c, &app)?;
+            vercelify_platform::preview_db::list(c, &app.id)
         })
         .await?,
     ))

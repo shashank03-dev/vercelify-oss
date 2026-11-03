@@ -681,6 +681,32 @@ impl Engine {
             .cloned()
             .ok_or_else(|| Error::Unavailable("the main server isn't registered yet".into()))?;
         let mut extra = Vec::new();
+        let database_preview = d.pr_number.is_some() && app.previews.database.is_some();
+        if database_preview {
+            if d.node_id
+                .as_ref()
+                .or(app.node_id.as_ref())
+                .is_some_and(|id| id != &main.id)
+            {
+                return Err(Error::Invalid(
+                    "built-in PostgreSQL previews currently run on the main node".into(),
+                ));
+            }
+            let binding = self
+                .store
+                .tx(|c| crate::preview_db::prepare(c, &self.key, &app, d.pr_number.unwrap()))?;
+            let service = self
+                .store
+                .with(|c| crate::databases::get(c, &self.key, &binding.service_id, false))?;
+            extra.push(crate::capacity::Request {
+                node_id: main.id.clone(),
+                owner: service.id,
+                kind: "database".into(),
+                memory_mb: u64::from(service.memory_mb.unwrap_or(256)) + 128,
+                disk_mb: 1024,
+                heavy: true,
+            });
+        }
         if self.needs_build(&app, d).await? {
             if !self.gate.builds_enabled() || !main.builds {
                 return Err(Error::Capacity(
@@ -713,7 +739,7 @@ impl Engine {
             overhead_mb: crate::capacity::transfer_mb(total),
             disk_mb: 1024,
             extra,
-            main_only: app.kind == AppKind::Compose,
+            main_only: app.kind == AppKind::Compose || database_preview,
             one_node: !vols.is_empty(),
             failover: app.runtime.failover,
         };
@@ -992,6 +1018,10 @@ impl Engine {
                 runtime_env.push((k.to_string(), v));
             }
         }
+        runtime_env.retain(|(key, _)| key != "VERCELIFY_PR_NUMBER");
+        runtime_env.push(("VERCELIFY_PR_NUMBER".into(), d.pr_number.unwrap_or(0).to_string()));
+        self.provision_preview_db(app, &d, &image, &mut runtime_env, cancel.clone(), log)
+            .await?;
         let vols = self.store.with(|c| match d.pr_number {
             Some(pr) => volumes::list_for_preview(c, &app.id, pr),
             None => volumes::checked_list(c, VolumeOwner::App, &app.id),
@@ -1540,10 +1570,11 @@ impl Engine {
     /// Take a preview down: container(s), route, its own volumes, and the
     /// preview record (closed). It is closed first, so its deployments still
     /// under way are cancelled and can't go live; the teardown waits for
-    /// them, so nothing of theirs appears after it. If the teardown fails the
-    /// preview is open again, for the next check to retry.
+    /// them, so nothing of theirs appears after it. Database-preview cleanup
+    /// stays closed and retries from its durable ownership journal.
     pub async fn remove_preview(&self, app_id: &str, pr: u32) -> Result<()> {
         let app = self.store.with(|c| apps::get(c, app_id))?;
+        let database_owned = self.store.with(|c| crate::preview_db::live(c, app_id, pr))?.is_some();
         let (was_open, in_flight) = {
             let _commit = self.preview_commit.lock().await;
             self.store.tx(|c| {
@@ -1579,6 +1610,21 @@ impl Engine {
                 "{} #{pr}: a deployment didn't stop in time; removing the preview anyway",
                 app.name
             );
+        }
+        let errors = self.reconcile_preview_databases().await;
+        if let Some(error) = errors.first() {
+            return Err(Error::Unavailable(error.clone()));
+        }
+        if self.store.with(|c| crate::preview_db::live(c, app_id, pr))?.is_some() {
+            return Err(Error::Unavailable(
+                "preview is closed; database cleanup is pending".into(),
+            ));
+        }
+        // The PG journal already removed this lifecycle's runtime and network.
+        // A reopened generation must not be torn down by this older callback.
+        if database_owned {
+            self.emit(EngineEvent::Changed);
+            return Ok(());
         }
         if let Err(e) = self.teardown_preview(&app, pr).await {
             if was_open {
@@ -1634,15 +1680,25 @@ impl Engine {
     }
 
     async fn teardown_preview(&self, app: &App, pr: u32) -> Result<()> {
-        let app_id = app.id.as_str();
+        self.teardown_preview_owned(&app.id, &app.name, app.kind == AppKind::Compose, pr)
+            .await
+    }
+
+    pub(crate) async fn teardown_preview_owned(
+        &self,
+        app_id: &str,
+        app_name: &str,
+        compose_app: bool,
+        pr: u32,
+    ) -> Result<()> {
         let (preview, vols) = self
             .store
             .with(|c| Ok((previews::get(c, app_id, pr)?, volumes::list_for_preview(c, app_id, pr)?)))?;
         let docker = &self.deployer.docker;
-        let key = deploy::route_key(&app.name, Some(pr));
+        let key = deploy::route_key(app_name, Some(pr));
         let vol_names: Vec<String> = vols
             .iter()
-            .map(|v| volumes::physical_name(v, &app.name, Some(pr)))
+            .map(|v| volumes::physical_name(v, app_name, Some(pr)))
             .collect();
         if let Some(dep) = preview.as_ref().and_then(|p| p.deployment_id.clone()) {
             for p in self.placed(&dep)? {
@@ -1656,20 +1712,20 @@ impl Engine {
                     remove_preview_networks: if rt.is_local() {
                         vec![]
                     } else {
-                        vec![crate::preview_network::name(&app.id, pr)]
+                        vec![crate::preview_network::name(app_id, pr)]
                     },
                     ..Apply::default()
                 })
                 .await?;
             }
         }
-        if app.kind == AppKind::Compose {
-            compose::down(docker, &compose::project_name(&app.name, Some(pr))).await?;
-            compose::remove_preview_volumes(docker, &app.id, pr).await?;
+        if compose_app {
+            compose::down(docker, &compose::project_name(app_name, Some(pr))).await?;
+            compose::remove_preview_volumes(docker, app_id, pr).await?;
         }
         crate::proxy::remove_route(&self.deployer.proxy, &key)?;
-        if preview.is_some() {
-            crate::preview_network::remove(docker, &crate::preview_network::name(&app.id, pr)).await?;
+        if preview.is_some() || self.store.with(|c| crate::preview_db::live(c, app_id, pr))?.is_some() {
+            crate::preview_network::remove(docker, &crate::preview_network::name(app_id, pr)).await?;
         }
         for name in &vol_names {
             let _ = docker.volume_remove(name).await;

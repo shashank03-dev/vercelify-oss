@@ -1,0 +1,19 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.63s
+     Running tests/preview_db.rs (target/debug/deps/preview_db-7e41cd6523e822fd)
+
+running 7 tests
+test fresh_databases_are_opt_in_and_settings_cannot_control_host_tools ... ok
+test two_prs_share_only_the_preview_process_and_keep_sealed_distinct_credentials ... ok
+test changing_preview_database_policy_fences_only_preview_build_jobs ... ok
+test deleting_an_app_preserves_the_cleanup_journal_and_exact_resource_ownership ... ok
+test the_opt_in_database_binding_is_runtime_only_and_other_production_refs_stay_blocked ... ok
+test direct_deploys_cannot_exceed_the_database_preview_limit ... ok
+test restart_reuses_owned_identity_but_close_fences_it_and_reopen_rotates ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.13s

@@ -64,6 +64,11 @@ pub fn get(c: &Connection, app_id: &str, pr: u32) -> Result<Option<Preview>> {
 
 /// Record (or reopen) a preview for a pull request.
 pub fn upsert(c: &Connection, app_id: &str, pr: u32, head_sha: &str, title: &str) -> Result<Preview> {
+    if let Some(owned) = crate::preview_db::live(c, app_id, pr)? {
+        if owned.state == "closing" {
+            return Err(Error::Capacity("waiting for previous preview database cleanup".into()));
+        }
+    }
     c.execute(
         "INSERT INTO previews (id, app_id, pr_number, head_sha, title, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT (app_id, pr_number) DO UPDATE SET head_sha = excluded.head_sha,
@@ -96,6 +101,7 @@ pub fn close(c: &Connection, app_id: &str, pr: u32) -> Result<Option<Preview>> {
         "UPDATE previews SET status = 'closed', closed_at = ?3 WHERE app_id = ?1 AND pr_number = ?2 AND status = 'active'",
         params![app_id, pr, now()],
     )?;
+    crate::preview_db::mark_closing(c, app_id, pr)?;
     Ok(p)
 }
 

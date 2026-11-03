@@ -201,6 +201,7 @@ pub fn revision(c: &Connection, key: &MasterKey, app: &str, preview: bool) -> Re
         a.runtime,
         a.node_id,
         a.environment_id,
+        preview.then_some(a.previews),
         vars,
         build_vars,
     ))?;

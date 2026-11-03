@@ -141,6 +141,35 @@ URL that queues a deployment when called.
 Apps can **sleep** when idle to free memory (`sudo vercelify sleep on APP 30`, or the app's
 **Sleep** card); the next visit wakes them with a short "waking up" page.
 
+### Fresh PostgreSQL for PR previews
+
+For trusted same-repository PRs, enable **Previews → Fresh PostgreSQL** and save
+the runtime variable (default `DATABASE_URL`), migration command and optional
+synthetic-seed command. Commands run with `sh -ec` in the built app image before
+publication; the image must contain the required shell and migration tools.
+Failure leaves the previous deployment serving. No production data is copied.
+
+This opt-in uses a separate PostgreSQL 17 service per app, shared by at most three
+active PRs. It defaults to 256 MiB and one CPU, admitted through the host resource
+budget. Each PR has a fresh database and restricted login, separate from production
+and other PR databases. Keep the application's pool at three connections or fewer:
+the role limit is four, leaving room for a migration. Runtime credentials never
+enter the image build or resolved-variable responses. Production database references
+in other preview variables remain blocked.
+
+Built-in database previews currently require the main node and a non-Compose app.
+The cluster is for trusted previews; shared process limits do not provide hostile
+tenant resource isolation. Data persists across new commits and app sleep while
+the PR is open. Closing, disabling the option or deleting the app schedules owned
+cleanup; failures remain visible and retry after restart. Reopening waits for cleanup
+and creates a new database and credential. The last close removes the owned service
+and volume. Preview data is disposable: no production-copy, backup-seed or independent
+per-database sleep is offered. Redeploy migrations/seed after preview volume loss.
+
+The health capability `preview-databases` gates the settings UI. The authenticated
+`GET /v1/platform/apps/{id}/preview-databases` endpoint returns lifecycle metadata
+and redacted errors, never passwords or connection URLs.
+
 ### Build on your computer or in CI
 
 Install the shared helper on the computer that builds: the Mac installer accepts

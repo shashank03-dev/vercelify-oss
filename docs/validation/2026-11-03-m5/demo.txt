@@ -1,0 +1,46 @@
+
+> vercelify-cockpit@1.0.0 e2e:demo
+> playwright test -c playwright.demo.config.ts
+
+[WebServer] (node:15853) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:15876) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 31 tests using 1 worker
+
+(node:15877) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓   1 [chromium] › e2e-demo/demo.spec.ts:25:1 › onboarding finds servers on the network and pairs with a short code (2.2s)
+  ✓   2 [chromium] › e2e-demo/demo.spec.ts:47:1 › a server whose engine didn't start says why (2.9s)
+  ✓   3 [chromium] › e2e-demo/demo.spec.ts:63:1 › several servers: add, switch, see them side by side, add a worker (18.8s)
+  ✓   4 [chromium] › e2e-demo/demo.spec.ts:129:1 › add a second main server: the wizard finishes on it (3.0s)
+  ✓   5 [chromium] › e2e-demo/demo.spec.ts:143:1 › add a machine: the wizard waits for a fresh install to come online (3.6s)
+  ✓   6 [chromium] › e2e-demo/demo.spec.ts:165:1 › AI models: chat streams, models download, snippets for the Mac (28.2s)
+  ✓   7 [chromium] › e2e-demo/demo.spec.ts:196:1 › apps: a failed build is explained by Gemma 4 on the server (6.3s)
+  ✓   8 [chromium] › e2e-demo/demo.spec.ts:212:1 › server care: hardware, history, uptime, alerts, devices, backups, previews (4.8s)
+  ✓   9 [chromium] › e2e-demo/demo.spec.ts:246:1 › a Raspberry Pi worker shows its SD card and power supply (2.5s)
+  ✓  10 [chromium] › e2e-demo/demo.spec.ts:255:1 › live: activity, sleeping apps, the domain and power guard (9.7s)
+  ✓  11 [chromium] › e2e-demo/demo.spec.ts:289:1 › vercel.json: rules, warnings, cron jobs, upload and removal (6.4s)
+  ✓  12 [chromium] › e2e-demo/demo.spec.ts:327:1 › platform engine: deploy with a live log, roll back, variables, domains, databases (29.3s)
+  ✓  13 [chromium] › e2e-demo/demo.spec.ts:443:1 › platform engine: live output, a terminal, restart, services and a database console (17.3s)
+  ✓  14 [chromium] › e2e-demo/demo.spec.ts:500:1 › Vercelify network: pair on the LAN, see each path, invite a server, revoke a device (4.8s)
+  ✓  15 [chromium] › e2e-demo/demo.spec.ts:536:1 › platform engine: apps across servers — where they run, replicas, drain a worker (6.4s)
+  ✓  16 [chromium] › e2e-demo/demo.spec.ts:571:1 › platform engine: a GitHub App for private repositories, and a webhook (6.1s)
+  ✓  17 [chromium] › e2e-demo/demo.spec.ts:600:1 › private app domains open through the app-mode browser gateway (2.9s)
+  ✓  18 [chromium] › e2e-demo/demo.spec.ts:616:1 › new apps save variables before their first deploy (3.7s)
+  ✓  19 [chromium] › e2e-demo/demo.spec.ts:631:1 › new apps accept Compose content (2.9s)
+  ✓  20 [chromium] › e2e-demo/demo.spec.ts:643:1 › server updates let the user choose edge or stable (2.1s)
+  ✓  21 [chromium] › e2e-demo/demo.spec.ts:654:1 › Settings keeps server controls on one page with collapsible history (2.0s)
+  ✓  22 [chromium] › e2e-demo/demo.spec.ts:667:1 › owners can save the backup recovery kit (3.2s)
+  ✓  23 [chromium] › e2e-demo/demo.spec.ts:675:1 › Vercelify environment: recommend, create with progress, resize with consent, stop and delete (26.5s)
+  ✓  24 [chromium] › e2e-demo/demo.spec.ts:717:1 › an old deployment can be deleted; the live one can't (3.4s)
+  ✓  25 [chromium] › e2e-demo/memory.spec.ts:3:1 › memory budget separates measured zero, unavailable readings and promised headroom (2.1s)
+  ✓  26 [chromium] › e2e-demo/navigation-exploratory.spec.ts:4:3 › all pages and keyboard navigation work in dark mode (1.7s)
+  ✓  27 [chromium] › e2e-demo/navigation-exploratory.spec.ts:4:3 › all pages and keyboard navigation work in light mode (1.8s)
+  ✓  28 [chromium] › e2e-demo/preview-database.spec.ts:3:1 › fresh preview PostgreSQL is opt-in, runtime-only and can be disabled (3.8s)
+  ✓  29 [chromium] › e2e-demo/sweep.spec.ts:18:3 › every page renders cleanly in the dark theme at the minimum window size (4.9s)
+  ✓  30 [chromium] › e2e-demo/sweep.spec.ts:18:3 › every page renders cleanly in the light theme at the minimum window size (5.0s)
+  ✓  31 [chromium] › e2e-demo/sweep.spec.ts:50:1 › a reload keeps the pairing and the page you were on (2.0s)
+
+  31 passed (3.7m)

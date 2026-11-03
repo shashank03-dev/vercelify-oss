@@ -738,7 +738,16 @@ export function platformRoute(req: HttpRequest): unknown {
             .map((l) => ({ key: l.slice(0, l.indexOf("=")).replace(/^export /, "").trim(), value: l.slice(l.indexOf("=") + 1).replace(/^["']|["']$/g, "") }));
           return putEnv(app, { vars, replace: !!body.replace });
         }
-        if (seg[3] === "provenance") return envProvenance(env.get(app.id) ?? []);
+        if (seg[3] === "provenance") {
+          const result=envProvenance(env.get(app.id) ?? []);
+          if(app.previews.enabled && app.previews.database) {
+            const key=app.previews.database.variable;
+            result.preview=result.preview.filter(v=>v.key!==key);
+            result.withheld=result.withheld.filter(v=>v.key!==key);
+            result.preview.push({key,scope:"app",origin:"preview_database",build:false,secret:true,database_reference:false});
+          }
+          return result;
+        }
         if (seg[3] && seg[4] === "share" && m === "PUT") {
           const v = (env.get(app.id) ?? []).find((x) => x.key === seg[3] && !x.preview_only);
           if (!v) throw new Error(`no variable ${seg[3]}`);
@@ -784,6 +793,8 @@ export function platformRoute(req: HttpRequest): unknown {
         if (m === "DELETE") previews.set(app.id, (previews.get(app.id) ?? []).filter((p) => p.pr_number !== Number(seg[3])));
         return clone(previews.get(app.id) ?? []);
       }
+      case "preview-databases":
+        return app.previews.database ? clone((previews.get(app.id) ?? []).filter(p=>!p.closed_at).map(p=>({id:`preview-db-${p.id}`,pr_number:p.pr_number,state:"ready",error:""}))) : [];
       case "git": {
         const w = watches.get(app.id) ?? { app_id: app.id, enabled: false, last_head: "", last_checked_at: null, last_error: "", skipped: 0, last_skip: "", waiting: "" };
         if (m === "PUT") w.enabled = !!body.enabled;

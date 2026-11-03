@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { platformRoute } from "./demo-platform";
 import type { EnvProvenance, EnvVar } from "../types";
 
-const call = <T>(method: "GET" | "PUT", path: string, body?: unknown) => platformRoute({ method, path: `/v1/platform${path}`, body }) as T;
+const call = <T>(method: "GET" | "PUT" | "PATCH", path: string, body?: unknown) => platformRoute({ method, path: `/v1/platform${path}`, body }) as T;
 
 describe("demo previews get only what is shared (design §5.1)", () => {
   it("withholds production values, blocks shared database references and never sends values", () => {
@@ -31,4 +31,15 @@ describe("demo previews get only what is shared (design §5.1)", () => {
     expect(p.withheld.find((w) => w.key === "DATABASE_URL")?.reason).toBe("production_database");
     expect(p.preview.some((v) => v.key === "DATABASE_URL")).toBe(false);
   });
+});
+
+it("demo fresh database provenance is runtime-only and disables without changing production variables", () => {
+  const app = call<import("../types").App>("GET", "/apps/shop");
+  const production = call<EnvProvenance>("GET", "/apps/shop/env/provenance").production;
+  call("PATCH", "/apps/shop", { previews: { ...app.previews, database: { variable: "DATABASE_URL", migration: "npm run migrate" } } });
+  const policy = call<EnvProvenance>("GET", "/apps/shop/env/provenance");
+  expect(policy.preview.find(v => v.key === "DATABASE_URL")).toMatchObject({ origin: "preview_database", build: false, secret: true });
+  expect(policy.production).toEqual(production);
+  call("PATCH", "/apps/shop", { previews: { ...app.previews, database: undefined } });
+  expect(call<import("../types").App>("GET", "/apps/shop").previews.database).toBeUndefined();
 });

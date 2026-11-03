@@ -95,7 +95,7 @@ fn container_spec(engine: &Engine, d: &Database, cred: &Credentials) -> Result<(
             .map_err(|e| Error::Unavailable(format!("can't create {p} on the storage disk: {e}")))?;
     }
     let ip = engine.private_ip();
-    let hash = spec_hash(d, ip.as_deref(), Some(hdd.as_deref().unwrap_or(&storage_name)));
+    let mut hash = spec_hash(d, ip.as_deref(), Some(hdd.as_deref().unwrap_or(&storage_name)));
     let mut spec = databases::spec(d, cred, ip.as_deref(), hdd);
     if let Some(mount) = spec.mounts.first_mut() {
         if vol.tier == StorageTier::Ssd {
@@ -104,6 +104,16 @@ fn container_spec(engine: &Engine, d: &Database, cred: &Credentials) -> Result<(
     }
     if d.memory_mb.is_some() {
         spec.cgroup_parent = engine.deployer.cgroup_parent.clone();
+    }
+    if let Some(network) = engine.store.with(|c| crate::preview_db::service_network(c, &d.id))? {
+        if d.kind != DatabaseKind::Postgresql || d.public_port.is_some() {
+            return Err(Error::Invalid(
+                "preview PostgreSQL services cannot expose a host port or change engine".into(),
+            ));
+        }
+        spec.networks = vec![network.clone()];
+        spec.isolated_preview = true;
+        hash.push_str(&format!("|preview-db={network}"));
     }
     spec.labels.insert("vercelify.spec".into(), hash.clone());
     Ok((spec, hash))
@@ -150,7 +160,7 @@ impl Engine {
         self.ensure_database_with_resources(id, false).await
     }
 
-    async fn ensure_database_with_resources(&self, id: &str, covered: bool) -> Result<Database> {
+    pub(crate) async fn ensure_database_with_resources(&self, id: &str, covered: bool) -> Result<Database> {
         let (d, cred) = self.database(id)?;
         let docker = &self.deployer.docker;
         if d.desired == Desired::Stopped {
@@ -159,6 +169,17 @@ impl Engine {
         }
         let (spec, hash) = container_spec(self, &d, &cred)?;
         let current = docker.inspect(&d.container).await?;
+        if current.is_some()
+            && self
+                .store
+                .with(|c| crate::preview_db::service_network(c, &d.id))?
+                .is_some()
+            && docker.label(&d.container, "vercelify.database").await? != d.id
+        {
+            return Err(Error::Conflict(
+                "preview PostgreSQL container is not owned by this service".into(),
+            ));
+        }
         let same = current.is_some() && docker.label(&d.container, "vercelify.spec").await.unwrap_or_default() == hash;
         if same && current.as_ref().is_some_and(|i| i.running) {
             return Ok(d);
@@ -187,7 +208,15 @@ impl Engine {
         if let Some(permit) = &mut permit {
             permit.started();
         }
-        docker.ensure_network(&spec.networks[0]).await?;
+        if self
+            .store
+            .with(|c| crate::preview_db::service_network(c, &d.id))?
+            .is_some()
+        {
+            crate::preview_network::ensure(docker, &spec.networks[0]).await?;
+        } else {
+            docker.ensure_network(&spec.networks[0]).await?;
+        }
         if !same {
             if current.is_some() {
                 // Same volume, new container: like a restart.
@@ -217,6 +246,15 @@ impl Engine {
         };
         let mut errors = vec![];
         for d in list {
+            if self
+                .store
+                .with(|c| crate::preview_db::service_network(c, &d.id))
+                .ok()
+                .flatten()
+                .is_some()
+            {
+                continue;
+            }
             let state = self.deployer.docker.inspect(&d.container).await.ok().flatten();
             let ok = match (&state, d.desired) {
                 // The power guard froze it (never databases, but be safe).
@@ -251,6 +289,7 @@ impl Engine {
                 }
             }
         }
+        errors.extend(self.reconcile_preview_databases().await);
         errors
     }
 
@@ -279,6 +318,15 @@ impl Engine {
     /// owners and permissions kept, switch the volume record, start it again.
     pub async fn move_database(&self, id: &str, tier: StorageTier, docker_root: &Path) -> Result<Database> {
         let (d, _) = self.database(id)?;
+        if self
+            .store
+            .with(|c| crate::preview_db::service_network(c, &d.id))?
+            .is_some()
+        {
+            return Err(Error::Invalid(
+                "preview PostgreSQL storage is managed by its lifecycle".into(),
+            ));
+        }
         let _operation = self.database_operation(&d.id).await;
         let (d, _) = self.database(&d.id)?;
         let vol = self

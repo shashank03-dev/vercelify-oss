@@ -330,6 +330,12 @@ pub fn resolve_for_deploy(
 ) -> Result<Resolution> {
     let mut res = resolve_all(c, key, app_id, preview)?;
     if preview {
+        if let Some(db) = crate::preview_db::settings(c, app_id)? {
+            // Explicit opt-in replaces only this runtime binding. No production
+            // URL or fresh PR credential enters the build environment.
+            res.vars.remove(&db.variable);
+            res.withheld.remove(&db.variable);
+        }
         check_preview(&res.vars)?;
     }
     for (k, v) in res.vars.iter_mut() {
@@ -373,6 +379,18 @@ pub fn provenance(c: &Connection, key: &MasterKey, app_id: &str) -> Result<EnvPr
         })
         .collect();
     let mut preview_vars = effective(&preview);
+    if let Some(db) = crate::preview_db::settings(c, app_id)? {
+        preview_vars.retain(|v| v.key != db.variable);
+        withheld.retain(|v| v.key != db.variable);
+        preview_vars.push(EffectiveVar {
+            key: db.variable,
+            scope: VarScope::App,
+            origin: VarOrigin::PreviewDatabase,
+            build: false,
+            secret: true,
+            database_reference: false,
+        });
+    }
     preview_vars.retain(|v| {
         let blocked = v.database_reference;
         if blocked {

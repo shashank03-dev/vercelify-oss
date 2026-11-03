@@ -41,6 +41,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DatabaseStatus } from "../components/DatabaseStatus";
+import { PreviewDatabaseCard } from "../components/PreviewDatabase";
 import { GithubAppModal, WebhookModal } from "../components/GitIntegrations";
 import { TerminalView } from "../components/Terminal";
 import { useToast } from "../components/Toast";
@@ -1184,7 +1185,7 @@ function PreviewVariables({ app, provenance, error }: { app: App; provenance: En
           {provenance.preview.map((v) => (
             <div key={`p-${v.key}`} className="flex items-center gap-3 px-4 py-2" data-testid={`preview-var-${v.key}`}>
               <span className="w-56 shrink-0 truncate font-mono text-[12px] text-fg">{v.key}</span>
-              <StatusText health="ok" label={v.origin === "preview_only" ? "Preview value" : "Shared from production"} className="min-w-0 flex-1" />
+              <StatusText health="ok" label={v.origin === "preview_database" ? "Fresh PostgreSQL · runtime only" : v.origin === "preview_only" ? "Preview value" : "Shared from production"} className="min-w-0 flex-1" />
               {v.scope !== "app" && <Tag>{v.scope}</Tag>}
             </div>
           ))}
@@ -1384,6 +1385,7 @@ function PreviewsTab({
           </div>
         )}
       </Card>
+      <PreviewDatabaseCard app={app} client={client} onChanged={onChanged} />
     </div>
   );
 }

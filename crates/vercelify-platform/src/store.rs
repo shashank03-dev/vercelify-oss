@@ -29,6 +29,7 @@ pub const MIGRATIONS: &[(u32, &str)] = &[
     (7, include_str!("../migrations/0007_preview_safety.sql")),
     (8, include_str!("../migrations/0008_offhost_builds.sql")),
     (9, include_str!("../migrations/0009_capacity.sql")),
+    (10, include_str!("../migrations/0010_preview_db.sql")),
 ];
 
 pub fn latest_version() -> u32 {
@@ -340,9 +341,10 @@ mod tests {
             }
             let a = crate::apps::create(&c, &crate::apps::tests::git_app("blog")).unwrap();
             let b = crate::apps::create(&c, &crate::apps::tests::git_app("docs")).unwrap();
-            crate::previews::upsert(&c, &a.id, 4, "abc", "open").unwrap();
-            crate::previews::upsert(&c, &b.id, 9, "def", "closed").unwrap();
-            crate::previews::close(&c, &b.id, 9).unwrap();
+            // Seed the historical v6 shape directly; current preview functions
+            // also maintain ownership tables introduced after that schema.
+            c.execute("INSERT INTO previews(id,app_id,pr_number,head_sha,title,created_at) VALUES('prv_legacy_open',?1,4,'abc','open',?2)",params![a.id,crate::now()]).unwrap();
+            c.execute("INSERT INTO previews(id,app_id,pr_number,head_sha,title,created_at,status,closed_at) VALUES('prv_legacy_closed',?1,9,'def','closed',?2,'closed',?2)",params![b.id,crate::now()]).unwrap();
             (a.id, b.id)
         };
         let s = Store::open(&path).unwrap();

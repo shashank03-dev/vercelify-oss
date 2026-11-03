@@ -1,0 +1,22 @@
+    Blocking waiting for file lock on build directory
+   Compiling rustls-webpki v0.103.16
+   Compiling boringtun v0.7.1
+   Compiling rusqlite v0.37.0
+   Compiling vercelify-core v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-core)
+   Compiling rustls v0.23.46
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling tokio-rustls v0.26.6
+   Compiling vercelify-mesh v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-mesh)
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+   Compiling vercelify-agent v1.0.0 (/Users/shashank/Desktop/VERCELIFY/agent)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.35s
+     Running tests/e2e.rs (target/debug/deps/e2e-f92f312dff1382b3)
+
+running 1 test
+test platform_api ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 20 filtered out; finished in 0.92s

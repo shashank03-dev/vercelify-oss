@@ -253,6 +253,7 @@ pub fn capabilities(s: &AppState) -> Vec<String> {
     }
     if s.platform.is_some() {
         caps.push("platform".into());
+        caps.push("preview-databases".into());
     }
     caps
 }

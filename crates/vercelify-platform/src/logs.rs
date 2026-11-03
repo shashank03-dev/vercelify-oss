@@ -150,6 +150,17 @@ impl LogWriter {
         self.redactor.apply(text)
     }
 
+    /// Add newly provisioned runtime secrets without dropping build/env masks.
+    pub fn hide<S: AsRef<str>>(&mut self, values: impl IntoIterator<Item = S>) {
+        self.redactor = Redactor::new(
+            self.redactor
+                .values
+                .iter()
+                .cloned()
+                .chain(values.into_iter().map(|v| v.as_ref().to_string())),
+        );
+    }
+
     /// One message: a multi-line one becomes several log lines (the file has
     /// one line per entry, so an embedded newline used to start a line with
     /// no time or stream and shift every number after it).

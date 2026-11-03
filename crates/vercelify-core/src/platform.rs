@@ -234,6 +234,10 @@ pub struct PreviewSettings {
     // Who can open a preview. Private serves this server's mesh name only;
     // public uses the wildcard domain like production.
     pub access: PreviewAccess,
+    /// Opt-in fresh PostgreSQL databases; credentials are runtime-only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub database: Option<PreviewDatabaseSettings>,
 }
 
 impl Default for PreviewSettings {
@@ -242,6 +246,29 @@ impl Default for PreviewSettings {
             enabled: false,
             max: 3,
             access: PreviewAccess::Private,
+            database: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
+#[serde(default, deny_unknown_fields)]
+#[ts(export)]
+pub struct PreviewDatabaseSettings {
+    pub variable: String,
+    /// Runs in the preview image before it can serve traffic.
+    #[ts(optional)]
+    pub migration: Option<String>,
+    /// Synthetic fixtures only; no production database is exposed.
+    #[ts(optional)]
+    pub seed: Option<String>,
+}
+impl Default for PreviewDatabaseSettings {
+    fn default() -> Self {
+        Self {
+            variable: "DATABASE_URL".into(),
+            migration: None,
+            seed: None,
         }
     }
 }
@@ -463,6 +490,8 @@ pub enum VarOrigin {
     Shared,
     /// A preview-only value.
     PreviewOnly,
+    /// An isolated PR database binding, supplied at runtime only.
+    PreviewDatabase,
 }
 
 /// One variable of an effective set: where it comes from, never its value.

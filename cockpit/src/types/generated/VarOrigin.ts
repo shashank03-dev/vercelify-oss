@@ -3,4 +3,4 @@
 /**
  * Where a variable a deployment gets comes from.
  */
-export type VarOrigin = "production" | "shared" | "preview_only";
+export type VarOrigin = "production" | "shared" | "preview_only" | "preview_database";
