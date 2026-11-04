@@ -1,0 +1,11 @@
+{
+  "owned_objects_deleted": 6,
+  "stored_bytes": 3036,
+  "integrity_after_repair": "passed",
+  "credential_revoked_http": 401,
+  "owned_bucket_removed": true,
+  "existing_buckets_unchanged": true,
+  "credential_bucket_scoped": true,
+  "credential_max_lifetime_hours": 2,
+  "repository": "encrypted restic on real Cloudflare R2 S3 endpoint"
+}

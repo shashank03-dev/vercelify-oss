@@ -1,0 +1,72 @@
+{
+  "provider": "Cloudflare R2, actual S3 endpoint",
+  "encrypted_format": "restic",
+  "source": "physical x86 PostgreSQL17 synthetic fixture; source database and volume previously removed",
+  "destination": "independent ARM Linux isolated daemon, fresh control store/master key",
+  "assertions": [
+    "128 rows",
+    "migration db1072b",
+    "id=128 value final-128"
+  ],
+  "cases": [
+    {
+      "case": "live-R2-separate-ARM-recovery",
+      "state": "succeeded",
+      "credential_source": "provided",
+      "integrity": "full_data_checked",
+      "verified_at": "2026-11-04T17:23:37Z",
+      "cleanup_pending": false
+    },
+    {
+      "case": "wrong-recovery-key",
+      "state": "failed",
+      "credential_source": "provided",
+      "integrity": "check_failed",
+      "verified_at": null,
+      "cleanup_pending": false
+    },
+    {
+      "case": "missing-recovery-key",
+      "http_rejected": 400
+    },
+    {
+      "case": "wrong-provider-credential",
+      "state": "failed",
+      "credential_source": "provided",
+      "integrity": "check_failed",
+      "verified_at": null,
+      "cleanup_pending": false
+    },
+    {
+      "case": "interruption",
+      "state": "cancelled",
+      "cleanup_pending": false
+    },
+    {
+      "case": "R2-ciphertext-corruption",
+      "state": "failed",
+      "credential_source": "provided",
+      "integrity": "check_failed",
+      "verified_at": null,
+      "cleanup_pending": false
+    }
+  ],
+  "resource_bounds": {
+    "outer_daemon_memory_bytes": 1073741824,
+    "observed_outer_daemon_memory_mib": 141.5,
+    "observation_is_peak": false
+  },
+  "cleanup": {
+    "owned_objects_deleted": 6,
+    "stored_bytes": 3036,
+    "integrity_after_repair": "passed",
+    "credential_revoked_http": 401,
+    "owned_bucket_removed": true,
+    "existing_buckets_unchanged": true,
+    "credential_bucket_scoped": true,
+    "credential_max_lifetime_hours": 2,
+    "repository": "encrypted restic on real Cloudflare R2 S3 endpoint"
+  },
+  "production_backup_config_changed": false,
+  "other_providers_qualified": false
+}

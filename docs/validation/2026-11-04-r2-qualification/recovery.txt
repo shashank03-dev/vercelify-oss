@@ -1,0 +1,6 @@
+{"case": "live-R2-separate-ARM-recovery", "state": "succeeded", "credential_source": "provided", "integrity": "full_data_checked", "verified_at": "2026-11-04T17:23:37Z", "cleanup_pending": false}
+{"case": "wrong-recovery-key", "state": "failed", "credential_source": "provided", "integrity": "check_failed", "verified_at": null, "cleanup_pending": false}
+{"case": "missing-recovery-key", "http_rejected": 400}
+{"case": "wrong-provider-credential", "state": "failed", "credential_source": "provided", "integrity": "check_failed", "verified_at": null, "cleanup_pending": false}
+{"case": "interruption", "state": "cancelled", "cleanup_pending": false}
+PASS: R2 independent recovery, known data assertions, wrong/missing keys, wrong provider key, interruption, cleanup

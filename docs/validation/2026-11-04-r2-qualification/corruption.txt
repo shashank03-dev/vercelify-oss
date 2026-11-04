@@ -1,0 +1,1 @@
+{"case": "R2-ciphertext-corruption", "state": "failed", "credential_source": "provided", "integrity": "check_failed", "verified_at": null, "cleanup_pending": false}
