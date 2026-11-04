@@ -1,0 +1,41 @@
+{
+ "utc": "2026-11-04T19:13:15.406946+00:00",
+ "boot": "c8cf25d3-bddd-429e-b02b-f16ef10b72a9",
+ "boot_changed": true,
+ "containers_before": [
+  "vercelify-proxy",
+  "vfy-db-gwdb",
+  "vfy-gw-2cv2ryfw",
+  "vfy-gw-pr1-re0wxze2",
+  "voxbento-mediamtx-1"
+ ],
+ "containers_now": [
+  "vercelify-proxy",
+  "vfy-db-gwdb",
+  "voxbento-mediamtx-1"
+ ],
+ "ac": "1",
+ "services": {
+  "vercelify-agent": "active",
+  "vercelify-mesh": "active",
+  "vercelify-power-guard": "active",
+  "docker": "active"
+ },
+ "pg_ready": "/var/run/postgresql:5432 - accepting connections",
+ "pg_log": "2026-11-04 18:33:22.308 UTC [29] LOG:  database system was shut down at 2026-11-04 18:18:45 UTC\n2026-11-04 18:33:22.353 UTC [1] LOG:  database system is ready to accept connections\n2026-11-04 19:08:48.766 UTC [1] LOG:  database system is shut down\n2026-11-04 19:12:43.384 UTC [35] LOG:  database system was shut down at 2026-11-04 19:08:48 UTC\n2026-11-04 19:12:43.401 UTC [1] LOG:  database system is ready to accept connections",
+ "integrity": "ok",
+ "counts_before": {
+  "apps": 1,
+  "deployments": 3,
+  "databases": 1
+ },
+ "counts_now": {
+  "apps": 1,
+  "deployments": 3,
+  "databases": 1
+ },
+ "guard_state": "{\"state\":\"ok\",\"reason\":\"AC power, CPU 72\u00b0C\",\"updated_at\":\"2026-11-04T19:12:59Z\"}",
+ "guard_boot_log": "Nov 05 00:42:38 user-Inspiron-5567 systemd[1]: Started Vercelify power & thermal guard.\nNov 05 00:42:39 user-Inspiron-5567 power-guard.sh[4079]: 2026-11-05T00:42:39+05:30 power-guard: started (shutdown<=15% pause>=92\u00b0C every 20s)",
+ "docker_stop_log": "Nov 05 00:03:19 user-Inspiron-5567 dockerd[1788]: time=\"2026-11-05T00:03:19.127769523+05:30\" level=info msg=\"Creating a containerd client\" address=/run/containerd/containerd.sock timeout=1m0s",
+ "containers_unchanged": false
+}

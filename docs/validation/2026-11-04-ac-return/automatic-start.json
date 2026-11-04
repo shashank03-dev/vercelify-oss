@@ -1,0 +1,8 @@
+{
+  "operator_confirmed_AC_reconnected": true,
+  "operator_reported_screen": "still dark without pressing power button",
+  "remote_observation_seconds": 118.0,
+  "automatic_start_observed": false,
+  "firmware_settings_changed": false,
+  "manual_start_next": true
+}

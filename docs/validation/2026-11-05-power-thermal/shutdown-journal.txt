@@ -1,0 +1,15 @@
+Nov 05 00:28:07 user-Inspiron-5567 power-guard.sh[4766]: 2026-11-05T00:28:07+05:30 power-guard: state ok -> warning (running on battery (96%))
+Nov 05 00:38:48 user-Inspiron-5567 power-guard.sh[4766]: 2026-11-05T00:38:48+05:30 power-guard: state warning -> shutting_down (on battery at 3% (<= 15%))
+Nov 05 00:38:48 user-Inspiron-5567 power-guard.sh[4766]: 2026-11-05T00:38:48+05:30 power-guard: stopping 3 app container(s)
+Nov 05 00:38:48 user-Inspiron-5567 dockerd[1788]: time="2026-11-05T00:38:48.800990238+05:30" level=warning msg="ShouldRestart failed, container will not be restarted" container=2202ac6f511a0a7ac48942cd252a70bcbafc947a6fc17bfb40df201b932b6fe2 daemonShuttingDown
+Nov 05 00:38:49 user-Inspiron-5567 dockerd[1788]: time="2026-11-05T00:38:49.274226649+05:30" level=warning msg="ShouldRestart failed, container will not be restarted" container=db2a0f0262b9a689ae7deb0a6ec252a78ec645dd34ef4673de2d2d8dec87cad0 daemonShuttingDown
+Nov 05 00:38:49 user-Inspiron-5567 dockerd[1788]: time="2026-11-05T00:38:49.286607108+05:30" level=warning msg="ShouldRestart failed, container will not be restarted" container=df341f080ef2ec225c11c84b4aac4408fe3d2b35eb861088d054545a30290987 daemonShuttingDown
+Nov 05 00:38:49 user-Inspiron-5567 power-guard.sh[4766]: 2026-11-05T00:38:49+05:30 power-guard: stopping 1 core container(s)
+Nov 05 00:38:49 user-Inspiron-5567 dockerd[1788]: time="2026-11-05T00:38:49.604289391+05:30" level=warning msg="ShouldRestart failed, container will not be restarted" container=c036049dc51675f764efec7d26565db3c358b5b28e441a2cdf6afb8e201eab62 daemonShuttingDown
+Nov 05 00:38:50 user-Inspiron-5567 power-guard.sh[4766]: 2026-11-05T00:38:50+05:30 power-guard: powering off: on battery at 3% (<= 15%)
+Nov 05 00:38:50 user-Inspiron-5567 power-guard.sh[4766]: 2026-11-05T00:38:50+05:30 power-guard: stopping
+Nov 05 00:38:50 user-Inspiron-5567 systemd[1]: vercelify-power-guard.service: Deactivated successfully.
+Nov 05 00:38:50 user-Inspiron-5567 systemd[1]: vercelify-power-guard.service: Consumed 4.703s CPU time.
+Nov 05 00:38:55 user-Inspiron-5567 systemd-shutdown[1]: Syncing filesystems and block devices.
+Nov 05 00:38:55 user-Inspiron-5567 systemd-shutdown[1]: Sending SIGTERM to remaining processes...
+Nov 05 00:38:55 user-Inspiron-5567 systemd-journald[247]: Journal stopped

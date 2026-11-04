@@ -1,0 +1,30 @@
+Nov 05 00:42:38 user-Inspiron-5567 systemd[1]: Starting Vercelify host agent (the engine and the app's API)...
+Nov 05 00:42:38 user-Inspiron-5567 systemd[1]: Started Vercelify power & thermal guard.
+Nov 05 00:42:38 user-Inspiron-5567 systemd[1]: Started Vercelify host agent (the engine and the app's API).
+Nov 05 00:42:38 user-Inspiron-5567 vercelify-agent[4086]: 2026-11-04T19:12:38.638155Z  INFO platform engine: /var/lib/vercelify/platform.db
+Nov 05 00:42:38 user-Inspiron-5567 vercelify-agent[4086]: 2026-11-04T19:12:38.674703Z  INFO wake listener on http://0.0.0.0:7421
+Nov 05 00:42:38 user-Inspiron-5567 vercelify-agent[4086]: 2026-11-04T19:12:38.674798Z  INFO mesh enrollment on http://0.0.0.0:7443
+Nov 05 00:42:38 user-Inspiron-5567 vercelify-agent[4086]: 2026-11-04T19:12:38.677277Z  INFO listening on http://127.0.0.1:7420
+Nov 05 00:42:38 user-Inspiron-5567 vercelify-agent[4086]: 2026-11-04T19:12:38.678386Z  INFO listening on http://10.77.0.1:7420
+Nov 05 00:42:38 user-Inspiron-5567 vercelify-agent[4086]: 2026-11-04T19:12:38.955771Z  INFO mesh relay: user-inspiron-5567 connected
+Nov 05 00:42:39 user-Inspiron-5567 power-guard.sh[4079]: 2026-11-05T00:42:39+05:30 power-guard: started (shutdown<=15% pause>=92°C every 20s)
+Nov 05 00:42:39 user-Inspiron-5567 vercelify-agent[4086]: 2026-11-04T19:12:39.573112Z  INFO mesh relay: shashanks-macbook-air connected
+Nov 05 00:42:44 user-Inspiron-5567 vercelify-agent[4086]: 2026-11-04T19:12:44.512270Z  INFO reconciled: Report { started: [], stopped: [], removed: [], recovering: [], routes_written: 0, routes_removed: 0, errors: ["capacity: no capacity sample is available; running services were left alone"] }
+Nov 05 00:42:44 user-Inspiron-5567 systemd[1]: Stopping Vercelify host agent (the engine and the app's API)...
+Nov 05 00:42:44 user-Inspiron-5567 vercelify-agent[4086]: 2026-11-04T19:12:44.759026Z  INFO shutting down
+Nov 05 00:42:49 user-Inspiron-5567 systemd[1]: vercelify-agent.service: Deactivated successfully.
+Nov 05 00:42:49 user-Inspiron-5567 systemd[1]: Stopped Vercelify host agent (the engine and the app's API).
+Nov 05 00:42:49 user-Inspiron-5567 systemd[1]: vercelify-agent.service: Consumed 1.432s CPU time.
+Nov 05 00:42:49 user-Inspiron-5567 systemd[1]: Starting Vercelify host agent (the engine and the app's API)...
+Nov 05 00:42:49 user-Inspiron-5567 systemd[1]: Started Vercelify host agent (the engine and the app's API).
+Nov 05 00:42:49 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:12:49.993925Z  INFO platform engine: /var/lib/vercelify/platform.db
+Nov 05 00:42:50 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:12:50.019795Z  INFO wake listener on http://0.0.0.0:7421
+Nov 05 00:42:50 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:12:50.019854Z  INFO mesh enrollment on http://0.0.0.0:7443
+Nov 05 00:42:50 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:12:50.019897Z  INFO listening on http://127.0.0.1:7420
+Nov 05 00:42:50 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:12:50.019978Z  INFO listening on http://10.77.0.1:7420
+Nov 05 00:42:50 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:12:50.597634Z  INFO reconciled: Report { started: [], stopped: [], removed: [], recovering: [], routes_written: 0, routes_removed: 0, errors: ["capacity: no capacity sample is available; running services were left alone"] }
+Nov 05 00:42:50 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:12:50.766294Z  INFO mesh relay: user-inspiron-5567 connected
+Nov 05 00:42:51 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:12:51.074433Z  INFO mesh relay: shashanks-macbook-air connected
+Nov 05 00:43:06 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:13:06.547513Z  INFO previews: gw: GitHub rate limit reached — add a token to check more often
+Nov 05 00:43:10 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:13:10.611848Z  INFO alert: App gw: needs attention — http://gw.10.77.0.1.sslip.io is not answering (HTTP 502)
+Nov 05 00:43:21 user-Inspiron-5567 vercelify-agent[5920]: 2026-11-04T19:13:21.238121Z  INFO reconciled: Report { started: ["vfy-gw-2cv2ryfw", "vfy-gw-pr1-re0wxze2"], stopped: [], removed: [], recovering: [], routes_written: 0, routes_removed: 0, errors: [] }

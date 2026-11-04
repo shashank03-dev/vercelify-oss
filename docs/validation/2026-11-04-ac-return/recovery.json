@@ -1,0 +1,62 @@
+{
+  "utc": "2026-11-04T18:33:37.406637+00:00",
+  "boot": "67bcd1e9-c2f0-4915-bed3-0f1e5bd02480",
+  "boot_changed": true,
+  "containers_unchanged": true,
+  "containers": "db2a0f0262b9 vfy-gw-pr1-re0wxze2\n2202ac6f511a vfy-db-gwdb\ndf341f080ef2 vfy-gw-2cv2ryfw\nc036049dc516 vercelify-proxy\n4a2a21ec2fc1 voxbento-mediamtx-1\n",
+  "ac": "1",
+  "services": {
+    "vercelify-agent": "active",
+    "vercelify-mesh": "active",
+    "vercelify-power-guard": "active"
+  },
+  "database": "/var/run/postgresql:5432 - accepting connections",
+  "states": [
+    {
+      "integrity": "ok",
+      "deployments": [
+        [
+          "dpl_b2t4hdqd2cv2ryfw",
+          "healthy",
+          "vfy-gw-2cv2ryfw"
+        ],
+        [
+          "dpl_b4be258fre0wxze2",
+          "healthy",
+          "vfy-gw-pr1-re0wxze2"
+        ],
+        [
+          "dpl_rwzfsbme0qevs6a7",
+          "superseded",
+          "vfy-gw-pr1-0qevs6a7"
+        ]
+      ],
+      "jobs": []
+    },
+    {
+      "integrity": "ok",
+      "deployments": [
+        [
+          "dpl_b2t4hdqd2cv2ryfw",
+          "healthy",
+          "vfy-gw-2cv2ryfw"
+        ],
+        [
+          "dpl_b4be258fre0wxze2",
+          "healthy",
+          "vfy-gw-pr1-re0wxze2"
+        ],
+        [
+          "dpl_rwzfsbme0qevs6a7",
+          "superseded",
+          "vfy-gw-pr1-0qevs6a7"
+        ]
+      ],
+      "jobs": []
+    }
+  ],
+  "deployments_unchanged": true,
+  "jobs_unchanged": true,
+  "shutdown_ordering_errors": [],
+  "postgres_journal": "2026-11-04 18:33:22.308 UTC [29] LOG:  database system was shut down at 2026-11-04 18:18:45 UTC\n2026-11-04 18:33:22.353 UTC [1] LOG:  database system is ready to accept connections"
+}
