@@ -2070,6 +2070,35 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
+    async fn manual_stop_wins_over_sleep_and_wake_before_any_runtime_action() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = engine(dir.path(), 1);
+        let app = image_app(&e);
+        e.store
+            .tx(|c| {
+                apps::patch(
+                    c,
+                    &app.id,
+                    &AppPatch {
+                        desired: Some(vercelify_core::platform::Desired::Stopped),
+                        ..Default::default()
+                    },
+                )
+            })
+            .unwrap();
+        assert!(matches!(e.sleep(&app.id, None).await, Err(Error::Conflict(_))));
+        assert!(matches!(e.wake(&app.id, None).await, Err(Error::Conflict(_))));
+        assert_eq!(
+            e.store.with(|c| apps::get(c, &app.id)).unwrap().desired,
+            vercelify_core::platform::Desired::Stopped
+        );
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap_or_default();
+        assert!(!calls
+            .lines()
+            .any(|l| l.starts_with("start ") || l.starts_with("stop ") || l.starts_with("inspect ")));
+    }
+
+    #[tokio::test]
     async fn missing_capacity_keeps_an_image_deployment_queued() {
         let dir = tempfile::tempdir().unwrap();
         let e = engine(dir.path(), 1);

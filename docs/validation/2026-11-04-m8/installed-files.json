@@ -1,0 +1,5 @@
+{
+  "/usr/local/bin/vercelify-agent": "838c29fdd9198930bbf3b2893c6f8743218be28c1a455de477adf8dfed124f97",
+  "/usr/local/lib/vercelify/power-guard.sh": "c9fe3afff54cfdf2656ecc2408ec258b9f340558136d89e4954dbd24f70ba39b",
+  "/usr/local/lib/vercelify/lib/battery-policy.sh": "07cc061ee9ece2caaf7dc324ee8066e8cd96174610c56ba4bc6bee2628ae8be2"
+}

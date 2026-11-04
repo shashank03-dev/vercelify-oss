@@ -55,6 +55,10 @@ PAUSED_FILE="$STATE_DIR/power-guard.paused"
 CAPPED_FILE="$STATE_DIR/power-guard.capped"
 RESTORE_FILE="$PERSIST_DIR/power-guard.restore"
 
+# Installed alongside common.sh; source-tree execution uses the same layout.
+# shellcheck source=lib/battery-policy.sh
+. "$(dirname "${BASH_SOURCE[0]}")/lib/battery-policy.sh"
+
 log() { printf '%s power-guard: %s\n' "$(date -Is)" "$*" >&2; }
 
 notify() {
@@ -149,7 +153,14 @@ is_protected() {
 }
 
 # Running containers as "id name image" lines.
-running_containers() { "$DOCKER" ps --format '{{.ID}} {{.Names}} {{.Image}}' 2>/dev/null; }
+running_containers() {
+  local id name image managed
+  while read -r id name image managed; do
+    if [[ "$managed" == platform || "$name" == buildx_buildkit_vercelify0 || "$name" == vercelify-ollama ]] || is_protected "$name"; then
+      printf '%s %s %s\n' "$id" "$name" "$image"
+    fi
+  done < <("$DOCKER" ps --format '{{.ID}} {{.Names}} {{.Image}} {{.Label "vercelify.managed"}}' 2>/dev/null)
+}
 
 is_data() { [[ "$2" =~ ($DATA_IMAGE_PATTERN) || "$1" =~ ^($DATA_IMAGE_PATTERN) ]]; }
 is_build() { [[ "$2" =~ ($BUILD_IMAGE_PATTERN) || "$1" =~ ($BUILD_IMAGE_PATTERN) ]]; }
@@ -169,6 +180,7 @@ graceful_shutdown() {
     echo "$id" >>"$RESTORE_FILE"
   done < <(running_containers)
   # Paused containers cannot be stopped; unfreeze them first.
+  battery_resume_work
   [[ -s "$PAUSED_FILE" ]] && xargs -r "$DOCKER" unpause <"$PAUSED_FILE" >/dev/null 2>&1
   rm -f "$PAUSED_FILE" "$CAPPED_FILE"
   if (( ${#apps[@]} )); then
@@ -253,8 +265,19 @@ restore_after_boot() {
   fi
   # Retry: dockerd may still be starting.
   for _ in 1 2 3 4 5 6; do "$DOCKER" info >/dev/null 2>&1 && break; sleep 5; done
-  log "restoring $(sort -u "$RESTORE_FILE" | wc -l) container(s) stopped before shutdown"
-  sort -u "$RESTORE_FILE" | xargs -r "$DOCKER" start >/dev/null 2>&1 || true
+  if [[ "$BATTERY_POLICY_ENABLED" == 1 && "$present" == 1 ]]; then
+    (( BATTERY_STAGE == 0 && BATTERY_AC_SINCE == 0 )) && BATTERY_STAGE=4
+    if battery_policy_tick 0 "$ac" "$present" "$cap"; then return 0; fi
+  fi
+  # Platform apps/databases are reconciled from declared state by the agent.
+  # Starting an old raw ID here could revive an app manually stopped meanwhile.
+  local id name
+  while read -r id; do
+    [[ "$id" =~ ^[a-zA-Z0-9]+$ ]] || continue
+    name=$("$DOCKER" inspect -f '{{.Name}}' "$id" 2>/dev/null) || continue
+    name=${name#/}
+    if is_protected "$name"; then "$DOCKER" start "$id" >/dev/null 2>&1 || true; fi
+  done < <(sort -u "$RESTORE_FILE")
   rm -f "$RESTORE_FILE"
 }
 
@@ -323,6 +346,11 @@ tick() {
     return 0
   fi
 
+  if battery_policy_tick "$on_battery" "$ac" "$present" "$cap"; then
+    save_counters
+    return 0
+  fi
+  [[ -s "$RESTORE_FILE" ]] && restore_after_boot
   if (( on_battery )); then
     if (( cap >= 0 && cap <= BATTERY_WARN_PCT )); then
       write_state warning "on battery at ${cap}% — shutdown at ${BATTERY_SHUTDOWN_PCT}%"
@@ -357,7 +385,6 @@ main() {
     *) echo "unknown option: $1" >&2; return 2 ;;
   esac
   load_counters
-  CURRENT_STATE=ok
   apply_charge_threshold
   restore_after_boot
   log "started (shutdown<=${BATTERY_SHUTDOWN_PCT}% pause>=${THERMAL_PAUSE_C}°C every ${INTERVAL}s)"

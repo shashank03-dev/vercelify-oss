@@ -24,6 +24,9 @@ use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 use vercelify_core::{ProxyMetricsResult, SleepRequest, SleepSetting, SleepStatus, SleepTarget};
 
+#[path = "power_sleep.rs"]
+mod power_sleep;
+
 pub const DEFAULT_IDLE_MINUTES: u32 = 30;
 const DYNAMIC_FILE: &str = "vercelify-sleep.yaml";
 /// A woken app is left awake at least this many minutes.
@@ -182,6 +185,10 @@ fn waking_page(host: &str, starting: bool) -> String {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 struct Asleep {
+    #[serde(default)]
+    reason: String,
+    #[serde(default)]
+    deployment_id: Option<String>,
     containers: Vec<String>,
     since: String,
 }
@@ -317,7 +324,7 @@ impl Sleep {
                         idle,
                     });
                 }
-                if s.previews {
+                if s.previews && app.desired != vercelify_core::platform::Desired::Stopped {
                     for p in vercelify_platform::previews::list(c, &app.id, true)? {
                         if p.deployment_id.is_none() {
                             continue;
@@ -427,6 +434,27 @@ impl Sleep {
         let idle = req.idle_minutes.unwrap_or(DEFAULT_IDLE_MINUTES);
         if !(5..=24 * 60).contains(&idle) {
             return Err(AppError::bad_request("idle time must be 5 minutes to 24 hours"));
+        }
+        if !req.enabled || req.previews == Some(false) {
+            let prefix = engine
+                .store
+                .with(|c| vercelify_platform::apps::get(c, app_uuid))
+                .ok()
+                .map(|a| a.name);
+            if let Some(name) = prefix {
+                if self
+                    .store
+                    .lock()
+                    .await
+                    .asleep
+                    .iter()
+                    .any(|(key, a)| a.reason == "battery" && (key == &name || key.starts_with(&format!("{name}-pr-"))))
+                {
+                    return Err(AppError::conflict(
+                        "battery recovery is pending; wait for the workload to resume before turning sleep off",
+                    ));
+                }
+            }
         }
         let setting = SleepSetting {
             app_uuid: app_uuid.into(),
@@ -538,6 +566,9 @@ impl Sleep {
         let targets = self.load_targets(&settings).await;
         self.write_routes(&targets);
         *self.targets.lock().await = targets.clone();
+        if self.power_tick(&targets).await {
+            return;
+        }
         if targets.is_empty() {
             *self.error.lock().await = None;
             return;
@@ -629,6 +660,8 @@ impl Sleep {
                     Asleep {
                         containers,
                         since: now(),
+                        reason: String::new(),
+                        deployment_id: None,
                     },
                 );
                 self.save(&store);
@@ -645,6 +678,9 @@ impl Sleep {
 
     /// Start a sleeping app again. Returns false if it wasn't asleep.
     async fn wake_key(&self, key: &str, why: &str) -> bool {
+        if self.power_blocks_wake(key).await {
+            return false;
+        }
         if !self.store.lock().await.asleep.contains_key(key) {
             return false;
         }
@@ -731,6 +767,9 @@ impl Sleep {
         };
         let asleep = self.store.lock().await.asleep.contains_key(&key);
         if asleep {
+            if self.power_blocks_wake(&key).await {
+                return (503,"<!doctype html><title>Waiting for power</title><h1>Waiting for power</h1><p>This app is paused by the battery policy. It can resume after stable AC and recovery charge.</p>".into());
+            }
             let me = self.clone();
             let k = key.clone();
             // Answer now; the page reloads until the app's route is back.

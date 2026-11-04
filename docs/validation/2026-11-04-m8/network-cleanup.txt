@@ -1,0 +1,32 @@
+{
+  "removed_unused_fixture_networks": [
+    "vfy-net-prj-1ektq1h8118eqe4s",
+    "vfy-net-prj-1v20trad7w140640",
+    "vfy-net-prj-01twf09gdzd1n4fe",
+    "vfy-net-prj-3and0ffwqc8ktqzd",
+    "vfy-net-prj-6ap8bwsfpznknbtq",
+    "vfy-net-prj-97mnxqvta2b9bgk4",
+    "vfy-net-prj-bcn5c1qs1j12jd4j",
+    "vfy-net-prj-cjpyzq2tex02e5a8",
+    "vfy-net-prj-dv4nmawcs7qfqna2",
+    "vfy-net-prj-gkfbz1jjc3yyawrr",
+    "vfy-net-prj-kd2xfv0n6x7fmvmq",
+    "vfy-net-prj-nkzzackff12137w5",
+    "vfy-net-prj-qyp3cpxqxsx9my04",
+    "vfy-net-prj-rbadc07zxyps9zmq",
+    "vfy-net-prj-s746gjw820e7em1f",
+    "vfy-net-prj-sbvntcqv3hs8jbjp",
+    "vfy-net-prj-sc0knyy4ahz6tqf5",
+    "vfy-net-prj-t635wz1n0e67nk3p",
+    "vfy-net-prj-v24q35bhnxan4mp9",
+    "vfy-net-prj-wfh1zaqw8gcmr2f8",
+    "vfy-net-prj-wx1yqrh9swhwxkvn",
+    "vfy-net-prj-x646wrq0stdxctm1",
+    "vfy-preview-app_ascs557rb6ttbfec-pr7",
+    "vfy-preview-app_dwdf8agn918rj05h-pr1",
+    "vfy-preview-app_dwdf8agn918rj05h-pr2",
+    "vfy-preview-db-app_9s9306n9nab6gjt9",
+    "vfy-preview-db-app_dwdf8agn918rj05h"
+  ],
+  "preserved_attached_networks": 3
+}

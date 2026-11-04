@@ -411,6 +411,11 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
             Some(&fix),
         ));
     }
+    if f.battery_pct.is_some() {
+        out.push(check("power-on-ac","Power after outage",Warn,
+            "firmware recovery is unverified; software cannot guarantee power-on after shutdown or depletion",
+            Some("check vendor firmware for AC recovery; test full shutdown, battery depletion, lid behavior and router/network recovery on this exact machine")));
+    }
     // A worn-out battery reads "100 %" but empties in minutes: the power
     // guard can't shut down cleanly on it after a power cut.
     if let Some(h) = f.battery_health_pct.filter(|h| *h < 20.0) {
@@ -419,13 +424,19 @@ pub fn evaluate(f: &Facts) -> Vec<DoctorCheck> {
             "Battery",
             Warn,
             format!("worn out: holds {h:.0}% of its design charge, so it won't carry the server through a power cut"),
-            Some("keep it on the charger (or a UPS); a power cut is then an abrupt stop, which Docker and SQLite survive"),
+            Some("replace the battery or use a UPS; abrupt power loss can lose writes and requires independent backup/restore verification"),
         ));
     }
     out.push(if f.power_guard_active {
         let state = f.power_guard.clone().unwrap_or_else(|| "ok".into());
         let status = match state.as_str() {
-            "thermal_paused" | "shutting_down" => Warn,
+            "thermal_paused"
+            | "shutting_down"
+            | "battery_build_hold"
+            | "battery_work_paused"
+            | "battery_preview_sleep"
+            | "battery_app_sleep"
+            | "battery_recovery" => Warn,
             _ => Fine,
         };
         check(
@@ -981,10 +992,14 @@ mod tests {
     }
 
     #[test]
-    fn healthy_machine_is_all_ok_without_fixes() {
+    fn healthy_machine_still_requires_independent_firmware_recovery_qualification() {
         let c = evaluate(&healthy_main());
-        assert!(c.iter().all(|c| c.status == Fine), "{c:#?}");
-        assert!(c.iter().all(|c| c.fix.is_none()));
+        assert!(
+            c.iter().filter(|c| c.id != "power-on-ac").all(|c| c.status == Fine),
+            "{c:#?}"
+        );
+        assert_eq!(status_of(&c, "power-on-ac"), Some(Warn));
+        assert!(c.iter().filter(|c| c.id != "power-on-ac").all(|c| c.fix.is_none()));
         assert_eq!(status_of(&c, "ollama"), None, "no AI check when Ollama isn't installed");
         assert_eq!(status_of(&c, "smart-sda"), Some(Fine));
     }

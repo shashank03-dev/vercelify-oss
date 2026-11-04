@@ -416,3 +416,11 @@ This release supports main-server private previews, 16 MiB uploads and 64 MiB
 transfers. Browser workers and embedded frames are unavailable through guest links;
 use the private link for applications that need them. Domain changes revoke all
 invitations, and previous guest namespaces remain reserved against app claims.
+
+### Opt-in battery conservation
+
+The independent Linux guard can hold builds, pause owned build work, then sleep
+explicitly sleep-enabled previews and noncritical apps as charge falls. It requires
+stable AC and recovery charge before waking matching generations. Manual stops and
+closed PRs take precedence. Enable this separately in host configuration; normal
+Sleep remains optional. See [power configuration and physical qualification](POWER-RESILIENCE.md).

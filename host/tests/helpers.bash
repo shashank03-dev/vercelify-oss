@@ -20,7 +20,11 @@ setup_sandbox() {
 echo "docker $*" >>"$CALLS"
 case "$1" in
   ps) cat "$SANDBOX/containers" 2>/dev/null ;;
-  inspect) echo "${STUB_NANOCPUS:-0}" ;;
+  inspect)
+    if [[ "$3" == '{{.State.Paused}}' ]]; then echo "${STUB_PAUSED:-false}"
+    elif [[ "$3" == '{{.Name}}' ]]; then
+      case "$4" in bbb) echo /vercelify-proxy ;; ddd) echo /vfy-registry ;; *) echo /app-web ;; esac
+    else echo "${STUB_NANOCPUS:-0}"; fi ;;
   info) exit 0 ;;
 esac
 STUB
@@ -30,7 +34,7 @@ echo "POWEROFF" >>"$CALLS"
 STUB
   chmod +x "$SANDBOX/bin/"*
   export DOCKER="$SANDBOX/bin/docker"
-  printf 'aaa app-web node:22\nbbb vercelify-proxy traefik:v3.1\nccc postgres-xyz postgres:16-alpine\nddd vfy-registry registry:2\n' >"$SANDBOX/containers"
+  printf 'aaa app-web node:22 platform\nbbb vercelify-proxy traefik:v3.1\nccc postgres-xyz postgres:16-alpine platform\nddd vfy-registry registry:2\n' >"$SANDBOX/containers"
 }
 
 teardown_sandbox() { rm -rf "$SANDBOX"; }

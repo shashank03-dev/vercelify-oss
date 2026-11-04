@@ -117,7 +117,7 @@ pub struct ThermalStatus {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, TS)]
 #[ts(export)]
 pub struct PowerGuardState {
-    /// ok | warning | thermal_paused | shutting_down
+    /// ok | warning | thermal_paused | shutting_down | battery_build_hold | battery_work_paused | battery_preview_sleep | battery_app_sleep | battery_recovery
     pub state: String,
     pub reason: String,
     pub updated_at: String,

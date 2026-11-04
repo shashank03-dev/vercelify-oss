@@ -10,7 +10,7 @@ import { Button, Card, IconButton, Modal, Select, StatusText } from "./ui";
 
 function nodeHealth(n: PlatformNode): { health: Health; label: string } {
   if (!n.online) return { health: "bad", label: "offline" };
-  if (n.status.thermal_paused) return { health: "warn", label: "too hot" };
+  if (n.status.thermal_paused) return { health: "warn", label: "power guard hold" };
   if (n.role !== "main" && !n.status.docker_ok) return { health: "bad", label: "Docker down" };
   if (n.drained) return { health: "idle", label: "drained" };
   return { health: "ok", label: "online" };

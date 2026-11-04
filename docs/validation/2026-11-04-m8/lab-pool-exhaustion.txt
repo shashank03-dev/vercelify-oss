@@ -1,0 +1,12 @@
+PASS: owned agent/apps/proxy stopped; private synthetic state retained for review
+PASS: owned agent/apps/proxy stopped; private synthetic state retained for review
+Traceback (most recent call last):
+  File "/workspace/host/tests/contract/power-resilience.py", line 44, in <module>
+    f.start();thread=threading.Thread(target=probe_loop,daemon=True);thread.start();facts=f.facts();app=facts['app_id'];preview=facts['preview_container'];state('ok')
+    ~~~~~~~^^
+  File "/workspace/host/tests/contract/guest-links.py", line 121, in start
+    d=wait_deploy(dep)
+  File "/workspace/host/tests/contract/guest-links.py", line 47, in wait_deploy
+    if d['status']=='failed':raise RuntimeError('fixture deploy failed: '+d.get('error',''))
+                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+RuntimeError: fixture deploy failed: cannot isolate preview network (Docker 28+ is required): Error response from daemon: all predefined address pools have been fully subnetted

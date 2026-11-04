@@ -1,0 +1,244 @@
+1..243
+ok 1 setup creates encrypted repositories, a private env file and a nightly timer
+ok 2 run dumps every database, saves the engine's state and records success
+ok 3 a failing repository is reported (doctor and alerts read backup.json)
+ok 4 restore to a directory, never over the live server without --instance
+ok 5 --instance: the engine's state comes back and no database sees its files change under it
+ok 6 not set up: clear message
+ok 7 a new machine reuses the old password to reach existing backups
+ok 8 a reinstall without the old config never re-creates over old backups, and says how to get them back
+ok 9 a database that can't be dumped doesn't stop the rest from being saved
+ok 10 a restored backup password keeps spaces and shell metacharacters literally
+ok 11 battery tiers are opt-in and require consecutive samples
+ok 12 tier escalation pauses only the installed builder and selects preview then app sleep
+ok 13 AC bounce and clock rollback restart the stable recovery interval
+ok 14 missing sensors do not release remembered battery work
+ok 15 charge hysteresis retains a tier until its recovery charge headroom exists
+ok 16 guard restart retains tier ownership and never resumes an already-paused builder
+ok 17 owned shutdown leaves unrelated containers out of its stop and restore manifest
+ok 18 post-shutdown restore waits for stable AC then starts only core
+ok 19 turning policy off retains safe recovery without escalating new sleep tiers
+ok 20 idle builder qualification refuses a serving host before running its test binary
+ok 21 llm: install, pull, list, chat and delete
+ok 22 llm: a failed download exits non-zero with Ollama's reason
+ok 23 llm: status shows an install that is still running instead of offering another
+ok 24 llm: a download that ends badly prints its reason, not a bare 'failed' first
+ok 25 llm: install puts models on the HDD when it is mounted
+ok 26 the agent token goes to curl on stdin, never on the command line
+ok 27 without the token file the CLI asks for sudo
+ok 28 a dead agent gives a pointer to doctor
+ok 29 doctor prints the agent's report (one source of truth) and fails on problems
+ok 30 doctor falls back to local checks when the agent is down
+ok 31 sleep: turn on, list and off
+ok 32 pair: both codes come from one agent call (one device token)
+ok 33 pair: an older agent without --with-code still gets both codes
+ok 34 uninstall wakes sleeping apps and removes Vercelify's own containers
+ok 35 git-source: a token from stdin (never an argument), a deploy key, list and remove
+ok 36 pair --host reaches the agent; anything else is refused
+ok 37 ask sets the caller's variable even when the caller has a local of the same name
+ok 38 a declined uninstall says so, exits non-zero and changes nothing
+ok 39 uninstall stops the apps and removes the proxy, builder and slice, and gives the lid back
+ok 40 uninstall with remote access on but no router doesn't stop halfway
+ok 41 version without sudo: install.env unreadable, the world-readable copy answers
+ok 42 llm --cancel stops running AI jobs
+ok 43 zone lookup walks up from a subdomain
+ok 44 unknown zone gives a clear error
+ok 45 bad token surfaces Cloudflare's message
+ok 46 tunnel is created once and then reused
+ok 47 ingress routes wildcard + apex to the proxy with a catch-all
+ok 48 a mesh coordinator gets mesh.DOMAIN to its control listener
+ok 49 DNS: create, then update in place
+ok 50 DNS: existing A record is left alone unless forced
+ok 51 routes: sync reapplies the routes from the stored token
+ok 52 the package for this system
+ok 53 the desktop's user: a graphical session, not root
+ok 54 on: the checked package, Sunshine for graphical logins and now, the agent told
+ok 55 on: a system_tray the user chose stays
+ok 56 not logged in yet: enabled, starts at login
+ok 57 a checksum that doesn't match: nothing installed
+ok 58 no desktop: says so, installs nothing
+ok 59 off: no longer started
+ok 60 on, under the CLI's set -euo pipefail
+ok 61 reset-login: Sunshine's login forgotten, paired devices kept
+ok 62 reset-login: refused while remote desktop is off
+ok 63 changing the desktop user refuses to interrupt running jobs
+ok 64 the dev agent refuses to run on a Vercelify server
+ok 65 the proxy-replacing test suites refuse on a server, unless told to go ahead
+ok 66 firewall keeps the AI API and the image registry private
+ok 67 containers can't reach the mesh beyond its ACL
+ok 68 the isolation can be turned off or widened in firewall.conf
+ok 69 the wake listener for sleeping apps is reachable from Docker bridges only
+ok 70 a firewall restart rebuilds the mesh's chains too, so devices are never left unfiltered
+ok 71 a mesh update replaces its chains in one commit: never empty, never half-built
+ok 72 profiles: Raspberry Pi 4/5, laptop, desktop
+ok 73 Pi thresholds sit below the firmware's own throttling; laptops keep theirs
+ok 74 throttling bits are explained
+ok 75 SD card roots are recognised
+ok 76 memory cgroup: added to cmdline.txt once, and a reboot is requested
+ok 77 containers get a memory-capped slice that leaves the OS its reserve
+ok 78 daemon.json: cgroup-parent and live-restore, but not with the cgroupfs driver
+ok 79 the registry command only sets up cross-CPU builds
+ok 80 picks the .dmg for this Mac's CPU
+ok 81 a universal build wins over per-CPU builds
+ok 82 a release without a Mac build gives nothing to download
+ok 83 options
+ok 84 --pair leaves the code for the app, readable by this user only
+ok 85 falls back to ~/Applications when /Applications is not writable
+ok 86 refuses to run anywhere but macOS
+ok 87 --help prints the options
+ok 88 the vfy CLI is installed next to the app
+ok 89 the network daemon: release asset and launchd job
+ok 90 install_mesh puts the binary and the LaunchAgent in place
+ok 91 a new signature clears the stale Screen Recording entry, the same one keeps it
+ok 92 optional display tool failures do not abort installation or claim success
+ok 93 the network job is restarted reliably: waits for the old one, retries, checks it runs
+ok 94 a network job that never runs fails loudly instead of claiming success
+ok 95 a network job that starts and then crashes is not reported as running
+ok 96 --from-source run from a checkout builds that checkout, not GitHub's main
+ok 97 an app built from source gets vfy from the same source
+ok 98 an app built from source gets its network daemon from the same checkout
+ok 99 a failed release download says why instead of claiming there is none
+ok 100 --host: the host manager's launchd job runs serve in the user's session
+ok 101 --host: a Lima download with the wrong checksum is refused and not installed
+ok 102 --host installs vercelify-host, Lima and the LaunchAgent
+ok 103 local builds install the selected shared pack binary without touching Docker contexts
+ok 104 a download cut short runs none of the steps
+ok 105 the release is installed and the download is not left in /tmp # skip install.sh needs root
+ok 106 a download that drops halfway resumes where it stopped # skip install.sh needs root
+ok 107 a damaged download installs nothing and says to run it again # skip install.sh needs root
+ok 108 an edge install downloads the exact commit main points at, and says which # skip install.sh needs root
+ok 109 an edge install without the commit API still installs main # skip install.sh needs root
+ok 110 nothing to do without pending updates
+ok 111 reboots when updates need it and nothing is running
+ok 112 a kernel replaced since boot counts as needing a reboot
+ok 113 a kernel the distro didn't provide (VPS, container) never reboots every night
+ok 114 never during a build, a backup, on battery, or right after boot
+ok 115 off means off; on sets the window and the timer
+ok 116 toml_set replaces, adds before tables, leaves comments
+ok 117 toml_list_add adds once, to existing, empty or missing lists
+ok 118 firewall: mesh rules for servers and devices, both families
+ok 119 firewall: containers reach other servers only on the ports the map lists
+ok 120 mesh invite, nodes and revoke through the agent
+ok 121 a platform main server's invite makes servers its workers
+ok 122 standby: choose a worker, see its copies, turn it off
+ok 123 promote and demote refuse what they shouldn't do
+ok 124 github-app and webhook (platform engine)
+ok 125 domain with a tunnel on a coordinator: devices outside the LAN join through mesh.DOMAIN
+ok 126 off-host qualification refuses a serving host before touching either Docker daemon
+ok 127 the engine is read from agent.toml, the platform unless turned off
+ok 128 domain settings for each mode
+ok 129 the agent's sandbox lets BuildKit keep its state, so git builds work
+ok 130 on AC: state ok, nothing touched
+ok 131 on battery above warn threshold: warning
+ok 132 low battery needs two consecutive readings before shutdown
+ok 133 shutdown stops apps before the core (proxy, registry) and remembers them
+ok 134 a reading back on AC resets the low-battery debounce
+ok 135 restore starts only core and leaves platform apps to declared-state reconciliation
+ok 136 restore waits while battery is still low
+ok 137 thermal: hot = builds paused, apps slowed, data and core untouched; resume when cool
+ok 138 thermal: very hot freezes apps too, but never databases
+ok 139 thermal thresholds come from the config (Raspberry Pi profile)
+ok 140 thermal: sustained critical temperature shuts down
+ok 141 peripheral batteries are ignored; desktops without battery are ok
+ok 142 config file overrides thresholds
+ok 143 --status prints readings
+ok 144 thresholds changed from the app override the config file
+ok 145 preview qualification refuses a serving host before executing the contract
+ok 146 public addresses only: private, CGNAT and link-local are refused
+ok 147 the ports, under the CLI's set -euo pipefail, with nothing configured
+ok 148 UPnP forwards both ports to this machine and the agent learns the public address
+ok 149 NAT-PMP when the router has no UPnP; configured ports are used
+ok 150 CGNAT: nothing is kept open on the router; a quick tunnel instead
+ok 151 a tunnel that restarts (a new address) has it followed at once, not at the next renewal
+ok 152 no UPnP or NAT-PMP: a quick tunnel, its signed address posted; it follows a new one
+ok 153 the router opens the ports again: direct, and the tunnel goes
+ok 154 the tunnel can't start: says what to do, writes nothing
+ok 155 with a Cloudflare domain and a closed router: the domain, no quick tunnel
+ok 156 a Cloudflare tunnel stays the control address
+ok 157 off removes the forwards, the timer and only what on wrote
+ok 158 off from a tunnel: the tunnel and its address go
+ok 159 only on the main server
+ok 160 supported operating systems
+ok 161 laptop: picks the HDD, never the OS disk, USB stick or zram
+ok 162 laptop: target is the existing ext4 partition
+ok 163 blank HDD next to NVMe: whole disk, needs formatting
+ok 164 old lsblk JSON (strings, single mountpoint) on a Raspberry Pi
+ok 165 partition paths
+ok 166 fstab: storage line uses UUID + nofail and is idempotent
+ok 167 fstab: replaces a previous entry for the same mount point
+ok 168 daemon.json: created with log limits, address pools and a shutdown timeout
+ok 169 daemon.json: existing settings win and are preserved
+ok 170 daemon.json: invalid JSON is refused, not overwritten
+ok 171 argument parsing normalises the domain
+ok 172 a worker joins with the invite the main server printed
+ok 173 unknown options are refused
+ok 174 app wildcard per domain mode
+ok 175 --help works without root
+ok 176 unknown options are rejected
+ok 177 SAFETY: -y never authorises formatting a blank disk
+ok 178 SAFETY: NTFS disks are not reformatted without --format-storage
+ok 179 existing ext4 partition is reused, never formatted
+ok 180 --format-storage on a blank disk partitions and formats it
+ok 181 updates keep the domain chosen earlier (no --domain on re-run)
+ok 182 --ai with and without a model
+ok 183 network: the main server coordinates, a worker joins with its invite
+ok 184 right after boot: waits for the system's own apt run instead of failing
+ok 185 the updater's shutdown helper, always running, is not an apt run
+ok 186 an explicitly selected partition is accepted
+ok 187 rerunning setup preserves a worker role even without a domain
+ok 188 edge installs build matching binaries instead of downloading an older release
+ok 189 an edge install takes CI's build of its exact commit, checked, before compiling
+ok 190 default setup defers optional feature questions
+ok 191 summary never reports ready when the mesh is unavailable
+ok 192 local and pinned source commits build matching binaries
+ok 193 dry-run Docker setup never downloads or runs the Docker installer
+ok 194 the default installation never selects an unrelated data disk
+ok 195 readiness requires the daemon and its actual mesh interface address
+ok 196 an existing Docker daemon also gets the Buildx plugin
+ok 197 a missing build plugin cannot be reported as a ready installation
+ok 198 an existing Docker daemon also gets Compose v2
+ok 199 a missing Compose plugin is reported before application deployment
+ok 200 an update (non-interactive re-run) mints no pairing code; a first install does
+ok 201 everything installed: no package list refresh at all
+ok 202 a package list that can't be fetched is a note, not the end of the install
+ok 203 Buildx: the package name apt offers is tried first, so no 'unable to locate' line
+ok 204 the version says what was installed: a release, or the branch and commit it was built from
+ok 205 laptop server mode: a dry run writes nothing
+ok 206 the admin CLI's scripts are root's and nobody else can write them, whoever owned the source
+ok 207 a failed installer run is rolled back to the previous agent and scripts
+ok 208 explicit control-state rollback uses the fresh update snapshot
+ok 209 an agent without db-backup is stopped for the copy and started again
+ok 210 an update whose engine doesn't open is rolled back, and the way out is named
+ok 211 an agent that doesn't come up after the update is rolled back too
+ok 212 a good update keeps the new version; rollback goes back on request
+ok 213 a local installer runs in place, so it installs the checkout it lives in
+ok 214 an automatic update failure preserves post-update control writes
+ok 215 a broken workload with a healthy control plane rolls back compatible binaries and verifies serving
+ok 216 an intentional workload change during update preserves current binaries and state
+ok 217 apps: state from the engine
+ok 218 deploy streams the build log and reports the result
+ok 219 logs, follow and restart
+ok 220 deploy follows the log again when the stream drops mid-build
+ok 221 rollback by commit or deployment number
+ok 222 env pull, set and push
+ok 223 the service catalogue
+ok 224 why APP reads the failed build from the engine
+ok 225 a server on the mesh is reached through vercelify-mesh's SOCKS proxy
+ok 226 forced env pull makes an existing public file private
+ok 227 forced env export refuses symbolic links and preserves their targets
+ok 228 a rejected env import reports failure without claiming success
+ok 229 logs of an app that never ran show its latest build failure
+ok 230 build-here refuses an unavailable local runtime before enqueueing a server build
+ok 231 build-here requires Buildx before creating a handoff job
+ok 232 a failed exact-commit fetch stops before planning or creating a build job
+ok 233 the build context excludes checkout credentials and Git metadata
+ok 234 a retained builder cannot silently use a different Docker runtime
+ok 235 a CI image without EXPOSE asks for an app port before creating a job
+ok 236 servers; a worker sends you to the main server
+ok 237 status, backup and errors from the agent
+ok 238 sleep an app by name, or keep it awake
+ok 239 config check reads vercel.json and vercelify.json from a folder
+ok 240 config push, sync, show and rm by app name
+ok 241 crons: list with the last run, run one now
+ok 242 why --log: any build log with the local Ollama, no paired server
+ok 243 why --provider gemini: Gemma 4 through the Gemini API, key via stdin

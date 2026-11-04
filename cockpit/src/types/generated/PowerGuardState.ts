@@ -5,6 +5,6 @@
  */
 export type PowerGuardState = { 
 /**
- * ok | warning | thermal_paused | shutting_down
+ * ok | warning | thermal_paused | shutting_down | battery_build_hold | battery_work_paused | battery_preview_sleep | battery_app_sleep | battery_recovery
  */
 state: string, reason: string, updated_at: string, };

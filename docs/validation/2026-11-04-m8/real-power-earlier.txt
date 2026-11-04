@@ -1,0 +1,9 @@
+PASS: owned agent/apps/proxy stopped; private synthetic state retained for review
+PASS: real agent, production sentinel and private preview ready; invitation retained only in mode-0600 facts.json
+PASS: preview tier sleeps only opted-in preview; authorized visit cannot bypass battery hold
+PASS: actual agent restart preserves generation-scoped power-sleep ownership
+PASS: stable recovery wakes matching preview through admission; manual stop wins for production
+PASS: PR close during battery sleep cannot be undone by recovery
+PASS: independent guard pauses/resumes the actual owned builder with AC debounce; serving sentinel remains healthy
+{"unchanged_production_probes": {"requests": 679, "failures": 0}}
+PASS: owned agent/apps/proxy stopped; private synthetic state retained for review

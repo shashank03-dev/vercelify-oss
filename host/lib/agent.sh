@@ -150,6 +150,8 @@ install_power_guard() {
   step "Power & thermal guard"
   run_cmd mkdir -p "$VERCELIFY_LIB"
   run_cmd install -m 0755 "$VERCELIFY_SRC/host/power-guard.sh" "$VERCELIFY_LIB/power-guard.sh"
+  run_cmd mkdir -p "$VERCELIFY_LIB/lib"
+  run_cmd install -m 0644 "$VERCELIFY_SRC/host/lib/battery-policy.sh" "$VERCELIFY_LIB/lib/battery-policy.sh"
   if [[ ! -f "$VERCELIFY_ETC/power-guard.conf" ]]; then
     # Thresholds suited to this machine (see hardware.sh).
     local p=${HW_PROFILE:-laptop}

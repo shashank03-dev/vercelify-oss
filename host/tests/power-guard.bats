@@ -52,11 +52,12 @@ teardown() { teardown_sandbox; }
   run ! grep -q POWEROFF "$CALLS"
 }
 
-@test "restore starts remembered containers when back on AC" {
+@test "restore starts only core and leaves platform apps to declared-state reconciliation" {
   laptop 1 50 Charging
   printf 'aaa\nbbb\naaa\n' >"$PERSIST_DIR/power-guard.restore"
   "$PG" --restore
-  grep -q 'docker start aaa bbb' "$CALLS"
+  grep -q 'docker start bbb' "$CALLS"
+  run ! grep -q 'docker start aaa' "$CALLS"
   [ ! -e "$PERSIST_DIR/power-guard.restore" ]
 }
 

@@ -146,7 +146,7 @@ pub fn unusable(n: &PlatformNode) -> Option<String> {
         return Some(format!("{} has no measured memory capacity yet", n.name));
     }
     if n.status.thermal_paused {
-        return Some(format!("{} is too hot (the power guard paused it)", n.name));
+        return Some(format!("{} is held by the power guard", n.name));
     }
     if n.status.on_battery && n.status.battery_percent.is_some_and(|p| p < 50) {
         return Some(format!("{} is on battery below 50 %", n.name));

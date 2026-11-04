@@ -232,7 +232,7 @@ function Fact({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   );
 }
 
-const GUARD_TONE: Record<string, Health> = { ok: "ok", warning: "warn", thermal_paused: "warn", shutting_down: "bad" };
+const GUARD_TONE: Record<string, Health> = { ok: "ok", warning: "warn", thermal_paused: "warn", shutting_down: "bad", battery_build_hold: "warn", battery_work_paused: "warn", battery_preview_sleep: "warn", battery_app_sleep: "warn", battery_recovery: "warn" };
 
 function PowerCard({ s }: { s?: SystemSnapshot }) {
   const p = s?.power;

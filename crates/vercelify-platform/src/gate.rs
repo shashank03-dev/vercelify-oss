@@ -32,7 +32,16 @@ impl Drop for BuildPermit<'_> {
 
 /// Power guard states that hold builds back.
 pub fn holds_builds(state: &str) -> bool {
-    matches!(state, "thermal_paused" | "shutting_down")
+    matches!(
+        state,
+        "thermal_paused"
+            | "shutting_down"
+            | "battery_build_hold"
+            | "battery_work_paused"
+            | "battery_preview_sleep"
+            | "battery_app_sleep"
+            | "battery_recovery"
+    )
 }
 
 impl BuildGate {
@@ -177,6 +186,15 @@ mod tests {
         let msgs = waiting.await.unwrap();
         assert_eq!(msgs.len(), 1);
         assert!(msgs[0].contains("thermal_paused"));
-        assert!(!holds_builds("warning"), "on battery builds still run");
+        assert!(!holds_builds("warning"), "legacy warning does not hold builds");
+        for state in [
+            "battery_build_hold",
+            "battery_work_paused",
+            "battery_preview_sleep",
+            "battery_app_sleep",
+            "battery_recovery",
+        ] {
+            assert!(holds_builds(state));
+        }
     }
 }

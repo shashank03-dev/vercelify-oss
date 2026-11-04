@@ -1,0 +1,27 @@
+{
+  "rust_all_features": {
+    "passed": 798,
+    "failed": 0,
+    "ignored": 14
+  },
+  "clippy": "passed",
+  "fmt": "passed",
+  "shellcheck": "passed",
+  "linux_bats": 243,
+  "linux_bats_nonroot": 238,
+  "root_only_cases": 5,
+  "root_installer_rerun": 6,
+  "ui_unit": 150,
+  "ui_types": "passed",
+  "ui_build": "passed",
+  "demo_browser": 33,
+  "real_power_contract": {
+    "requests": 736,
+    "failures": 0
+  },
+  "real_engine_contract_seconds": 96.32,
+  "physical_laptop_online": false,
+  "physical_power_matrix": "unmeasured",
+  "backup_copy_preview": "disabled",
+  "post_final_helper_change_focused_linux_cases": 9
+}

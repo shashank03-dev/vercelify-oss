@@ -5,8 +5,8 @@
 <h1 align="center">Vercelify</h1>
 
 <p align="center">
-  <b>Put your websites online from an old laptop you already own.</b><br/>
-  Free. No monthly bill. Controlled from an app on your Mac.
+  <b>Deploy apps to hardware you own.</b><br/>
+  Open source. Your hardware, power and network. Controlled from your Mac.
 </p>
 
 <p align="center">
@@ -38,16 +38,16 @@ version with one click.
 You don't need to know how servers work. You install Vercelify once on the old laptop,
 install the Vercelify app on your Mac, and do everything else from the app.
 
-It costs nothing to use. The only costs are the ones you already have: electricity for
-the laptop and your internet connection (and a domain name, if you want one).
+The software is free. Hardware, electricity, networking, storage, backups and a domain
+can still cost money. See the [tested scope and release limits](docs/RELEASE-QUALIFICATION.md).
 
 ## What you can do
 
 ### Put your projects online
 
 - **Publish straight from GitHub.** Pick a repository and click **Deploy**. Websites
-  made with Next.js, Vite, React, Express, Python and most other tools work as they
-  are.
+  use a supported build configuration or Dockerfile. Qualification is specific to
+  the app, architecture and declared resources; see the platform guide.
 - **Updates go live by themselves.** Every time you push a change to GitHub, Vercelify
   builds the new version and switches over once it's working. Your site stays up while
   this happens.
@@ -77,17 +77,18 @@ the laptop and your internet connection (and a domain name, if you want one).
   and MinIO (file storage).
 - **Secret settings** like passwords and API keys are stored encrypted, and you can copy
   them to your Mac with one command when you work on your code.
-- **Nightly backups.** Your apps' data is backed up every night, encrypted, to a second
-  disk, another computer or online storage, and you can restore it when you need to.
+- **Encrypted backups.** Configure a repository and schedule, retain recovery keys
+  independently, and verify important PostgreSQL snapshots with restore drills.
+  Backup configuration alone does not prove recoverability.
 
 ### Share your sites safely
 
 - **Private by default.** Your apps can only be reached from your own devices until you
   decide to make one public.
 - **Your own web address with the padlock (HTTPS).** Use a domain like
-  `blog.yourname.com`. This works even when your internet provider doesn't let other
-  people connect to your home (common on mobile and some home connections). You don't
-  have to change any router settings.
+  `blog.yourname.com`. Configure DNS and ingress for your network. An HTTPS tunnel
+  is an option when inbound connections are unavailable; qualify its routing and
+  access controls separately.
 - **Reach your server from anywhere.** Take your Mac to a café or school and it still
   connects to the laptop at home, over an encrypted connection. Turn it on with one
   command; there's no account to create.
@@ -97,16 +98,18 @@ the laptop and your internet connection (and a domain name, if you want one).
 
 ### Look after the old laptop
 
-- **Works with the lid closed** and keeps running when you're not around.
+- **Lid and power guidance** helps configure a Linux laptop. Firmware recovery and
+  lid behavior need testing on your model; see the [physical power matrix](docs/POWER-RESILIENCE.md).
 - **Watches the hardware:** temperature, battery, memory and disk space, with a warning
   before something runs out.
 - **Protects the battery** and slows things down if the laptop gets too hot.
 - **Puts quiet apps to sleep** to free memory on small machines. The next visitor wakes
-  the app up in a second or two.
+  the app after resource admission and health checks.
 - **Installs security updates by itself** at night (on from the start), and restarts
   only when an update needs it and nothing important is running.
-- **Safe updates.** Updating Vercelify keeps all your apps and data. If an update goes
-  wrong, it goes back to the previous version by itself.
+- **Recoverable updates.** Update and reboot recovery preserve declared state.
+  Automatic app rollback requires a compatible, verified prior generation; retain
+  independent backups for control state and important data.
 - **A health check** (`sudo vercelify doctor`) looks at everything and tells you, in
   plain words, what to fix.
 
@@ -121,8 +124,8 @@ the laptop and your internet connection (and a domain name, if you want one).
 
 - **Add more computers.** Another old laptop or a Raspberry Pi can join and share the
   work.
-- **A backup server.** A second machine can keep a copy of everything and take over if
-  the main one dies.
+- **A backup server.** A second machine can hold recovery data. Test recovery on it;
+  automatic failover and physical machine-loss recovery are not qualified.
 
 ### For people coming from Vercel
 

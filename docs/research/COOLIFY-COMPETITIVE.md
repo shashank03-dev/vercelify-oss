@@ -514,6 +514,41 @@ are the qualified scope. Both static agents remain below 8 MiB.
 Raw samples, test counts and reproduction:
 [M7b validation](../validation/2026-11-04-m7b/VALIDATION.md).
 
+### Re-measured for M8 opt-in battery software, 4 November 2026
+
+Same original six apps and four-GiB ARM lab, twelve samples six seconds apart plus
+collection time after two-minute settle. The disposable daemon and BuildKit were
+stopped. The guard service remains disabled on this no-battery VM, so this is idle
+agent/software footprint, not physical battery-policy or outage qualification.
+
+| Median MiB | M7b builder stopped | M8 builder stopped |
+| --- | ---: | ---: |
+| System used (range) | 634.5 (625–648) | 638.5 (609–653) |
+| Agent RSS | 13.37 | 8.72 |
+| Mesh RSS | 3.10 | 3.11 |
+| Traefik RSS | 87.94 | 89.84 |
+| dockerd / containerd RSS | 103.43 / 48.13 | 103.62 / 49.80 |
+| All shim RSS | 74.31 | 74.77 |
+| BuildKit RSS | 0 | 0 |
+
+All six original routes remain HTTP200. A prior M8 candidate sample (639 MiB system,
+9.66 MiB agent) is retained separately; it predates the final settings/recovery
+conflict fix. Restart age, allocator/cache histories and daemon RSS differ; neither
+run establishes a causal overhead reduction or electricity saving.
+
+The real software flow passed with 736 unchanged serving probes and zero failures:
+opted-in preview/app sleep, durable restart ownership, manual-stop/PR-close fencing,
+admitted recovery and actual owned-builder pause/resume. Synthetic sysfs/clock tests
+cover opt-in, debounce, hysteresis, AC bounce, missing sensors and clock rollback.
+The laptop still reports offline; its physical shutdown/depletion, lid, thermal,
+firmware AC recovery and network matrix remain **unmeasured**, so M8's physical
+acceptance gate stays open. Backup-copy previews remain disabled.
+
+Raw samples, final hashes, scope and reproduction:
+[M8 software validation](../validation/2026-11-04-m8/VALIDATION.md),
+[physical matrix](../POWER-RESILIENCE.md#physical-qualification) and
+[release qualification](../RELEASE-QUALIFICATION.md).
+
 ## 7. Feature verdicts after validation
 
 ### 7.1 Your computer builds, your server serves — build early

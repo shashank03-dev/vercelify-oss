@@ -1,0 +1,21 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-agent v1.0.0 (/Users/shashank/Desktop/VERCELIFY/agent)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.22s
+     Running unittests src/main.rs (target/debug/deps/vercelify_agent-52a665e9c393de8b)
+
+running 3 tests
+test sleep::power_sleep::tests::battery_selection_requires_the_preview_tier_before_production_tier ... ok
+test sleep::power_sleep::tests::power_sleep_reason_survives_restart_and_requires_a_fresh_recovery_state ... ok
+test sleep::power_sleep::tests::persisted_preview_generation_and_manual_stop_fence_power_recovery ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 166 filtered out; finished in 0.03s
+
+     Running tests/e2e.rs (target/debug/deps/e2e-f92f312dff1382b3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 23 filtered out; finished in 0.00s

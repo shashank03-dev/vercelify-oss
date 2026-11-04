@@ -80,3 +80,15 @@ Streams and sockets are rechecked every second with bounded inspection time.
 Browser workers and frames are unavailable through guest hosts. Operator DNS/TLS,
 the host, Docker and Traefik remain trusted; a guest invitation is not a sandbox
 for malicious repository code. The private network URL remains available.
+
+
+## Power and recovery scope
+
+Battery conservation is opt-in. The guard acts on platform-labelled containers and
+exact installed core/builder names; unrelated containers are excluded. Its own pause
+IDs and generation-bound power-sleep intent persist. Recovery uses declared state
+and admitted wake, respecting manual app stops and closed PRs. Root-owned host
+configuration and journals remain trusted. These software controls do not certify
+battery health, firmware AC power-on, storage survival after sudden loss or router/
+ISP recovery. Physical qualification is recorded separately; backup-copy previews
+remain disabled pending their independent data-scrubbing and isolation gates.

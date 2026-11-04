@@ -1,0 +1,24 @@
+1..5
+not ok 1 battery tiers are opt-in and require consecutive samples
+# (in test file host/tests/battery-policy.bats, line 24)
+#   `"$PG" --once; [ "$(state)" = battery_build_hold ]' failed
+# 2026-11-04T07:05:10+05:30 power-guard: state ok -> warning (running on battery (45%))
+not ok 2 tier escalation pauses only the installed builder and selects preview then app sleep
+# (in test file host/tests/battery-policy.bats, line 28)
+#   `[ "$(state)" = battery_work_paused ]' failed
+# 2026-11-04T07:05:10+05:30 power-guard: state ok -> warning (running on battery (35%))
+not ok 3 AC bounce and clock rollback restart the stable recovery interval
+# (in test file host/tests/battery-policy.bats, line 36)
+#   `laptop 1 80 Charging; "$PG" --once; [ "$(state)" = battery_recovery ]' failed
+# 2026-11-04T07:05:10+05:30 power-guard: state ok -> warning (running on battery (35%))
+# 2026-11-04T07:05:10+05:30 power-guard: state warning -> ok (AC power, CPU 50°C)
+not ok 4 missing sensors do not release remembered battery work
+# (in test file host/tests/battery-policy.bats, line 49)
+#   `[ "$(state)" = battery_recovery ]' failed
+# 2026-11-04T07:05:10+05:30 power-guard: state ok -> warning (running on battery (35%))
+# 2026-11-04T07:05:10+05:30 power-guard: state warning -> ok (no battery, CPU 50°C)
+not ok 5 charge hysteresis retains a tier until its recovery charge headroom exists
+# (in test file host/tests/battery-policy.bats, line 56)
+#   `[ "$(state)" = battery_recovery ]' failed
+# 2026-11-04T07:05:10+05:30 power-guard: state ok -> warning (running on battery (35%))
+# 2026-11-04T07:05:10+05:30 power-guard: state warning -> ok (AC power, CPU 50°C)

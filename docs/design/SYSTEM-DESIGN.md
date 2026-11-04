@@ -1381,6 +1381,39 @@ the user chose to deploy.
 | Clock wrong | Certificates checked with 5 min skew; the existing clock-sync doctor check alerts |
 | Migration to a newer schema, then agent rollback | Newer `user_version` refuses to open. Updates save a fresh consistent control snapshot. Automatic binary rollback is allowed only without a schema rewind; otherwise current candidate/control writes are retained and repair or explicit `vercelify rollback --restore-control-state` is required. The explicit flag rewinds control metadata to the update snapshot, preserving the replaced file and warning that later control writes are lost. Application volume data is never restored as a side effect. Before/after update, capable agents record equivalent runtime/local-ingress and intentional stop/sleep state; changed workload intent preserves the candidate for review. A healthy control plane with failed workloads tries only compatible previous binaries and verifies the recorded scope. Legacy readiness remains explicitly unmeasured. |
 
+### 15.1 Opt-in battery conservation (competitive roadmap M8)
+
+The existing independent shell guard sources `host/lib/battery-policy.sh`; the
+installer places both files together. `BATTERY_POLICY_ENABLED=0` preserves existing
+behavior. Opt-in stages at 50/40/30/20 percent hold builds, pause owned build work,
+sleep explicitly sleep-enabled previews, then sleep opted-in production apps. The
+existing 15-percent clean-shutdown path remains independent of agent health.
+
+Two consistent readings advance a tier. Recovery needs continuous AC for sixty
+seconds and charge five points above the entered tier. Backward clock movement or
+AC loss resets that delay. Missing sensors never authorize resume. Persisted
+root-private tier and pause ownership survive guard restart; only owned pause IDs
+are unpaused, never started. Managed container labels and exact installed core/
+builder names exclude unrelated containers from all guard actions. Boot restoration
+starts only core; app/database desired-state reconciliation owns workload recovery.
+
+Agent `power_sleep.rs` reuses explicit Sleep settings and the existing engine stop/
+admitted-wake path. `sleep.json` records battery reason and deployment identity before
+stop. A restarted agent completes pending stops. A paused build's durable Building
+status does not block conservation. Previously idle-sleeping work remains asleep;
+manual app stop, PR close and generation replacement cannot be undone by power
+recovery. Power-owned wake requires a fresh guard `ok` state; visiting while held
+shows Waiting for power. Disabling sleep while a power-recovery intent remains is refused explicitly, even
+between AC recovery and the automatic admitted wake.
+Worker placement and the local build gate recognize battery hold/recovery states.
+
+Doctor reports firmware AC recovery as unverified, with manual model-specific
+guidance, and warns that worn batteries can lose writes. Physical outage, depletion,
+lid, thermal and network recovery remain an open gate while the laptop is offline.
+The Linux VM and synthetic sysfs qualify software behavior only. Production-data
+backup-copy previews stay disabled. See `docs/POWER-RESILIENCE.md`,
+`docs/RELEASE-QUALIFICATION.md` and milestone raw evidence for the actual scope.
+
 ## 16. Resource budgets
 
 | Item | Budget | Enforced by |

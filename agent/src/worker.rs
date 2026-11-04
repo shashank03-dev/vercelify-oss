@@ -61,7 +61,7 @@ pub async fn node_status(cfg: &Config, collector: &vercelify_core::collect::Coll
         memory_available_mb: mem.available_bytes / 1_048_576,
         on_battery: power.on_battery,
         battery_percent: power.lowest_capacity_pct,
-        thermal_paused: pg.is_some_and(|p| p.state.contains("thermal")),
+        thermal_paused: pg.is_some_and(|p| vercelify_platform::gate::holds_builds(&p.state)),
         docker_ok,
         http_port: cfg.proxy_http_port,
         agent_version: crate::VERSION.into(),

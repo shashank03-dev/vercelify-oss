@@ -1,0 +1,10 @@
+1..9
+ok 1 battery tiers are opt-in and require consecutive samples
+ok 2 tier escalation pauses only the installed builder and selects preview then app sleep
+ok 3 AC bounce and clock rollback restart the stable recovery interval
+ok 4 missing sensors do not release remembered battery work
+ok 5 charge hysteresis retains a tier until its recovery charge headroom exists
+ok 6 guard restart retains tier ownership and never resumes an already-paused builder
+ok 7 owned shutdown leaves unrelated containers out of its stop and restore manifest
+ok 8 post-shutdown restore waits for stable AC then starts only core
+ok 9 turning policy off retains safe recovery without escalating new sleep tiers

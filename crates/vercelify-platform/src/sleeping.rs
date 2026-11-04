@@ -43,6 +43,20 @@ impl Engine {
     /// Put an app (`pr` None) or one of its previews to sleep.
     pub async fn sleep(&self, app_id: &str, pr: Option<u32>) -> Result<()> {
         let app = self.store.with(|c| apps::get(c, app_id))?;
+        if app.desired == Desired::Stopped {
+            return Err(Error::Conflict(
+                "manually stopped apps cannot be power-slept or woken".into(),
+            ));
+        }
+        if let Some(n) = pr {
+            if !self
+                .store
+                .with(|c| previews::get(c, app_id, n))?
+                .is_some_and(|p| p.status == "active")
+            {
+                return Err(Error::Conflict("closed previews cannot be slept or woken".into()));
+            }
+        }
         self.store.tx(|c| match pr {
             None => apps::patch(
                 c,
@@ -78,6 +92,20 @@ impl Engine {
     /// Wake an app or preview: start it, wait until it answers, route it.
     pub async fn wake(&self, app_id: &str, pr: Option<u32>) -> Result<()> {
         let app = self.store.with(|c| apps::get(c, app_id))?;
+        if app.desired == Desired::Stopped {
+            return Err(Error::Conflict(
+                "manually stopped apps cannot be power-slept or woken".into(),
+            ));
+        }
+        if let Some(n) = pr {
+            if !self
+                .store
+                .with(|c| previews::get(c, app_id, n))?
+                .is_some_and(|p| p.status == "active")
+            {
+                return Err(Error::Conflict("closed previews cannot be slept or woken".into()));
+            }
+        }
         let Some((dep, placed, sidecars)) = serving(self, app_id, pr).await? else {
             return Err(Error::Conflict(format!("{} has no deployment to wake", app.name)));
         };
@@ -136,6 +164,16 @@ impl Engine {
                 .await?;
         }
         let (base, main_id) = self.store.tx(|c| {
+            let current = apps::get(c, app_id)?;
+            let current_deployment = match pr {
+                None => current.current_deployment_id,
+                Some(n) => previews::get(c, app_id, n)?
+                    .filter(|p| p.status == "active")
+                    .and_then(|p| p.deployment_id),
+            };
+            if current.desired == Desired::Stopped || current_deployment.as_deref() != Some(dep.as_str()) {
+                return Err(Error::Conflict("app stopped or generation changed during wake".into()));
+            }
             match pr {
                 None => {
                     apps::patch(
