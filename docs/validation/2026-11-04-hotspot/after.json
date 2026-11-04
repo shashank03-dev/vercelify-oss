@@ -1,0 +1,17 @@
+{
+  "utc": "2026-11-04T18:14:40.827813+00:00",
+  "boot_unchanged": true,
+  "containers_unchanged": true,
+  "containers": "db2a0f0262b9 vfy-gw-pr1-re0wxze2\n2202ac6f511a vfy-db-gwdb\ndf341f080ef2 vfy-gw-2cv2ryfw\nc036049dc516 vercelify-proxy\n4a2a21ec2fc1 voxbento-mediamtx-1\n",
+  "ac": "1",
+  "local_http_samples": 117,
+  "local_http_failures": 0,
+  "services": {
+    "vercelify-agent": "active",
+    "vercelify-mesh": "active",
+    "vercelify-power-guard": "active"
+  },
+  "route": "default via 192.168.49.251 dev wlp1s0 proto dhcp metric 600 ",
+  "database": "/var/run/postgresql:5432 - accepting connections",
+  "wifi_journal": "2026-11-04T23:37:48+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815668.1478] dhcp4 (wlp1s0): state changed new lease, address=10.90.182.207\n2026-11-04T23:42:41+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815961.0285] device (wlp1s0): state change: activated -> deactivating (reason 'new-activation', sys-iface-state: 'managed')\n2026-11-04T23:42:41+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815961.0922] device (wlp1s0): supplicant interface state: completed -> disconnected\n2026-11-04T23:42:41+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815961.0922] device (p2p-dev-wlp1s0): supplicant management interface state: completed -> disconnected\n2026-11-04T23:42:41+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815961.0925] device (wlp1s0): state change: deactivating -> disconnected (reason 'new-activation', sys-iface-state: 'managed')\n2026-11-04T23:42:41+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815961.1077] device (wlp1s0): state change: disconnected -> prepare (reason 'none', sys-iface-state: 'managed')\n2026-11-04T23:42:46+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815966.1534] device (wlp1s0): supplicant interface state: disconnected -> scanning\n2026-11-04T23:42:46+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815966.1535] device (p2p-dev-wlp1s0): supplicant management interface state: disconnected -> scanning\n2026-11-04T23:42:51+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815971.0261] device (wlp1s0): supplicant interface state: scanning -> authenticating\n2026-11-04T23:42:51+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815971.0292] device (wlp1s0): supplicant interface state: authenticating -> associating\n2026-11-04T23:42:51+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815971.0456] device (wlp1s0): supplicant interface state: associating -> associated\n2026-11-04T23:42:51+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815971.0681] device (wlp1s0): supplicant interface state: associated -> completed\n2026-11-04T23:42:51+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815971.0681] device (p2p-dev-wlp1s0): supplicant management interface state: associated -> completed\n2026-11-04T23:42:53+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815973.1039] dhcp4 (wlp1s0): state changed new lease, address=192.168.49.207\n2026-11-04T23:42:53+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815973.1277] device (wlp1s0): state change: secondaries -> activated (reason 'none', sys-iface-state: 'managed')\n2026-11-04T23:42:53+0530 user-Inspiron-5567 NetworkManager[767]: <info>  [1793815973.1293] device (wlp1s0): Activation: successful, device activated."
+}

@@ -115,3 +115,10 @@ AC interruption/bounce, healthy/missing/aged-battery outage matrix, depletion,
 firmware automatic restart, or thermal policy thresholds/critical shutdown.
 The badly worn battery and absent physical actions cannot be replaced by VM or
 synthetic-sensor evidence. Do not claim the whole project completely qualified.
+
+## Later attended hotspot test
+
+The operator subsequently completed a separately monitored hotspot off/on action.
+Recovery and changed DHCP address were observed; see ../2026-11-04-hotspot/VALIDATION.md.
+This supersedes the pending hotspot gate above for that tested configuration,
+without claiming separate router/ISP or battery/power qualification.

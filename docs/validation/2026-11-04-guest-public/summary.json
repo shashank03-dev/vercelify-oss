@@ -84,5 +84,6 @@
     "owned_fixture_secret_state_removed": true,
     "owned_daemon_stopped": true
   },
-  "external_probe_paused_http": 503
+  "external_probe_paused_http": 503,
+  "later_hotspot_qualification": "../2026-11-04-hotspot/VALIDATION.md"
 }

@@ -1,0 +1,63 @@
+{
+  "operator_confirmed_hotspot_off_then_on": true,
+  "external_probe_episodes": [
+    {
+      "first_failure": "2026-11-04T18:11:10.622704+00:00",
+      "first_recovery": "2026-11-04T18:11:30.731470+00:00",
+      "observed_seconds": 20.11
+    },
+    {
+      "first_failure": "2026-11-04T18:11:41.149029+00:00",
+      "first_recovery": "2026-11-04T18:11:46.179122+00:00",
+      "observed_seconds": 5.03
+    },
+    {
+      "first_failure": "2026-11-04T18:12:41.005784+00:00",
+      "first_recovery": "2026-11-04T18:13:21.241069+00:00",
+      "observed_seconds": 40.24
+    }
+  ],
+  "transitions": [
+    {
+      "utc": "2026-11-04T18:10:47.301118+00:00",
+      "production": "200",
+      "preview": "200"
+    },
+    {
+      "utc": "2026-11-04T18:11:10.622704+00:00",
+      "production": "000",
+      "preview": "000"
+    },
+    {
+      "utc": "2026-11-04T18:11:30.731470+00:00",
+      "production": "200",
+      "preview": "200"
+    },
+    {
+      "utc": "2026-11-04T18:11:41.149029+00:00",
+      "production": "000",
+      "preview": "000"
+    },
+    {
+      "utc": "2026-11-04T18:11:46.179122+00:00",
+      "production": "200",
+      "preview": "200"
+    },
+    {
+      "utc": "2026-11-04T18:12:41.005784+00:00",
+      "production": "000",
+      "preview": "000"
+    },
+    {
+      "utc": "2026-11-04T18:13:21.241069+00:00",
+      "production": "200",
+      "preview": "200"
+    }
+  ],
+  "local_samples": 117,
+  "local_failures": 0,
+  "boot_unchanged": true,
+  "containers_unchanged": true,
+  "recovery": "passed for the observed hotspot off/on and DHCP address change",
+  "limits": "No exact operator action timestamps; earlier transient drops retained; not separate router reboot/ISP failure qualification"
+}
