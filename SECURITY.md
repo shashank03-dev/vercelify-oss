@@ -64,3 +64,19 @@ through Docker/BuildKit; private ingress is not a build sandbox. Code that recei
 an approved secret can deliberately reveal or misuse it despite log redaction.
 Fork builds remain disabled. Runtime isolation does not protect against Docker or
 kernel exploits, a compromised host administrator, or a compromised ingress proxy.
+
+## Guest invitations
+
+An Owner may expose a selected private preview on a separate public HTTPS guest
+host. Its invitation is a bearer secret: anyone receiving the complete link can
+redeem it. The gateway removes the fragment before explicit confirmation, then
+uses a host-only Secure/HttpOnly cookie. Metadata stores only credential hashes;
+secrets are shown once and are never automatically posted to a PR.
+
+All assets, advanced routes, wake requests and upgrades require a live invitation
+session. Revocation, expiry, PR close, generation replacement, privacy changes and
+manual app stop end access; previously downloaded bytes remain with the recipient.
+Streams and sockets are rechecked every second with bounded inspection time.
+Browser workers and frames are unavailable through guest hosts. Operator DNS/TLS,
+the host, Docker and Traefik remain trusted; a guest invitation is not a sandbox
+for malicious repository code. The private network URL remains available.

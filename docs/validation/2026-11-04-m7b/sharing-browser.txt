@@ -1,0 +1,16 @@
+
+> vercelify-cockpit@1.0.0 e2e:demo
+> playwright test -c playwright.demo.config.ts guest-links.spec.ts --output=/tmp/vfy-m7b-sharing-playwright
+
+[WebServer] (node:46099) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+[WebServer] (node:46122) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+[WebServer] (Use `node --trace-warnings ...` to show where the warning was created)
+
+Running 1 test using 1 worker
+
+(node:46134) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✓  1 [chromium] › e2e-demo/guest-links.spec.ts:2:1 › sharing distinguishes network-only links from owner guest invitations (5.8s)
+
+  1 passed (7.2s)

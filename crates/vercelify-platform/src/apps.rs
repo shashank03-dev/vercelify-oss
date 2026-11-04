@@ -24,6 +24,8 @@ pub struct DomainSettings {
     /// of the saved domain settings; the agent records it ([`set_mesh_ingress`]).
     #[serde(skip)]
     pub mesh: Option<MeshIngress>,
+    #[serde(skip)]
+    pub guest_hosts: std::collections::BTreeMap<String, Vec<String>>,
 }
 
 /// This server's place on the mesh (design §9.1): its node name, for
@@ -44,6 +46,7 @@ pub fn domain_settings(c: &Connection) -> Result<DomainSettings> {
         .ok()
         .flatten()
         .filter(|m| !m.node.is_empty() && !m.cidrs.is_empty());
+    s.guest_hosts = crate::guest_shares::routing_hosts(c)?;
     Ok(s)
 }
 
@@ -474,9 +477,15 @@ pub fn patch(c: &Connection, id: &str, p: &AppPatch) -> Result<App> {
                 "built-in PostgreSQL previews require an image or Git app".into(),
             ));
         }
+        if pr.access != app.previews.access || pr.enabled != app.previews.enabled {
+            crate::guest_shares::revoke_app(c, id)?;
+        }
         set("previews", json(pr))?;
     }
     if let Some(d) = p.desired {
+        if d == vercelify_core::platform::Desired::Stopped {
+            crate::guest_shares::revoke_app(c, id)?;
+        }
         set("desired", d.as_str().to_string())?;
     }
     if let Some(n) = &p.node_id {
@@ -528,6 +537,7 @@ fn insert_domain(
     redirect_to: Option<&str>,
     settings: &DomainSettings,
 ) -> Result<AppDomain> {
+    crate::guest_shares::require_app_domain(c, host)?;
     let id = new_id("dom");
     let status = if settings.edge_tls {
         "edge"
@@ -737,6 +747,7 @@ pub(crate) mod tests {
                     https: true,
                     edge_tls: false,
                     mesh: None,
+                    guest_hosts: Default::default(),
                 },
             )
         })
@@ -1090,6 +1101,7 @@ pub(crate) mod tests {
                     https: true,
                     edge_tls: true,
                     mesh: None,
+                    guest_hosts: Default::default(),
                 },
             )
         })

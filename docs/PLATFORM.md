@@ -395,3 +395,24 @@ server's state on a worker, refreshed every 5 minutes. If the main server dies, 
 - The engine cleans old images and build caches by itself, keeping what rollbacks need.
 - Turn on alerts (**Settings → Alerts** in the app) to hear about failed deployments,
   backups and battery or thermal events.
+
+### Expiring guest invitations for private previews
+
+In an active private preview, choose **Share**. The existing private link requires
+the Vercelify network. An Owner can configure a dedicated public guest domain and
+create a separate expiring invitation for someone outside that network. Wildcard
+DNS and HTTPS must route to the main server; Vercelify does not provision a relay.
+A configured domain alone does not verify Internet reachability.
+
+Copy the secret invitation when it is shown: it cannot be recovered from metadata.
+The recipient explicitly opens it in a browser. The default permits one session,
+lasting at most 15 minutes; reusable invitations allow eight live sessions. Revoking
+a link ends active access, including streams/sockets. Closing the PR, replacing its
+deployment, changing preview privacy/enablement or manually stopping the app also
+revokes invitations permanently. Previously downloaded content cannot be recalled.
+Keep secret links out of public PR comments. App Basic Auth still applies.
+
+This release supports main-server private previews, 16 MiB uploads and 64 MiB
+transfers. Browser workers and embedded frames are unavailable through guest links;
+use the private link for applications that need them. Domain changes revoke all
+invitations, and previous guest namespaces remain reserved against app claims.

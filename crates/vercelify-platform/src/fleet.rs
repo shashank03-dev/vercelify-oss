@@ -129,8 +129,9 @@ pub fn routes(base: &RouteBase, placed: &[Placed], main_id: &str) -> BTreeMap<St
     let plain: Vec<RouteHost> = base
         .hosts
         .iter()
-        .filter(|h| h.redirect_to.is_none())
+        .filter(|h| h.redirect_to.is_none() && !h.guest_bridge)
         .map(|h| RouteHost {
+            guest_bridge: false,
             host: h.host.clone(),
             https: false,
             redirect_to: None,
@@ -194,12 +195,14 @@ mod tests {
             key: "blog".into(),
             hosts: vec![
                 RouteHost {
+                    guest_bridge: false,
                     host: "blog.example.com".into(),
                     https: true,
                     redirect_to: None,
                     allow_from: vec![],
                 },
                 RouteHost {
+                    guest_bridge: false,
                     host: "www.blog.example.com".into(),
                     https: true,
                     redirect_to: Some("blog.example.com".into()),

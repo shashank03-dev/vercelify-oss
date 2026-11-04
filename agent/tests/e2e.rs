@@ -2663,3 +2663,205 @@ fn restore_drills_keep_assertions_owner_only_and_expose_scoped_metadata() {
     );
     assert_eq!(status, 404);
 }
+
+#[test]
+fn guest_invitation_http_is_owner_issued_scanner_safe_and_cookie_scoped() {
+    use vercelify_core::platform::{DeploymentStatus, DeploymentTrigger};
+    use vercelify_platform::{apps, deployments, guest_shares as shares, nodes, previews, Store};
+    let wake_port = free_port();
+    let proxy_port = free_port();
+    let mut a = start_with(&[
+        ("VERCELIFY_ENGINE", "platform".into()),
+        ("VERCELIFY_WAKE_LISTEN", format!("127.0.0.1:{wake_port}")),
+        ("VERCELIFY_PROXY_HTTP_PORT", proxy_port.to_string()),
+    ]);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let (_, cfg) = get(&a, "/v1/platform/settings/guest-links");
+        if cfg["gateway_available"] == true {
+            break;
+        }
+        assert!(Instant::now() < deadline);
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let (status, _) = send(
+        &a,
+        "PUT",
+        "/v1/platform/settings/guest-links",
+        TOKEN,
+        Some(json!({"domain":"guests.example.test"})),
+    );
+    assert_eq!(status, 200);
+    for role in ["viewer", "deployer"] {
+        let (_, created) = post(&a, "/v1/tokens", json!({"name":role,"role":role}));
+        let token = created["secret"].as_str().unwrap();
+        for (method, path, body) in [
+            (
+                "PUT",
+                "/v1/platform/settings/guest-links",
+                Some(json!({"domain":"bad.example.test"})),
+            ),
+            ("POST", "/v1/platform/settings/guest-links/rotate", Some(json!({}))),
+            (
+                "POST",
+                "/v1/platform/apps/anything/previews/7/guest-links",
+                Some(json!({})),
+            ),
+            ("DELETE", "/v1/platform/guest-links/shr_missing", None),
+        ] {
+            let (status, _) = send(&a, method, path, token, body);
+            assert_eq!(status, 403);
+        }
+    }
+    let store = Store::open(&a.root.join("state/platform.db")).unwrap();
+    let app = store
+        .tx(|c| {
+            apps::create(
+                c,
+                &serde_json::from_value(json!({"name":"guest-http","kind":"image","source":{"image":"example:v1"},"previews":{"enabled":true,"access":"private","max":3}}))
+                    .unwrap(),
+            )
+        })
+        .unwrap();
+    store
+        .tx(|c| {
+            let main = nodes::main(c)?;
+            previews::upsert(c, &app.id, 7, "abc1234", "test")?;
+            let d = deployments::create(
+                c,
+                &deployments::NewDeployment {
+                    app_id: &app.id,
+                    pr_number: Some(7),
+                    branch: "main",
+                    commit_sha: "abc1234",
+                    commit_message: "",
+                    trigger: DeploymentTrigger::Manual,
+                    rollback_of: None,
+                    image: "example:v1",
+                    node_id: Some(&main.id),
+                },
+            )?;
+            deployments::transition(c, &d.id, DeploymentStatus::Deploying, None)?;
+            deployments::transition(c, &d.id, DeploymentStatus::Healthy, None)?;
+            previews::set_serving(c, &app.id, 7, &d.id, "http://pr-7-guest-http.main.vfy")
+        })
+        .unwrap();
+    let issued = store
+        .tx(|c| shares::create(c, &app.id, 7, "owner", 3600, true, chrono::Utc::now().timestamp()))
+        .unwrap();
+    fn wake(
+        port: u16,
+        method: &str,
+        path: &str,
+        host: &str,
+        headers: &[(&str, &str)],
+        body: Option<Value>,
+    ) -> (u16, String, String) {
+        let mut socket = TcpStream::connect(("127.0.0.1", port)).unwrap();
+        socket.set_read_timeout(Some(Duration::from_secs(5))).unwrap();
+        let body = body.map(|v| v.to_string()).unwrap_or_default();
+        let extra = headers.iter().map(|(k, v)| format!("{k}: {v}\r\n")).collect::<String>();
+        socket.write_all(format!("{method} {path} HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\nContent-Length: {}\r\nContent-Type: application/json\r\n{extra}\r\n{body}",body.len()).as_bytes()).unwrap();
+        let mut raw = String::new();
+        socket.read_to_string(&mut raw).unwrap();
+        let (headers, body) = raw.split_once("\r\n\r\n").unwrap();
+        let status = headers.split_whitespace().nth(1).unwrap().parse().unwrap();
+        let body = if headers.to_ascii_lowercase().contains("transfer-encoding: chunked") {
+            dechunk(body)
+        } else {
+            body.into()
+        };
+        (status, headers.into(), body)
+    }
+    let host = &issued.grant.host;
+    let (status, _, page) = wake(wake_port, "GET", "/__vfy/invite", host, &[], None);
+    assert_eq!(status, 200);
+    assert!(page.contains("history.replaceState"));
+    assert_eq!(store.with(|c| shares::get(c, &issued.grant.id)).unwrap().redeemed, 0);
+    let origin = format!("https://{host}");
+    let payload = json!({"token":issued.secret.as_str()});
+    assert_eq!(
+        wake(wake_port, "POST", "/__vfy/redeem", host, &[], Some(payload.clone())).0,
+        403
+    );
+    assert_eq!(
+        wake(
+            wake_port,
+            "POST",
+            "/__vfy/redeem",
+            host,
+            &[("Origin", "https://wrong.example.test")],
+            Some(payload.clone())
+        )
+        .0,
+        403
+    );
+    let (status, headers, _) = wake(
+        wake_port,
+        "POST",
+        "/__vfy/redeem",
+        host,
+        &[("Origin", &origin)],
+        Some(payload.clone()),
+    );
+    assert_eq!(status, 204);
+    let set_cookie = headers
+        .lines()
+        .find_map(|line| line.strip_prefix("set-cookie: "))
+        .unwrap();
+    assert!(
+        set_cookie.contains("Secure")
+            && set_cookie.contains("HttpOnly")
+            && set_cookie.contains("SameSite=Lax")
+            && !set_cookie.contains("Domain=")
+    );
+    let cookie = set_cookie.split(';').next().unwrap().to_string();
+    assert_eq!(
+        wake(
+            wake_port,
+            "POST",
+            "/__vfy/redeem",
+            host,
+            &[("Origin", &origin)],
+            Some(payload)
+        )
+        .0,
+        401
+    );
+    let (_, _, page) = wake(wake_port, "GET", "/__vfy/invite", host, &[("Cookie", &cookie)], None);
+    assert!(page.contains("history.replaceState"));
+    let (_, rows) = get(&a, &format!("/v1/platform/apps/{}/previews/7/guest-links", app.id));
+    let serialized = rows.to_string();
+    assert!(!serialized.contains(issued.secret.as_str()));
+    assert!(!serialized.contains(cookie.split_once('=').unwrap().1));
+    a.restart_with(&[]);
+    assert!(store
+        .tx(|c| shares::authorize(
+            c,
+            host,
+            cookie.split_once('=').unwrap().1,
+            chrono::Utc::now().timestamp()
+        ))
+        .unwrap()
+        .is_some());
+    let (status, _) = send(
+        &a,
+        "DELETE",
+        &format!("/v1/platform/guest-links/{}", issued.grant.id),
+        TOKEN,
+        None,
+    );
+    assert_eq!(status, 200);
+    let (status, headers, _) = wake(
+        wake_port,
+        "GET",
+        "/assets/private.js",
+        host,
+        &[("Cookie", &cookie)],
+        None,
+    );
+    assert_eq!(status, 401);
+    assert!(headers
+        .to_ascii_lowercase()
+        .contains("cache-control: private, no-store"));
+}

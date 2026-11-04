@@ -646,6 +646,7 @@ mod tests {
         Route {
             key: name.into(),
             hosts: vec![RouteHost {
+                guest_bridge: false,
                 host: format!("{name}.example.com"),
                 https: true,
                 redirect_to: None,

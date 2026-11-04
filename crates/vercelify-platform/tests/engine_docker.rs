@@ -186,6 +186,7 @@ async fn deploy_redeploy_rollback_recover() {
                     https: false,
                     edge_tls: false,
                     mesh: None,
+                    guest_hosts: Default::default(),
                 },
             )
         })

@@ -423,7 +423,7 @@ function agentRoute(req: HttpRequest, server?: unknown): unknown {
       capabilities: [
         "doctor", "update", "rollback", "hardware", "alerts", "metrics", "uptime", "tokens", "audit", "backup", "backup-recovery-kit", "previews",
         "auto-rollback", "events", "jobs", "sleep", "power-guard", "domain", "projects", "roles", "sunshine-pair",
-        ...(h.hostname === ENGINE_DOWN_HOST || isWorkerHost(h) ? [] : ["platform", "preview-databases", "deployment-guards", "postgres-restore-drills"]),
+        ...(h.hostname === ENGINE_DOWN_HOST || isWorkerHost(h) ? [] : ["platform", "preview-databases", "deployment-guards", "postgres-restore-drills", "preview-guest-links"]),
       ],
     };
   }

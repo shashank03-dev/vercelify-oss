@@ -32,6 +32,7 @@ pub const MIGRATIONS: &[(u32, &str)] = &[
     (10, include_str!("../migrations/0010_preview_db.sql")),
     (11, include_str!("../migrations/0011_deploy_guard.sql")),
     (12, include_str!("../migrations/0012_restore_drills.sql")),
+    (13, include_str!("../migrations/0013_guest_shares.sql")),
 ];
 
 pub fn latest_version() -> u32 {

@@ -1,0 +1,7 @@
+1..6
+ok 1 a download cut short runs none of the steps
+ok 2 the release is installed and the download is not left in /tmp
+ok 3 a download that drops halfway resumes where it stopped
+ok 4 a damaged download installs nothing and says to run it again
+ok 5 an edge install downloads the exact commit main points at, and says which
+ok 6 an edge install without the commit API still installs main

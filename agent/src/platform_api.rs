@@ -39,6 +39,7 @@ impl From<vercelify_platform::Error> for AppError {
 pub fn router() -> Router<AppState> {
     Router::new()
         .merge(crate::restore_drills::router())
+        .merge(crate::guest_api::router())
         .route("/platform/capacity", get(memory_report))
         .route("/platform/projects", get(project_list).post(project_create))
         .route(
@@ -1388,8 +1389,12 @@ async fn domain_set(State(s): State<AppState>, Json(req): Json<PlatformDomain>) 
         https: req.https && !req.edge_tls,
         edge_tls: req.edge_tls,
         mesh: None,
+        guest_hosts: Default::default(),
     };
     tx(&s, move |c, _| {
+        if let Some(wildcard) = &settings.wildcard {
+            vercelify_platform::guest_shares::require_app_wildcard(c, wildcard)?;
+        }
         vercelify_platform::store::put_setting(c, apps::DOMAIN_SETTING, &settings)
     })
     .await?;

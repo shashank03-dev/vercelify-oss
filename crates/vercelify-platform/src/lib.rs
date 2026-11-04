@@ -26,6 +26,8 @@ pub mod gate;
 pub mod git;
 pub mod git_sources;
 pub mod git_watch;
+pub mod guest_routes;
+pub mod guest_shares;
 pub mod health;
 pub mod hooks;
 pub mod ids;

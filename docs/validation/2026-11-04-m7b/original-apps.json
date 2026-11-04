@@ -1,0 +1,26 @@
+[
+  {
+    "app": "blog",
+    "status": 200
+  },
+  {
+    "app": "w1",
+    "status": 200
+  },
+  {
+    "app": "w2",
+    "status": 200
+  },
+  {
+    "app": "w3",
+    "status": 200
+  },
+  {
+    "app": "w4",
+    "status": 200
+  },
+  {
+    "app": "w5",
+    "status": 200
+  }
+]

@@ -1,0 +1,24 @@
+import { expect, test } from "@playwright/test";
+test("sharing distinguishes network-only links from owner guest invitations", async ({ page }) => {
+  await page.goto("/");
+  const server=page.getByTestId("found-optiplex-7050");
+  await server.getByRole("button",{name:"Connect"}).click();
+  await server.getByTestId("short-code").fill("K7QF-M2XD");
+  await server.getByTestId("short-submit").click();
+  await page.getByTestId("papp-shop").getByRole("button",{name:/shop/}).first().click();
+  await page.getByTestId("tab-previews").click();
+  await page.getByRole("button",{name:"Share",exact:true}).first().click();
+  const dialog=page.getByTestId("guest-links-dialog");
+  await expect(dialog).toContainText("No public guest domain is configured");
+  await expect(dialog.getByTestId("create-guest-invitation")).toBeDisabled();
+  await dialog.getByText("Public guest domain settings (owners)",{exact:true}).click();
+  await dialog.getByLabel("Guest domain",{exact:true}).fill("guests.example.test");
+  await dialog.getByLabel("Public HTTPS port").fill("8443");
+  await dialog.getByRole("button",{name:"Use guest domain",exact:true}).click();
+  await expect(dialog.getByTestId("create-guest-invitation")).toBeEnabled();
+  await dialog.getByTestId("create-guest-invitation").click();
+  await expect(dialog.getByLabel("Secret guest invitation")).toHaveValue(/https:\/\/.+\.guests\.example\.test:8443\/__vfy\/invite#vfy=.+/);
+  await dialog.getByRole("button",{name:"Revoke",exact:true}).click();
+  await expect(dialog.getByLabel("Secret guest invitation")).toHaveCount(0);
+  await expect(dialog.getByTestId("guest-invitation-row")).toContainText("Revoked");
+});

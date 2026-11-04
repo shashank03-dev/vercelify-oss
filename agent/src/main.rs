@@ -23,6 +23,8 @@ mod exec;
 mod github;
 mod github_app;
 mod gitpoll;
+mod guest;
+mod guest_api;
 mod http;
 mod json;
 mod llm;
@@ -286,6 +288,9 @@ async fn serve(cfg: Config) {
         let private = mesh::private_ipv4(&state.config);
         p.engine.set_private_ip(private);
         platform_api::record_mesh_ingress(p, &state.config);
+        if let Some(gateway) = &state.guest {
+            tokio::spawn(guest::run(gateway.clone()));
+        }
         // Tests run with the background loops off (watch interval 0).
         let every = if state.config.watch_interval_secs == 0 { 0 } else { 30 };
         p.spawn(Duration::from_secs(every));
@@ -345,13 +350,20 @@ async fn serve(cfg: Config) {
     if !wake.is_empty() && state.config.role() != "worker" {
         match wake.parse::<SocketAddr>() {
             Ok(addr) => {
-                let router = sleep::wake_router(state.sleep.clone());
+                let router = guest::wake_router(state.clone());
+                let guest_gateway = state.guest.clone();
                 tasks.spawn(async move {
                     match tokio::net::TcpListener::bind(addr).await {
                         Ok(l) => {
+                            if let Some(gateway) = &guest_gateway {
+                                gateway.mark_ready(true);
+                            }
                             tracing::info!("wake listener on http://{addr}");
                             if let Err(e) = axum::serve(l, router).with_graceful_shutdown(shutdown()).await {
                                 tracing::error!("wake listener failed: {e}");
+                            }
+                            if let Some(gateway) = &guest_gateway {
+                                gateway.mark_ready(false);
                             }
                         }
                         Err(e) => tracing::warn!("wake listener: bind {addr} failed: {e}; sleeping apps won't wake"),

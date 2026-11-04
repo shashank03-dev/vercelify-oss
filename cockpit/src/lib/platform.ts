@@ -109,6 +109,16 @@ export interface RestoreSchedule {
   next_due: string | null; overdue: boolean;
 }
 
+export interface GuestGrant {
+  id: string; app_id: string; pr_number: number; deployment_id: string; host: string;
+  created_by: string; created_at: number; expires_at: number; single_use: boolean; redeemed: number; revoked_at: number | null;
+}
+export interface GuestSettings {
+  config: { domain: string | null; public_port: number }; gateway_available: boolean;
+  session_seconds: number; dns_tls_verified: boolean;
+}
+export interface GuestInvitation { grant: GuestGrant; url: string; secret_shown_once: boolean }
+
 export function platformOn(server?: string) {
   const req = <T>(method: HttpRequest["method"], path: string, body?: unknown, timeout?: number) =>
     call<T>("agent_request", { request: { method, path: `/v1/platform${path}`, body, timeout }, server });
@@ -172,6 +182,12 @@ export function platformOn(server?: string) {
 
     previews: (app: string) => req<Preview[]>("GET", `/apps/${q(app)}/previews`),
     deploymentGuards: (app: string) => req<DeploymentGuard[]>("GET", `/apps/${q(app)}/deployment-guards`),
+    guestSettings: () => req<GuestSettings>("GET", "/settings/guest-links"),
+    configureGuestDomain: (domain: string | null, public_port = 443) => req<unknown>("PUT", "/settings/guest-links", { domain, public_port }),
+    rotateGuestSecurity: () => req<unknown>("POST", "/settings/guest-links/rotate", {}),
+    guestInvitations: (app: string, pr: number) => req<GuestGrant[]>("GET", `/apps/${q(app)}/previews/${pr}/guest-links`),
+    createGuestInvitation: (app: string, pr: number, expires_in = 3600, single_use = true) => req<GuestInvitation>("POST", `/apps/${q(app)}/previews/${pr}/guest-links`, { expires_in, single_use }),
+    revokeGuestInvitation: (id: string) => req<unknown>("DELETE", `/guest-links/${q(id)}`),
     previewDatabases: (app: string) => req<PreviewDatabaseStatus[]>("GET", `/apps/${q(app)}/preview-databases`),
     removePreview: (app: string, pr: number) => req<unknown>("DELETE", `/apps/${q(app)}/previews/${pr}`),
 

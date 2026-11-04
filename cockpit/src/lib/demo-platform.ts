@@ -1,4 +1,4 @@
-import type { RestoreDrill, RestoreSchedule } from "./platform";
+import type { GuestGrant, GuestSettings, RestoreDrill, RestoreSchedule } from "./platform";
 // Demo backend of the platform engine (`/v1/platform/…`) for the demo server
 // `optiplex-7050`: an in-memory stand-in for the agent's API, so the platform
 // screens can be designed and tested without a host. Deployments move through
@@ -228,6 +228,11 @@ env.set(apps[0]!.id, [
 ]);
 secretValues.set(env.get(apps[0]!.id)!.find((v) => v.key === "STRIPE_SECRET_KEY")!.id, "sk_live_demo_51NzQ…");
 
+const guestSettings: GuestSettings = { config: { domain: null, public_port: 443 }, gateway_available: true, session_seconds: 900, dns_tls_verified: false };
+const guestGrants = new Map<string, GuestGrant>();
+function revokeGuestGrants(app?: string, pr?: number) {
+  for (const grant of guestGrants.values()) if ((!app || grant.app_id === app) && (pr === undefined || grant.pr_number === pr)) grant.revoked_at = Math.floor(Date.now() / 1000);
+}
 const previews = new Map<string, Preview[]>([
   [
     apps[0]!.id,
@@ -619,6 +624,15 @@ export function platformRoute(req: HttpRequest): unknown {
     }
     return clone(nodes.map((n) => ({ ...n, last_seen_at: isoNow(), instances: instanceCount(n.id) })));
   }
+  if (seg[0] === "settings" && seg[1] === "guest-links") {
+    if (seg[2] === "rotate") { revokeGuestGrants(); return { revoked_all: true, clock_reset: true }; }
+    if (m === "PUT") { revokeGuestGrants(); guestSettings.config = { domain: body.domain ? String(body.domain) : null, public_port: Number(body.public_port ?? 443) }; }
+    return clone(guestSettings);
+  }
+  if (seg[0] === "guest-links" && m === "DELETE") {
+    const grant = guestGrants.get(seg[1] ?? ""); if (!grant) throw new Error("No guest invitation");
+    grant.revoked_at = Math.floor(Date.now() / 1000); return { revoked: true };
+  }
   if (seg[0] === "settings" && seg[1] === "standby") {
     if (m === "PUT") {
       const n = body.node ? nodes.find((x) => x.id === body.node || x.name === body.node) : null;
@@ -793,6 +807,23 @@ export function platformRoute(req: HttpRequest): unknown {
         return clone(volumes.get(app.id) ?? []);
       }
       case "previews": {
+        if (seg[4] === "guest-links") {
+          const pr = Number(seg[3]);
+          if (m === "POST") {
+            if (!guestSettings.config.domain) throw new Error("Configure a dedicated public HTTPS guest domain first");
+            if (app.previews.access !== "private") throw new Error("Share only private previews");
+            const preview = (previews.get(app.id) ?? []).find(p => p.pr_number === pr && !p.closed_at);
+            if (!preview) throw new Error("No active preview");
+            const now = Math.floor(Date.now() / 1000), key = id("shr");
+            const grant: GuestGrant = { id: key, app_id: app.id, pr_number: pr, deployment_id: preview.deployment_id ?? "dpl_demo_preview", host: `${key.replaceAll("_", "-")}.${guestSettings.config.domain}`, created_by: "demo-owner", created_at: now, expires_at: now + Number(body.expires_in ?? 3600), single_use: body.single_use !== false, redeemed: 0, revoked_at: null };
+            guestGrants.set(key, grant);
+            // Demo only: synthetic URLs grant no real access. Metadata excludes this value.
+            const secret = id("demo-invitation");
+            return { grant: clone(grant), url: `https://${grant.host}${guestSettings.config.public_port === 443 ? "" : ":" + guestSettings.config.public_port}/__vfy/invite#vfy=${secret}`, secret_shown_once: true };
+          }
+          return clone([...guestGrants.values()].filter(g => g.app_id === app.id && g.pr_number === pr));
+        }
+        if (m === "DELETE") { revokeGuestGrants(app.id, Number(seg[3])); }
         if (m === "DELETE") previews.set(app.id, (previews.get(app.id) ?? []).filter((p) => p.pr_number !== Number(seg[3])));
         return clone(previews.get(app.id) ?? []);
       }

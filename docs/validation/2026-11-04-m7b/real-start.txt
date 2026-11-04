@@ -1,0 +1,1 @@
+PASS: real agent, production sentinel and private preview ready; invitation retained only in mode-0600 facts.json

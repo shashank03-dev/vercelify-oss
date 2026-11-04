@@ -34,6 +34,7 @@ pub struct AppState {
     pub events: Arc<crate::events::Events>,
     pub jobs: Arc<crate::events::Jobs>,
     pub sleep: Arc<crate::sleep::Sleep>,
+    pub guest: Option<Arc<crate::guest::Gateway>>,
     pub projects: Arc<crate::projects::Projects>,
     /// Vercelify's own engine (main server, `engine = "platform"`).
     pub platform: Option<Arc<crate::platform::Platform>>,
@@ -107,16 +108,28 @@ impl AppState {
         };
         let llm = Arc::new(Llm::new(config.clone()));
         llm.set_jobs(jobs.clone());
+        let sleep = Arc::new(crate::sleep::Sleep::load(config.clone(), events.clone(), jobs.clone()));
+        if let Some(p) = &platform {
+            sleep.set_engine(p.engine.clone());
+        }
+        let guest = if config.wake_listen.parse::<std::net::SocketAddr>().is_ok() && config.role() != "worker" {
+            platform.as_ref().and_then(
+                |p| match crate::guest::Gateway::new(p.clone(), config.clone(), sleep.clone()) {
+                    Ok(gateway) => Some(gateway),
+                    Err(error) => {
+                        tracing::warn!("guest gateway unavailable: {error}");
+                        None
+                    }
+                },
+            )
+        } else {
+            None
+        };
         Self {
             tokens: Arc::new(crate::tokens::Tokens::new(token.clone())),
             llm,
-            sleep: {
-                let s = Arc::new(crate::sleep::Sleep::load(config.clone(), events.clone(), jobs.clone()));
-                if let Some(p) = &platform {
-                    s.set_engine(p.engine.clone());
-                }
-                s
-            },
+            sleep,
+            guest,
             projects,
             platform,
             platform_error,
@@ -257,6 +270,9 @@ pub fn capabilities(s: &AppState) -> Vec<String> {
         caps.push("deployment-guards".into());
         caps.push("serving-checks".into());
         caps.push("postgres-restore-drills".into());
+        if s.guest.is_some() {
+            caps.push("preview-guest-links".into());
+        }
     }
     caps
 }

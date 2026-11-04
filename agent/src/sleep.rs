@@ -304,7 +304,7 @@ impl Sleep {
                     vercelify_platform::engine::hosts_for(&domain, &app, pr)
                         .0
                         .into_iter()
-                        .filter(|h| h.redirect_to.is_none())
+                        .filter(|h| h.redirect_to.is_none() && !h.guest_bridge)
                         .map(|h| (h.https, h.host, h.allow_from))
                         .collect()
                 };
@@ -752,34 +752,6 @@ impl Sleep {
         };
         (503, waking_page(&host, starting))
     }
-}
-
-/// The wake listener: Traefik forwards requests for sleeping apps here.
-pub fn wake_router(sleep: Arc<Sleep>) -> axum::Router {
-    use axum::http::{header, HeaderMap, StatusCode};
-    use axum::response::IntoResponse;
-    axum::Router::new().fallback(move |headers: HeaderMap| {
-        let sleep = sleep.clone();
-        async move {
-            let host = headers
-                .get("x-forwarded-host")
-                .or_else(|| headers.get(header::HOST))
-                .and_then(|h| h.to_str().ok())
-                .unwrap_or("")
-                .to_string();
-            let (code, page) = sleep.on_request(&host).await;
-            (
-                StatusCode::from_u16(code).unwrap_or(StatusCode::SERVICE_UNAVAILABLE),
-                [
-                    (header::CONTENT_TYPE, "text/html; charset=utf-8"),
-                    (header::CACHE_CONTROL, "no-store"),
-                    (header::RETRY_AFTER, "2"),
-                ],
-                page,
-            )
-                .into_response()
-        }
-    })
 }
 
 #[cfg(test)]

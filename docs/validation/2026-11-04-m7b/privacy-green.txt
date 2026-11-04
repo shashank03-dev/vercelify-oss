@@ -1,0 +1,20 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.47s
+     Running tests/guest_shares.rs (target/debug/deps/guest_shares-c66791619603be3a)
+
+running 8 tests
+test reserved_guest_domains_cannot_be_claimed_by_an_application ... ok
+test denied_authentication_commits_expiry_and_cannot_resurrect_after_clock_correction ... ok
+test restart_keeps_valid_sessions_but_key_rotation_and_clock_rollback_fail_closed ... ok
+test opaque_invitation_and_cookie_are_scoped_hashed_and_bounded ... ok
+test expiry_revocation_close_and_generation_changes_never_resurrect_access ... ok
+test reusable_invites_have_a_bounded_live_session_count ... ok
+test a_single_use_invitation_is_consumed_by_only_one_concurrent_transaction ... ok
+test changing_privacy_disabling_or_stopping_permanently_revokes_guest_access ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.18s

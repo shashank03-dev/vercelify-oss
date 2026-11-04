@@ -88,6 +88,9 @@ pub fn upsert(c: &Connection, app_id: &str, pr: u32, head_sha: &str, title: &str
 
 /// The deployment now serving a preview, and its URL.
 pub fn set_serving(c: &Connection, app_id: &str, pr: u32, deployment_id: &str, url: &str) -> Result<()> {
+    if get(c, app_id, pr)?.is_some_and(|p| p.deployment_id.as_deref().is_some_and(|old| old != deployment_id)) {
+        crate::guest_shares::revoke_preview(c, app_id, pr)?;
+    }
     c.execute(
         "UPDATE previews SET deployment_id = ?3, url = ?4, asleep = 0 WHERE app_id = ?1 AND pr_number = ?2",
         params![app_id, pr, deployment_id, url],
@@ -97,6 +100,7 @@ pub fn set_serving(c: &Connection, app_id: &str, pr: u32, deployment_id: &str, u
 
 pub fn close(c: &Connection, app_id: &str, pr: u32) -> Result<Option<Preview>> {
     let p = get(c, app_id, pr)?;
+    crate::guest_shares::revoke_preview(c, app_id, pr)?;
     c.execute(
         "UPDATE previews SET status = 'closed', closed_at = ?3 WHERE app_id = ?1 AND pr_number = ?2 AND status = 'active'",
         params![app_id, pr, now()],

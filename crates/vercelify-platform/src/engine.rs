@@ -1865,15 +1865,23 @@ pub fn hosts_for(settings: &apps::DomainSettings, app: &App, pr: Option<u32>) ->
         Some(pr) if app.previews.access == PreviewAccess::Private => match &settings.mesh {
             Some(m) => {
                 let host = deploy::preview_host(&app.name, pr, &format!("{}.vfy", m.node));
-                (
-                    vec![RouteHost {
+                let mut hosts = vec![RouteHost {
+                    guest_bridge: false,
+                    host: host.clone(),
+                    https: false,
+                    redirect_to: None,
+                    allow_from: m.cidrs.clone(),
+                }];
+                if let Some(guests) = settings.guest_hosts.get(&format!("{}/{}", app.id, pr)) {
+                    hosts.extend(guests.iter().map(|host| RouteHost {
+                        guest_bridge: true,
                         host: host.clone(),
                         https: false,
                         redirect_to: None,
-                        allow_from: m.cidrs.clone(),
-                    }],
-                    Some(format!("http://{host}")),
-                )
+                        allow_from: vec![],
+                    }));
+                }
+                (hosts, Some(format!("http://{host}")))
             }
             None => (vec![], None),
         },
@@ -1887,6 +1895,7 @@ pub fn hosts_for(settings: &apps::DomainSettings, app: &App, pr: Option<u32>) ->
                 };
                 (
                     vec![RouteHost {
+                        guest_bridge: false,
                         host: host.clone(),
                         https: settings.https && !settings.edge_tls,
                         redirect_to: None,
@@ -1901,6 +1910,7 @@ pub fn hosts_for(settings: &apps::DomainSettings, app: &App, pr: Option<u32>) ->
             app.domains
                 .iter()
                 .map(|dm| RouteHost {
+                    guest_bridge: false,
                     host: dm.host.clone(),
                     https: dm.https && dm.cert_status != CertStatus::Edge,
                     redirect_to: dm.redirect_to.clone(),
@@ -2010,6 +2020,7 @@ pub(crate) mod tests {
                         https: false,
                         edge_tls: false,
                         mesh: None,
+                        guest_hosts: Default::default(),
                     },
                 )
             })
@@ -2576,6 +2587,7 @@ esac
 
         let off_mesh = apps::DomainSettings {
             mesh: None,
+            guest_hosts: Default::default(),
             ..settings.clone()
         };
         assert_eq!(

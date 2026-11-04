@@ -1,0 +1,28 @@
+{
+  "rust_all_features": {
+    "passed": 793,
+    "failed": 0,
+    "ignored": 14,
+    "additional_advanced_routing_test": 1
+  },
+  "clippy": "passed",
+  "fmt": "passed",
+  "linux_bats": 234,
+  "shellcheck": "passed",
+  "ui_unit": 150,
+  "ui_types": "passed",
+  "ui_build": "passed",
+  "demo_browser": 32,
+  "additional_sharing_browser": 1,
+  "real_chromium_guest": "passed",
+  "real_tls_guest_production_probes": {
+    "requests": 80,
+    "failures": 0
+  },
+  "docker_contracts": [
+    "restore-drills",
+    "engine",
+    "postgres-previews",
+    "preview-safety"
+  ]
+}

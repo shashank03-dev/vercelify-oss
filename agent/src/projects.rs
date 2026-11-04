@@ -255,7 +255,7 @@ pub fn platform_routers(route: &vercelify_platform::proxy::Route) -> Vec<AppRout
         .filter(|(_, h)| h.redirect_to.is_none())
         .map(|(i, h)| AppRouter {
             name: router_name(&route.key, i, h.https),
-            rule: format!("Host(`{}`)", h.host),
+            rule: vercelify_platform::proxy::host_rule(h),
             entry_points: vec![if h.https { "websecure" } else { "web" }.to_string()],
             service: format!("{}@file", service_name(&route.key)),
             // The source check first: a private preview's rules (higher
@@ -263,6 +263,15 @@ pub fn platform_routers(route: &vercelify_platform::proxy::Route) -> Vec<AppRout
             middlewares: (!h.allow_from.is_empty())
                 .then(|| format!("{}@file", allow_middleware(&route.key, i)))
                 .into_iter()
+                .chain(if h.guest_bridge {
+                    vec![
+                        format!("{}@file", vercelify_platform::proxy::GUEST_CAPABILITY),
+                        format!("{}@file", vercelify_platform::proxy::GUEST_AUTH),
+                        format!("{}@file", vercelify_platform::proxy::GUEST_STRIP),
+                    ]
+                } else {
+                    vec![]
+                })
                 .chain(auth.iter().cloned())
                 .collect(),
             tls: h.https.then(|| serde_json::json!({ "certResolver": RESOLVER })),
@@ -937,18 +946,21 @@ mod tests {
             key: "blog".into(),
             hosts: vec![
                 RouteHost {
+                    guest_bridge: false,
                     host: "blog.example.com".into(),
                     https: true,
                     redirect_to: None,
                     allow_from: vec![],
                 },
                 RouteHost {
+                    guest_bridge: false,
                     host: "www.example.com".into(),
                     https: true,
                     redirect_to: Some("blog.example.com".into()),
                     allow_from: vec![],
                 },
                 RouteHost {
+                    guest_bridge: false,
                     host: "blog.lan".into(),
                     https: false,
                     redirect_to: None,
@@ -974,6 +986,35 @@ mod tests {
             "a mesh-only host keeps its source check, first, on project rules too"
         );
         assert_eq!(cron_base(&routers).as_deref(), Some("https://blog.example.com"));
+    }
+
+    #[test]
+    fn guest_advanced_routes_keep_both_authentication_boundaries_before_app_auth() {
+        use vercelify_platform::proxy::{Route, RouteHost};
+        let routers = platform_routers(&Route {
+            key: "guest-pr-7".into(),
+            hosts: vec![RouteHost {
+                host: "shr-test.guests.example.test".into(),
+                https: false,
+                redirect_to: None,
+                allow_from: vec![],
+                guest_bridge: true,
+            }],
+            upstreams: vec!["http://app:3000".into()],
+            basic_auth: vec!["app:hash".into()],
+            dns_challenge: false,
+        });
+        assert_eq!(routers.len(), 1);
+        assert!(routers[0].rule.contains("HeaderRegexp(`X-Vfy-Bridge`, `.+`)"));
+        assert_eq!(
+            routers[0].middlewares,
+            [
+                "vfy-guest-capability@file",
+                "vfy-guest-bridge@file",
+                "vfy-guest-strip@file",
+                "vfy-guest-pr-7-auth@file"
+            ]
+        );
     }
 
     #[test]

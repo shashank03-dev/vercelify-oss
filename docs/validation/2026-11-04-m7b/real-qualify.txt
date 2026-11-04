@@ -1,0 +1,5 @@
+PASS: real TLS guest redemption, header/cookie stripping, app authorization preservation and cache/referrer/worker policy
+PASS: revoked invitation/cookie and live WebSocket fail closed within three seconds
+PASS: revocation terminates an already-streaming HTTP response
+PASS: induced server-side expiry ends an upgraded socket and cannot be bypassed by its cookie
+{"unchanged_production_probes": {"requests": 80, "failures": 0}}

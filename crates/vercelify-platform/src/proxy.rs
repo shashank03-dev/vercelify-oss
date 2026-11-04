@@ -116,6 +116,23 @@ pub struct RouteHost {
     /// it: base, `vercel.json` and wake.
     #[serde(default)]
     pub allow_from: Vec<String>,
+    /// Only the authenticated guest gateway may use this alias. Never send
+    /// bridge aliases to old workers or expose them as wake targets.
+    #[serde(default)]
+    pub guest_bridge: bool,
+}
+
+pub const GUEST_BRIDGE_HEADER: &str = "X-Vfy-Bridge";
+pub const GUEST_CAPABILITY: &str = "vfy-guest-capability";
+pub const GUEST_AUTH: &str = "vfy-guest-bridge";
+pub const GUEST_STRIP: &str = "vfy-guest-strip";
+pub fn host_rule(h: &RouteHost) -> String {
+    let rule = format!("Host(`{}`)", h.host);
+    if h.guest_bridge {
+        format!("{rule} && HeaderRegexp(`{GUEST_BRIDGE_HEADER}`, `.+`)")
+    } else {
+        rule
+    }
 }
 
 /// The middleware that limits host `index` of route `key` to its
@@ -177,8 +194,12 @@ pub fn render(r: &Route) -> String {
     }
     let resolver = if r.dns_challenge { DNS_RESOLVER } else { RESOLVER };
     for (i, h) in r.hosts.iter().enumerate() {
-        let rule = format!("Host(`{}`)", h.host);
-        let mut mws: Vec<String> = vec![];
+        let rule = host_rule(h);
+        let mut mws: Vec<String> = if h.guest_bridge {
+            vec![GUEST_CAPABILITY.into(), GUEST_AUTH.into(), GUEST_STRIP.into()]
+        } else {
+            vec![]
+        };
         if !h.allow_from.is_empty() {
             let name = allow_middleware(&r.key, i);
             middlewares.push_str(&allow_list_yaml(&name, &h.allow_from));
@@ -506,18 +527,21 @@ mod tests {
             key: "blog".into(),
             hosts: vec![
                 RouteHost {
+                    guest_bridge: false,
                     host: "blog.example.com".into(),
                     https: true,
                     redirect_to: None,
                     allow_from: vec![],
                 },
                 RouteHost {
+                    guest_bridge: false,
                     host: "www.example.com".into(),
                     https: true,
                     redirect_to: Some("blog.example.com".into()),
                     allow_from: vec![],
                 },
                 RouteHost {
+                    guest_bridge: false,
                     host: "blog.10.77.0.1.sslip.io".into(),
                     https: false,
                     redirect_to: None,

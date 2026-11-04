@@ -809,6 +809,44 @@ Templates in `crates/vercelify-platform/templates/databases.toml` (versioned wit
   shell (`psql`, `mysql`, `mongosh`, `valkey-cli`, `clickhouse-client`) logged in from the
   container's environment, so the password never crosses the API.
 
+### 9.9 Private-preview guest invitations (competitive roadmap M7b)
+
+Schema 13 stores reserved guest namespaces, hash-only grants and sessions, a persisted
+clock high-water mark and a sealed key-rotation probe. Only Owners configure a dedicated
+HTTPS guest domain or issue/revoke invitations; this first release supports main-node
+private previews. DNS/TLS provisioning stays with the operator. Configuration is not
+proof of public reachability. Guest domains remain reserved after revocation.
+
+A unique host carries each invitation. Its 256-bit secret is shown once in a URL
+fragment on `/__vfy/invite`; the gateway clears that fragment before explicit redemption.
+Scanner GETs never consume invitations or reach the app. Host-only Secure/HttpOnly
+SameSite=Lax cookies expire within 15 minutes and the grant lifetime. One-session
+invitations are the default; reusable ones allow eight live sessions. There are at
+most 100 active grants, 128 live sessions and 32 proxied connections.
+
+The existing wake listener checks authorization before assets, routing or waking.
+The reserved public router has priority 60000. Protected backend aliases, including
+advanced application rules, require both a random service Basic Auth capability and
+live ForwardAuth with a separate bridge secret. Only a bcrypt verifier is written to
+the proxy file. After these checks Traefik restores the original application Authorization
+and strips all bridge/session headers; the gateway strips guest cookies and forwarded
+identity before proxying. Existing app Basic Auth still applies. Worker nodes receive
+no guest aliases. Host processes and loopback remain trusted.
+
+Every request validates host, private/active PR and current deployment. Revocation,
+PR close, generation replacement, privacy/enablement changes and manual app stop
+permanently retire access. Restart preserves sessions; clock rollback fails closed;
+master-key replacement revokes them. Streaming HTTP and WebSockets have independent
+one-second authorization supervisors (750 ms inspection timeout) and a monotonic
+session deadline. HTTP uploads cap at 16 MiB; transfers cap at 64 MiB. Guest responses
+force no-store, no-referrer and noindex; workers and frames are blocked to protect
+future invitation navigations. Downloaded content cannot be revoked.
+
+Owner issuance waits for routing readiness and revokes an unreturned invitation on
+timeout. A stopped listener, absent alias, failed inspection or unavailable middleware
+denies access. No extra daemon/container or cloud relay is introduced. Qualification
+and limitations: `docs/validation/2026-11-04-m7b/VALIDATION.md`.
+
 ### 10.0 Isolated restore drills (competitive roadmap M7a)
 
 Schema 12 journals `restore_drills`, exact owned temporary services and schedules;

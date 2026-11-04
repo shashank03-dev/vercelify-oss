@@ -485,6 +485,35 @@ remote repositories and physical laptop measurements remain **unmeasured**.
 Raw samples, binaries, limits and reproduction:
 [M7a validation](../validation/2026-11-03-m7a/VALIDATION.md).
 
+### Re-measured for M7b private-preview guest invitations, 4 November 2026
+
+Same original six apps on the four-GiB ARM lab, twelve samples six seconds apart
+plus collection time after two-minute settle. BuildKit and the disposable daemon
+were stopped. The installed schema13 feature has no guest domain configured.
+
+| Median MiB | M7a builder stopped | M7b builder stopped |
+| --- | ---: | ---: |
+| System used (range) | 589.5 (581–599) | 634.5 (625–648) |
+| Agent RSS | 9.02 | 13.37 |
+| Mesh RSS | 2.80 | 3.10 |
+| Traefik RSS | 88.20 | 87.94 |
+| dockerd / containerd RSS | 101.70 / 46.50 | 103.43 / 48.13 |
+| All shim RSS | 73.16 | 74.31 |
+| BuildKit RSS | 0 | 0 |
+
+This is a matched idle workload observation, not peak guest traffic memory or a
+causal feature-overhead estimate; cache/process histories differ. All six original
+app routes remain HTTP200. Real TLS gateway tests pass with eighty concurrent
+sentinel probes and zero failures. External Chromium confirms scanner safety,
+fragment removal before application execution, host-only secure cookies and worker
+denial. Revocation ends open HTTP/WebSocket streams. Actual restart/key replacement,
+PR close and privacy-toggle retirement pass. Public Internet DNS/TLS, tunnels,
+external IPv6 and the physical laptop remain unmeasured. Main-node private previews
+are the qualified scope. Both static agents remain below 8 MiB.
+
+Raw samples, test counts and reproduction:
+[M7b validation](../validation/2026-11-04-m7b/VALIDATION.md).
+
 ## 7. Feature verdicts after validation
 
 ### 7.1 Your computer builds, your server serves — build early

@@ -43,6 +43,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { RestoreDrills } from "../components/RestoreDrills";
 import { DatabaseStatus } from "../components/DatabaseStatus";
 import { DeployGuardCard } from "../components/DeployGuard";
+import { GuestLinksButton } from "../components/GuestLinks";
 import { PreviewDatabaseCard } from "../components/PreviewDatabase";
 import { GithubAppModal, WebhookModal } from "../components/GitIntegrations";
 import { TerminalView } from "../components/Terminal";
@@ -1376,6 +1377,7 @@ function PreviewsTab({
                     <ExternalLink />
                   </IconButton>
                 )}
+                {p.url && <GuestLinksButton app={app.id} pr={p.pr_number} url={p.url} privatePreview={app.previews.access === "private"} client={client} />}
                 <IconButton
                   label={`Remove preview #${p.pr_number}`}
                   onClick={() => void act(`rm-${p.pr_number}`, () => client.removePreview(app.id, p.pr_number), `Removed the preview of #${p.pr_number}`).then(() => void previews.refresh())}
