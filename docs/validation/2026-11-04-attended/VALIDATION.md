@@ -146,3 +146,21 @@ only its named file. The physical host received the drop-in and daemon-reload,
 without service restart. Physical validation of this second fix remains pending.
 Thirty affected hardware/CLI tests passed on Linux; shellcheck passed. Systemd
 prefix drop-in semantics: https://www.freedesktop.org/software/systemd/man/latest/systemd.unit
+
+## Corrected ordering physical retest: passed
+
+Operator explicitly approved a separate retest, confirmed manual power-on after
+shutdown. AC remained connected. New boot ID:
+846ad12e-60b0-4496-ac4e-6372c9b7290a. All three services and five original containers
+recovered, PostgreSQL reports the previous clean shutdown, SQLite integrity is ok,
+and deployment/job state matches the pre-shutdown snapshot (no active builds).
+Both external app-mode routes recovered. See scope-fixed-summary.json for timing;
+the outage includes operator wait, so it is not a pure boot-time measurement.
+
+The complete previous-boot Docker journal has zero matching restart-manager,
+container cleanup or destructive transaction errors. Shutdown events show Docker
+stopped before individual libcontainer scopes and the workload slice. The earlier
+shutdown-ordering finding is resolved for this physical idle/AC/manual-start test.
+This does not establish battery/AC-return firmware, thermal stress, router recovery,
+active-job fencing or permanent public/cloud-provider qualification. No further
+outage is authorized by this completed window.

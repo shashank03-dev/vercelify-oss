@@ -1,0 +1,8 @@
+{
+  "first_http_failure": "2026-11-04T15:33:16.903451+00:00",
+  "first_http_recovery": "2026-11-04T15:35:52.832768+00:00",
+  "matching_docker_shutdown_errors": 0,
+  "boot": "846ad12e-60b0-4496-ac4e-6372c9b7290a",
+  "physical_ordering_retest": "passed",
+  "limits": "idle workloads; AC connected; manual power-on; no active-job, firmware-AC-return or battery qualification"
+}
