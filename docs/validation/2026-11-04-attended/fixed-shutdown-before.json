@@ -1,0 +1,5 @@
+{
+  "rollback_ready": true,
+  "boot": "5fb4b2eb-025e-49d3-bc07-458e2e0bd9ad",
+  "containers": "db2a0f0262b9 vfy-gw-pr1-re0wxze2\n2202ac6f511a vfy-db-gwdb\ndf341f080ef2 vfy-gw-2cv2ryfw\nc036049dc516 vercelify-proxy\n4a2a21ec2fc1 voxbento-mediamtx-1\n"
+}

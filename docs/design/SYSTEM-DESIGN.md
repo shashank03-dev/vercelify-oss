@@ -1389,6 +1389,10 @@ Systemd reverses that relationship during shutdown, keeping the workload slice
 alive until Docker has stopped; it must not tear down container cgroups while
 the daemon can still attempt restart-policy recovery. This ordering does not
 change application stop intent or container restart policies.
+Docker's transient `docker-<id>.scope` units also receive a prefix drop-in with
+`Before=docker.service`: scopes may be stopped independently of their parent
+slice during poweroff. Both relationships are needed. Uninstall removes only
+Vercelify's named scope drop-in and preserves other administrator snippets.
 
 The existing independent shell guard sources `host/lib/battery-policy.sh`; the
 installer places both files together. `BATTERY_POLICY_ENABLED=0` preserves existing

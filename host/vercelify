@@ -645,6 +645,8 @@ cmd_uninstall() {
   # (from its next restart).
   systemctl stop vercelify.slice >/dev/null 2>&1 || true
   rm -f "$SYSTEMD_DIR/vercelify.slice"
+  rm -f "$SYSTEMD_DIR/docker-.scope.d/90-vercelify-ordering.conf"
+  rmdir "$SYSTEMD_DIR/docker-.scope.d" 2>/dev/null || true
   if [[ -s "$DOCKER_DAEMON_JSON" ]] && jq -e '."cgroup-parent" == "vercelify.slice"' "$DOCKER_DAEMON_JSON" >/dev/null 2>&1; then
     jq 'del(."cgroup-parent")' "$DOCKER_DAEMON_JSON" >"$DOCKER_DAEMON_JSON.tmp" && mv "$DOCKER_DAEMON_JSON.tmp" "$DOCKER_DAEMON_JSON"
     info "Docker no longer puts containers in vercelify.slice (from its next restart)"

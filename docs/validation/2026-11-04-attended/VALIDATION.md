@@ -127,3 +127,22 @@ physical shutdown warning resolved on fixture evidence alone.
 Full Linux host suite: bats host/tests completed 248 tests, exit 0. No serving
 Docker integration suite was enabled. Cloud account/domain availability remains
 unchanged; lack of live provider access is not a successful provider qualification.
+
+## First physical retest of ordering fix: incomplete fix
+
+Operator approved another 15-minute window, confirmed power-on after shutdown.
+Recovery succeeded with new boot ID 17a18169-37ee-47cc-9d35-e29357fe1cea, original
+five containers running, all three services active, identical deployment/job state,
+and PostgreSQL clean shutdown/startup. The slice now stopped after Docker, but
+restart errors persisted: individual transient scopes were stopped independently
+at the start of poweroff. The previous slice-only fixture did not cover this.
+See fixed-shutdown-recovery.json. Do not mark the first fix physically successful.
+
+The contract fixture now includes a real transient scope (DefaultDependencies=no)
+in the generated workload slice and stops scope, slice and daemon together. It
+failed with the slice-only fix and passed after adding a Docker scope prefix
+drop-in Before=docker.service. Installer generates this snippet; uninstall removes
+only its named file. The physical host received the drop-in and daemon-reload,
+without service restart. Physical validation of this second fix remains pending.
+Thirty affected hardware/CLI tests passed on Linux; shellcheck passed. Systemd
+prefix drop-in semantics: https://www.freedesktop.org/software/systemd/man/latest/systemd.unit

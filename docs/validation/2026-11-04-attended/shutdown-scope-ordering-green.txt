@@ -1,0 +1,1 @@
+PASS: workload scope and slice stay active until daemon shutdown completes

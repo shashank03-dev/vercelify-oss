@@ -239,6 +239,13 @@ MemoryAccounting=yes
 MemoryHigh=${high}M
 MemoryMax=${max}M
 EOF
+  # Poweroff also stops transient container scopes independently of the slice.
+  # Prefix drop-ins apply to Docker's docker-<id>.scope units, including those
+  # created after installation, without changing their restart policy.
+  write_file "$SYSTEMD_DIR/docker-.scope.d/90-vercelify-ordering.conf" 0644 <<EOF || true
+[Unit]
+Before=docker.service
+EOF
   run_cmd systemctl daemon-reload
   run_cmd systemctl start vercelify.slice 2>/dev/null || true
   echo "$max"
