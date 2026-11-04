@@ -1,0 +1,20 @@
+{
+  "lid-open-local.jsonl": {
+    "samples": 19,
+    "first": "2026-11-04T14:04:53.449542+00:00",
+    "last": "2026-11-04T14:05:30.327717+00:00",
+    "failures": {
+      "http": 0,
+      "gateway": 0
+    }
+  },
+  "lid-open-external.jsonl": {
+    "samples": 17,
+    "first": "2026-11-04T14:04:50.592448+00:00",
+    "last": "2026-11-04T14:05:30.844814+00:00",
+    "failures": {
+      "preview": 1,
+      "production": 1
+    }
+  }
+}

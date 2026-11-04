@@ -1,6 +1,43 @@
 # Physical test window — approval required
 
-Target: user-inspiron-5567-1 / 100.123.113.77. This procedure is prepared, not approved or executed.
+Target: user-inspiron-5567-1 / 100.123.113.77.
+
+Status: the revised first window below was explicitly approved and executed. See
+../2026-11-04-attended/VALIDATION.md for results. Other windows remain unapproved.
+
+## Attended first window (revised 2026-11-04, executed)
+
+The operator confirmed physical presence and access to the charger. Current checks
+show all three Vercelify services active, all five protected containers running,
+81 GiB free, AC connected, and reported thermal readings of 20–58°C. BAT0 reports
+100% but charge_full/charge_full_design is 130000/3684000 (about 3.5%): percentage
+alone is insufficient grounds to disconnect AC. This revised first window
+supersedes Window A below: **no AC disconnects or bounces**.
+
+Allow up to 30 minutes, with interruption of every service possible. Keep the
+charger connected. Record external Mac reachability and original HTTP routes;
+perform one ordinary reboot, allowing at most ten minutes for recovery. Confirm
+the original services, containers and routes recover before continuing. Then ask
+the operator to close the lid for two minutes and reopen it. If this suspends the
+host, the operator reopens it and presses the power button briefly if necessary;
+stop further actions if recovery fails. Record whether lid closure actually
+suspends the host rather than assuming either behavior. Do not change firmware,
+power policy, networking or production configuration. No shutdown/depletion,
+battery removal or thermal stress is included. AC and router tests need separate
+procedures and approval. External Internet recovery is not established by the
+Mac's mesh probes.
+
+Fresh private rollback material is at
+`/var/lib/vercelify/qualification-attended-20261104`: configuration, consistent
+SQLite copy (integrity_check: ok), master key, protected container inventory and
+PostgreSQL cluster dump with a completion marker. Dump generation is verified;
+this new production dump has not been restore-qualified. The existing independent
+PG17 fixture recovery evidence remains distinct from this production PG15 dump.
+Do not restore any of these files over live state automatically.
+
+Historical planning text below was approved for this revised first window only.
+The reboot and lid actions are complete; do not reuse that approval for further
+outages.
 
 Prerequisites: authenticated Tailscale SSH, operator physically present with charger,
 verified independently readable PostgreSQL 17 fixture backup and retained credentials,

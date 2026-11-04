@@ -1,0 +1,14 @@
+{
+  "boot": "7b8344a4-1aca-4ad7-9a7c-f66252932edf",
+  "integrity": "ok",
+  "services": {
+    "vercelify-agent": "active",
+    "vercelify-mesh": "active",
+    "vercelify-power-guard": "active"
+  },
+  "pg_ready": "/var/run/postgresql:5432 - accepting connections",
+  "containers": "db2a0f0262b9a689ae7deb0a6ec252a78ec645dd34ef4673de2d2d8dec87cad0 /vfy-gw-pr1-re0wxze2 restarts=0 running=true\n2202ac6f511a0a7ac48942cd252a70bcbafc947a6fc17bfb40df201b932b6fe2 /vfy-db-gwdb restarts=0 running=true\ndf341f080ef2ec225c11c84b4aac4408fe3d2b35eb861088d054545a30290987 /vfy-gw-2cv2ryfw restarts=0 running=true\nc036049dc51675f764efec7d26565db3c358b5b28e441a2cdf6afb8e201eab62 /vercelify-proxy restarts=0 running=true\n4a2a21ec2fc1dbcb35bea4b462aace1f5fb094c0cffaf6b99e7ba1b7228aee18 /voxbento-mediamtx-1 restarts=0 running=true",
+  "failed_units": "\u25cf apparmor.service loaded failed failed Load AppArmor profiles",
+  "lid_policy": "HandleLidSwitch=ignore\nHandleLidSwitchExternalPower=ignore\nHandleLidSwitchDocked=ignore",
+  "ac": "1"
+}

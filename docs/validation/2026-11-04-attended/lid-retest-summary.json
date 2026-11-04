@@ -1,0 +1,21 @@
+{
+  "closed_confirmation_utc": "2026-11-04T14:21:37Z",
+  "checks": {
+    "lid-retest-external.jsonl": {
+      "samples": 69,
+      "preview_failures": 0,
+      "production_failures": 0
+    },
+    "lid-retest-local.jsonl": {
+      "samples": 45,
+      "http_failures": 0,
+      "boot_ids": [
+        "7b8344a4-1aca-4ad7-9a7c-f66252932edf"
+      ],
+      "ac_values": [
+        "1"
+      ]
+    }
+  },
+  "reopen_request_recorded_utc": "2026-11-04T14:24:01.492903+00:00"
+}

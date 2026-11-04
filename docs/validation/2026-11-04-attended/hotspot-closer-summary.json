@@ -1,0 +1,31 @@
+{
+  "hotspot-closer-local.jsonl": {
+    "samples": 30,
+    "first": "2026-11-04T14:09:58.937740+00:00",
+    "last": "2026-11-04T14:11:26.343559+00:00",
+    "http_failures": 0,
+    "signal_readings": [
+      "signal: -45 dBm",
+      "signal: -46 dBm",
+      "signal: -47 dBm",
+      "signal: -48 dBm",
+      "signal: -49 dBm",
+      "signal: -50 dBm"
+    ],
+    "gateway_note": "Old fixed gateway 10.90.182.8 is stale after network change; these gateway failures are invalid evidence of current connectivity."
+  },
+  "hotspot-closer-external.jsonl": {
+    "samples": 30,
+    "first": "2026-11-04T14:09:59.469939+00:00",
+    "last": "2026-11-04T14:11:05.014117+00:00",
+    "preview_failures": 0,
+    "production_failures": 0
+  },
+  "hotspot-current-gateway.jsonl": {
+    "samples": 10,
+    "first": "2026-11-04T14:11:11.335916+00:00",
+    "last": "2026-11-04T14:11:29.650214+00:00",
+    "gateway": "192.168.127.182",
+    "failures": 0
+  }
+}
