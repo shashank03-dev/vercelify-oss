@@ -72,3 +72,13 @@ Operator confirmed reopening. window-final.json records all three services
 active, the original five protected containers running, PostgreSQL accepting
 connections, AC connected and both remote HTTP routes returning 200. No further
 outage actions are approved by this completed window.
+
+## Post-window read-only audit
+
+state-comparison.json confirms identical deployment IDs/statuses/container mappings
+and zero build jobs before and after the idle window. Both SQLite integrity checks
+returned ok. This observes no new jobs; it does not exercise in-flight generation
+fencing or claim duplicate-job prevention under active workloads. Rollback files
+have private permissions, saved config is present, and the PG dump completion marker
+is present (still not a production restore qualification). The previous boot also
+records the same Discord abi/4.0 AppArmor error, establishing it predates this reboot.

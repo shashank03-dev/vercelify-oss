@@ -72,3 +72,23 @@ newer state separately. Verify original app routes, PostgreSQL data assertions, 
 media container, manual stops and absence of duplicate jobs. Retain logs even on failure.
 Actual outage actions remain blocked until user approves a specific window and confirms
 physical presence, backups and recovery access. Approval is not inferred from silence.
+
+## Window C: graceful shutdown/manual power-on (15 minutes, not approved)
+
+Keep AC connected throughout; do not disconnect/remove/deplete the aged battery.
+Operator must remain beside the laptop with access to the power button. Record
+baseline service/container identities and app probes; refresh private config,
+consistent control-store and database rollback material before shutdown. Start
+external HTTP and Tailscale monitoring. Execute one normal systemctl poweroff;
+ask operator to confirm the laptop is off. Then ask the operator to press the
+power button once. Allow ten minutes for normal boot and service recovery;
+record boot ID, original protected container identities, database readiness,
+production/PR1 HTTP, control-store integrity and deployment/job state. Stop if
+normal shutdown fails or recovery fails; do not force power off or automatically
+restore over live data. Preserve logs and obtain operator observations for
+recovery decisions. No lid, network, firmware, AC or security-policy changes.
+
+Expected impact: production, PostgreSQL, PR1 preview and media are unavailable
+between shutdown and recovery. This proves graceful shutdown and manual boot
+only; it does not qualify AC-return firmware behavior or battery depletion.
+Explicit approval for this separate window is required before any power action.

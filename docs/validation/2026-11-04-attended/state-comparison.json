@@ -1,0 +1,81 @@
+{
+  "before": {
+    "integrity": "ok",
+    "deployments": [
+      [
+        "dpl_b2t4hdqd2cv2ryfw",
+        "app_q4psfmgmevf6sehb",
+        "healthy",
+        "vfy-gw-2cv2ryfw"
+      ],
+      [
+        "dpl_b4be258fre0wxze2",
+        "app_q4psfmgmevf6sehb",
+        "healthy",
+        "vfy-gw-pr1-re0wxze2"
+      ],
+      [
+        "dpl_rwzfsbme0qevs6a7",
+        "app_q4psfmgmevf6sehb",
+        "superseded",
+        "vfy-gw-pr1-0qevs6a7"
+      ]
+    ],
+    "build_jobs": []
+  },
+  "after": {
+    "integrity": "ok",
+    "deployments": [
+      [
+        "dpl_b2t4hdqd2cv2ryfw",
+        "app_q4psfmgmevf6sehb",
+        "healthy",
+        "vfy-gw-2cv2ryfw"
+      ],
+      [
+        "dpl_b4be258fre0wxze2",
+        "app_q4psfmgmevf6sehb",
+        "healthy",
+        "vfy-gw-pr1-re0wxze2"
+      ],
+      [
+        "dpl_rwzfsbme0qevs6a7",
+        "app_q4psfmgmevf6sehb",
+        "superseded",
+        "vfy-gw-pr1-0qevs6a7"
+      ]
+    ],
+    "build_jobs": []
+  },
+  "same_deployments": true,
+  "same_build_jobs": true,
+  "rollback": {
+    "platform-before.db-wal": {
+      "bytes": 0,
+      "private": true
+    },
+    "platform-before.db-shm": {
+      "bytes": 32768,
+      "private": true
+    },
+    "containers-before.txt": {
+      "bytes": 663,
+      "private": true
+    },
+    "platform-before.db": {
+      "bytes": 503808,
+      "private": true
+    },
+    "master.key.before": {
+      "bytes": 32,
+      "private": true
+    },
+    "postgresql-before.sql": {
+      "bytes": 3959,
+      "private": true
+    }
+  },
+  "config_backup_exists": true,
+  "pg_dump_completion": true,
+  "previous_boot_apparmor": "Nov 03 01:14:49 user-Inspiron-5567 apparmor.systemd[568]: AppArmor parser error for /etc/apparmor.d in profile /etc/apparmor.d/discord at line 1: Could not open 'abi/4.0': No such file or directory\nNov 03 01:14:50 user-Inspiron-5567 apparmor.systemd[632]: AppArmor parser error for /etc/apparmor.d/discord in profile /etc/apparmor.d/discord at line 1: Could not open 'abi/4.0': No such file or directory\nNov 03 01:14:50 user-Inspiron-5567 systemd[1]: Failed to start Load AppArmor profiles."
+}
