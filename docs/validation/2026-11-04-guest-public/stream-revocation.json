@@ -1,0 +1,6 @@
+{
+  "case": "external-in-progress-HTTP-stream-revocation",
+  "passed": true,
+  "close_observed_after_revoke_call_seconds": 0.69,
+  "stream_total_ms": 4327
+}

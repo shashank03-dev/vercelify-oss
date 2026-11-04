@@ -1,0 +1,14 @@
+[
+  {
+    "case": "public-session-survives-agent-restart",
+    "passed": true
+  },
+  {
+    "case": "public-session-revoked-by-lab-master-key-replacement",
+    "passed": true
+  },
+  {
+    "case": "public-privacy-and-preview-toggles-do-not-resurrect-session",
+    "passed": true
+  }
+]

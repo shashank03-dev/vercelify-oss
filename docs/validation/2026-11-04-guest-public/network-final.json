@@ -1,0 +1,14 @@
+{
+  "boot_unchanged": true,
+  "containers_unchanged": true,
+  "local_http_samples": 360,
+  "local_http_failures": 0,
+  "default_route": "default via 10.90.182.8 dev wlp1s0 proto dhcp metric 600 ",
+  "services": {
+    "vercelify-agent": "active",
+    "vercelify-mesh": "active",
+    "vercelify-power-guard": "active"
+  },
+  "pg_ready": "/var/run/postgresql:5432 - accepting connections",
+  "hotspot_off_on": "operator action not confirmed; not qualified"
+}

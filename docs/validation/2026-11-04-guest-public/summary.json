@@ -1,0 +1,88 @@
+{
+  "guest_public_cases": [
+    {
+      "case": "external-unauthenticated-assets-routes-and-forged-control-denied",
+      "passed": true
+    },
+    {
+      "case": "external-redemption-cookie-policy-stream-assets-and-internal-credential-stripping",
+      "passed": true
+    },
+    {
+      "case": "external-live-WebSocket-revocation",
+      "passed": true,
+      "socket_ms": 4863
+    },
+    {
+      "case": "external-live-WebSocket-expiry",
+      "passed": true,
+      "socket_ms": 4745
+    },
+    {
+      "case": "external-generation-replacement-revokes-old-session",
+      "passed": true
+    },
+    {
+      "case": "external-PR-close-revokes-session",
+      "passed": true
+    },
+    {
+      "case": "public-session-survives-agent-restart",
+      "passed": true
+    },
+    {
+      "case": "public-session-revoked-by-lab-master-key-replacement",
+      "passed": true
+    },
+    {
+      "case": "public-privacy-and-preview-toggles-do-not-resurrect-session",
+      "passed": true
+    },
+    {
+      "case": "public-guest-idle-sleep-and-wake",
+      "passed": true,
+      "idle_wait_seconds": 326.39,
+      "wake_to_200_seconds": 8.42,
+      "unauthenticated_request_did_not_wake": true
+    },
+    {
+      "case": "external-in-progress-HTTP-stream-revocation",
+      "passed": true,
+      "close_observed_after_revoke_call_seconds": 0.69,
+      "stream_total_ms": 4327
+    }
+  ],
+  "browser_results": {
+    "chromium": "passed",
+    "firefox": "passed fresh-invitation retry; initial generic assertion failure remains unexplained",
+    "webkit": "passed"
+  },
+  "network": {
+    "production": {
+      "first_failed_probe": "2026-11-04T17:37:18.642697+00:00",
+      "first_recovery_probe": "2026-11-04T17:37:58.860886+00:00",
+      "approx_probe_interval_outage_seconds": 40.22,
+      "last_http": "200"
+    },
+    "preview": {
+      "first_failed_probe": "2026-11-04T17:37:18.642697+00:00",
+      "first_recovery_probe": "2026-11-04T17:37:58.860886+00:00",
+      "approx_probe_interval_outage_seconds": 40.22,
+      "last_http": "200"
+    },
+    "scope": "one host Wi-Fi disconnect with local 20-second recovery timer; no confirmed hotspot/router power cycle"
+  },
+  "physical_hotspot_power_cycle": "not confirmed by operator; not qualified",
+  "battery_and_firmware_power_matrix": "not performed; badly aged battery and separate safe physical procedures required",
+  "critical_thermal_policy": "not qualified by bounded load observation",
+  "cleanup": {
+    "guest_dns_records_removed": 17,
+    "original_dns_unchanged": true,
+    "test_tunnel_removed": true,
+    "connector_and_forward_stopped": true,
+    "owned_guest_apps_and_proxy_removed": true,
+    "owned_fixture_secret_state_removed": true,
+    "owned_daemon_stopped": true
+  },
+  "external_probe_paused_http": 503
+}

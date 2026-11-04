@@ -1,0 +1,14 @@
+{
+  "production": {
+    "http": "200",
+    "exit": 0
+  },
+  "preview": {
+    "http": "200",
+    "exit": 0
+  },
+  "personal_site": {
+    "http": "200",
+    "exit": 0
+  }
+}

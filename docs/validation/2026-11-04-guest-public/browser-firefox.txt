@@ -1,0 +1,1 @@
+PASS: public-domain guest browser scanner GET never reaches app; fragment clears before confirmation; trusted public TLS; host-only Secure/HttpOnly cookie; worker denied; existing session safely reopens; separate browser cannot reuse single-session invitation

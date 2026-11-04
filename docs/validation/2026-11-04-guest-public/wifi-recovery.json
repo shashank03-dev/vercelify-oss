@@ -1,0 +1,20 @@
+{
+  "boot": "846ad12e-60b0-4496-ac4e-6372c9b7290a",
+  "boot_unchanged": true,
+  "containers_unchanged": true,
+  "services": {
+    "vercelify-agent": "active",
+    "vercelify-mesh": "active",
+    "vercelify-power-guard": "active"
+  },
+  "route": "default via 10.90.182.8 dev wlp1s0 proto dhcp metric 600 ",
+  "recovery_timer": "Result=success\nExecMainStatus=0",
+  "journal": "Nov 04 23:07:47 user-Inspiron-5567 systemd[1]: Started /usr/bin/nmcli device connect wlp1s0.\nNov 04 23:07:49 user-Inspiron-5567 nmcli[84890]: [88B blob data]\nNov 04 23:07:49 user-Inspiron-5567 systemd[1]: vfy-qualification-network-reconnect.service: Deactivated successfully.\nNov 04 23:08:11 user-Inspiron-5567 systemd[1]: vfy-qualification-network-reconnect.service: Failed to open /run/systemd/transient/vfy-qualification-network-reconnect.service: No such file or directory",
+  "local_samples": [
+    "{\"utc\": \"2026-11-04T17:38:02.528991+00:00\", \"http\": \"200\", \"exit\": 0}",
+    "{\"utc\": \"2026-11-04T17:38:04.539081+00:00\", \"http\": \"200\", \"exit\": 0}",
+    "{\"utc\": \"2026-11-04T17:38:06.549147+00:00\", \"http\": \"200\", \"exit\": 0}",
+    "{\"utc\": \"2026-11-04T17:38:08.559402+00:00\", \"http\": \"200\", \"exit\": 0}",
+    "{\"utc\": \"2026-11-04T17:38:10.569240+00:00\", \"http\": \"200\", \"exit\": 0}"
+  ]
+}

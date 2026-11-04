@@ -1,0 +1,7 @@
+{
+  "case": "public-guest-idle-sleep-and-wake",
+  "passed": true,
+  "idle_wait_seconds": 326.39,
+  "wake_to_200_seconds": 8.42,
+  "unauthenticated_request_did_not_wake": true
+}

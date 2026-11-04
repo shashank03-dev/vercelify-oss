@@ -1,0 +1,11 @@
+{
+  "boot": "846ad12e-60b0-4496-ac4e-6372c9b7290a",
+  "ac": "1",
+  "containers": "db2a0f0262b9 vfy-gw-pr1-re0wxze2 Up 2 hours\n2202ac6f511a vfy-db-gwdb Up 2 hours\ndf341f080ef2 vfy-gw-2cv2ryfw Up 2 hours\nc036049dc516 vercelify-proxy Up 2 hours\n4a2a21ec2fc1 voxbento-mediamtx-1 Up 2 hours\n",
+  "services": {
+    "vercelify-agent": "active",
+    "vercelify-mesh": "active",
+    "vercelify-power-guard": "active"
+  },
+  "database": "/var/run/postgresql:5432 - accepting connections"
+}

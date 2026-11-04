@@ -1,0 +1,15 @@
+{
+  "production": {
+    "first_failed_probe": "2026-11-04T17:37:18.642697+00:00",
+    "first_recovery_probe": "2026-11-04T17:37:58.860886+00:00",
+    "approx_probe_interval_outage_seconds": 40.22,
+    "last_http": "200"
+  },
+  "preview": {
+    "first_failed_probe": "2026-11-04T17:37:18.642697+00:00",
+    "first_recovery_probe": "2026-11-04T17:37:58.860886+00:00",
+    "approx_probe_interval_outage_seconds": 40.22,
+    "last_http": "200"
+  },
+  "scope": "one host Wi-Fi disconnect with local 20-second recovery timer; no confirmed hotspot/router power cycle"
+}

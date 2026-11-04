@@ -1,0 +1,1098 @@
+{
+  "kind": "real physical telemetry; bounded quarter-core load, not policy-threshold qualification",
+  "result": "completed",
+  "samples": [
+    {
+      "utc": "2026-11-04T17:40:31.361160+00:00",
+      "phase": "baseline",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 58.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:40:32.370471+00:00",
+      "phase": "baseline",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:40:33.379733+00:00",
+      "phase": "baseline",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:40:34.387923+00:00",
+      "phase": "baseline",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:40:35.398736+00:00",
+      "phase": "baseline",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:40:36.407350+00:00",
+      "phase": "baseline",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:40:37.416806+00:00",
+      "phase": "baseline",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:40:38.427458+00:00",
+      "phase": "baseline",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:40:39.446378+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 45.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 56.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:40.455630+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 45.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 48.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:41.463269+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 44.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 49.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:42.471676+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 57.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:43.480510+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 51.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 59.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:44.488534+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 48.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 51.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:45.497749+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 48.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:46.506963+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:47.516870+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 44.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 45.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:48.527478+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 45.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 50.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:49.536957+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 48.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 45.0,
+        "thermal_zone4": 37.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:50.546966+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 45.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 47.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:51.556644+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 49.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:52.566001+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 45.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:53.574898+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 58.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:54.584181+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 48.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 47.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:55.592789+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 46.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 55.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:56.602173+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 37.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 58.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:57.612396+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 56.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:58.622411+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 49.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 49.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:40:59.631916+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 51.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 47.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:41:00.642041+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 48.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 46.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:41:01.651048+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 46.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:41:02.661173+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 48.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 47.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:41:03.669892+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 48.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 46.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:41:04.679269+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 48.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 45.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:41:05.689178+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 49.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:41:06.698239+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 45.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:41:07.708308+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 46.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 52.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:41:08.717879+00:00",
+      "phase": "load",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 57.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": true
+    },
+    {
+      "utc": "2026-11-04T17:41:09.728032+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 50.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:10.738572+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 43.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:11.748535+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 56.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:12.760763+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 43.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:13.770203+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:14.779202+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 43.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 58.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:15.790038+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 45.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:16.800235+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:17.810428+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:18.819999+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:19.828841+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 54.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:20.840134+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 44.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 42.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:21.849228+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 43.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 42.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:22.859146+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 42.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:23.869317+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 54.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:24.879340+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 44.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 42.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:25.890595+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 49.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:26.900634+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:27.910210+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:28.920424+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 44.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:29.930745+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 65.0,
+        "thermal_zone4": 38.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:30.939356+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 63.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 61.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:31.949223+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 61.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 60.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:32.959293+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 61.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 60.0,
+        "thermal_zone4": 39.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:33.968726+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 61.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 60.0,
+        "thermal_zone4": 39.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:34.979482+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 61.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 46.0,
+        "thermal_zone4": 39.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:35.989155+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 44.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 47.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:37.000758+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 45.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:38.010318+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 45.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:39.019853+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:40.030758+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:41.041833+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 43.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 55.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:42.054374+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 43.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 45.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:43.064150+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:44.074204+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 42.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:45.084956+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 44.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 42.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:46.095449+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:47.104621+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 47.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:48.115505+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 42.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 43.0,
+        "thermal_zone4": 39.0
+      },
+      "worker_running": false
+    },
+    {
+      "utc": "2026-11-04T17:41:49.127594+00:00",
+      "phase": "cooldown",
+      "temperatures_c": {
+        "thermal_zone2": 20.0,
+        "thermal_zone0": 25.0,
+        "thermal_zone5": 41.05,
+        "thermal_zone3": 38.05,
+        "thermal_zone1": 37.05,
+        "thermal_zone6": 42.0,
+        "thermal_zone4": 38.5
+      },
+      "worker_running": false
+    }
+  ]
+}

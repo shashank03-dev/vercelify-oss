@@ -1,0 +1,28 @@
+[
+  {
+    "case": "external-unauthenticated-assets-routes-and-forged-control-denied",
+    "passed": true
+  },
+  {
+    "case": "external-redemption-cookie-policy-stream-assets-and-internal-credential-stripping",
+    "passed": true
+  },
+  {
+    "case": "external-live-WebSocket-revocation",
+    "passed": true,
+    "socket_ms": 4863
+  },
+  {
+    "case": "external-live-WebSocket-expiry",
+    "passed": true,
+    "socket_ms": 4745
+  },
+  {
+    "case": "external-generation-replacement-revokes-old-session",
+    "passed": true
+  },
+  {
+    "case": "external-PR-close-revokes-session",
+    "passed": true
+  }
+]

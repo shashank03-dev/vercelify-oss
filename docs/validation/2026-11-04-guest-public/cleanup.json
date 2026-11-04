@@ -1,0 +1,9 @@
+{
+  "guest_dns_records_removed": 17,
+  "original_dns_unchanged": true,
+  "test_tunnel_removed": true,
+  "connector_and_forward_stopped": true,
+  "owned_guest_apps_and_proxy_removed": true,
+  "owned_fixture_secret_state_removed": true,
+  "owned_daemon_stopped": true
+}
