@@ -231,6 +231,8 @@ container_slice() {
   write_file "$SYSTEMD_DIR/vercelify.slice" 0644 <<EOF || true
 [Unit]
 Description=Vercelify containers (memory-capped so the host stays reachable)
+# Reverse stop ordering: keep container cgroups alive until Docker is stopped.
+Before=docker.service
 
 [Slice]
 MemoryAccounting=yes

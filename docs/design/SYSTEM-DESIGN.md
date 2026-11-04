@@ -1384,6 +1384,12 @@ the user chose to deploy.
 
 ### 15.1 Opt-in battery conservation (competitive roadmap M8)
 
+The generated workload `vercelify.slice` orders itself before `docker.service`.
+Systemd reverses that relationship during shutdown, keeping the workload slice
+alive until Docker has stopped; it must not tear down container cgroups while
+the daemon can still attempt restart-policy recovery. This ordering does not
+change application stop intent or container restart policies.
+
 The existing independent shell guard sources `host/lib/battery-policy.sh`; the
 installer places both files together. `BATTERY_POLICY_ENABLED=0` preserves existing
 behavior. Opt-in stages at 50/40/30/20 percent hold builds, pause owned build work,

@@ -1,0 +1,1 @@
+PASS: workload slice stays active until daemon shutdown completes
