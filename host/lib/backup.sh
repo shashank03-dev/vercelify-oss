@@ -265,22 +265,72 @@ backup_list() {
 owned_volume() { [[ $1 == vfy-* || $1 == vfyv2-* ]]; }
 
 # Running containers that write what an instance restore replaces: ours, and
-# any other one using a volume being restored (ALL=1: every container but the
-# proxy and the registry).
-restore_writers() { # ALL VOLUME...
+# any other one using a volume being restored: a Docker volume by name, or a
+# storage-disk directory (an absolute path) bind-mounted from it or below it.
+# ALL=1: every container but the proxy and the registry.
+restore_writers() { # ALL VOLUME|PATH...
   local all=$1 v; shift
-  local output names=''
+  local output names='' paths=() ids src src_list name
   if (( all )); then
     output=$(docker ps --format '{{.Names}}') || return 1
     names=$(printf '%s\n' "$output" | grep -vx -e vercelify-proxy -e vfy-registry || true)
   else
     names=$(docker ps --filter label=vercelify.managed=platform --format '{{.Names}}') || return 1
     for v in "$@"; do
+      if [[ $v == /* ]]; then paths+=("$v"); continue; fi
       output=$(docker ps --filter "volume=$v" --format '{{.Names}}') || return 1
       names+=$'\n'"$output"
     done
+    # `--filter volume=` matches names and destinations, not bind sources.
+    if (( ${#paths[@]} )); then
+      ids=$(docker ps -q) || return 1
+      if [[ -n "$ids" ]]; then
+        # shellcheck disable=SC2086
+        output=$(docker inspect -f '{{.Name}}{{range .Mounts}} {{.Source}}{{end}}' $ids) || return 1
+        while read -r name src_list; do
+          for src in $src_list; do
+            for v in "${paths[@]}"; do
+              [[ $src == "$v" || $src == "$v"/* ]] && names+=$'\n'"${name#/}"
+            done
+          done
+        done <<<"$output"
+      fi
+    fi
   fi
   printf '%s\n' "$names" | sed '/^$/d' | sort -u
+}
+
+# Whether the filesystems holding the live volumes have room for the staged
+# copies (each restored tree is copied beside the live one before the switch,
+# and the live one is kept). Checked before anything is stopped.
+restore_space_ok() { # SNAPSHOT_ROOT VOLUME... -- STORAGE_NAME...
+  local root=$1 kb fs; shift
+  local -A need=() where=()
+  local storage=0 name src dst
+  for name in "$@"; do
+    if [[ $name == -- ]]; then storage=1; continue; fi
+    if (( storage )); then
+      src="$root$STORAGE_MOUNT/volumes/$name"; dst="$STORAGE_MOUNT/volumes"
+    else
+      src="$root$DOCKER_VOLUMES_DIR/$name/_data"; dst="$DOCKER_VOLUMES_DIR"
+    fi
+    [[ -d "$dst" ]] || dst=$(dirname "$dst")
+    kb=$(du -sk "$src" 2>/dev/null | awk '{print $1}')
+    fs=$(df -Pk "$dst" 2>/dev/null | awk 'NR==2 {print $6}')
+    [[ -n "$kb" && -n "$fs" ]] || continue
+    need[$fs]=$(( ${need[$fs]:-0} + kb ))
+    where[$fs]=$dst
+  done
+  local ok=0 avail
+  for fs in "${!need[@]}"; do
+    avail=$(df -Pk "${where[$fs]}" | awk 'NR==2 {print $4}')
+    # 5% and 256 MB of headroom: the disk must not fill while apps are down.
+    if (( avail < need[$fs] + need[$fs] / 20 + 262144 )); then
+      err "not enough free space on $fs: the restore needs about $(( need[$fs] / 1024 + 256 )) MB, $(( avail / 1024 )) MB free"
+      ok=1
+    fi
+  done
+  return "$ok"
 }
 
 # Replace LIVE with exactly SNAPSHOT's tree: copied beside it first, then
@@ -343,6 +393,9 @@ backup_restore() {
     [[ -d "$d" ]] && hdd+=("$(basename "$d")")
   done
   info "volumes to restore: ${vols[*]:-none}${hdd[*]:+; storage disk: ${hdd[*]}}"
+  restore_space_ok "$t" "${vols[@]}" -- "${hdd[@]}" || die "nothing was stopped or changed: free some space, or restore to a directory with --target (files are in $t)"
+  local hdd_paths=()
+  for name in "${hdd[@]}"; do hdd_paths+=("$STORAGE_MOUNT/volumes/$name"); done
   (( ${#skipped[@]} )) && warn "not Vercelify's, left as they are: ${skipped[*]} (--all-volumes restores them too)"
   confirm "Replace this server's apps, settings, secrets and app data with the backup?" n || die "cancelled (files stay in $t)"
   # The engine stops first: it would put back what it last knew.
@@ -350,14 +403,14 @@ backup_restore() {
   # Every writer of what is replaced stops, and is seen stopped, before any
   # live file changes: a database must not see its files change under it.
   local writers=() left=() observed
-  if ! observed=$(restore_writers "$all" "${vols[@]}"); then
+  if ! observed=$(restore_writers "$all" "${vols[@]}" "${hdd_paths[@]}"); then
     run_cmd systemctl start vercelify-agent || true
     die "could not inspect restore writers; nothing was changed (files are in $t)"
   fi
   [[ -z "$observed" ]] || mapfile -t writers <<<"$observed"
   if (( ${#writers[@]} )); then
     run_cmd docker stop "${writers[@]}" >/dev/null || warn "some containers did not stop"
-    if ! observed=$(restore_writers "$all" "${vols[@]}"); then
+    if ! observed=$(restore_writers "$all" "${vols[@]}" "${hdd_paths[@]}"); then
       run_cmd docker start "${writers[@]}" >/dev/null || true
       run_cmd systemctl start vercelify-agent || true
       die "could not verify stopped restore writers; nothing was changed (files are in $t)"

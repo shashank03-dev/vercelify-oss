@@ -91,3 +91,19 @@ healthy battery, and physically reached thermal thresholds.
 Evidence: before.json, recovery.json, battery.jsonl, thermal.jsonl,
 power-external.jsonl, thermal-external.jsonl, shutdown-journal.txt,
 boot-journal.txt, thermal.py, batt.py and the operator-confirmation timestamps.
+
+## Follow-up fixes (same day)
+
+- Finding 1: power-guard now checks every 5 s on battery, shuts down on a single
+  reading at ≤ 5%, and on a battery under 30% of its design charge shuts down after
+  120 s on battery (this laptop reads `battery_health_pct=2`). See docs/POWER-RESILIENCE.md.
+- Finding 3: a reconcile refused only for a missing or stale capacity sample retries
+  after 3 s and asks the fleet task to measure at once.
+- The post-boot mesh outage (../2026-11-04-ac-return/) had three causes, all fixed:
+  overlay (Tailscale) addresses announced as endpoints, overlay addresses learned
+  and passed on as observed, and enrollment-time coordinator endpoints merged into
+  the live map forever. After the update the registry lists only LAN and public
+  endpoints, and the Mac's path to the laptop is LAN (13 ms). That needed the new
+  Mac binary to be granted macOS Local Network permission: a rebuilt, ad-hoc-signed
+  binary loses it, and without it the Mac can reach the laptop only through the relay.
+  40/40 external probes succeeded afterwards.

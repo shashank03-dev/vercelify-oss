@@ -22,8 +22,10 @@ STUB
 #!/usr/bin/env bash
 echo "docker $*" >>"$CALLS"
 case "$1" in
-  inspect) exit 0 ;;
+  inspect) [[ "$2" == -f ]] && printf '/media-box %s\n/web %s\n' "$(cat "$CALLS.bind" 2>/dev/null)" /srv/web
+           exit 0 ;;
   ps) [[ -e "$CALLS.inspect-fails" ]] && exit 1
+      if [[ "$*" == 'ps -q' ]]; then [[ -e "$CALLS.stopped" ]] || printf 'x9\nb2\n'; exit 0; fi
       if [[ "$*" == *'label=vercelify.managed=platform'* ]]; then
         [[ -e "$CALLS.stopped" ]] || printf 'pg-main\nweb\n'
       elif [[ "$*" == *'volume='* ]]; then :
@@ -186,6 +188,29 @@ instance_snapshot() {
   [ "$status" -eq 0 ]
   [ "$(cat "$T/volumes/other-db/_data/table")" = theirs-then ]
   grep -q 'docker stop pg-main unrelated-db web' "$CALLS"
+}
+
+@test "--instance: not enough disk for the staged copies stops before anything is touched" {
+  instance_snapshot
+  printf '#!/usr/bin/env bash\necho "Filesystem 1024-blocks Used Available Capacity Mounted"\necho "/dev/x 100 99 1 99%% /"\n' >"$T/bin/df"
+  chmod +x "$T/bin/df"
+  ASSUME_YES=1 run "$CLI" backup restore latest --instance --target "$T/out"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"not enough free space"*"nothing was stopped or changed"* ]]
+  run ! grep -q 'systemctl stop vercelify-agent' "$CALLS"
+  run ! grep -q 'docker stop' "$CALLS"
+  [ "$(cat "$T/volumes/vfy-db-pg-data/_data/table")" = live ]
+}
+
+@test "--instance: a container bind-mounting a restored storage-disk volume is stopped too" {
+  instance_snapshot
+  mkdir -p "$T/out$T/storage/volumes/app"
+  echo snapshot >"$T/out$T/storage/volumes/app/file"
+  echo "$T/storage/volumes/app/media" >"$CALLS.bind"
+  ASSUME_YES=1 run "$CLI" backup restore latest --instance --target "$T/out"
+  [ "$status" -eq 0 ]
+  grep -q 'docker stop media-box pg-main web' "$CALLS"
+  [ "$(cat "$T/storage/volumes/app/file")" = snapshot ]
 }
 
 @test "--instance (audit A08): paired devices' tokens come back; this machine's settings stay" {

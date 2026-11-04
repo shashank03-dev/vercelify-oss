@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # vercelify power-guard — keeps a laptop-hosted PaaS safe.
 #
-#   * AC unplugged and battery <= BATTERY_SHUTDOWN_PCT (2 readings in a row):
-#     stop app containers, then the core (proxy, registry), sync, power off. Containers
-#     stopped this way are remembered and started again on the next boot.
+#   * AC unplugged and battery <= BATTERY_SHUTDOWN_PCT (2 readings in a row, or
+#     one at <= BATTERY_CRITICAL_PCT): stop app containers, then the core (proxy,
+#     registry), sync, power off. Containers stopped this way are remembered and
+#     started again on the next boot. On battery the guard checks every
+#     BATTERY_INTERVAL seconds instead of INTERVAL.
+#   * A worn battery (full charge < BATTERY_WORN_HEALTH_PCT of its design) reports
+#     a percentage that can collapse between readings, so the guard also shuts
+#     down after BATTERY_WORN_RUNTIME_S seconds on battery.
 #   * CPU >= THERMAL_PAUSE_C: pause build containers and the AI model server,
 #     and cap app containers' CPU so they keep serving, more slowly.
 #   * CPU >= THERMAL_FREEZE_C: also freeze app containers. Databases and the
@@ -26,6 +31,9 @@ LOCAL_CONFIG_FILE=${POWER_GUARD_LOCAL_CONFIG:-/var/lib/vercelify/power-guard.loc
 
 : "${BATTERY_SHUTDOWN_PCT:=15}"
 : "${BATTERY_WARN_PCT:=30}"
+: "${BATTERY_CRITICAL_PCT:=5}"
+: "${BATTERY_WORN_HEALTH_PCT:=30}"
+: "${BATTERY_WORN_RUNTIME_S:=120}"
 : "${THERMAL_PAUSE_C:=92}"
 : "${THERMAL_RESUME_C:=80}"
 : "${THERMAL_SHUTDOWN_C:=98}"
@@ -33,6 +41,7 @@ LOCAL_CONFIG_FILE=${POWER_GUARD_LOCAL_CONFIG:-/var/lib/vercelify/power-guard.loc
 # Fraction of the CPUs each app container may use while hot (percent).
 : "${THERMAL_CPU_CAP_PCT:=50}"
 : "${INTERVAL:=20}"
+: "${BATTERY_INTERVAL:=5}"
 : "${CONTAINER_STOP_TIMEOUT:=60}"
 : "${CHARGE_STOP_THRESHOLD:=}"
 # The core: never frozen, stopped last.
@@ -69,10 +78,10 @@ notify() {
 
 # --- readings ---------------------------------------------------------------
 
-# Prints "<ac> <battery_present> <min_capacity> <discharging>"
-#   ac: 1 | 0 | none
+# Prints "<ac> <battery_present> <min_capacity> <discharging> <min_health>"
+#   ac: 1 | 0 | none; health: full charge as % of design, -1 if unknown
 read_power() {
-  local ac=none present=0 min=101 discharging=0 dev type scope online cap status
+  local ac=none present=0 min=101 discharging=0 health=101 dev type scope online cap status h
   for dev in "$POWER_SUPPLY_DIR"/*; do
     [[ -e "$dev/type" ]] || continue
     type=$(<"$dev/type")
@@ -90,11 +99,27 @@ read_power() {
         cap=$(cat "$dev/capacity" 2>/dev/null || echo 101)
         [[ "$cap" =~ ^[0-9]+$ ]] && (( cap < min )) && min=$cap
         status=$(cat "$dev/status" 2>/dev/null || true)
-        [[ "$status" == Discharging ]] && discharging=1 ;;
+        [[ "$status" == Discharging ]] && discharging=1
+        h=$(battery_health "$dev")
+        (( h >= 0 && h < health )) && health=$h ;;
     esac
   done
   (( min == 101 )) && min=-1
-  echo "$ac $present $min $discharging"
+  (( health == 101 )) && health=-1
+  echo "$ac $present $min $discharging $health"
+}
+
+# Full charge as a whole % of design capacity (charge_* or energy_*), or -1.
+battery_health() {
+  local dev=$1 kind full design
+  for kind in charge energy; do
+    full=$(cat "$dev/${kind}_full" 2>/dev/null || true)
+    design=$(cat "$dev/${kind}_full_design" 2>/dev/null || true)
+    if [[ "$full" =~ ^[0-9]+$ && "$design" =~ ^[0-9]+$ ]] && (( design > 0 )); then
+      echo $(( full * 100 / design )); return
+    fi
+  done
+  echo -1
 }
 
 # Highest plausible temperature in whole °C, or -1 if no sensors.
@@ -116,6 +141,7 @@ read_max_temp() {
 LOW_COUNT=0
 HOT_COUNT=0
 CURRENT_STATE=ok
+BATTERY_SINCE=0
 
 load_counters() {
   # shellcheck disable=SC1090
@@ -125,7 +151,7 @@ load_counters() {
 
 save_counters() {
   mkdir -p "$STATE_DIR"
-  printf 'LOW_COUNT=%d\nHOT_COUNT=%d\nCURRENT_STATE=%s\n' "$LOW_COUNT" "$HOT_COUNT" "$CURRENT_STATE" >"$COUNTERS_FILE"
+  printf 'LOW_COUNT=%d\nHOT_COUNT=%d\nCURRENT_STATE=%s\nBATTERY_SINCE=%d\n' "$LOW_COUNT" "$HOT_COUNT" "$CURRENT_STATE" "$BATTERY_SINCE" >"$COUNTERS_FILE"
 }
 
 json_escape() { local s=${1//\\/\\\\}; s=${s//\"/\\\"}; printf '%s' "$s"; }
@@ -257,8 +283,8 @@ thermal_resume() {
 # Start containers that power-guard stopped before the last shutdown.
 restore_after_boot() {
   [[ -s "$RESTORE_FILE" ]] || return 0
-  local ac present cap _d
-  read -r ac present cap _d < <(read_power)
+  local ac present cap _d _h
+  read -r ac present cap _d _h < <(read_power)
   if [[ "$present" == 1 && "$ac" != 1 ]] && (( cap >= 0 && cap <= BATTERY_SHUTDOWN_PCT + 10 )); then
     log "battery still low (${cap}%), not restoring containers yet"
     return 0
@@ -293,23 +319,34 @@ apply_charge_threshold() {
 # --- main loop --------------------------------------------------------------
 
 tick() {
-  local ac present cap discharging temp on_battery=0 reasons=()
-  read -r ac present cap discharging < <(read_power)
+  local ac present cap discharging health temp on_battery=0 reasons=() now worn=0
+  read -r ac present cap discharging health < <(read_power)
   temp=$(read_max_temp)
+  now=$(date +%s)
 
   if [[ "$present" == 1 ]]; then
     if [[ "$ac" == 0 ]] || [[ "$ac" == none && "$discharging" == 1 ]]; then on_battery=1; fi
   fi
+  (( health >= 0 && health < BATTERY_WORN_HEALTH_PCT && BATTERY_WORN_RUNTIME_S > 0 )) && worn=1
 
   # Battery
+  if (( on_battery )); then
+    (( BATTERY_SINCE > 0 )) || BATTERY_SINCE=$now
+  else
+    BATTERY_SINCE=0
+  fi
   if (( on_battery )) && (( cap >= 0 && cap <= BATTERY_SHUTDOWN_PCT )); then
     LOW_COUNT=$((LOW_COUNT + 1))
-    if (( LOW_COUNT >= 2 )); then
+    if (( LOW_COUNT >= 2 || cap <= BATTERY_CRITICAL_PCT )); then
       graceful_shutdown "on battery at ${cap}% (<= ${BATTERY_SHUTDOWN_PCT}%)"
       return 0
     fi
   else
     LOW_COUNT=0
+  fi
+  if (( on_battery && worn && now - BATTERY_SINCE >= BATTERY_WORN_RUNTIME_S )); then
+    graceful_shutdown "worn battery (${health}% of design) on battery for $(( now - BATTERY_SINCE ))s"
+    return 0
   fi
 
   # Thermal
@@ -352,7 +389,9 @@ tick() {
   fi
   [[ -s "$RESTORE_FILE" ]] && restore_after_boot
   if (( on_battery )); then
-    if (( cap >= 0 && cap <= BATTERY_WARN_PCT )); then
+    if (( worn )); then
+      write_state warning "worn battery (${health}% of design) at ${cap}% — shutdown within $(( BATTERY_WORN_RUNTIME_S - (now - BATTERY_SINCE) ))s"
+    elif (( cap >= 0 && cap <= BATTERY_WARN_PCT )); then
       write_state warning "on battery at ${cap}% — shutdown at ${BATTERY_SHUTDOWN_PCT}%"
     else
       write_state warning "running on battery (${cap}%)"
@@ -367,10 +406,10 @@ tick() {
 }
 
 status() {
-  local ac present cap discharging
-  read -r ac present cap discharging < <(read_power)
-  printf 'ac_online=%s battery_present=%s battery_pct=%s discharging=%s max_temp_c=%s\n' \
-    "$ac" "$present" "$cap" "$discharging" "$(read_max_temp)"
+  local ac present cap discharging health
+  read -r ac present cap discharging health < <(read_power)
+  printf 'ac_online=%s battery_present=%s battery_pct=%s discharging=%s battery_health_pct=%s max_temp_c=%s\n' \
+    "$ac" "$present" "$cap" "$discharging" "$health" "$(read_max_temp)"
   [[ -r "$STATE_FILE" ]] && cat "$STATE_FILE"
   return 0
 }
@@ -387,11 +426,11 @@ main() {
   load_counters
   apply_charge_threshold
   restore_after_boot
-  log "started (shutdown<=${BATTERY_SHUTDOWN_PCT}% pause>=${THERMAL_PAUSE_C}°C every ${INTERVAL}s)"
+  log "started (shutdown<=${BATTERY_SHUTDOWN_PCT}% pause>=${THERMAL_PAUSE_C}°C every ${INTERVAL}s, ${BATTERY_INTERVAL}s on battery)"
   trap 'log "stopping"; [[ -s "$PAUSED_FILE" || -s "$CAPPED_FILE" ]] && thermal_resume; exit 0' TERM INT
   while :; do
     tick
-    sleep "$INTERVAL" &
+    if (( BATTERY_SINCE > 0 )); then sleep "$BATTERY_INTERVAL" & else sleep "$INTERVAL" & fi
     wait $!
   done
 }

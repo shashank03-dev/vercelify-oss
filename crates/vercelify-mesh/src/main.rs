@@ -209,7 +209,7 @@ fn main() {
         Cmd::Join { token, name, port } => {
             let name = name.unwrap_or_else(hostname);
             // `--port 0` (a device on a random port): `up` reports its addresses.
-            let local: Vec<String> = vercelify_mesh::net::local_ipv4s(None)
+            let local: Vec<String> = vercelify_mesh::net::endpoint_ipv4s(None)
                 .into_iter()
                 .filter(|_| port != 0)
                 .map(|ip| format!("{ip}:{port}"))
@@ -340,7 +340,7 @@ fn main() {
             if join {
                 let token = mesh_join_of(&full).unwrap_or_else(|| fail("that server isn't on the mesh (a vfy1. code)"));
                 let name = name.unwrap_or_else(hostname);
-                let local: Vec<String> = vercelify_mesh::net::local_ipv4s(None)
+                let local: Vec<String> = vercelify_mesh::net::endpoint_ipv4s(None)
                     .into_iter()
                     .filter(|_| port != 0)
                     .map(|ip| format!("{ip}:{port}"))

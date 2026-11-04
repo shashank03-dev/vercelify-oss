@@ -5,9 +5,31 @@ use std::net::Ipv4Addr;
 
 /// The node's own IPv4 addresses on other interfaces: what peers on the
 /// same networks can reach it at. Loopback, link-local, the mesh itself and
-/// container bridges are left out.
-#[cfg(windows)]
+/// container bridges are left out. Addresses on another VPN's interface
+/// (Tailscale, WireGuard, ZeroTier) come last: they are kept for join tokens,
+/// where they may be the only way in, but never announced as WireGuard
+/// endpoints (see [`endpoint_ipv4s`]).
 pub fn local_ipv4s(skip_prefix: Option<Ipv4Addr>) -> Vec<Ipv4Addr> {
+    let (mut own, overlay): (Vec<_>, Vec<_>) = interface_ipv4s(skip_prefix).into_iter().partition(|(_, o)| !o);
+    own.extend(overlay);
+    own.into_iter().map(|(ip, _)| ip).collect()
+}
+
+/// The addresses announced as this node's WireGuard endpoints: the
+/// interface addresses without another VPN's. A mesh path through another
+/// overlay stalls whenever that overlay changes its own path (Tailscale
+/// moving between its relay and a direct route did for 40 s), while the LAN
+/// address underneath reaches the same peers directly.
+pub fn endpoint_ipv4s(skip_prefix: Option<Ipv4Addr>) -> Vec<Ipv4Addr> {
+    interface_ipv4s(skip_prefix)
+        .into_iter()
+        .filter(|(_, overlay)| !overlay)
+        .map(|(ip, _)| ip)
+        .collect()
+}
+
+#[cfg(windows)]
+fn interface_ipv4s(skip_prefix: Option<Ipv4Addr>) -> Vec<(Ipv4Addr, bool)> {
     // The address of the interface the default route uses: a UDP socket
     // "connected" to a public address learns it without sending anything.
     // Enough for LAN endpoints; peers elsewhere are found by STUN.
@@ -22,11 +44,12 @@ pub fn local_ipv4s(skip_prefix: Option<Ipv4Addr>) -> Vec<Ipv4Addr> {
     ip.into_iter()
         .filter(|ip| !(ip.is_loopback() || ip.is_link_local() || ip.is_unspecified()))
         .filter(|ip| skip_prefix.is_none_or(|p| p.octets()[..2] != ip.octets()[..2]))
+        .map(|ip| (ip, false))
         .collect()
 }
 
 #[cfg(unix)]
-pub fn local_ipv4s(skip_prefix: Option<Ipv4Addr>) -> Vec<Ipv4Addr> {
+fn interface_ipv4s(skip_prefix: Option<Ipv4Addr>) -> Vec<(Ipv4Addr, bool)> {
     let mut out = vec![];
     let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
     if unsafe { libc::getifaddrs(&mut head) } != 0 {
@@ -55,16 +78,23 @@ pub fn local_ipv4s(skip_prefix: Option<Ipv4Addr>) -> Vec<Ipv4Addr> {
                 continue;
             }
         }
-        if !out.contains(&ip) {
-            out.push(ip);
+        if !out.iter().any(|(o, _)| *o == ip) {
+            out.push((ip, overlay_interface(&name)));
         }
     }
     unsafe { libc::freeifaddrs(head) };
     out
 }
 
-/// Interfaces worth announcing: not loopback, not ours, not Docker's or
-/// another VPN's.
+/// Another VPN's interface: Tailscale (`tailscale0`, `utun*` on macOS),
+/// WireGuard (`wg*`), ZeroTier (`zt*`) and other tunnels.
+pub fn overlay_interface(name: &str) -> bool {
+    ["tailscale", "utun", "wg", "zt", "tun", "nordlynx"]
+        .iter()
+        .any(|p| name.starts_with(p))
+}
+
+/// Interfaces with reachable addresses: not loopback, not ours, not Docker's.
 pub fn usable_interface(name: &str) -> bool {
     !(name == "lo"
         || name.starts_with("vfy")
@@ -87,5 +117,16 @@ mod tests {
             assert!(!usable_interface(n), "{n}");
         }
         assert!(local_ipv4s(None).iter().all(|ip| !ip.is_loopback()));
+        for n in ["tailscale0", "utun4", "wg0", "ztabcdef", "tun0", "nordlynx"] {
+            assert!(overlay_interface(n) && usable_interface(n), "{n}");
+        }
+        for n in ["eth0", "wlp1s0", "en0", "enp3s0"] {
+            assert!(!overlay_interface(n), "{n}");
+        }
+        let all = local_ipv4s(None);
+        let announced = endpoint_ipv4s(None);
+        assert!(announced.iter().all(|ip| all.contains(ip)));
+        // Own interfaces first: the announced addresses lead the full list.
+        assert_eq!(&all[..announced.len()], &announced[..]);
     }
 }

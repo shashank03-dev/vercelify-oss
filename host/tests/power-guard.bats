@@ -33,6 +33,53 @@ teardown() { teardown_sandbox; }
   [ "$(state)" = shutting_down ]
 }
 
+@test "critical battery shuts down on the first reading" {
+  laptop 0 4 Discharging
+  "$PG" --once
+  grep -q POWEROFF "$CALLS"
+  [ "$(state)" = shutting_down ]
+}
+
+@test "worn battery: shuts down after its runtime on battery, whatever the percentage" {
+  laptop 0 90 Discharging
+  set_attr "$POWER_SUPPLY_DIR/BAT0/charge_full" 130000
+  set_attr "$POWER_SUPPLY_DIR/BAT0/charge_full_design" 3684000
+  "$PG" --once
+  run ! grep -q POWEROFF "$CALLS"
+  grep -q 'worn battery (3% of design) at 90%' "$STATE_DIR/power-guard.state"
+  sed -i.bak 's/^BATTERY_SINCE=.*/BATTERY_SINCE=1/' "$STATE_DIR/power-guard.counters"
+  "$PG" --once
+  grep -q POWEROFF "$CALLS"
+  grep -q 'worn battery (3% of design) on battery for' "$STATE_DIR/power-guard.state"
+}
+
+@test "worn battery: AC back resets the runtime; healthy or unknown health never uses it" {
+  laptop 0 90 Discharging
+  set_attr "$POWER_SUPPLY_DIR/BAT0/energy_full" 10000
+  set_attr "$POWER_SUPPLY_DIR/BAT0/energy_full_design" 50000
+  "$PG" --once
+  laptop 1 90 Charging; "$PG" --once
+  grep -q '^BATTERY_SINCE=0$' "$STATE_DIR/power-guard.counters"
+  laptop 0 90 Discharging; "$PG" --once
+  run ! grep -q POWEROFF "$CALLS"
+  set_attr "$POWER_SUPPLY_DIR/BAT0/energy_full" 45000
+  sed -i.bak 's/^BATTERY_SINCE=.*/BATTERY_SINCE=1/' "$STATE_DIR/power-guard.counters"
+  "$PG" --once
+  run ! grep -q POWEROFF "$CALLS"
+  grep -q 'running on battery (90%)' "$STATE_DIR/power-guard.state"
+}
+
+@test "worn-battery runtime of 0 disables it" {
+  laptop 0 90 Discharging
+  set_attr "$POWER_SUPPLY_DIR/BAT0/charge_full" 1
+  set_attr "$POWER_SUPPLY_DIR/BAT0/charge_full_design" 100
+  echo 'BATTERY_WORN_RUNTIME_S=0' >>"$POWER_GUARD_CONFIG"
+  "$PG" --once
+  sed -i.bak 's/^BATTERY_SINCE=.*/BATTERY_SINCE=1/' "$STATE_DIR/power-guard.counters"
+  "$PG" --once
+  run ! grep -q POWEROFF "$CALLS"
+}
+
 @test "shutdown stops apps before the core (proxy, registry) and remembers them" {
   laptop 0 10 Discharging
   "$PG" --once; "$PG" --once

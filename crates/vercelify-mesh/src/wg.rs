@@ -104,10 +104,28 @@ pub enum Control {
     /// This node's own addresses (`ip:port` on its interfaces), sent to
     /// peers in `call_me`.
     SetLocal(Vec<SocketAddr>),
+    /// This node's addresses on another VPN's interface (Tailscale…): a peer
+    /// reaching it through that overlay sees it there, and announcing what it
+    /// saw would nest the mesh inside the overlay again.
+    SetOverlay(Vec<std::net::IpAddr>),
     /// STUN servers to learn this node's public address from.
     SetStun(Vec<SocketAddr>),
     /// The addresses peers and STUN servers saw this node at.
     Observed(oneshot::Sender<Vec<SocketAddr>>),
+}
+
+/// Whether `a` is on the same overlay network as one of this node's own VPN
+/// addresses (Tailscale's 100.64.0.0/10, else the same /24 or /64): a path
+/// through another VPN is never learned, only one that was announced.
+fn on_overlay(overlay: &[std::net::IpAddr], a: &SocketAddr) -> bool {
+    use std::net::IpAddr;
+    let cgnat = |ip: &std::net::Ipv4Addr| ip.octets()[0] == 100 && (ip.octets()[1] & 0xc0) == 64;
+    overlay.iter().any(|o| match (o, a.ip()) {
+        (IpAddr::V4(o), IpAddr::V4(ip)) if cgnat(o) => cgnat(&ip),
+        (IpAddr::V4(o), IpAddr::V4(ip)) => o.octets()[..3] == ip.octets()[..3],
+        (IpAddr::V6(o), IpAddr::V6(ip)) => o.segments()[..4] == ip.segments()[..4],
+        _ => false,
+    })
 }
 
 /// The engine's side of a relay connection (`relay_client.rs`).
@@ -302,6 +320,7 @@ pub struct Engine<D: Device> {
     /// The relay as the last timer tick saw it.
     relay_was_up: bool,
     local: Vec<SocketAddr>,
+    overlay: Vec<std::net::IpAddr>,
     stun_servers: Vec<SocketAddr>,
     stun_pending: Vec<(stun::TxId, Instant)>,
     next_stun: Instant,
@@ -333,6 +352,7 @@ impl<D: Device> Engine<D> {
             relay_up: Arc::new(AtomicBool::new(false)),
             relay_was_up: false,
             local: vec![],
+            overlay: vec![],
             stun_servers: vec![],
             stun_pending: vec![],
             next_stun: Instant::now() + Duration::from_secs(1),
@@ -459,7 +479,7 @@ impl<D: Device> Engine<D> {
         let mut v: Vec<(SocketAddr, Instant)> = self
             .observed
             .iter()
-            .filter(|(_, t)| now.duration_since(**t) < OBSERVED_TTL)
+            .filter(|(a, t)| now.duration_since(**t) < OBSERVED_TTL && !self.overlay.contains(&a.ip()))
             .map(|(a, t)| (*a, *t))
             .collect();
         v.sort_by_key(|(_, t)| std::cmp::Reverse(*t));
@@ -595,7 +615,9 @@ impl<D: Device> Engine<D> {
         match (msg, from) {
             (Message::Ping { tx }, Some(from)) => {
                 // It reached us from there, so we can likely reach it there.
-                p.learn(from);
+                if !on_overlay(&self.overlay, &from) {
+                    p.learn(from);
+                }
                 let reply = p
                     .disco
                     .as_ref()
@@ -622,7 +644,7 @@ impl<D: Device> Engine<D> {
                 self.observed.insert(observed, now);
             }
             (Message::CallMe { endpoints }, _) => {
-                for e in endpoints {
+                for e in endpoints.into_iter().filter(|e| !on_overlay(&self.overlay, e)) {
                     p.learn(e);
                 }
                 // Ping now: the peer is pinging us at this moment too.
@@ -665,7 +687,9 @@ impl<D: Device> Engine<D> {
                             p.roamed = true;
                         }
                     }
-                    p.learn(from);
+                    if !on_overlay(&self.overlay, &from) {
+                        p.learn(from);
+                    }
                 }
             }
             match res {
@@ -845,6 +869,7 @@ impl<D: Device> Engine<D> {
                     Some(Control::Rekey(k)) => self.rekey(&k),
                     Some(Control::Status(tx)) => { let _ = tx.send(self.status()); }
                     Some(Control::SetLocal(l)) => self.local = l,
+                    Some(Control::SetOverlay(o)) => self.overlay = o,
                     Some(Control::SetStun(s)) => {
                         if s != self.stun_servers {
                             self.stun_servers = s;
@@ -1119,6 +1144,24 @@ mod tests {
         let (tx, rx) = oneshot::channel();
         a.control.send(Control::Observed(tx)).await.unwrap();
         assert_eq!(rx.await.unwrap(), vec![a.addr]);
+        assert!(on_overlay(
+            &["100.123.113.77".parse().unwrap()],
+            &"100.110.224.18:4".parse().unwrap()
+        ));
+        assert!(!on_overlay(
+            &["100.123.113.77".parse().unwrap()],
+            &"10.90.182.34:4".parse().unwrap()
+        ));
+        assert!(on_overlay(
+            &["10.8.0.2".parse().unwrap()],
+            &"10.8.0.9:4".parse().unwrap()
+        ));
+        assert!(!on_overlay(&[], &"100.110.224.18:4".parse().unwrap()));
+        // Seen at an address of another VPN's interface: never passed on.
+        a.control.send(Control::SetOverlay(vec![a.addr.ip()])).await.unwrap();
+        let (tx, rx) = oneshot::channel();
+        a.control.send(Control::Observed(tx)).await.unwrap();
+        assert!(rx.await.unwrap().is_empty());
     }
 
     /// Two relay links joined by a task, as the coordinator's hub joins them.

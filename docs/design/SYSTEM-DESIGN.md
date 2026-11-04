@@ -493,6 +493,12 @@ for each node:
 regenerate route files for the node; write only files whose content changed
 ```
 
+Starts are admitted against the node's capacity sample. When a pass is refused only
+because no fresh sample exists yet (right after a boot or an agent restart, before
+the fleet task's first measurement), the next pass runs after 3 s instead of the
+normal interval, for up to 20 retries, so apps stopped by a clean shutdown come back
+without waiting a full tick.
+
 Stopped and sleeping apps lose their base route, so visitors get the wake page
 (sleeping) or a 404 instead of a 502 from a dead upstream; routes of apps with a
 deployment in flight are left to the engine. The reconciler never builds and never
@@ -1152,7 +1158,10 @@ depends on re-serialising JSON (`vercelify-mesh::cert`).
   stream connects, so a reboot brings the mesh back while the coordinator is away.
 - `epoch` increases when a standby is promoted; nodes ignore maps with a lower epoch.
 - Endpoint reports: `POST /v1/mesh/endpoints { local: [...], stun: [...] }` whenever they
-  change; the coordinator adds the source address it observed.
+  change; the coordinator adds the source address it observed. `local` never includes
+  addresses on another VPN's interface (`tailscale*`, `utun*`, `wg*`, `zt*`, `tun*`): a
+  WireGuard path nested in another overlay stalls whenever that overlay changes its own
+  path. Join tokens still list those addresses last, since they may be the only way in.
 
 ### 13.5 Data plane (`vercelify-mesh`)
 
@@ -1218,8 +1227,12 @@ associated data. Bodies: `ping {tx}`, `pong {tx, observed}`, `call_me {endpoints
 
 Per peer, in the engine (`wg.rs`):
 
-1. Candidates: the map's endpoints, then what the node learned (the source of a peer's
-   pings, `call_me` lists, authenticated WireGuard packets), at most 16.
+1. Candidates: the map's endpoints (for the coordinator, the enrollment-time ones only
+   while the map has none: they go stale), then what the node learned (the source of a peer's
+   pings, `call_me` lists, authenticated WireGuard packets), at most 16. Addresses on the
+   network of this node's own VPN interfaces (Tailscale's 100.64.0.0/10, else the same /24)
+   are never learned or passed on as observed: a path inside another overlay stalls when
+   that overlay re-routes.
 2. Every 5 s while no direct path is confirmed, every 12 s once one is: a `ping` to every
    candidate. A `pong` from the address pinged confirms that path with its round trip and
    tells the node where the peer saw it (peers act as STUN servers for each other; the

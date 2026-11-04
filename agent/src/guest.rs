@@ -12,6 +12,8 @@ use std::{
 use vercelify_platform::{guest_shares as shares, proxy, secrets};
 use zeroize::Zeroizing;
 const COOKIE: &str = "__Host-vfy_guest";
+/// Per-invitation request budgets kept at once (live grants are capped at 100).
+const SESSION_BUCKETS: usize = 128;
 const INVITE: &str = "/__vfy/invite";
 const REDEEM: &str = "/__vfy/redeem";
 const INTERNAL: &str = "/__vfy/internal-check";
@@ -157,7 +159,12 @@ pub struct Gateway {
     ready: std::sync::atomic::AtomicBool,
     connections: Arc<tokio::sync::Semaphore>,
     checks: Arc<tokio::sync::Semaphore>,
+    /// Requests without an authorized session (invitation pages, bad
+    /// cookies, unknown hosts): one budget for the whole gateway.
     rate: Mutex<Bucket>,
+    /// Requests of authorized sessions, a budget per invitation: anonymous
+    /// traffic cannot use up what invited guests need.
+    sessions: Mutex<std::collections::HashMap<String, Bucket>>,
     redemptions: Mutex<Bucket>,
 }
 impl Gateway {
@@ -181,6 +188,7 @@ impl Gateway {
             connections: Arc::new(tokio::sync::Semaphore::new(32)),
             checks: Arc::new(tokio::sync::Semaphore::new(32)),
             rate: Mutex::new(Bucket::new(64.0, 128.0)),
+            sessions: Mutex::new(std::collections::HashMap::new()),
             redemptions: Mutex::new(Bucket::new(1.0, 20.0)),
         });
         gateway.refresh()?;
@@ -325,6 +333,24 @@ impl Gateway {
                     })
         }
     }
+    fn anonymous_take(&self) -> bool {
+        self.rate.lock().unwrap_or_else(|e| e.into_inner()).take()
+    }
+    fn session_take(&self, grant: &str) -> bool {
+        let mut sessions = self.sessions.lock().unwrap_or_else(|e| e.into_inner());
+        if sessions.len() >= SESSION_BUCKETS && !sessions.contains_key(grant) {
+            // Invitations are capped at 100 live grants: drop idle budgets.
+            let now = Instant::now();
+            sessions.retain(|_, b| now.duration_since(b.last) < Duration::from_secs(600));
+            if sessions.len() >= SESSION_BUCKETS {
+                return false;
+            }
+        }
+        sessions
+            .entry(grant.to_string())
+            .or_insert_with(|| Bucket::new(32.0, 128.0))
+            .take()
+    }
     async fn allowed(&self, host: &str, secret: &str) -> Option<shares::Allowed> {
         // The permit stays with the blocking closure even if the requester
         // times out: a busy SQLite mutex cannot grow an unbounded task queue.
@@ -352,12 +378,24 @@ impl Gateway {
             .map(|v| v.as_bytes())
             .unwrap_or_default();
         if !bool::from(bridge.ct_eq(self.bridge.as_bytes())) {
+            if !self.anonymous_take() {
+                return response(StatusCode::TOO_MANY_REQUESTS, "Please retry shortly");
+            }
             return response(StatusCode::UNAUTHORIZED, "Preview access denied");
         }
         let target = headers.get(TARGET_HEADER).and_then(|v| v.to_str().ok()).unwrap_or("");
         let session = headers.get(SESSION_HEADER).and_then(|v| v.to_str().ok()).unwrap_or("");
-        if self.allowed(target, session).await.is_none() {
-            return response(StatusCode::UNAUTHORIZED, "Preview access denied");
+        match self.allowed(target, session).await {
+            Some(a) if !self.session_take(&a.grant.id) => {
+                return response(StatusCode::TOO_MANY_REQUESTS, "Please retry shortly")
+            }
+            Some(_) => {}
+            None => {
+                if !self.anonymous_take() {
+                    return response(StatusCode::TOO_MANY_REQUESTS, "Please retry shortly");
+                }
+                return response(StatusCode::UNAUTHORIZED, "Preview access denied");
+            }
         }
         let mut result = response(StatusCode::NO_CONTENT, Body::empty());
         if let Some(value) = headers.get(APP_AUTH_HEADER) {
@@ -366,11 +404,17 @@ impl Gateway {
         result
     }
     pub async fn request(self: Arc<Self>, request: Request) -> Response {
-        if !self.rate.lock().unwrap_or_else(|e| e.into_inner()).take() {
-            return response(StatusCode::TOO_MANY_REQUESTS, "Please retry shortly");
-        }
         if request.uri().path() == INTERNAL {
             return self.internal(request.headers()).await;
+        }
+        let too_many = || response(StatusCode::TOO_MANY_REQUESTS, "Please retry shortly");
+        let anonymous = |request: &Request| {
+            request.headers().contains_key(proxy::GUEST_BRIDGE_HEADER)
+                || request.uri().path() == REDEEM
+                || cookie(request.headers()).is_none()
+        };
+        if anonymous(&request) && !self.anonymous_take() {
+            return too_many();
         }
         if request.headers().contains_key(proxy::GUEST_BRIDGE_HEADER) {
             return response(StatusCode::UNAUTHORIZED, "Preview access denied");
@@ -384,15 +428,24 @@ impl Gateway {
         if request.uri().path() == REDEEM {
             return self.redeem(request, &host).await;
         }
-        if request.uri().path() == INVITE || cookie(request.headers()).is_none() {
+        // A presented session is checked once and charged to its own budget;
+        // one that doesn't authorize is anonymous traffic.
+        let secret = Zeroizing::new(cookie(request.headers()).unwrap_or_default());
+        let allowed = if secret.is_empty() {
+            None
+        } else {
+            self.allowed(&host, &secret).await
+        };
+        match &allowed {
+            Some(a) if !self.session_take(&a.grant.id) => return too_many(),
+            None if !secret.is_empty() && !self.anonymous_take() => return too_many(),
+            _ => {}
+        }
+        if request.uri().path() == INVITE || secret.is_empty() {
             if request.method() != Method::GET && request.method() != Method::HEAD {
                 return response(StatusCode::UNAUTHORIZED, "Open the invitation first");
             }
-            let existing = if let Some(secret) = cookie(request.headers()) {
-                self.allowed(&host, &secret).await.is_some()
-            } else {
-                false
-            };
+            let existing = allowed.is_some();
             let nonce = secrets::random_token(32);
             let mut result = response(
                 if request.uri().path() == INVITE {
@@ -420,8 +473,7 @@ impl Gateway {
         if request.uri().path().starts_with("/__vfy/") {
             return response(StatusCode::NOT_FOUND, "Reserved preview path");
         }
-        let secret = Zeroizing::new(cookie(request.headers()).unwrap_or_default());
-        let Some(allowed) = self.allowed(&host, &secret).await else {
+        let Some(allowed) = allowed else {
             return response(StatusCode::UNAUTHORIZED, "Preview session expired or revoked");
         };
         if allowed.asleep {

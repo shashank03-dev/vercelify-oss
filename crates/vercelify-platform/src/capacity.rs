@@ -8,6 +8,10 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const POLICY_VERSION: u32 = 1;
 pub const MAX_AGE_SECONDS: i64 = 90;
+/// Refusals that only mean "no fresh measurement yet" (after a boot or an
+/// agent restart): the reconciler retries these soon instead of a full tick.
+pub const NO_SAMPLE: &str = "no capacity sample is available";
+pub const STALE_SAMPLE: &str = "the capacity sample is stale; waiting for a fresh report";
 pub const SAFETY_MB: u64 = 128;
 pub const DISK_RECOVERY_MB: u64 = 512;
 
@@ -33,6 +37,10 @@ struct Held {
     recovering: bool,
 }
 
+/// Whether an error message is a missing or stale sample refusal.
+pub fn awaiting_sample(message: &str) -> bool {
+    message.contains(NO_SAMPLE) || message.contains(STALE_SAMPLE)
+}
 fn refusal(reason: impl Into<String>) -> Error {
     Error::Capacity(format!("capacity: {}; running services were left alone", reason.into()))
 }
@@ -144,7 +152,7 @@ fn fresh(s: &Sample, now: i64) -> Result<()> {
         ));
     }
     if !(-5..=MAX_AGE_SECONDS).contains(&(now - s.measured_at)) {
-        return Err(refusal("the capacity sample is stale; waiting for a fresh report"));
+        return Err(refusal(STALE_SAMPLE));
     }
     Ok(())
 }
@@ -173,7 +181,7 @@ pub fn sample(c: &Connection, node: &str) -> Result<Sample> {
             r.get(0)
         })
         .optional()?;
-    serde_json::from_str(&raw.ok_or_else(|| refusal("no capacity sample is available"))?).map_err(Error::from)
+    serde_json::from_str(&raw.ok_or_else(|| refusal(NO_SAMPLE))?).map_err(Error::from)
 }
 fn held(c: &Connection, node: &str) -> Result<Vec<Held>> {
     let mut st=c.prepare("SELECT operation,owner,kind,memory_mb,disk_mb,heavy,settled_at,recovering FROM resource_reservations WHERE node_id=?1")?;
@@ -480,4 +488,20 @@ pub fn reports(c: &Connection, now: i64) -> Result<Vec<vercelify_core::platform:
             })
         })
         .collect()
+}
+
+#[cfg(test)]
+mod awaiting_tests {
+    use super::*;
+
+    #[test]
+    fn only_missing_or_stale_samples_count_as_awaiting() {
+        let c = Connection::open_in_memory().unwrap();
+        c.execute_batch("CREATE TABLE capacity_samples(node_id TEXT PRIMARY KEY, sample TEXT)")
+            .unwrap();
+        let missing = sample(&c, "n1").unwrap_err().to_string();
+        assert!(awaiting_sample(&missing), "{missing}");
+        assert!(awaiting_sample(&refusal(STALE_SAMPLE).to_string()));
+        assert!(!awaiting_sample(&refusal("not enough memory for this app").to_string()));
+    }
 }

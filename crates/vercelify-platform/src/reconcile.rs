@@ -137,6 +137,11 @@ pub fn plan(
     p
 }
 
+/// Retry interval while capacity has not been measured yet, and how many such
+/// retries before falling back to the normal interval.
+const QUICK_RETRY: Duration = Duration::from_secs(3);
+const QUICK_RETRIES: u32 = 20;
+
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct Report {
     pub started: Vec<String>,
@@ -500,13 +505,29 @@ impl Reconciler {
     }
 
     pub async fn run(self: Arc<Self>, every: Duration) {
+        let mut quick = 0;
         loop {
+            let mut wait = every;
             match self.once().await {
-                Ok(r) if r != Report::default() => tracing::info!("reconciled: {r:?}"),
-                Ok(_) => {}
+                Ok(r) => {
+                    // After a boot the first pass often runs before the
+                    // fleet task has measured capacity: retry it soon so
+                    // apps are not left down for a whole interval.
+                    if r.errors.iter().any(|e| crate::capacity::awaiting_sample(e)) && quick < QUICK_RETRIES {
+                        quick += 1;
+                        wait = every.min(QUICK_RETRY);
+                        // Ask the fleet task to measure now, as admission does.
+                        self.engine.capacity_refresh.notify_one();
+                    } else {
+                        quick = 0;
+                    }
+                    if r != Report::default() {
+                        tracing::info!("reconciled: {r:?}");
+                    }
+                }
                 Err(e) => tracing::warn!("reconcile: {e}"),
             }
-            tokio::time::sleep(every).await;
+            tokio::time::sleep(wait).await;
         }
     }
 }

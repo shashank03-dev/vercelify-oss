@@ -147,7 +147,10 @@ pub fn peer_specs(map: &PeerMap, coordinator: &CoordinatorInfo) -> Vec<PeerSpec>
                 addresses.push(ip);
             }
             let mut endpoints: Vec<SocketAddr> = p.endpoints.iter().filter_map(|e| e.parse().ok()).collect();
-            if p.public_key == coordinator.public_key {
+            // Only while the map knows no address for it: enrollment-time
+            // addresses go stale (another network, another VPN) and would be
+            // pinged forever next to the live ones.
+            if p.public_key == coordinator.public_key && endpoints.is_empty() {
                 for e in coordinator.endpoints.iter().filter_map(|e| e.parse().ok()) {
                     if !endpoints.contains(&e) {
                         endpoints.push(e);
@@ -403,11 +406,17 @@ async fn follow_map(live: &Arc<Live>, opts: &Arc<UpOptions>, ctl: &mpsc::Sender<
 /// addresses, then what peers and STUN servers saw (its public mapping).
 async fn report_endpoints(live: &Live, ctl: &mpsc::Sender<Control>, port: u16, last: &mut Vec<String>) {
     let mesh_prefix = live.state.read().unwrap().ipv4.parse::<Ipv4Addr>().ok();
-    let local: Vec<SocketAddr> = crate::net::local_ipv4s(mesh_prefix)
+    let local: Vec<SocketAddr> = crate::net::endpoint_ipv4s(mesh_prefix)
         .into_iter()
         .map(|ip| SocketAddr::new(IpAddr::V4(ip), port))
         .collect();
     let _ = ctl.send(Control::SetLocal(local.clone())).await;
+    let overlay: Vec<IpAddr> = crate::net::local_ipv4s(mesh_prefix)
+        .into_iter()
+        .filter(|ip| !local.iter().any(|l| l.ip() == IpAddr::V4(*ip)))
+        .map(IpAddr::V4)
+        .collect();
+    let _ = ctl.send(Control::SetOverlay(overlay)).await;
     let (tx, rx) = oneshot::channel();
     let observed = if ctl.send(Control::Observed(tx)).await.is_ok() {
         rx.await.unwrap_or_default()
@@ -1108,13 +1117,17 @@ mod tests {
         let m = specs.iter().find(|s| s.name == "main").unwrap();
         assert_eq!(
             m.endpoints,
-            vec![
-                "192.168.1.1:51820".parse::<SocketAddr>().unwrap(),
-                "203.0.113.7:51820".parse().unwrap()
-            ],
-            "map endpoints, then the coordinator's from enrollment; junk skipped"
+            vec!["192.168.1.1:51820".parse::<SocketAddr>().unwrap()],
+            "the map's endpoints (junk skipped); enrollment's go stale and are left out"
         );
         assert_eq!(m.addresses.len(), 2);
+        // A map with no address for the coordinator yet: enrollment fills in.
+        let mut bare = main.clone();
+        bare.endpoints.clear();
+        let early = build_map(&[bare, pi.clone()], &pi, &a, 1, 1, 0);
+        let specs = peer_specs(&early, &coord);
+        let m = specs.iter().find(|s| s.name == "main").unwrap();
+        assert_eq!(m.endpoints, vec!["203.0.113.7:51820".parse::<SocketAddr>().unwrap()]);
 
         let acl = acl_json(&map, "vfy0");
         assert_eq!(acl["servers"], serde_json::json!(["10.77.0.1", "fd76:6679:6d65::1"]));

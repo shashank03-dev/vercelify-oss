@@ -5,6 +5,20 @@ is low even if the agent is unavailable. This reduces risk; it cannot guarantee
 availability or preserve writes after sudden loss of power. Keep independent,
 verified backups and allow time for shutdown before battery exhaustion.
 
+## Shutdown on battery (always on)
+
+On battery the guard checks every `BATTERY_INTERVAL` seconds (5) instead of every
+`INTERVAL` (20). It shuts down after two readings at or below `BATTERY_SHUTDOWN_PCT`
+(15%), or after a single reading at or below `BATTERY_CRITICAL_PCT` (5%).
+
+A worn battery's percentage is not reliable. On the field laptop, a cell holding 3.5%
+of its design charge read 38%, then 5% one sample later, and the guard shut down at
+3% with seconds to spare (docs/validation/2026-11-05-power-thermal/). So when the
+battery's full charge is below `BATTERY_WORN_HEALTH_PCT` (30%) of its design, the
+guard also shuts down after `BATTERY_WORN_RUNTIME_S` (120) seconds on battery,
+whatever the percentage says. AC returning resets that clock. Set it to 0 to rely on
+the percentage alone. `power-guard.sh --status` prints `battery_health_pct`.
+
 ## Opt-in battery conservation
 
 In `/etc/vercelify/power-guard.conf`, set `BATTERY_POLICY_ENABLED=1`, then restart

@@ -218,7 +218,7 @@ impl Device for Tun {
     }
 }
 
-pub use crate::net::{local_ipv4s, usable_interface};
+pub use crate::net::{endpoint_ipv4s, local_ipv4s, usable_interface};
 
 #[cfg(test)]
 mod tests {
