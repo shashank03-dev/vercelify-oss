@@ -82,3 +82,25 @@ fencing or claim duplicate-job prevention under active workloads. Rollback files
 have private permissions, saved config is present, and the PG dump completion marker
 is present (still not a production restore qualification). The previous boot also
 records the same Discord abi/4.0 AppArmor error, establishing it predates this reboot.
+
+## Approved shutdown/manual start window
+
+Operator explicitly approved the separate 15-minute Window C. Fresh private
+rollback copies were saved at /var/lib/vercelify/qualification-shutdown-20261104
+before poweroff; SQLite integrity and PG dump completion were checked. Operator
+confirmed fully off, then confirmed pressing the power button. AC stayed connected.
+Both remote routes first failed at 14:38:20 UTC and first recovered at 14:41:42 UTC;
+this interval includes the intentional operator wait, not just boot latency.
+New boot ID: 5fb4b2eb-025e-49d3-bc07-458e2e0bd9ad. All three services and original
+five containers recovered; deployments unchanged; no jobs before or after;
+SQLite integrity checks ok. PostgreSQL logs show clean shutdown and subsequent
+startup without crash recovery. This does not assert application data invariants
+beyond the recorded state checks or active-job recovery.
+
+Recovery succeeded, but the shutdown is **not fully clean**: vercelify.slice was
+removed before Docker finished stopping, and Docker attempted container restarts
+while poweroff was queued. Current slice has no explicit Docker shutdown ordering.
+See shutdown-ordering.json and shutdown-recovery.json. This is an actionable
+ordering finding, not grounds to modify live systemd units or perform another
+outage under the completed approval. The test does not qualify automatic firmware
+AC-return boot, battery depletion, missing battery or router recovery.

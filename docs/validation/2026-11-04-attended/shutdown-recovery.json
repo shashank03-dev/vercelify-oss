@@ -1,0 +1,65 @@
+{
+  "utc": "2026-11-04T14:42:00.381065+00:00",
+  "boot": "5fb4b2eb-025e-49d3-bc07-458e2e0bd9ad",
+  "ac": "1",
+  "services": {
+    "vercelify-agent": "active",
+    "vercelify-mesh": "active",
+    "vercelify-power-guard": "active"
+  },
+  "containers": "db2a0f0262b9a689ae7deb0a6ec252a78ec645dd34ef4673de2d2d8dec87cad0 /vfy-gw-pr1-re0wxze2 running=true restarts=0\n2202ac6f511a0a7ac48942cd252a70bcbafc947a6fc17bfb40df201b932b6fe2 /vfy-db-gwdb running=true restarts=0\ndf341f080ef2ec225c11c84b4aac4408fe3d2b35eb861088d054545a30290987 /vfy-gw-2cv2ryfw running=true restarts=0\nc036049dc51675f764efec7d26565db3c358b5b28e441a2cdf6afb8e201eab62 /vercelify-proxy running=true restarts=0\n4a2a21ec2fc1dbcb35bea4b462aace1f5fb094c0cffaf6b99e7ba1b7228aee18 /voxbento-mediamtx-1 running=true restarts=0",
+  "pg_ready": "/var/run/postgresql:5432 - accepting connections",
+  "state": [
+    {
+      "integrity": "ok",
+      "deployments": [
+        [
+          "dpl_b2t4hdqd2cv2ryfw",
+          "app_q4psfmgmevf6sehb",
+          "healthy",
+          "vfy-gw-2cv2ryfw"
+        ],
+        [
+          "dpl_b4be258fre0wxze2",
+          "app_q4psfmgmevf6sehb",
+          "healthy",
+          "vfy-gw-pr1-re0wxze2"
+        ],
+        [
+          "dpl_rwzfsbme0qevs6a7",
+          "app_q4psfmgmevf6sehb",
+          "superseded",
+          "vfy-gw-pr1-0qevs6a7"
+        ]
+      ],
+      "jobs": []
+    },
+    {
+      "integrity": "ok",
+      "deployments": [
+        [
+          "dpl_b2t4hdqd2cv2ryfw",
+          "app_q4psfmgmevf6sehb",
+          "healthy",
+          "vfy-gw-2cv2ryfw"
+        ],
+        [
+          "dpl_b4be258fre0wxze2",
+          "app_q4psfmgmevf6sehb",
+          "healthy",
+          "vfy-gw-pr1-re0wxze2"
+        ],
+        [
+          "dpl_rwzfsbme0qevs6a7",
+          "app_q4psfmgmevf6sehb",
+          "superseded",
+          "vfy-gw-pr1-0qevs6a7"
+        ]
+      ],
+      "jobs": []
+    }
+  ],
+  "deployments_unchanged": true,
+  "jobs_unchanged": true,
+  "previous_shutdown_journal": "2026-11-04T20:08:19+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:19.711416911+05:30\" level=info msg=\"ignoring event\" container=4a2a21ec2fc1dbcb35bea4b462aace1f5fb094c0cffaf6b99e7ba1b7228aee18 module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2026-11-04T20:08:19+0530 user-Inspiron-5567 systemd[1]: Stopping User Login Management...\n2026-11-04T20:08:19+0530 user-Inspiron-5567 systemd-logind[800]: Removed session 3.\n2026-11-04T20:08:19+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:19.988775234+05:30\" level=info msg=\"ignoring event\" container=df341f080ef2ec225c11c84b4aac4408fe3d2b35eb861088d054545a30290987 module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2026-11-04T20:08:19+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:19.991427711+05:30\" level=info msg=\"ignoring event\" container=db2a0f0262b9a689ae7deb0a6ec252a78ec645dd34ef4673de2d2d8dec87cad0 module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2026-11-04T20:08:20+0530 user-Inspiron-5567 systemd[1]: systemd-logind.service: Deactivated successfully.\n2026-11-04T20:08:20+0530 user-Inspiron-5567 systemd[1]: Stopped User Login Management.\n2026-11-04T20:08:20+0530 user-Inspiron-5567 systemd[1]: systemd-logind.service: Consumed 1.003s CPU time.\n2026-11-04T20:08:20+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:20.234765909+05:30\" level=info msg=\"ignoring event\" container=2202ac6f511a0a7ac48942cd252a70bcbafc947a6fc17bfb40df201b932b6fe2 module=libcontainerd namespace=moby topic=/tasks/delete type=\"*events.TaskDelete\"\n2026-11-04T20:08:20+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:20.920795958+05:30\" level=warning msg=\"Security options with `:` as a separator are deprecated and will be completely unsupported in 17.04, use `=` instead.\"\n2026-11-04T20:08:21+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:21.006988726+05:30\" level=error msg=\"4a2a21ec2fc1dbcb35bea4b462aace1f5fb094c0cffaf6b99e7ba1b7228aee18 cleanup: failed to delete container from containerd: NotFound: container \\\"4a2a21ec2fc1dbcb35bea4b462aace1f5fb094c0cffaf6b99e7ba1b7228aee18\\\" in namespace \\\"moby\\\": not found\"\n2026-11-04T20:08:21+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:21.034556924+05:30\" level=error msg=\"2202ac6f511a0a7ac48942cd252a70bcbafc947a6fc17bfb40df201b932b6fe2 cleanup: failed to delete container from containerd: NotFound: container \\\"2202ac6f511a0a7ac48942cd252a70bcbafc947a6fc17bfb40df201b932b6fe2\\\" in namespace \\\"moby\\\": not found\"\n2026-11-04T20:08:21+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:21.058483187+05:30\" level=error msg=\"restartmanger wait error: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: unable to apply cgroup configuration: unable to start unit \\\"docker-4a2a21ec2fc1dbcb35bea4b462aace1f5fb094c0cffaf6b99e7ba1b7228aee18.scope\\\" (properties [{Name:Description Value:\\\"libcontainer container 4a2a21ec2fc1dbcb35bea4b462aace1f5fb094c0cffaf6b99e7ba1b7228aee18\\\"} {Name:Slice Value:\\\"vercelify.slice\\\"} {Name:Delegate Value:true} {Name:PIDs Value:@au [34362]} {Name:MemoryAccounting Value:true} {Name:CPUAccounting Value:true} {Name:IOAccounting Value:true} {Name:TasksAccounting Value:true} {Name:DefaultDependencies Value:false}]): Transaction for docker-4a2a21ec2fc1dbcb35bea4b462aace1f5fb094c0cffaf6b99e7ba1b7228aee18.scope/start is destructive (shutdown.target has 'start' job queued, but 'stop' is included in transaction).\"\n2026-11-04T20:08:21+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:21.082256811+05:30\" level=error msg=\"c036049dc51675f764efec7d26565db3c358b5b28e441a2cdf6afb8e201eab62 cleanup: failed to delete container from containerd: NotFound: container \\\"c036049dc51675f764efec7d26565db3c358b5b28e441a2cdf6afb8e201eab62\\\" in namespace \\\"moby\\\": not found\"\n2026-11-04T20:08:21+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:21.088566702+05:30\" level=error msg=\"restartmanger wait error: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: unable to apply cgroup configuration: unable to start unit \\\"docker-2202ac6f511a0a7ac48942cd252a70bcbafc947a6fc17bfb40df201b932b6fe2.scope\\\" (properties [{Name:Description Value:\\\"libcontainer container 2202ac6f511a0a7ac48942cd252a70bcbafc947a6fc17bfb40df201b932b6fe2\\\"} {Name:Slice Value:\\\"vercelify.slice\\\"} {Name:Delegate Value:true} {Name:PIDs Value:@au [34404]} {Name:MemoryAccounting Value:true} {Name:CPUAccounting Value:true} {Name:IOAccounting Value:true} {Name:TasksAccounting Value:true} {Name:DefaultDependencies Value:false}]): Transaction for docker-2202ac6f511a0a7ac48942cd252a70bcbafc947a6fc17bfb40df201b932b6fe2.scope/start is destructive (shutdown.target has 'start' job queued, but 'stop' is included in transaction).\"\n2026-11-04T20:08:21+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:21.094551164+05:30\" level=error msg=\"db2a0f0262b9a689ae7deb0a6ec252a78ec645dd34ef4673de2d2d8dec87cad0 cleanup: failed to delete container from containerd: NotFound: container \\\"db2a0f0262b9a689ae7deb0a6ec252a78ec645dd34ef4673de2d2d8dec87cad0\\\" in namespace \\\"moby\\\": not found\"\n2026-11-04T20:08:21+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:21.105234179+05:30\" level=error msg=\"df341f080ef2ec225c11c84b4aac4408fe3d2b35eb861088d054545a30290987 cleanup: failed to delete container from containerd: NotFound: container \\\"df341f080ef2ec225c11c84b4aac4408fe3d2b35eb861088d054545a30290987\\\" in namespace \\\"moby\\\": not found\"\n2026-11-04T20:08:21+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:21.145935352+05:30\" level=error msg=\"restartmanger wait error: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: unable to apply cgroup configuration: unable to start unit \\\"docker-c036049dc51675f764efec7d26565db3c358b5b28e441a2cdf6afb8e201eab62.scope\\\" (properties [{Name:Description Value:\\\"libcontainer container c036049dc51675f764efec7d26565db3c358b5b28e441a2cdf6afb8e201eab62\\\"} {Name:Slice Value:\\\"vercelify.slice\\\"} {Name:Delegate Value:true} {Name:PIDs Value:@au [34477]} {Name:MemoryAccounting Value:true} {Name:CPUAccounting Value:true} {Name:IOAccounting Value:true} {Name:TasksAccounting Value:true} {Name:DefaultDependencies Value:false}]): Transaction for docker-c036049dc51675f764efec7d26565db3c358b5b28e441a2cdf6afb8e201eab62.scope/start is destructive (systemd-poweroff.service has 'start' job queued, but 'stop' is included in transaction).\"\n2026-11-04T20:08:21+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:21.157062226+05:30\" level=error msg=\"restartmanger wait error: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: unable to apply cgroup configuration: unable to start unit \\\"docker-db2a0f0262b9a689ae7deb0a6ec252a78ec645dd34ef4673de2d2d8dec87cad0.scope\\\" (properties [{Name:Description Value:\\\"libcontainer container db2a0f0262b9a689ae7deb0a6ec252a78ec645dd34ef4673de2d2d8dec87cad0\\\"} {Name:Slice Value:\\\"vercelify.slice\\\"} {Name:Delegate Value:true} {Name:PIDs Value:@au [34510]} {Name:MemoryAccounting Value:true} {Name:CPUAccounting Value:true} {Name:IOAccounting Value:true} {Name:TasksAccounting Value:true} {Name:DefaultDependencies Value:false}]): Transaction for docker-db2a0f0262b9a689ae7deb0a6ec252a78ec645dd34ef4673de2d2d8dec87cad0.scope/start is destructive (systemd-poweroff.service has 'start' job queued, but 'stop' is included in transaction).\"\n2026-11-04T20:08:21+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:21.167928923+05:30\" level=error msg=\"restartmanger wait error: failed to create task for container: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: unable to apply cgroup configuration: unable to start unit \\\"docker-df341f080ef2ec225c11c84b4aac4408fe3d2b35eb861088d054545a30290987.scope\\\" (properties [{Name:Description Value:\\\"libcontainer container df341f080ef2ec225c11c84b4aac4408fe3d2b35eb861088d054545a30290987\\\"} {Name:Slice Value:\\\"vercelify.slice\\\"} {Name:Delegate Value:true} {Name:PIDs Value:@au [34521]} {Name:MemoryAccounting Value:true} {Name:CPUAccounting Value:true} {Name:IOAccounting Value:true} {Name:TasksAccounting Value:true} {Name:DefaultDependencies Value:false}]): Transaction for docker-df341f080ef2ec225c11c84b4aac4408fe3d2b35eb861088d054545a30290987.scope/start is destructive (poweroff.target has 'start' job queued, but 'stop' is included in transaction).\"\n2026-11-04T20:08:24+0530 user-Inspiron-5567 systemd[1]: vercelify-agent.service: Deactivated successfully.\n2026-11-04T20:08:24+0530 user-Inspiron-5567 systemd[1]: Stopped Vercelify host agent (the engine and the app's API).\n2026-11-04T20:08:24+0530 user-Inspiron-5567 systemd[1]: vercelify-agent.service: Consumed 52.767s CPU time.\n2026-11-04T20:08:24+0530 user-Inspiron-5567 systemd[1]: Stopping Docker Application Container Engine...\n2026-11-04T20:08:24+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:24.388859216+05:30\" level=info msg=\"Processing signal 'terminated'\"\n2026-11-04T20:08:24+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:24.389993228+05:30\" level=info msg=\"stopping event stream following graceful shutdown\" error=\"<nil>\" module=libcontainerd namespace=moby\n2026-11-04T20:08:24+0530 user-Inspiron-5567 dockerd[1642]: time=\"2026-11-04T20:08:24.390669916+05:30\" level=info msg=\"Daemon shutdown complete\"\n2026-11-04T20:08:24+0530 user-Inspiron-5567 systemd[1]: docker.service: Deactivated successfully.\n2026-11-04T20:08:24+0530 user-Inspiron-5567 systemd[1]: Stopped Docker Application Container Engine.\n2026-11-04T20:08:24+0530 user-Inspiron-5567 systemd[1]: docker.service: Consumed 26.147s CPU time."
+}

@@ -73,7 +73,7 @@ media container, manual stops and absence of duplicate jobs. Retain logs even on
 Actual outage actions remain blocked until user approves a specific window and confirms
 physical presence, backups and recovery access. Approval is not inferred from silence.
 
-## Window C: graceful shutdown/manual power-on (15 minutes, not approved)
+## Window C: graceful shutdown/manual power-on (15 minutes, completed)
 
 Keep AC connected throughout; do not disconnect/remove/deplete the aged battery.
 Operator must remain beside the laptop with access to the power button. Record
@@ -92,3 +92,7 @@ Expected impact: production, PostgreSQL, PR1 preview and media are unavailable
 between shutdown and recovery. This proves graceful shutdown and manual boot
 only; it does not qualify AC-return firmware behavior or battery depletion.
 Explicit approval for this separate window is required before any power action.
+
+Window C was explicitly approved and completed on 2026-11-04. Recovery succeeded;
+shutdown ordering warnings remain an open finding. See the attended validation
+report. Its approval does not authorize another outage or live systemd changes.
