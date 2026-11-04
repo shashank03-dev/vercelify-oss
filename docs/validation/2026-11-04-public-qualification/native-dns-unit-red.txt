@@ -1,0 +1,21 @@
+   Compiling vercelify-mesh v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-mesh)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.99s
+     Running unittests src/lib.rs (target/debug/deps/vercelify_mesh-26f73db7a16b98df)
+
+running 1 test
+
+thread 'utun::resolver_tests::resolver_uses_the_loopback_listener_port_and_is_system_readable' (18177742) panicked at crates/vercelify-mesh/src/utun.rs:171:9:
+# vercelify-mesh
+nameserver 127.0.0.1
+
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test utun::resolver_tests::resolver_uses_the_loopback_listener_port_and_is_system_readable ... FAILED
+
+failures:
+
+failures:
+    utun::resolver_tests::resolver_uses_the_loopback_listener_port_and_is_system_readable
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 75 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p vercelify-mesh --lib`

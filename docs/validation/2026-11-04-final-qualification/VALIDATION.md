@@ -1,5 +1,9 @@
 # Final local and physical-host qualification
 
+Public Internet/IPv6 and native Mac system-mode checks were subsequently exercised
+in the [follow-up qualification](../2026-11-04-public-qualification/VALIDATION.md).
+The open-gate list below records the state before that follow-up.
+
 Captured text logs have trailing whitespace/extra EOF blank lines normalized;
 `log-whitespace-normalization.json` retains original and normalized fingerprints.
 

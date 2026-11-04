@@ -1,0 +1,72 @@
+{
+  "vantage": "Vercel function outside LAN/Tailscale",
+  "host": "requested-alliance-vernon-gene.trycloudflare.com",
+  "root": {
+    "status": 200,
+    "headers": {
+      "date": "Wed, 04 Nov 2026 03:32:04 GMT",
+      "content-type": "text/html",
+      "transfer-encoding": "chunked",
+      "connection": "keep-alive",
+      "cf-ray": "a5508ca5f9f80ab0-IAD",
+      "cf-cache-status": "DYNAMIC",
+      "cache-control": "public, max-age=86400",
+      "server": "cloudflare",
+      "x-robots-tag": "none, none"
+    },
+    "body": "<!doctype html><title>Public Internet qualification fixture e8fb366</title><h1>Public Internet qualification fixture e8fb366</h1><p>Authenticated application content.</p>",
+    "elapsed_ms": 615
+  },
+  "assets": {
+    "status": 200,
+    "headers": {
+      "date": "Wed, 04 Nov 2026 03:32:05 GMT",
+      "content-type": "application/json",
+      "transfer-encoding": "chunked",
+      "connection": "keep-alive",
+      "cf-ray": "a5508ca60921e5f5-IAD",
+      "cf-cache-status": "DYNAMIC",
+      "cache-control": "public, max-age=86400",
+      "server": "cloudflare",
+      "x-robots-tag": "none, none"
+    },
+    "body": "{\"url\":\"/assets/probe.js\",\"headers\":{\"host\":\"public-network-qualification.10.77.0.1.sslip.io\",\"user-agent\":\"Go-http-client/2.0\",\"accept-encoding\":\"gzip\",\"cdn-loop\":\"cloudflare; loops=1; subreqs=1\",\"cf-connecting-ip\":\"18.234.143.29\",\"cf-ew-via\":\"15\",\"cf-ipcountry\":\"US\",\"cf-ray\":\"a5508ca73d6be645-IAD\",\"cf-visitor\":\"{\\\"scheme\\\":\\\"https\\\"}\",\"cf-warp-tag-id\":\"858ab655-b66b-49c5-a385-6375de0b99ae\",\"cf-worker\":\"trycloudflare.com\",\"x-forwarded-for\":\"10.0.0.1\",\"x-forwarded-host\":\"public-network-qualification.10.77.0.1.sslip.io\",\"x-forwarded-port\":\"80\",\"x-forwarded-proto\":\"http\",\"x-forwarded-server\":\"c036049dc516\",\"x-invocation-id\":\"sin1:iad1::p9zsj-1793763124073-81255f575cbf\",\"x-real-ip\":\"10.0.0.1\",\"x-vercel-id\":\"sin1:iad1::p9zsj-1793763124073-81255f575cbf\"},\"pr\":\"0\"}",
+    "elapsed_ms": 961
+  },
+  "forged": {
+    "status": 403,
+    "headers": {
+      "date": "Wed, 04 Nov 2026 03:32:04 GMT",
+      "content-type": "text/plain; charset=UTF-8",
+      "content-length": "17",
+      "connection": "keep-alive",
+      "cache-control": "private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0",
+      "expires": "Thu, 01 Jan 1970 00:00:01 GMT",
+      "referrer-policy": "same-origin",
+      "x-frame-options": "SAMEORIGIN",
+      "x-robots-tag": "none",
+      "server": "cloudflare",
+      "cf-ray": "a5508ca60f367fc3-IAD"
+    },
+    "body": "error code: 1000\n",
+    "elapsed_ms": 58
+  },
+  "stream": {
+    "error": "request timeout",
+    "elapsed_ms": 15976
+  },
+  "websocket": {
+    "upgraded": true,
+    "echo": "external-probe",
+    "elapsed_ms": 1128
+  },
+  "ipv6": {
+    "error": "EADDRNOTAVAIL",
+    "elapsed_ms": 10
+  },
+  "aaaa": [
+    "2606:4700::6810:e784",
+    "2606:4700::6810:e684"
+  ],
+  "core_pass": false
+}

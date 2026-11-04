@@ -1,0 +1,12 @@
+[
+  {
+    "url": "http://pr-1-gw.user-inspiron-5567.vfy/",
+    "status": 200,
+    "body_bytes": 809
+  },
+  {
+    "url": "http://gw.10.77.0.1.sslip.io/",
+    "status": 200,
+    "body_bytes": 784
+  }
+]

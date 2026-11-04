@@ -1,0 +1,21 @@
+   Compiling vercelify-mesh v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-mesh)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.32s
+     Running unittests src/lib.rs (target/debug/deps/vercelify_mesh-26f73db7a16b98df)
+
+running 1 test
+
+thread 'dns::tests::proxy_names_advertise_only_the_supported_ipv4_ingress' (18531097) panicked at crates/vercelify-mesh/src/dns.rs:241:9:
+assertion `left == right` failed: app exists but has no IPv6 proxy route
+  left: (0, 1)
+ right: (0, 0)
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test dns::tests::proxy_names_advertise_only_the_supported_ipv4_ingress ... FAILED
+
+failures:
+
+failures:
+    dns::tests::proxy_names_advertise_only_the_supported_ipv4_ingress
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 76 filtered out; finished in 0.00s
+
+error: test failed, to rerun pass `-p vercelify-mesh --lib`

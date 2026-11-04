@@ -1,0 +1,13 @@
+{
+  "services": {
+    "vercelify-agent": "active",
+    "vercelify-mesh": "active",
+    "vercelify-power-guard": "active"
+  },
+  "remaining_apps": [
+    "gw"
+  ],
+  "protected_container_ids_and_restart_counts_preserved": true,
+  "mesh_sha256": "494effa77e7e470b9c3cef43145a589b11888290c069827c061787cbcf9baff6",
+  "public_fixture_removed": true
+}

@@ -1,0 +1,42 @@
+{
+  "vantage": "Vercel cloud outside Tailscale/LAN",
+  "tests": [
+    {
+      "path": "/",
+      "status": 403,
+      "body": "Forbidden",
+      "cf_ray": "a550a4274bf3b14d-IAD"
+    },
+    {
+      "path": "/assets/private.js",
+      "status": 403,
+      "body": "Forbidden",
+      "cf_ray": "a550a4273f009c6d-IAD"
+    },
+    {
+      "path": "/ws",
+      "status": 403,
+      "body": "Forbidden",
+      "cf_ray": "a550a4273c7bf24a-IAD"
+    },
+    {
+      "path": "/v1/platform/apps",
+      "status": 403,
+      "body": "Forbidden",
+      "cf_ray": "a550a4273cdb8302-IAD"
+    }
+  ],
+  "forged": {
+    "path": "/headers",
+    "status": 403,
+    "body": "Forbidden",
+    "cf_ray": "a550a4299f2c8302-IAD"
+  },
+  "directHost": {
+    "path": "/",
+    "status": 421,
+    "body": "<html>\r\n<head><title>421 Misdirected Request</title></head>\r\n<body>\r\n<center><h1>421 Misdirected Req",
+    "cf_ray": "a550a42be9f28302-IAD"
+  },
+  "pass": true
+}

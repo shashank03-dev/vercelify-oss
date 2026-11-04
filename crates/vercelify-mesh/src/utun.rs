@@ -145,9 +145,21 @@ impl Utun {
 }
 
 /// `*.vfy` through the mesh's name server (macOS reads /etc/resolver/<domain>).
-pub fn configure_resolver(ip: &str) -> io::Result<()> {
-    std::fs::create_dir_all("/etc/resolver")?;
-    std::fs::write("/etc/resolver/vfy", format!("# vercelify-mesh\nnameserver {ip}\n"))
+pub fn configure_resolver(ip: &str, port: u16) -> io::Result<()> {
+    write_resolver(std::path::Path::new("/etc/resolver"), ip, port)
+}
+
+fn write_resolver(dir: &std::path::Path, ip: &str, port: u16) -> io::Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+    let existed = dir.exists();
+    std::fs::create_dir_all(dir)?;
+    if !existed {
+        // This is public system configuration, even under a private umask.
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o755))?;
+    }
+    let path = dir.join("vfy");
+    std::fs::write(&path, format!("# vercelify-mesh\nnameserver {ip}\nport {port}\n"))?;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o644))
 }
 
 impl Device for Utun {
@@ -208,5 +220,27 @@ impl Device for Utun {
                 Err(_would_block) => continue,
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod resolver_tests {
+    use super::*;
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn resolver_uses_the_loopback_listener_port_and_is_system_readable() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("resolver");
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("vfy"), "old").unwrap();
+        std::fs::set_permissions(path.join("vfy"), std::fs::Permissions::from_mode(0o600)).unwrap();
+        write_resolver(&path, "127.0.0.1", 53053).unwrap();
+        let text = std::fs::read_to_string(path.join("vfy")).unwrap();
+        assert!(text.contains("nameserver 127.0.0.1\nport 53053\n"), "{text}");
+        assert_eq!(
+            std::fs::metadata(path.join("vfy")).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
     }
 }

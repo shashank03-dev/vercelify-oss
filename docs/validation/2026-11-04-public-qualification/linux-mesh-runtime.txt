@@ -1,0 +1,39 @@
+network: LAN 192.168.77.0/24 (main, pi) — router — 172.31.9.0/24 (far)
+coordinator: agent + vercelify-mesh in vfyt-main
+  [32m✓[0m coordinator on 10.77.0.1
+joining
+  [32m✓[0m pi joined (sealed enrollment over the LAN)
+  [32m✓[0m a join token works once
+  [32m✓[0m far joined (through the router)
+paths
+  [32m✓[0m pi → main (LAN)
+  [32m✓[0m far → main (routed)
+  [32m✓[0m pi → far directly (full mesh, not through main)
+  [32m✓[0m IPv6 on the mesh
+  [32m✓[0m status: main on the LAN, far direct
+  [32m✓[0m pi's endpoint for far is far itself (172.31.9.10:51820)
+names and services
+  [32m✓[0m far.vfy → 10.77.0.3, *.main.vfy → main, others refused
+  [32m✓[0m pi reaches main's agent at 10.77.0.1:7420
+  [32m✓[0m node tokens are refused from outside the mesh
+  [32m✓[0m ACL file written and the firewall hook ran
+a device and the firewall
+  [32m✓[0m firewall: the mac reaches the agent but not :9999; servers reach everything
+the Mac app: pairing by short code on the LAN, then app mode (no tun, no root)
+  [32m✓[0m the app finds main by mDNS (a pairing code is waiting)
+  [32m✓[0m short code over SPAKE2: a wrong one opens nothing; the right one gives the vfy2. code, and the app joined
+  [32m✓[0m SOCKS5: main.vfy:7420 from userspace, no tun device
+  [32m✓[0m forward 127.0.0.1:17420 → main.vfy:7420
+  [32m✓[0m the pairing's device token works at its agent_url (10.77.0.1:7420) through the mesh
+  [32m✓[0m 4 MB through the userspace stack, byte for byte
+  [32m✓[0m UDP forward 127.0.0.1:15600 → main.vfy:5600 and back (the display stream's path)
+  [32m✓[0m forwards added and removed while the daemon runs (the forwards file)
+  [32m✓[0m a device reaches Sunshine's ports (Moonlight)
+  [32m✓[0m SOCKS refuses the internet; main's firewall still applies to the app
+rotation
+  [32m✓[0m pi rotated its key; the mesh followed
+revocation
+  [32m✓[0m far revoked: peers dropped it, it knows, the rest keeps working
+restart with the last map, coordinator away
+  [32m✓[0m pi came back on its saved map while the coordinator's agent is down
+mesh: 28 checks passed

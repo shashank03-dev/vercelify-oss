@@ -1,0 +1,33 @@
+{
+  "checked_utc": "2026-11-04T10:55:38.262885+00:00",
+  "rust": {
+    "passed": 806,
+    "failed": 0,
+    "ignored": 14
+  },
+  "clippy_exit_code": 0,
+  "native_system_mode": {
+    "exit_code": 0,
+    "native_system_test_passed": true,
+    "interface": "utun6",
+    "temporary_interface_removed": true,
+    "resolver_restored": true,
+    "existing_userspace_service_preserved": true
+  },
+  "external_private_gate_passed": true,
+  "ipv6_public_http": {
+    "url": "https://en.internet.nl/site/requested-alliance-vernon-gene.trycloudflare.com/4389868/",
+    "checked_at": "2026-11-04T03:37:34.296Z",
+    "aaaa_present": true,
+    "ipv6_web_reachable": true,
+    "matching_ipv4_ipv6_content": true,
+    "scope": "Independent Internet.nl IPv6 ingress and HTTP content comparison through Cloudflare; not direct native IPv6 on the laptop or IPv6 WebSocket coverage."
+  },
+  "linux_mesh_runtime_checks": 28,
+  "temporary_http_streaming": "failed; not qualified",
+  "cloud_storage_account": "not available (operator confirmed)",
+  "cloud_probe_project": "paused; verified HTTP 503 DEPLOYMENT_PAUSED",
+  "pushed": false,
+  "final_cleanup_verified": true,
+  "installed_linux_mesh_sha256": "494effa77e7e470b9c3cef43145a589b11888290c069827c061787cbcf9baff6"
+}

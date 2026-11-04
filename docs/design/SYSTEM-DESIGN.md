@@ -1290,8 +1290,9 @@ ports (which devices may reach too). The daemon writes them into the ACL file
 container block). A database's public port changing bumps the map version.
 
 
-- DNS server on `<mesh ipv4>:53` and `[<mesh ipv6>]:53` (servers and system-mode Macs), zone
-  `vfy`: `A`/`AAAA` for `<node>.vfy` and `*.<node>.vfy`; everything else `REFUSED`. Linux
+- Linux DNS listens on `<mesh ipv4>:53`; native macOS uses an ephemeral loopback
+  UDP listener recorded in `/etc/resolver/vfy`. Zone `vfy` returns `A`/`AAAA` for
+  `<node>.vfy`, and `A` only for `*.<node>.vfy`; everything else is `REFUSED`. Linux
   hosts with `systemd-resolved` get `resolvectl dns vfy0 10.77.0.x; resolvectl domain vfy0 ~vfy`.
 - Firewall: the daemon writes `/run/vercelify/mesh-acl.json` (`{servers: [ip], devices:
   [{ip, ports}]}`) whenever the map changes and runs its ACL hook, `firewall.sh mesh`, which
@@ -1685,3 +1686,21 @@ budget. It retains a 30-second body inactivity limit, the declared 3-GiB ceiling
 resource reservation and per-frame lease/generation/configuration fencing. The
 route's overall ceiling matches the 90-minute hard build lease; the normal
 five-minute renewable lease and 15-minute Docker-load deadline still apply.
+
+### Native macOS system resolver (4 November 2026)
+
+Native macOS system mode serves its signed-map DNS zone on an ephemeral loopback
+UDP port and writes both `nameserver` and `port` to `/etc/resolver/vfy`. Packets to
+the device's own point-to-point mesh address do not reach its local DNS socket.
+Linux continues to listen on its mesh address at port 53. New resolver directories
+and files are explicitly system-readable (0755/0644), independently of a private
+launch umask. Private node keys/state retain their existing restrictive permissions.
+
+Mesh node names retain A/AAAA records. Wildcard application names advertise A
+records only: the current Docker proxy ingress preserves the private-preview
+client address on IPv4; its IPv6 userland-proxy path rewrites the source and
+correctly fails private access closed. Publishing that path as an app AAAA record
+causes normal dual-stack browsers to receive 403 instead of using the working
+IPv4 ingress. This does not remove node-to-node IPv6, nor public IPv6 ingress at
+a configured external tunnel. Direct private-app IPv6 ingress remains unsupported
+until source-preserving IPv6 hosting is implemented and qualified.

@@ -1,0 +1,6 @@
+kernel IPv4 health HTTP 000
+
+; <<>> DiG 9.10.6 <<>> @10.77.0.3 pr-1-gw.user-inspiron-5567.vfy +time=1 +tries=1
+; (1 server found)
+;; global options: +cmd
+;; connection timed out; no servers could be reached

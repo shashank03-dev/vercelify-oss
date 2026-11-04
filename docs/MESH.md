@@ -149,3 +149,12 @@ sudo vercelify logs mesh
 Certificates renew by themselves (30 days, renewed after 20); `sudo vercelify mesh
 rotate` changes a machine's key now. The Servers page in the app shows the same: each
 machine's path and round trip, invites and revoking.
+
+### App DNS and native macOS system mode
+
+Node hostnames such as `main.vfy` retain mesh IPv4/IPv6 records. App hostnames
+such as `shop.main.vfy` use IPv4, which preserves client identity through the
+current Docker private-preview ingress. Direct IPv6 private-app ingress is not
+yet supported; public IPv6 visitors can reach a properly configured tunnel.
+Native macOS serves its scoped resolver on a loopback UDP port listed in
+`/etc/resolver/vfy`, without routing local DNS through its own utun address.

@@ -1,0 +1,11 @@
+{
+  "project_id": "prj_VFsZpoSx47CuG2cUS6CS1DnahNCx",
+  "project_name": "vfy-public-probe-20261104",
+  "team_id": "team_he3vTLSrLXg2yfA4khPTrXAH",
+  "deployment_id": "dpl_MKhg1mkwYLoUnRC5e96iWLHR8v8Y",
+  "url": "https://vfy-public-probe-20261104-5mswmoid6-shashank03-devs-projects.vercel.app",
+  "scope": "temporary fixed-target public network probe; no existing project modified",
+  "private_deployment_id": "dpl_CT7QaXfXSzF9KEuAjD7gGAjBbw2U",
+  "private_deployment_url": "https://vfy-public-probe-20261104-rhh601kqh-shashank03-devs-projects.vercel.app",
+  "paused": true
+}

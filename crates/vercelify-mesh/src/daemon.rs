@@ -587,11 +587,12 @@ async fn resolve_stun(servers: Vec<String>, ctl: mpsc::Sender<Control>) {
 }
 
 /// Point `*.vfy` at the mesh name server (systemd-resolved, when present).
-async fn configure_resolver(interface: &str, ip: &str) {
+async fn configure_resolver(interface: &str, ip: &str, port: u16) {
+    let _ = port;
     #[cfg(target_os = "macos")]
     {
         let _ = interface;
-        if let Err(e) = crate::utun::configure_resolver(ip) {
+        if let Err(e) = crate::utun::configure_resolver(ip, port) {
             tracing::warn!("/etc/resolver/vfy: {e}");
         }
     }
@@ -810,12 +811,20 @@ pub async fn up(opts: UpOptions) -> Result<()> {
         }
     }
     if opts.dns && opts.userspace.is_none() {
-        match UdpSocket::bind((ipv4, 53)).await {
+        // A macOS point-to-point interface does not loop traffic addressed
+        // to its own mesh IP back to a local UDP listener. Use loopback and
+        // advertise the actual ephemeral port in the scoped resolver instead.
+        #[cfg(target_os = "macos")]
+        let dns_address = (Ipv4Addr::LOCALHOST, 0);
+        #[cfg(not(target_os = "macos"))]
+        let dns_address = (ipv4, 53);
+        match UdpSocket::bind(dns_address).await {
             Ok(sock) => {
+                let address = sock.local_addr()?;
                 tokio::spawn(crate::dns::server::serve(sock, live.zone.clone()));
-                configure_resolver(&interface, &state.ipv4).await;
+                configure_resolver(&interface, &address.ip().to_string(), address.port()).await;
             }
-            Err(e) => tracing::warn!("mesh DNS on {ipv4}:53: {e}"),
+            Err(e) => tracing::warn!("mesh DNS on {}:{}: {e}", dns_address.0, dns_address.1),
         }
     }
 

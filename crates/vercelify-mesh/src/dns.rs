@@ -1,6 +1,9 @@
 //! The mesh's name server (design §13.8): `<node>.vfy` and `*.<node>.vfy`
-//! answer the node's mesh addresses (A and AAAA); every other name is
-//! refused, so the system resolver asks its usual servers. A pure
+//! answer node addresses (A/AAAA) and proxy app addresses (A only). App
+//! ingress currently preserves client identity over IPv4; publishing node
+//! AAAA addresses for app hosts would send private apps to an unusable proxy
+//! path. Other names are refused, so the system resolver uses its usual servers.
+//! A pure
 //! query → answer function; the daemon serves it on the mesh address.
 
 use crate::proto::Dns;
@@ -136,7 +139,7 @@ pub fn answer(query: &[u8], zone: &Dns) -> Option<Vec<u8>> {
             answers.push(rr(TYPE_A, &ip.octets()));
         }
     }
-    if matches!(qtype, TYPE_AAAA | TYPE_ANY) {
+    if matches!(qtype, TYPE_AAAA | TYPE_ANY) && name == format!("{node}.{}", zone.zone) {
         if let Some(ip) = v6 {
             answers.push(rr(TYPE_AAAA, &ip.octets()));
         }
@@ -224,7 +227,7 @@ mod tests {
         assert!(r[2] & 0x04 != 0, "authoritative");
         assert!(r[2] & 0x01 != 0, "recursion desired is echoed");
 
-        let r = answer(&query("blog.pi5.vfy", TYPE_AAAA), &zone()).unwrap();
+        let r = answer(&query("pi5.vfy", TYPE_AAAA), &zone()).unwrap();
         assert_eq!(ancount(&r), 1);
         assert_eq!(
             &r[r.len() - 16..],
@@ -233,6 +236,26 @@ mod tests {
 
         let r = answer(&query("main.vfy", TYPE_AAAA), &zone()).unwrap();
         assert_eq!((rcode(&r), ancount(&r)), (0, 0), "exists, no AAAA");
+    }
+
+    #[test]
+    fn proxy_names_advertise_only_the_supported_ipv4_ingress() {
+        let v6 = answer(&query("blog.pi5.vfy", TYPE_AAAA), &zone()).unwrap();
+        assert_eq!(
+            (rcode(&v6), ancount(&v6)),
+            (0, 0),
+            "app exists but has no IPv6 proxy route"
+        );
+        let v4 = answer(&query("blog.pi5.vfy", TYPE_A), &zone()).unwrap();
+        assert_eq!(ancount(&v4), 1);
+        let any = answer(&query("pr-1.blog.pi5.vfy", TYPE_ANY), &zone()).unwrap();
+        assert_eq!(
+            ancount(&any),
+            1,
+            "wildcard app names use the source-preserving IPv4 ingress"
+        );
+        let node = answer(&query("pi5.vfy", TYPE_AAAA), &zone()).unwrap();
+        assert_eq!(ancount(&node), 1, "native node IPv6 stays available");
     }
 
     #[test]

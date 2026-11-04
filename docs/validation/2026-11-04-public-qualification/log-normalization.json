@@ -1,0 +1,26 @@
+{
+  "native-dns-unit-green.txt": {
+    "original_sha256": "6cf091fda9d62bb916a749424a5057e34a3888205737e39d431c04839daef424",
+    "normalized_sha256": "517325a0c0e5d86a690a9c9b4e49bfb900765ac15c4c072a84bb0ff10be298c3"
+  },
+  "rust.txt": {
+    "original_sha256": "715fa9051a9d75c893179558ec14f6f2e18d52c35e679f281aa1b37e04b10a26",
+    "normalized_sha256": "a33ae2880968409d1bca58eb3851c3159f86620a9ba50b4871d6f9de2f9c340c"
+  },
+  "mesh-tests.txt": {
+    "original_sha256": "0d78bf5865db4b0ef2a3978baf13356c7e3ab3c6aae3f7292bc564202979a261",
+    "normalized_sha256": "2a2e15a700f1579bdee43e0bca128110042d8aaf45572dcd41080bba53b87016"
+  },
+  "clippy.txt": {
+    "original_sha256": "d81a670eede1e410e4dbcc1ad1396602ed7a099d58ed097c491a290508035f6e",
+    "normalized_sha256": "70cc7338a0eb82d696293e5f7e17a555ab1d4b3dbaa0c74f23ca07f4002d5597"
+  },
+  "native-system-before.log": {
+    "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "normalized_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  },
+  "native-daemon.log": {
+    "original_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "normalized_sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+  }
+}

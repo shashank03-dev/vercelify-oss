@@ -1,0 +1,6 @@
+{
+  "status": 200,
+  "route": "production gw on fd76:6679:6d65::1 port 80",
+  "bytes": 753,
+  "sha256": "38e41f09063198f5c42ecb83fbb21f9694c40de32f47b8427b2f934f66e1739b"
+}

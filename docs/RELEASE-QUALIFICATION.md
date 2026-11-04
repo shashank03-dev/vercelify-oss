@@ -17,7 +17,7 @@ qualify all laptops, apps, database sizes or language/framework combinations.
 | Fresh PostgreSQL previews | [M5](validation/2026-11-03-m5/VALIDATION.md); synthetic migration/seed, no production-data copying |
 | Durable deploy guard | [M6](validation/2026-11-03-m6/VALIDATION.md); compatible verified rollback, durable cleanup and restart recovery |
 | Restore drills | [M7a](validation/2026-11-03-m7a/VALIDATION.md) and [separate-host qualification](validation/2026-11-04-final-qualification/VALIDATION.md); encrypted PostgreSQL 17 fixture created on physical x86 and recovered on a separate ARM host after source deletion, using independently retained credentials and a fresh control store/key. Physical total-machine-loss and cloud-provider gates remain separate. |
-| Guest invitations | [M7b](validation/2026-11-04-m7b/VALIDATION.md); main-node private previews, real TLS/Chromium lab; public Internet DNS/TLS/tunnel/IPv6 not qualified |
+| Guest invitations | [M7b](validation/2026-11-04-m7b/VALIDATION.md); main-node private previews, real TLS/Chromium lab; [follow-up](validation/2026-11-04-public-qualification/VALIDATION.md) verifies public HTTPS/tunnel/IPv6 ingress, three browser engines and external private-route denial. Stable custom-domain invitation flows and temporary-tunnel HTTP streaming remain unqualified |
 | Battery conservation | [M8 software evidence](validation/2026-11-04-m8/VALIDATION.md) and [configuration](POWER-RESILIENCE.md); opt-in staged policy; physical outage/recovery gate remains open |
 
 Production-data backup-copy previews remain disabled. Restore quarantine alone does
@@ -37,6 +37,9 @@ model as qualified.
 The [final qualification report](validation/2026-11-04-final-qualification/VALIDATION.md)
 records physical x86 installation and image handoff, matched memory samples, real
 Mac app-mode browser access, ignored-test coverage and remaining external gates.
+The [public/native follow-up](validation/2026-11-04-public-qualification/VALIDATION.md)
+adds native Mac system-mode evidence and two DNS fixes. Real cloud storage remains
+unavailable because the operator has no cloud storage account.
 Cold/warm cgroup-budget fixtures are not whole-machine memory qualifications.
 
 No broad “five apps plus PostgreSQL on one GiB”, guaranteed lid-close/AC restart,

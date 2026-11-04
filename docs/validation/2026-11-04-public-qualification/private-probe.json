@@ -1,0 +1,8 @@
+{
+  "private_host": "pr-7-guest-preview.main.vfy",
+  "public_probe_url": "https://builder-cir-inserted-featuring.trycloudflare.com",
+  "ssh_pid": 75550,
+  "cloudflared_pid": 75551,
+  "owner_container": "vfy-final-qualification-docker",
+  "local_port": 54492
+}

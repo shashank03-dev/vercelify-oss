@@ -1,0 +1,8 @@
+{
+  "exit_code": 1,
+  "native_system_test_passed": false,
+  "interface": "utun6",
+  "temporary_interface_removed": true,
+  "resolver_restored": true,
+  "existing_userspace_service_preserved": true
+}
