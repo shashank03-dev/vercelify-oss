@@ -1,0 +1,35 @@
+[
+  {
+    "engine": "chromium",
+    "status": 200,
+    "trusted_tls": true,
+    "content": true,
+    "websocket": "browser-qa",
+    "stream": {
+      "status": 200,
+      "text": "open\n"
+    }
+  },
+  {
+    "engine": "firefox",
+    "status": 200,
+    "trusted_tls": true,
+    "content": true,
+    "websocket": "browser-qa",
+    "stream": {
+      "status": 200,
+      "text": "open\n"
+    }
+  },
+  {
+    "engine": "webkit",
+    "status": 200,
+    "trusted_tls": true,
+    "content": true,
+    "websocket": "browser-qa",
+    "stream": {
+      "status": 200,
+      "text": "open\n"
+    }
+  }
+]

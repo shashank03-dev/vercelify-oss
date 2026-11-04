@@ -1,0 +1,83 @@
+{
+  "vantage": "Vercel function outside LAN/Tailscale",
+  "host": "vfy-qual-20261104.shashankdev03.me",
+  "root": {
+    "status": 200,
+    "headers": {
+      "date": "Wed, 04 Nov 2026 17:12:53 GMT",
+      "content-type": "text/html",
+      "transfer-encoding": "chunked",
+      "connection": "keep-alive",
+      "cache-control": "public, max-age=86400",
+      "cf-cache-status": "DYNAMIC",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=L7F1auX71CSNJT3qoUk3q2Hkwgqw6I1ohy%2BaiYnURzCB1LPH9ikowxbKJqUZ%2F%2FzYYlTaHPEJi%2FtXZv8AEn9RTwxdY6NciB4rUNk%2FV4DBvkmxyGMVin4XVKhmK0pYK2jKqjmod9aipO%2FY8FJzNI9HqrAMmTDG\"}]}",
+      "server-timing": "cfCacheStatus;desc=\"DYNAMIC\", cfEdge;dur=34,cfOrigin;dur=926",
+      "server": "cloudflare",
+      "cf-ray": "a5553f035fb67075-IAD",
+      "alt-svc": "h3=\":443\"; ma=86400"
+    },
+    "body": "<!doctype html><title>Named tunnel qualification fixture</title><h1>Named tunnel qualification fixture</h1><p>Authenticated application content.</p><script type=\"module\" src=\"https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092\" integrity=\"sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==\" data-cf-beacon='{\"version\":\"2024.11.0\",\"token\":\"1490e01ae8ef4df8ab38e876165f59b5\",\"r\":1,\"spa\":2}' crossorigin=\"anonymous\"></script>\n",
+    "elapsed_ms": 1028
+  },
+  "assets": {
+    "status": 200,
+    "headers": {
+      "date": "Wed, 04 Nov 2026 17:12:53 GMT",
+      "content-type": "application/json",
+      "transfer-encoding": "chunked",
+      "connection": "keep-alive",
+      "cache-control": "public, max-age=86400",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "last-modified": "Wed, 04 Nov 2026 17:12:53 GMT",
+      "cf-cache-status": "MISS",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=%2B1QphODMkRtC0qwy8c0gJbCMNnrHhcipXpcCmlDGvBwd9tgEsI%2F4%2BvzY7dqOBiu%2F6aNTz%2BnkwBcOyCyTAFWwzLUSzs5bXsPcaI1jgpqaG0EeYAAV75w3btno9nbII6DeC3cHAU1kMbn1qDAWaBtjxT56tgRo\"}]}",
+      "server-timing": "cfCacheStatus;desc=\"MISS\", cfEdge;dur=20,cfOrigin;dur=948",
+      "server": "cloudflare",
+      "cf-ray": "a5553f0369165fa4-IAD",
+      "alt-svc": "h3=\":443\"; ma=86400"
+    },
+    "body": "{\"url\":\"/assets/probe.js\",\"headers\":{\"host\":\"named-tunnel-qualification.10.77.0.1.sslip.io\",\"user-agent\":\"Go-http-client/2.0\",\"accept-encoding\":\"gzip, br\",\"cdn-loop\":\"cloudflare; loops=1\",\"cf-connecting-ip\":\"34.200.247.40\",\"cf-ipcountry\":\"US\",\"cf-ray\":\"a5553f0369165fa4-IAD\",\"cf-visitor\":\"{\\\"scheme\\\":\\\"https\\\"}\",\"cf-warp-tag-id\":\"4cbbb2c2-3a48-4e97-838e-1737b5b89425\",\"x-forwarded-for\":\"10.0.0.1\",\"x-forwarded-host\":\"named-tunnel-qualification.10.77.0.1.sslip.io\",\"x-forwarded-port\":\"80\",\"x-forwarded-proto\":\"http\",\"x-forwarded-server\":\"c036049dc516\",\"x-invocation-id\":\"bom1::2hgqj-1793812372573-713de53e020c\",\"x-real-ip\":\"10.0.0.1\",\"x-vercel-id\":\"bom1::2hgqj-1793812372573-713de53e020c\"},\"pr\":\"0\"}",
+    "elapsed_ms": 1028
+  },
+  "forged": {
+    "status": 403,
+    "headers": {
+      "date": "Wed, 04 Nov 2026 17:12:53 GMT",
+      "content-type": "text/plain; charset=UTF-8",
+      "content-length": "17",
+      "connection": "keep-alive",
+      "cache-control": "private, max-age=0, no-store, no-cache, must-revalidate, post-check=0, pre-check=0",
+      "expires": "Thu, 01 Jan 1970 00:00:01 GMT",
+      "referrer-policy": "same-origin",
+      "server-timing": "cfEdge;dur=14,cfOrigin;dur=0",
+      "x-frame-options": "SAMEORIGIN",
+      "report-to": "{\"group\":\"cf-nel\",\"max_age\":604800,\"endpoints\":[{\"url\":\"https://a.nel.cloudflare.com/report/v4?s=PUIc9YENmlhR75lMQpCXMpzLshRh2QIB4RjZckmIduHpyjciKa55k9inyAwlD3BSgm8Ylv9CBD2cXRHUEhiBmShdUTAFJuOABawEl7UQrkoPVcXZoxb2ZusMWZ7ZvuEWjTpjUeieo3gqxocjtAPdS8yRS1Ya\"}]}",
+      "nel": "{\"report_to\":\"cf-nel\",\"success_fraction\":0.0,\"max_age\":604800}",
+      "server": "cloudflare",
+      "cf-ray": "a5553f0369a2ef62-IAD",
+      "alt-svc": "h3=\":443\"; ma=86400"
+    },
+    "body": "error code: 1000\n",
+    "elapsed_ms": 64
+  },
+  "stream": {
+    "status": 200,
+    "first_chunk_ms": 1032,
+    "body": "open\n"
+  },
+  "websocket": {
+    "upgraded": true,
+    "echo": "external-probe",
+    "elapsed_ms": 1467
+  },
+  "ipv6": {
+    "error": "EADDRNOTAVAIL",
+    "elapsed_ms": 23
+  },
+  "aaaa": [
+    "2606:4700:3035::6815:2c4a",
+    "2606:4700:3031::ac43:c4f1"
+  ],
+  "core_pass": true
+}

@@ -1,0 +1,11 @@
+{
+  "provider": "Cloudflare R2",
+  "attempt": "cf r2 buckets list",
+  "result": "blocked",
+  "http_status": 403,
+  "error_code": 10042,
+  "message": "Please enable R2 through the Cloudflare Dashboard.",
+  "bucket_created": false,
+  "backup_uploaded": false,
+  "qualification_pass": false
+}

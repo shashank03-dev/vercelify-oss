@@ -1,0 +1,18 @@
+{
+  "physical_app_removed": true,
+  "connector_stopped": true,
+  "test_dns_removed": true,
+  "test_tunnel_removed": true,
+  "other_dns_records_unchanged": true,
+  "owned_containers_remaining": 0,
+  "protected_original_container_ids": [
+    "db2a0f0262b9",
+    "2202ac6f511a",
+    "df341f080ef2",
+    "c036049dc516",
+    "4a2a21ec2fc1"
+  ],
+  "original_site_https": 200,
+  "original_site_tls_verify": 0,
+  "external_probe_paused_http": 503
+}
