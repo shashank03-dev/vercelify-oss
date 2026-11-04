@@ -1,0 +1,34 @@
+{
+  "service": "active",
+  "supplies": {
+    "BAT0": {
+      "type": "Battery",
+      "status": "Full",
+      "capacity": "100",
+      "charge_full": "130000",
+      "charge_full_design": "3684000",
+      "manufacturer": "LGC-LGC3.553",
+      "model_name": "DELL 8YPRW7C"
+    },
+    "AC": {
+      "type": "Mains",
+      "online": "1"
+    }
+  },
+  "installed": {
+    "/usr/local/lib/vercelify/power-guard.sh": "b9a6dc7f60b1e697ca569690a0854cbf05bdc25b1de5020e2e9894afdf04f0be",
+    "/usr/local/lib/vercelify/lib/battery-policy.sh": null
+  },
+  "configured_keys": [
+    "BATTERY_SHUTDOWN_PCT",
+    "BATTERY_WARN_PCT",
+    "THERMAL_PAUSE_C",
+    "THERMAL_RESUME_C",
+    "THERMAL_SHUTDOWN_C",
+    "THERMAL_CPU_CAP_PCT",
+    "INTERVAL",
+    "CONTAINER_STOP_TIMEOUT",
+    "CHARGE_STOP_THRESHOLD",
+    "NOTIFY_URL"
+  ]
+}

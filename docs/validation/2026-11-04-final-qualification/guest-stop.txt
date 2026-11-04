@@ -1,0 +1,1 @@
+PASS: owned agent/apps/proxy stopped; private synthetic state retained for review

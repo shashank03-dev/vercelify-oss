@@ -1,0 +1,10 @@
+
+running 1 test
+test idle_builder_retains_cache_and_restarts_for_repeated_builds has been running for over 60 seconds
+cycle 0: built, retained cache, stopped safely
+cycle 1: built, retained cache, stopped safely
+cycle 2: built, retained cache, stopped safely
+deleted builder recreated with bounded resources and retained warm cache
+test idle_builder_retains_cache_and_restarts_for_repeated_builds ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 141.90s

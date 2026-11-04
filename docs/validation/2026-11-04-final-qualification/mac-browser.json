@@ -1,0 +1,16 @@
+[
+  {
+    "url": "http://gw.10.77.0.1.sslip.io.localhost:7481/",
+    "status": 200,
+    "body_bytes": 784
+  },
+  {
+    "url": "http://pr-1-gw.user-inspiron-5567.vfy.localhost:7481/",
+    "status": 200,
+    "body_bytes": 809
+  },
+  {
+    "url": "http://pr-1-gw.user-inspiron-5567.vfy/",
+    "error": "Error: page.goto: net::ERR_NAME_NOT_RESOLVED at http://pr-1-gw.user-inspiron-5567.vfy/"
+  }
+]

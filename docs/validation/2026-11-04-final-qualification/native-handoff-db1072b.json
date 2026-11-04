@@ -1,0 +1,15 @@
+[
+  {
+    "case": "native-handoff",
+    "architecture": "amd64",
+    "config_digest": "sha256:15834fdcfef8af19200821f49869d003669b3c7565831a67f0d29878bd24f80b",
+    "archive_bytes": 2228736,
+    "build_import_to_healthy_seconds": 30.36,
+    "status": "healthy",
+    "body_assertion": true
+  },
+  {
+    "case": "incompatible-architecture-request",
+    "rejected_http": 400
+  }
+]

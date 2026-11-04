@@ -1,0 +1,28 @@
+   Compiling vercelify-mesh v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-mesh)
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+   Compiling vercelify-agent v1.0.0 (/Users/shashank/Desktop/VERCELIFY/agent)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 19.14s
+     Running unittests src/main.rs (target/debug/deps/vercelify_agent-52a665e9c393de8b)
+
+running 1 test
+
+thread 'routes::upload_timeout_tests::slow_image_handoff_outlives_the_regular_api_budget_and_still_needs_auth' (18116111) panicked at agent/src/routes.rs:940:9:
+assertion `left == right` failed
+  left: 504
+ right: 204
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test routes::upload_timeout_tests::slow_image_handoff_outlives_the_regular_api_budget_and_still_needs_auth ... FAILED
+
+failures:
+
+failures:
+    routes::upload_timeout_tests::slow_image_handoff_outlives_the_regular_api_budget_and_still_needs_auth
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 169 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `-p vercelify-agent --bin vercelify-agent`

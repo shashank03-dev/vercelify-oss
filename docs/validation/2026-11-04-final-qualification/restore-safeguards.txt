@@ -1,0 +1,30 @@
+
+==> Restoring snapshot latest from /var/lib/final-restore-safeguards/repository
+restoring snapshot bcfb3d29 of [/var/lib/final-restore-safeguards/etc /var/lib/final-restore-safeguards/state/backup-stage /var/lib/final-restore-safeguards/state/master.key /var/lib/final-restore-safeguards/state/tokens.json /var/lib/docker/volumes/vfy-finalq-restore /var/lib/docker/volumes/unrelated-finalq-restore] at 2026-11-04 02:46:45.36960877 +0000 UTC by root@4f5dad23b1a1 to /var/lib/final-restore-safeguards/restore-inspect-fails
+Summary: Restored 19 files/dirs (203 B) in 0:00
+  ✓ files restored under /var/lib/final-restore-safeguards/restore-inspect-fails
+  • volumes to restore: vfy-finalq-restore
+  ! not Vercelify's, left as they are: unrelated-finalq-restore (--all-volumes restores them too)
+  ✗ could not inspect restore writers; nothing was changed (files are in /var/lib/final-restore-safeguards/restore-inspect-fails)
+PASS: inspect-fails aborts before live replacement; writer and service remain available
+
+==> Restoring snapshot latest from /var/lib/final-restore-safeguards/repository
+restoring snapshot bcfb3d29 of [/var/lib/final-restore-safeguards/etc /var/lib/final-restore-safeguards/state/backup-stage /var/lib/final-restore-safeguards/state/master.key /var/lib/final-restore-safeguards/state/tokens.json /var/lib/docker/volumes/vfy-finalq-restore /var/lib/docker/volumes/unrelated-finalq-restore] at 2026-11-04 02:46:45.36960877 +0000 UTC by root@4f5dad23b1a1 to /var/lib/final-restore-safeguards/restore-stop-fails
+Summary: Restored 19 files/dirs (203 B) in 0:00
+  ✓ files restored under /var/lib/final-restore-safeguards/restore-stop-fails
+  • volumes to restore: vfy-finalq-restore
+  ! not Vercelify's, left as they are: unrelated-finalq-restore (--all-volumes restores them too)
+  ! some containers did not stop
+  ✗ still running: vfy-finalq-writer — nothing was changed and everything was started again (files are in /var/lib/final-restore-safeguards/restore-stop-fails)
+PASS: stop-fails aborts before live replacement; writer and service remain available
+
+==> Restoring snapshot latest from /var/lib/final-restore-safeguards/repository
+restoring snapshot bcfb3d29 of [/var/lib/final-restore-safeguards/etc /var/lib/final-restore-safeguards/state/backup-stage /var/lib/final-restore-safeguards/state/master.key /var/lib/final-restore-safeguards/state/tokens.json /var/lib/docker/volumes/vfy-finalq-restore /var/lib/docker/volumes/unrelated-finalq-restore] at 2026-11-04 02:46:45.36960877 +0000 UTC by root@4f5dad23b1a1 to /var/lib/final-restore-safeguards/restored
+Summary: Restored 19 files/dirs (203 B) in 0:00
+  ✓ files restored under /var/lib/final-restore-safeguards/restored
+  • volumes to restore: vfy-finalq-restore
+  ! not Vercelify's, left as they are: unrelated-finalq-restore (--all-volumes restores them too)
+  ✓ instance restored — the engine is bringing apps and databases back as they were. Database dumps are in /var/lib/final-restore-safeguards/restored/var/lib/final-restore-safeguards/state/backup-stage/databases
+  • the data each volume had before is kept beside it as *.before-restore-20261104-024658; remove it once the apps check out
+  • device access is as it was at the backup: tokens revoked after it work again until revoked again (sudo vercelify tokens)
+PASS: exact snapshot tree replaces newer files; prior tree retained; tokens restored; unrelated volume/writer preserved; owned writer resumes

@@ -1669,3 +1669,19 @@ writers cannot truncate or rename another writer's temporary file.
 HTTP deployment readiness requires a 2xx or 3xx response, including probes made
 through the proxy for isolated previews. Authentication failures, missing paths,
 and throttling responses are readiness failures rather than successful publication.
+
+### Missing builder recovery qualification (4 November 2026)
+
+If a dedicated BuildKit container has been removed but its buildx registration
+remains, a bounded build discards only that stale registration with
+`buildx rm --keep-state`, preserving its cache volume, then recreates the builder
+with the configured memory, swap and CPU limits. Other inspection or bootstrap
+errors continue to fail closed; an existing running builder is never replaced.
+
+### Streaming image handoff deadline (4 November 2026)
+
+Image upload is an authenticated bulk route outside the ordinary 120-second API
+budget. It retains a 30-second body inactivity limit, the declared 3-GiB ceiling,
+resource reservation and per-frame lease/generation/configuration fencing. The
+route's overall ceiling matches the 90-minute hard build lease; the normal
+five-minute renewable lease and 15-minute Docker-load deadline still apply.

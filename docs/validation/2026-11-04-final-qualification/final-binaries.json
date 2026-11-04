@@ -1,0 +1,22 @@
+{
+  "aarch64": {
+    "agent": {
+      "bytes": 6443416,
+      "sha256": "c1791845cdee414e8508af86fac8aa43e18a045d670b02c065746fe00a8473f9"
+    },
+    "mesh": {
+      "bytes": 2469448,
+      "sha256": "1686161035e184f5d66343c9b86b90bfa746f2366c6614d8c3749868307bff66"
+    }
+  },
+  "x86_64": {
+    "agent": {
+      "bytes": 7811256,
+      "sha256": "a38bff60f3cb810d86523570056aeb2a27915cbffa2ba89171f18d8a9a9a299b"
+    },
+    "mesh": {
+      "bytes": 2920768,
+      "sha256": "1e6352e1787c4332679d2ffee14d1a4a8071999e588d1ff935a1b7c1d344b15c"
+    }
+  }
+}

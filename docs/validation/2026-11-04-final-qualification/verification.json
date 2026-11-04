@@ -1,0 +1,32 @@
+{
+  "checked_at_utc": "2026-11-04T03:14:45.698914+00:00",
+  "base_commit": "db1072b",
+  "rust": {
+    "passed": 804,
+    "failed": 0,
+    "ignored": 14,
+    "exit_code": 0
+  },
+  "ignored_runtime_successes": 14,
+  "mesh_runtime_checks": 28,
+  "mesh_nat_checks": 8,
+  "clippy_all_targets_all_features_exit_code": 0,
+  "format_exit_code": 0,
+  "generated_types_unchanged": true,
+  "native_slow_handoff_seconds": 197.55,
+  "whole_vm_gib_profiles": [
+    1,
+    2,
+    4
+  ],
+  "physical_outages_performed": false,
+  "pushed": false,
+  "source_sha256": {
+    "agent/src/offhost.rs": "d55ea118dabeda5d65d5a3569a577013ee2548e13c4ed1018b28362117a16edc",
+    "agent/src/platform_api.rs": "a6907157a30e080b7c155167562047e0c3da3ec9805ceec6057e9f6499ccc1b8",
+    "agent/src/routes.rs": "a456c40b3b3ef8a84109e7410725840d90a2b69c81550484225b4d0503b2d3f5",
+    "crates/vercelify-platform/src/build.rs": "0ad40989eb1ca85f92801ad98f431a3e6439f670e5fbcff7cceab699c6ca7d3c",
+    "crates/vercelify-platform/src/health.rs": "e64ca2bc28714d5bd0035ead2d5c1439e264c9b172b94ff83dccdde72493f37f",
+    "crates/vercelify-platform/tests/builder_idle.rs": "c537b0f71c90640a8af2605494a910bcfe7fbfe6fd6294d51a8a197777c0bc1e"
+  }
+}

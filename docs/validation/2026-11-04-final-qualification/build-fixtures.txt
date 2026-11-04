@@ -1,0 +1,5 @@
+
+running 1 test
+test build::tests::builds_fixture_apps_with_docker ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 197 filtered out; finished in 7.25s

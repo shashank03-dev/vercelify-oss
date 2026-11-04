@@ -257,6 +257,25 @@ impl Builder {
                     Duration::from_secs(30),
                 ))
                 .await?;
+                if !checked.success() {
+                    if checked.stderr.contains("No such container") {
+                        // Buildx retains its registration after an externally
+                        // removed container. Keep the cache volume, but recreate
+                        // using the currently configured resource limits.
+                        let forgotten = proc::run(self.spec(
+                            &proc::args(&["buildx", "rm", "--keep-state", BUILDER]),
+                            Duration::from_secs(60),
+                        ))
+                        .await?;
+                        if !forgotten.success() {
+                            return Err(Error::Unavailable(
+                                "could not recover the missing BuildKit builder".into(),
+                            ));
+                        }
+                        return self.create_builder(log).await;
+                    }
+                    return Err(Error::Unavailable("could not inspect BuildKit resource limits".into()));
+                }
                 let state: serde_json::Value = serde_json::from_str(checked.stdout.trim())
                     .map_err(|_| Error::Unavailable("could not verify BuildKit resource limits".into()))?;
                 let bytes = crate::capacity::build_memory_mb(Some(memory))?.saturating_mul(1_048_576);
@@ -264,9 +283,6 @@ impl Builder {
                     && state["HostConfig"]["MemorySwap"].as_u64() == Some(bytes)
                     && state["HostConfig"]["CpuQuota"].as_u64() == Some(100000)
                     && state["HostConfig"]["CpuPeriod"].as_u64() == Some(100000);
-                if !checked.success() {
-                    return Err(Error::Unavailable("could not inspect BuildKit resource limits".into()));
-                }
                 if !bounded {
                     if state["State"]["Running"].as_bool() != Some(false) {
                         return Err(Error::Capacity(
@@ -308,6 +324,10 @@ impl Builder {
             }
             return Ok(());
         }
+        self.create_builder(log).await
+    }
+
+    async fn create_builder(&self, log: &mut LogWriter) -> Result<()> {
         log.info("creating the BuildKit builder (first build on this server)");
         let mut opts = format!("image={BUILDKIT_IMAGE}");
         if let Some(m) = &self.memory {
@@ -682,6 +702,48 @@ fi
             !calls.contains("create"),
             "do not replace a builder on bootstrap failure"
         );
+    }
+
+    #[tokio::test]
+    async fn a_missing_builder_container_is_recreated_with_limits_without_discarding_cache() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("docker");
+        std::fs::write(
+            &bin,
+            format!(
+                r#"#!/bin/sh
+echo "$*" >> '{d}/calls'
+if [ "$1" = container ]; then
+  echo 'Error: No such container: buildx_buildkit_vercelify0' >&2
+  exit 1
+fi
+"#,
+                d = dir.path().display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let builder = Builder {
+            docker: bin.display().to_string(),
+            git: "git".into(),
+            work_dir: dir.path().join("work"),
+            driver: Driver::Container,
+            memory: Some("1024m".into()),
+            timeout: Duration::from_secs(10),
+        };
+        let logs = LogHub::new(dir.path().join("logs"));
+        builder
+            .ensure_builder(&mut logs.writer("app", "dpl_recover"))
+            .await
+            .unwrap();
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap();
+        assert!(calls.contains("buildx rm --keep-state vercelify"), "{calls}");
+        assert!(
+            calls.contains("memory=1024m,memory-swap=1024m,cpu-quota=100000,cpu-period=100000"),
+            "{calls}"
+        );
+        assert!(!calls.contains("prune"));
     }
 
     #[tokio::test]

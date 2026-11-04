@@ -1,0 +1,109 @@
+{
+  "scope": "Only trailing whitespace and extra blank lines at EOF removed; test outcomes unchanged. Original copies retained locally under /tmp/vercelify-final-qualification-raw-logs.",
+  "files": {
+    "restore-drills.txt": {
+      "original_sha256": "9f2492b64dfa90582f2d0436eca239949d83d5b9e4ae70078b025e7f1a7be28f",
+      "normalized_sha256": "1b0024f1160b33fd8e2de3bfdabf2e42a9a0a3fb1c57670434abc49f2e7dcde0"
+    },
+    "terminal.txt": {
+      "original_sha256": "9bc939c1f34c0391d0d06e946e5331b4287470743ed9fdd14b672593835374bf",
+      "normalized_sha256": "fe2d17381054b1811608fbed82c0173cfcbd2118cd0c608258501285b6f6b349"
+    },
+    "upload-timeout-green.txt": {
+      "original_sha256": "ce1c87df7cfad64a6998e07a6355b8cafeb179d3accf0de5b10b4db3ae92f0b9",
+      "normalized_sha256": "2749e20ad3cab79db4d8110b6072f3e49792ea720e765ac434b6928264cc6718"
+    },
+    "registry.txt": {
+      "original_sha256": "8be43f66a7c7e42db519307d61ce1590c95b0fedc717e9cb5ac9031178ca1003",
+      "normalized_sha256": "c662ce25165eb2d91fc26f1a6388b6fa324b3ece1c36a8b85de7c2d7f71685dd"
+    },
+    "readiness.txt": {
+      "original_sha256": "1d11557c532b804919f1e5d0765bfd18dcf4379b6e87f54f7c4b419c3163e08e",
+      "normalized_sha256": "0be7084c02d3b2940c570b071983a8e6a62973e78803710c2b39fdaa03a7d93d"
+    },
+    "builder-idle.txt": {
+      "original_sha256": "584202513c40e2195d27c2d6e8521930068798fd2fc7a6495cc484a0b8555c85",
+      "normalized_sha256": "37dc67e726818229471afaad5039c2dd57da881c7c47bf2b8108f8b060727f41"
+    },
+    "postgres-previews.txt": {
+      "original_sha256": "04fbfe4d035138f84ef0ff144e4ddc9d999c431a485cf45e677c0dc834fba522",
+      "normalized_sha256": "ca854eb4aad6ed48e8480fd5cd7e3ec391822b7b504088a0131c70412ba9cbe5"
+    },
+    "compose-config.txt": {
+      "original_sha256": "72b4547fb5bb13d9bce456665a13489f3d996be4502b38602520dea12a229325",
+      "normalized_sha256": "0c6843267fc5f8df44e4d35bc8d2ada1725e5c668091005cccd7bfbfd922e3aa"
+    },
+    "engine.txt": {
+      "original_sha256": "698fde97f8550ad0686f28ecaf1449327cc28165b16ae1af704705442ddcd372",
+      "normalized_sha256": "3048123cd0aab2af4ffbcf3682fc662b6a87128b77587adee6e54de3e1451375"
+    },
+    "docker.txt": {
+      "original_sha256": "6c0bb7aa5807970378265372ed1bf0ddcd1f655712bef3928a3fc671f5efa428",
+      "normalized_sha256": "5d89f2a8085e76060a9868ff90114000f5ca8f3ab11999e3b59520d79d8e3d73"
+    },
+    "upload-timeout-red.txt": {
+      "original_sha256": "cf466ed2b1165030b240720e0188175be0b8a690d5fe58414c0990f85d5023a8",
+      "normalized_sha256": "1df22640c2b21bc2eda82da7633fca3e6326b4b63f446b7b8e459af4edf24e0d"
+    },
+    "deploy-guard.txt": {
+      "original_sha256": "5a2a5c983e0ad9e56d2f6d7b987820fd68442667fd7ca4908cca004ae688ce57",
+      "normalized_sha256": "e3282aaf21fa10ede5f92e4968122a50b3c021d4260b417e4bdce38c846a1cc2"
+    },
+    "build-fixtures.txt": {
+      "original_sha256": "1a3263ee511b95f7ebb137bec0bbe419e2a6b933e479a27d5dd6c26a82df9920",
+      "normalized_sha256": "ede001f3ebc6a279372f1bbd48d7d4431a72b5835b5489645f5613549b099a33"
+    },
+    "mesh-pairing.txt": {
+      "original_sha256": "42140a25f1964db956a55b109fc19238e429f040b2970d793104ff1dab23ef51",
+      "normalized_sha256": "996ccb05e6dd4f25a9330eb689c1b9f96c8d4337b6bff8a1acbdb688332cc3a6"
+    },
+    "rust-final.txt": {
+      "original_sha256": "46bcc066c28d951b0948f3892d5961f2dabfc523f0942cb5dd7f15ae20619d2b",
+      "normalized_sha256": "2ae7625f0bdfc5de41d1522bee46e7039a2adefa2e5d800f7cb2c2c17400c832"
+    },
+    "clippy-final.txt": {
+      "original_sha256": "5164ec5298abda2500582bbf6d76893c4dfaf7d57a41b2e628f10198fd5a0fb9",
+      "normalized_sha256": "2688126ccf68482db759210ba62b4975ebfa3694fda19ec66951531147398d29"
+    },
+    "laptop-cleanup.txt": {
+      "original_sha256": "84237ba41a77998b94d9778236953debf0329a5d7c56121a28a71311a6c858a6",
+      "normalized_sha256": "036ecbc667931b8d5739dae6826e0da444219524809242662e54e855e66a884d"
+    },
+    "builder-recovery-red.txt": {
+      "original_sha256": "23a4e064f230eff2010ab78d72c95ef283ccbc99ab9c8f7cc9fbaa75c9630203",
+      "normalized_sha256": "b09e2f02bc4d41ab9d00cda518ce166c7b6260af288277df3f2c055938509cd4"
+    },
+    "preview-safety.txt": {
+      "original_sha256": "a210da1e5806ca296d8aab3454637ab3a1ece7eba68a39b5e0a810fc771f5a86",
+      "normalized_sha256": "83b02d1d2a50a0d4fcfc8196e628ffc8fbcd214d0028e1995786bebf282187b4"
+    },
+    "cold-build-progress.txt": {
+      "original_sha256": "0db6875cfd25d639640a0c756d34ff0b89151da56a864306c1cbbd34ec0afa6a",
+      "normalized_sha256": "7cd3e3630cf23d50efd18f48dc654ed53c880494ddce338ea66afd65f880c9e4"
+    },
+    "mac-virtual-display.txt": {
+      "original_sha256": "071dbcd163158c026a4b9e615b15253de7840c7b5502c102a53dd47cc3492177",
+      "normalized_sha256": "f36cec36b2200e42b837c939a8ca4feea386598e896ff591d97621a26558728d"
+    },
+    "builder-recovery-green.txt": {
+      "original_sha256": "0067aabc9997d8a4f7de479041fcc60ac9ddd666319bf77e04291e1d45983017",
+      "normalized_sha256": "273c3142e41de090d52730ddb6f0ea6a51f264f37258103c5c04e36480dbfd48"
+    },
+    "mesh-state.txt": {
+      "original_sha256": "7beaf5c9ec1e84c95679063936aeab1596819c131cd2fa5176b9e8b941106242",
+      "normalized_sha256": "342f6669a6823b09f800dbc2e8f65764c208374d5c33c59dad5ab7974e07d779"
+    },
+    "databases.txt": {
+      "original_sha256": "6adae46cce357eb8574ce74dab0ac94f3657254a454c1d3dbb2a6978b7916f35",
+      "normalized_sha256": "cf6f5e1ec9b1d8afec26dcd242cedfb58b6ba7737a09701ce0b4ff2ff160247b"
+    },
+    "builder-recovery-docker.txt": {
+      "original_sha256": "cad61e623607d31440a3e66d53e21813711bd6421436d87472201c74d9fed558",
+      "normalized_sha256": "1d1cc12bdeaaefd78c78d1a92190d1cdbc4d051050c5d181e4c6c7ff1fc241b1"
+    },
+    "compose-runtime.txt": {
+      "original_sha256": "70f0b7fa0a27b86ed81ab072fe34d150f1f169ebb9e9ed4bbfea652f847adc23",
+      "normalized_sha256": "549ae42e10e4aeb04f601784a61def9cafab3f406cb9a681b79f40c36fa0db86"
+    }
+  }
+}

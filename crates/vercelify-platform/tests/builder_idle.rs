@@ -129,4 +129,57 @@ async fn idle_builder_retains_cache_and_restarts_for_repeated_builds() {
         assert!(!engine.stop_idle_builder(idle).await.unwrap(), "already stopped");
         println!("cycle {n}: built, retained cache, stopped safely");
     }
+    // A deleted container leaves buildx metadata behind. Recreate it without
+    // losing the prior cache, and enforce the new bounded builder settings.
+    docker.remove(BUILDER_CONTAINER).await.unwrap();
+    let mut recovered = engine.builder.clone();
+    recovered.memory = Some("1024m".into());
+    let mut log = engine.logs.writer("idle-contract", "dpl_recreated");
+    recovered
+        .build_dir(
+            DirBuild {
+                dir: dir.path(),
+                app_name: "idle-contract",
+                deployment_id: "dpl_recreated",
+                build: &AppBuild::default(),
+                build_env: &[],
+            },
+            Cancel::never(),
+            &mut log,
+        )
+        .await
+        .unwrap();
+    drop(log);
+    let state = docker
+        .run(
+            &proc::args(&["inspect", "--format", "{{json .HostConfig}}", BUILDER_CONTAINER]),
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+    let limits: serde_json::Value = serde_json::from_str(state.stdout.trim()).unwrap();
+    assert_eq!(limits["Memory"], 1024_u64 * 1024 * 1024);
+    assert_eq!(limits["MemorySwap"], 1024_u64 * 1024 * 1024);
+    assert_eq!(limits["CpuQuota"], 100000);
+    let mounts = docker
+        .run(
+            &proc::args(&["inspect", "--format", "{{json .Mounts}}", BUILDER_CONTAINER]),
+            Duration::from_secs(10),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Some(mounts.stdout),
+        cache,
+        "deleted-container recovery preserves the cache volume"
+    );
+    assert!(
+        engine
+            .logs
+            .read("idle-contract", "dpl_recreated", None)
+            .iter()
+            .any(|line| line.text.contains("CACHED")),
+        "recreated builder reuses retained cache"
+    );
+    println!("deleted builder recreated with bounded resources and retained warm cache");
 }

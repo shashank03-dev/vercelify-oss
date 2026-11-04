@@ -1,0 +1,2 @@
+{"source_host": "physical-x86", "source_image_id": "sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b", "source_repo_digests": ["postgres@sha256:266d3c257594e195b309ae9d1805e54c788f1d7b375f56bf6c367aac6c917e7b"], "architecture": "amd64", "snapshot": "b4c62a57", "dump_bytes": 2525, "asserted_rows": 128, "root": "/var/lib/vercelify/qualification-final-20261104T022650Z/independent-backup"}
+Owned source container and source volume removed before independent recovery

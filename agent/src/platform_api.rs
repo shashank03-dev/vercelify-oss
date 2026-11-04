@@ -74,10 +74,6 @@ pub fn router() -> Router<AppState> {
         .route("/platform/apps/{app}/build-jobs", post(crate::offhost::create))
         .route("/platform/build-jobs/{id}", get(crate::offhost::get))
         .route("/platform/build-jobs/{id}/renew", post(crate::offhost::renew))
-        .route(
-            "/platform/build-jobs/{id}/image",
-            axum::routing::put(crate::offhost::upload),
-        )
         .route("/platform/apps/{app}/rollback", post(app_rollback))
         .route("/platform/apps/{app}/previews", get(app_previews))
         .route("/platform/apps/{app}/preview-databases", get(app_preview_databases))

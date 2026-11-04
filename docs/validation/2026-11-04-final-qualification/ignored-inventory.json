@@ -1,0 +1,145 @@
+[
+  {
+    "source": "agent/src/terminal.rs",
+    "test": "into_a_container",
+    "historical_runtime_logs": [],
+    "fresh_status": "passed",
+    "fresh_log": "terminal.txt",
+    "binary_sha256": "323fbce4f0aadebd6d85e90c3df5bbad9b7e3edd85f0706a70d23042e6c013d9"
+  },
+  {
+    "source": "crates/vercelify-platform/tests/restore_drill_docker.rs",
+    "test": "isolated_restore_drills_verify_selected_snapshots_and_fail_safely",
+    "historical_runtime_logs": [
+      "docs/validation/2026-11-04-m7b/restore-drills.txt",
+      "docs/validation/2026-11-03-m7a/restore-drills.txt",
+      "docs/validation/2026-11-03-m7a/drill-docker.txt",
+      "docs/validation/2026-11-03-m7a/drill-docker-expanded.txt"
+    ],
+    "fresh_status": "passed",
+    "fresh_log": "restore-drills.txt",
+    "binary_sha256": "c54e3994492d66ddac8eff6de708770f1cc1f516f7ee76d332037c12012a93af"
+  },
+  {
+    "source": "crates/vercelify-platform/tests/preview_safety.rs",
+    "test": "previews_have_no_production_credentials_network_or_public_bypass",
+    "historical_runtime_logs": [
+      "docs/validation/2026-11-04-m7b/preview-safety.txt",
+      "docs/validation/2026-11-02-m1/preview-safety-contract.txt",
+      "docs/validation/2026-11-03-m6/preview-safety.txt",
+      "docs/validation/2026-11-03-m7a/preview-safety.txt",
+      "docs/validation/2026-11-02-m4/preview-safety.txt",
+      "docs/validation/2026-11-03-m5/preview-safety.txt"
+    ],
+    "fresh_status": "passed",
+    "fresh_log": "preview-safety.txt",
+    "binary_sha256": "3ebac26e524f7b8dd6c116ea5a89cd7dfcc5ed315f9ca79e13104d455a1831df"
+  },
+  {
+    "source": "crates/vercelify-platform/tests/engine_docker.rs",
+    "test": "deploy_redeploy_rollback_recover",
+    "historical_runtime_logs": [
+      "docs/validation/2026-11-04-m7b/engine.txt",
+      "docs/validation/2026-11-03-m6/engine.txt",
+      "docs/validation/2026-11-03-m7a/engine.txt",
+      "docs/validation/2026-11-04-m8/engine.txt",
+      "docs/validation/2026-11-02-m4/engine-docker.txt"
+    ],
+    "fresh_status": "passed",
+    "fresh_log": "engine.txt",
+    "binary_sha256": "851aa726a66f21608f74c4781efdd6650c8f99b37974cd6aa380b9d7c67ec555"
+  },
+  {
+    "source": "crates/vercelify-platform/tests/deploy_guard_docker.rs",
+    "test": "running_http_failure_crash_loop_and_failed_recovery_are_durable",
+    "historical_runtime_logs": [
+      "docs/validation/2026-11-03-m6/deploy-guard.txt"
+    ],
+    "fresh_status": "passed",
+    "fresh_log": "deploy-guard.txt",
+    "binary_sha256": "c69dba83a1b52b0a1c6bbab18e9d9eb91cf4c06241f1796d6fb2ee311c7eb52b"
+  },
+  {
+    "source": "crates/vercelify-platform/tests/databases_docker.rs",
+    "test": "databases_end_to_end",
+    "historical_runtime_logs": [
+      "docs/validation/2026-11-02-m4/databases-docker.txt",
+      "docs/validation/2026-11-02-m4/restore-serving.txt"
+    ],
+    "fresh_status": "passed",
+    "fresh_log": "databases.txt",
+    "binary_sha256": "96ed3deede83924936cb37c8645c49989a75e213f21cb4c304ebb2b12dfea938"
+  },
+  {
+    "source": "crates/vercelify-platform/tests/preview_db_docker.rs",
+    "test": "isolated_postgres_roles_migrations_and_owned_recovery",
+    "historical_runtime_logs": [
+      "docs/validation/2026-11-04-m7b/postgres-previews.txt",
+      "docs/validation/2026-11-03-m6/postgres-previews.txt",
+      "docs/validation/2026-11-03-m7a/postgres-previews.txt",
+      "docs/validation/2026-11-03-m5/postgres-docker.txt"
+    ],
+    "fresh_status": "passed",
+    "fresh_log": "postgres-previews.txt",
+    "binary_sha256": "6a0bc98c5be14a4e4cba8f3677ced51a4acbdc1a72e4b4853048eb7939e1dd81"
+  },
+  {
+    "source": "crates/vercelify-platform/tests/builder_idle.rs",
+    "test": "idle_builder_retains_cache_and_restarts_for_repeated_builds",
+    "historical_runtime_logs": [
+      "docs/validation/2026-11-02-m4/builder-idle.txt",
+      "docs/validation/2026-11-02-m3/builder-contract.txt",
+      "docs/validation/2026-11-02-m2/builder-contract.txt"
+    ],
+    "fresh_status": "passed",
+    "fresh_log": "builder-idle.txt",
+    "binary_sha256": "7b499ff089f2adb9f2a98541e6e5184dbb762aea40cc74b1258b0626358be268"
+  },
+  {
+    "source": "crates/vercelify-platform/src/docker.rs",
+    "test": "container_lifecycle",
+    "historical_runtime_logs": [],
+    "fresh_status": "passed",
+    "fresh_log": "docker.txt",
+    "binary_sha256": "a0d910e73cf47c04d005df169b9d57d5d432186f5bd84799ac3ebb0cdb5853db"
+  },
+  {
+    "source": "crates/vercelify-platform/src/registry.rs",
+    "test": "push_list_delete",
+    "historical_runtime_logs": [],
+    "fresh_status": "passed",
+    "fresh_log": "registry.txt",
+    "binary_sha256": "a0d910e73cf47c04d005df169b9d57d5d432186f5bd84799ac3ebb0cdb5853db"
+  },
+  {
+    "source": "crates/vercelify-platform/src/compose.rs",
+    "test": "compose_resolves_preview_volumes",
+    "historical_runtime_logs": [],
+    "fresh_status": "passed",
+    "fresh_log": "compose-config.txt",
+    "binary_sha256": "a0d910e73cf47c04d005df169b9d57d5d432186f5bd84799ac3ebb0cdb5853db"
+  },
+  {
+    "source": "crates/vercelify-platform/src/compose.rs",
+    "test": "compose_up_and_down",
+    "historical_runtime_logs": [],
+    "fresh_status": "passed",
+    "fresh_log": "compose-runtime.txt",
+    "binary_sha256": "a0d910e73cf47c04d005df169b9d57d5d432186f5bd84799ac3ebb0cdb5853db"
+  },
+  {
+    "source": "crates/vercelify-platform/src/build.rs",
+    "test": "builds_fixture_apps_with_docker",
+    "historical_runtime_logs": [],
+    "fresh_status": "passed",
+    "fresh_log": "build-fixtures.txt",
+    "binary_sha256": "a0d910e73cf47c04d005df169b9d57d5d432186f5bd84799ac3ebb0cdb5853db"
+  },
+  {
+    "source": "cockpit/src-tauri/src/vdisplay.rs",
+    "test": "a_virtual_display_appears_and_goes",
+    "historical_runtime_logs": [],
+    "fresh_status": "passed",
+    "fresh_log": "mac-virtual-display.txt"
+  }
+]

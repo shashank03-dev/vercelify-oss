@@ -1,0 +1,42 @@
+{
+  "before": {
+    "samples": 12,
+    "system_used_mib_median": 2081.0,
+    "system_used_mib_range": [
+      2069,
+      2108
+    ],
+    "agent_rss_mib_median": 10.504,
+    "agent_rss_mib_range": [
+      10.238,
+      10.699
+    ]
+  },
+  "after": {
+    "samples": 12,
+    "system_used_mib_median": 2092.0,
+    "system_used_mib_range": [
+      2044,
+      2107
+    ],
+    "agent_rss_mib_median": 11.043,
+    "agent_rss_mib_range": [
+      11.016,
+      11.07
+    ]
+  },
+  "final": {
+    "samples": 12,
+    "system_used_mib_median": 2087.5,
+    "system_used_mib_range": [
+      2058,
+      2149
+    ],
+    "agent_rss_mib_median": 12.377,
+    "agent_rss_mib_range": [
+      12.371,
+      12.402
+    ],
+    "mesh_rss_mib_median": 3.074
+  }
+}

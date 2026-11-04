@@ -1,0 +1,16 @@
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on build directory
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+    Checking vercelify-agent v1.0.0 (/Users/shashank/Desktop/VERCELIFY/agent)
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.22s

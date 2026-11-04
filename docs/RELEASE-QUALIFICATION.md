@@ -16,7 +16,7 @@ qualify all laptops, apps, database sizes or language/framework combinations.
 | Admission and memory profiles | [M4](validation/2026-11-02-m4/VALIDATION.md); sample freshness and reservations; small-host support is workload-specific |
 | Fresh PostgreSQL previews | [M5](validation/2026-11-03-m5/VALIDATION.md); synthetic migration/seed, no production-data copying |
 | Durable deploy guard | [M6](validation/2026-11-03-m6/VALIDATION.md); compatible verified rollback, durable cleanup and restart recovery |
-| Restore drills | [M7a](validation/2026-11-03-m7a/VALIDATION.md); PostgreSQL 17, local encrypted repository; physical off-device loss remains unqualified |
+| Restore drills | [M7a](validation/2026-11-03-m7a/VALIDATION.md) and [separate-host qualification](validation/2026-11-04-final-qualification/VALIDATION.md); encrypted PostgreSQL 17 fixture created on physical x86 and recovered on a separate ARM host after source deletion, using independently retained credentials and a fresh control store/key. Physical total-machine-loss and cloud-provider gates remain separate. |
 | Guest invitations | [M7b](validation/2026-11-04-m7b/VALIDATION.md); main-node private previews, real TLS/Chromium lab; public Internet DNS/TLS/tunnel/IPv6 not qualified |
 | Battery conservation | [M8 software evidence](validation/2026-11-04-m8/VALIDATION.md) and [configuration](POWER-RESILIENCE.md); opt-in staged policy; physical outage/recovery gate remains open |
 
@@ -33,6 +33,11 @@ and [power matrix](POWER-RESILIENCE.md#physical-qualification). A deployed app n
 working host power, storage and networking; DNS and public HTTPS require operator
 configuration. Record the actual outage/recovery results before advertising a laptop
 model as qualified.
+
+The [final qualification report](validation/2026-11-04-final-qualification/VALIDATION.md)
+records physical x86 installation and image handoff, matched memory samples, real
+Mac app-mode browser access, ignored-test coverage and remaining external gates.
+Cold/warm cgroup-budget fixtures are not whole-machine memory qualifications.
 
 No broad “five apps plus PostgreSQL on one GiB”, guaranteed lid-close/AC restart,
 universal zero-downtime update, automatic failover or measured electricity-saving

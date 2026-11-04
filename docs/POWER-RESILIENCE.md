@@ -74,10 +74,13 @@ writes and recovery outcomes for each row:
 | Router, DNS, mesh/tunnel and ISP recovery | Unmeasured |
 | Independent off-device backup recovery | Unmeasured physically; logical lab recovery is separate |
 
-The field-test laptop at `100.123.113.77` is currently offline. Its saved pre-M3
-build configuration must be restored from
-`/var/lib/vercelify/qualification-m3-before/pre-crossbuild-agent.toml` when it
-reconnects, preserving unrelated services. No physical qualification is inferred
+The field-test laptop at `100.123.113.77` was reached through Tailscale on
+4 November 2026. Its saved pre-M3 build settings have been restored, retaining
+its subsequently corrected mesh public URL; both configurations were backed up.
+Production, PostgreSQL, PR #1 and the unrelated media container retained their
+container identities. Physical outage tests remain deferred until an operator
+can attend; the prepared [test window](validation/2026-11-04-final-qualification/OUTAGE-PROCEDURE.md)
+is not approved for unattended execution. No physical qualification is inferred
 from the ARM lab's simulated sysfs, real containers or controlled process restarts.
 
 Router and ISP loss can make a healthy laptop unreachable. This is not a cloud SLA.

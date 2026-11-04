@@ -1,0 +1,16 @@
+   Compiling vercelify-mesh v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-mesh)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.49s
+     Running unittests src/lib.rs (target/debug/deps/vercelify_mesh-26f73db7a16b98df)
+
+running 3 tests
+test state::tests::saved_privately ... ok
+test state::tests::the_lock_is_exclusive ... ok
+test state::tests::concurrent_writes_each_land_whole ... ok
+
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 72 filtered out; finished in 2.69s
+
+     Running unittests src/main.rs (target/debug/deps/vercelify_mesh-178a60ca8ec925ae)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

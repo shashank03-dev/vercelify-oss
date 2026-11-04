@@ -1,0 +1,18 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.75s
+     Running unittests src/lib.rs (target/debug/deps/vercelify_cockpit_lib-2dfc5527a652aa1f)
+
+running 1 test
+test vdisplay::tests::a_virtual_display_appears_and_goes ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 28 filtered out; finished in 13.32s
+
+     Running unittests src/main.rs (target/debug/deps/vercelify_cockpit-0590184f37bbc872)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s

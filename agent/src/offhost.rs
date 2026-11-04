@@ -18,6 +18,10 @@ use tokio::io::AsyncWriteExt;
 use vercelify_core::platform::{BuildJob, LocalBuildRequest};
 use vercelify_platform::{artifact, capacity, deployments, ids::new_id, offhost, proc};
 
+pub fn upload_router() -> axum::Router<AppState> {
+    axum::Router::new().route("/platform/build-jobs/{id}/image", axum::routing::put(upload))
+}
+
 #[derive(Deserialize)]
 pub struct Lease {
     pub generation: u32,

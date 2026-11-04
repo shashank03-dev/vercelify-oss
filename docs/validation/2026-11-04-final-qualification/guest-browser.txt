@@ -1,0 +1,1 @@
+PASS: lab Chromium scanner GET never reaches app; fragment clears before confirmation; host-only Secure/HttpOnly cookie; worker denied; existing session safely reopens; separate browser cannot reuse single-session invitation

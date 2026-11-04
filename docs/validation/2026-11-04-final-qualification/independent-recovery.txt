@@ -1,0 +1,6 @@
+{"case": "separate-host-success", "id": "task_nct8g529cm31a82b", "state": "succeeded", "credential_source": "provided", "integrity": "full_data_checked", "verified_at": "2026-11-04T02:45:45Z", "cleanup_pending": false}
+{"case": "wrong-key", "id": "task_ma32ptd96zagpymw", "state": "failed", "credential_source": "provided", "integrity": "check_failed", "verified_at": null, "cleanup_pending": false}
+{"case": "missing-key", "rejected_http": 400}
+{"case": "ciphertext-corruption", "id": "task_pwj5tkgm6kav2dyv", "state": "failed", "credential_source": "provided", "integrity": "check_failed", "verified_at": null, "cleanup_pending": false}
+{"case": "cancel-interruption", "id": "task_kdqdtvdffyypxv0m", "state": "cancelled", "credential_source": "provided", "integrity": "unknown", "verified_at": null, "cleanup_pending": false}
+PASS: separate physical source removed; fresh ARM host control store/master key; known row/migration/value assertions; wrong/missing keys; corruption; cancellation and cleanup

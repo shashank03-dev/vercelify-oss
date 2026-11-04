@@ -1,0 +1,29 @@
+[
+  {
+    "name": "vfy-final-qualification-docker",
+    "image": "docker:29-dind",
+    "state": "exited",
+    "oom_killed": false,
+    "memory_limit_bytes": 2147483648,
+    "privileged": true,
+    "qualification_label": "db1072b"
+  },
+  {
+    "name": "vfy-final-recovery-docker",
+    "image": "docker:29-dind",
+    "state": "exited",
+    "oom_killed": false,
+    "memory_limit_bytes": 1073741824,
+    "privileged": true,
+    "qualification_label": "db1072b-independent-recovery"
+  },
+  {
+    "name": "vfy-final-mesh",
+    "image": "vfy-finalq-tools",
+    "state": "exited",
+    "oom_killed": false,
+    "memory_limit_bytes": 0,
+    "privileged": true,
+    "qualification_label": "final-mesh"
+  }
+]

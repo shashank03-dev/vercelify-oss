@@ -1,0 +1,24 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.41s
+     Running unittests src/lib.rs (target/debug/deps/vercelify_platform-efc4f6d72736babd)
+
+running 1 test
+
+thread 'build::tests::a_missing_builder_container_is_recreated_with_limits_without_discarding_cache' (18071016) panicked at crates/vercelify-platform/src/build.rs:706:78:
+called `Result::unwrap()` on an `Err` value: Unavailable("could not verify BuildKit resource limits")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test build::tests::a_missing_builder_container_is_recreated_with_limits_without_discarding_cache ... FAILED
+
+failures:
+
+failures:
+    build::tests::a_missing_builder_container_is_recreated_with_limits_without_discarding_cache
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 197 filtered out; finished in 0.48s
+
+error: test failed, to rerun pass `-p vercelify-platform --lib`

@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-04-final-qualification/native-handoff.py", line 34, in <module>
+    id=job['job']['deployment_id'];uploaded=api('PUT',f'/build-jobs/{id}/image?generation=1&digest={digest}',archive=archive);assert uploaded['phase']=='verified'
+  File "/Users/shashank/Desktop/VERCELIFY/docs/validation/2026-11-04-final-qualification/native-handoff.py", line 16, in api
+    if int(status)>=400:raise urllib.error.HTTPError(BASE+path,int(status),'agent API error',{},None)
+urllib.error.HTTPError: HTTP Error 504: agent API error
+
+Server journal: response failed classification=Status code: 504 Gateway Timeout latency=120001 ms (2026-11-04T02:58:06.989705Z)

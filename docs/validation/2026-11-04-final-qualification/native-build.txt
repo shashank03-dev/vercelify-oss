@@ -1,0 +1,30 @@
+detected: Dockerfile
+building vfy/final-x86-qualification:z49dmag714gacmwm
+#0 building with "colima" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 175B done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/busybox:1.37
+#2 DONE 0.0s
+
+#3 [internal] load .dockerignore
+#3 transferring context: 2B done
+#3 DONE 0.0s
+
+#4 [1/2] FROM docker.io/library/busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec
+#4 resolve docker.io/library/busybox:1.37@sha256:a7dbc319b1438115a207e11930dc4bb3e643dcb3ec0bdd694bb36cd8fad289ec done
+#4 CACHED
+
+#5 [2/2] RUN mkdir -p /www && echo native-x86-db1072b > /www/index.html
+#5 DONE 0.1s
+
+#6 exporting to image
+#6 exporting layers 0.0s done
+#6 exporting manifest sha256:0a8b2340c8291aed18cff896dba0415e61e975bf1fd9919097c51dfce997f0a3 done
+#6 exporting config sha256:1da30420e06132e4ea362ad826dd6f905fb8f098a892a46345efed0108abfa8b done
+#6 exporting attestation manifest sha256:667d2dde294c729aec9499e2d53068cb6cd93f94bbe61f4565a2d6c0c01ec701 done
+#6 exporting manifest list sha256:e6970daa53ce65c243b8114059e915c960b2f8bfce6acf15c18aa69482f39bff done
+#6 naming to docker.io/vfy/final-x86-qualification:z49dmag714gacmwm done
+#6 DONE 0.0s

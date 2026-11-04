@@ -1,0 +1,4 @@
+PASS: actual agent restart preserves a valid hashed guest session
+PASS: actual control master-key replacement permanently revokes guest sessions
+PASS: privacy and preview enablement toggles cannot resurrect an old invitation
+PASS: PR close retires guest access on the real proxy path

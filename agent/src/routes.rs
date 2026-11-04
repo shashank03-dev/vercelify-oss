@@ -151,6 +151,10 @@ impl AppState {
 }
 
 pub fn router(state: AppState) -> Router {
+    router_with_upload(state, crate::offhost::upload_router())
+}
+
+fn router_with_upload(state: AppState, upload: Router<AppState>) -> Router {
     let api = Router::new()
         .route("/system", get(system))
         .route("/containers", get(containers))
@@ -209,6 +213,11 @@ pub fn router(state: AppState) -> Router {
     let api = api
         .merge(long)
         .merge(stream)
+        // An image can arrive over a slow mesh link. The handler enforces
+        // a 30-second idle deadline and the renewable, generation-scoped lease.
+        .merge(upload.layer(timeout(Duration::from_secs(
+            vercelify_platform::offhost::MAX_SECONDS as u64,
+        ))))
         // Instance starts and health waits outlast the usual timeout.
         .merge(crate::runtime_api::router())
         .merge(crate::mesh::owner_routes())
@@ -878,4 +887,60 @@ async fn domain_info(State(s): State<AppState>) -> Json<DomainInfo> {
         wildcard,
         tunnel_active,
     })
+}
+
+#[cfg(test)]
+mod upload_timeout_tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_image_handoff_outlives_the_regular_api_budget_and_still_needs_auth() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config {
+            engine: "none".into(),
+            state_dir: dir.path().join("state"),
+            run_dir: dir.path().join("run"),
+            tokens_file: dir.path().join("tokens.json"),
+            audit_log: dir.path().join("audit.log"),
+            ..Config::default()
+        };
+        config.apply_defaults();
+        let state = AppState::new(config, "slow-upload-owner".into());
+        // Exercise the actual production router/layer composition, replacing
+        // only image processing with a handler that needs 121 seconds.
+        let upload = Router::new().route(
+            "/platform/build-jobs/{id}/image",
+            put(|| async {
+                tokio::time::sleep(Duration::from_secs(121)).await;
+                StatusCode::NO_CONTENT
+            }),
+        );
+        let app = router_with_upload(state, upload);
+        let request = || {
+            Request::builder()
+                .method("PUT")
+                .uri("/v1/platform/build-jobs/test/image")
+        };
+        let denied = app
+            .clone()
+            .oneshot(request().body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(denied.status(), StatusCode::UNAUTHORIZED);
+        let allowed = app
+            .oneshot(
+                request()
+                    .header("authorization", "Bearer slow-upload-owner")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(allowed.status(), StatusCode::NO_CONTENT);
+    }
 }

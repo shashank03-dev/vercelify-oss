@@ -1,0 +1,182 @@
+[
+  {
+    "label": "docker",
+    "test": "docker::tests::container_lifecycle",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_platform-43d06aca6a60d50d",
+    "sha256": "7cbf6bd6317f05c1a6c1bbc61b2e06e726ee853adaf6e893fa21fcb3582839fc",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 24.62
+  },
+  {
+    "label": "compose-config",
+    "test": "compose::tests::compose_resolves_preview_volumes",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_platform-43d06aca6a60d50d",
+    "sha256": "7cbf6bd6317f05c1a6c1bbc61b2e06e726ee853adaf6e893fa21fcb3582839fc",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 0.34
+  },
+  {
+    "label": "compose-runtime",
+    "test": "compose::tests::compose_up_and_down",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_platform-43d06aca6a60d50d",
+    "sha256": "7cbf6bd6317f05c1a6c1bbc61b2e06e726ee853adaf6e893fa21fcb3582839fc",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 11.1
+  },
+  {
+    "label": "registry",
+    "test": "registry::tests::push_list_delete",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_platform-43d06aca6a60d50d",
+    "sha256": "7cbf6bd6317f05c1a6c1bbc61b2e06e726ee853adaf6e893fa21fcb3582839fc",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 39.97
+  },
+  {
+    "label": "build-fixtures",
+    "test": "build::tests::builds_fixture_apps_with_docker",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_platform-43d06aca6a60d50d",
+    "sha256": "7cbf6bd6317f05c1a6c1bbc61b2e06e726ee853adaf6e893fa21fcb3582839fc",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 193.18
+  },
+  {
+    "label": "terminal",
+    "test": "terminal::tests::into_a_container",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_agent-c2c005d9198ef5b5",
+    "sha256": "323fbce4f0aadebd6d85e90c3df5bbad9b7e3edd85f0706a70d23042e6c013d9",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 0.36
+  },
+  {
+    "label": "builder-idle",
+    "test": "idle_builder_retains_cache_and_restarts_for_repeated_builds",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/builder_idle-c200571c1e1e4434",
+    "sha256": "0ff5cc42a6dc36bec52e0c607c84304140b28fa170901b4943fbfd9c2d9d359b",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 114.21
+  },
+  {
+    "label": "engine",
+    "test": "deploy_redeploy_rollback_recover",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/engine_docker-e54f8f4f693a8996",
+    "sha256": "06faf0cbe597240a1629af8819179f55c12942ec24128fc2f13b1986c041cdda",
+    "passed": false,
+    "exit_code": 101,
+    "seconds": 115.3
+  },
+  {
+    "label": "databases",
+    "test": "databases_end_to_end",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/databases_docker-5c54044b38a4019c",
+    "sha256": "96ed3deede83924936cb37c8645c49989a75e213f21cb4c304ebb2b12dfea938",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 276.05
+  },
+  {
+    "label": "deploy-guard",
+    "test": "running_http_failure_crash_loop_and_failed_recovery_are_durable",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/deploy_guard_docker-ee083c92edbc7da2",
+    "sha256": "c69dba83a1b52b0a1c6bbab18e9d9eb91cf4c06241f1796d6fb2ee311c7eb52b",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 102.22
+  },
+  {
+    "label": "postgres-previews",
+    "test": "isolated_postgres_roles_migrations_and_owned_recovery",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/preview_db_docker-2a915b9ad3cc9cd2",
+    "sha256": "6a0bc98c5be14a4e4cba8f3677ced51a4acbdc1a72e4b4853048eb7939e1dd81",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 94.52
+  },
+  {
+    "label": "preview-safety",
+    "test": "previews_have_no_production_credentials_network_or_public_bypass",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/preview_safety-9b729d6fb192ed7d",
+    "sha256": "3ebac26e524f7b8dd6c116ea5a89cd7dfcc5ed315f9ca79e13104d455a1831df",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 52.38
+  },
+  {
+    "label": "restore-drills",
+    "test": "isolated_restore_drills_verify_selected_snapshots_and_fail_safely",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/restore_drill_docker-df57ac706a16df29",
+    "sha256": "c54e3994492d66ddac8eff6de708770f1cc1f516f7ee76d332037c12012a93af",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 103.93
+  },
+  {
+    "label": "docker",
+    "test": "docker::tests::container_lifecycle",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_platform-43d06aca6a60d50d",
+    "sha256": "a0d910e73cf47c04d005df169b9d57d5d432186f5bd84799ac3ebb0cdb5853db",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 1.51
+  },
+  {
+    "label": "compose-config",
+    "test": "compose::tests::compose_resolves_preview_volumes",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_platform-43d06aca6a60d50d",
+    "sha256": "a0d910e73cf47c04d005df169b9d57d5d432186f5bd84799ac3ebb0cdb5853db",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 0.45
+  },
+  {
+    "label": "compose-runtime",
+    "test": "compose::tests::compose_up_and_down",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_platform-43d06aca6a60d50d",
+    "sha256": "a0d910e73cf47c04d005df169b9d57d5d432186f5bd84799ac3ebb0cdb5853db",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 11.31
+  },
+  {
+    "label": "registry",
+    "test": "registry::tests::push_list_delete",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_platform-43d06aca6a60d50d",
+    "sha256": "a0d910e73cf47c04d005df169b9d57d5d432186f5bd84799ac3ebb0cdb5853db",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 6.29
+  },
+  {
+    "label": "build-fixtures",
+    "test": "build::tests::builds_fixture_apps_with_docker",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/vercelify_platform-43d06aca6a60d50d",
+    "sha256": "a0d910e73cf47c04d005df169b9d57d5d432186f5bd84799ac3ebb0cdb5853db",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 7.33
+  },
+  {
+    "label": "builder-idle",
+    "test": "idle_builder_retains_cache_and_restarts_for_repeated_builds",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/builder_idle-2cc731a991c75c46",
+    "sha256": "7b499ff089f2adb9f2a98541e6e5184dbb762aea40cc74b1258b0626358be268",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 9.78
+  },
+  {
+    "label": "engine",
+    "test": "deploy_redeploy_rollback_recover",
+    "binary": "target/aarch64-unknown-linux-musl/release/deps/engine_docker-e54f8f4f693a8996",
+    "sha256": "851aa726a66f21608f74c4781efdd6650c8f99b37974cd6aa380b9d7c67ec555",
+    "passed": true,
+    "exit_code": 0,
+    "seconds": 234.1
+  }
+]

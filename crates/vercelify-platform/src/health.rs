@@ -1,7 +1,7 @@
 //! Is a new container ready for traffic? (design §7.2 step 3)
 //!
-//! HTTP: `GET <path>` must answer below 500 (redirects and 404s still mean
-//! the server is up; a health path should answer 2xx). TCP: the port accepts
+//! HTTP: `GET <path>` must answer 2xx or 3xx; client and server errors fail
+//! readiness. TCP: the port accepts
 //! a connection. Command: exits 0 inside the container. Two passes in a row
 //! are needed, so an app that answers once and then crashes isn't promoted.
 

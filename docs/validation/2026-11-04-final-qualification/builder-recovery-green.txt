@@ -1,0 +1,122 @@
+warning: failed to parse serde attribute
+  |
+  | deserialize_with = "runtime_port"
+  |
+  = note: ts-rs failed to parse this attribute. It will be ignored.
+   Compiling vercelify-platform v1.0.0 (/Users/shashank/Desktop/VERCELIFY/crates/vercelify-platform)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 8.46s
+     Running unittests src/lib.rs (target/debug/deps/vercelify_platform-efc4f6d72736babd)
+
+running 8 tests
+test build::tests::builds_fixture_apps_with_docker ... ignored, needs Docker: VERCELIFY_DOCKER_TESTS=1 cargo test … -- --include-ignored
+test build::tests::tags ... ok
+test build::tests::emulation_needs_binfmt ... ok
+test build::tests::project_files_skip_symlinks_and_big_files ... ok
+test build::tests::a_linked_context_never_reaches_docker ... ok
+test build::tests::existing_builder_is_bootstrapped_and_errors_are_not_recreated ... ok
+test build::tests::a_missing_builder_container_is_recreated_with_limits_without_discarding_cache ... ok
+test build::tests::old_builder_limits_change_only_while_stopped_and_keep_the_cache ... ok
+
+test result: ok. 7 passed; 0 failed; 1 ignored; 0 measured; 190 filtered out; finished in 0.78s
+
+     Running unittests src/bin/vercelify-pack.rs (target/debug/deps/vercelify_pack-dc438634594ae8d0)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/builder_idle.rs (target/debug/deps/builder_idle-bd01ab6ee289dae3)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/capacity.rs (target/debug/deps/capacity-da872182d86bdfd9)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 15 filtered out; finished in 0.00s
+
+     Running tests/databases_docker.rs (target/debug/deps/databases_docker-c40fb82fb195678d)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/deploy_guard.rs (target/debug/deps/deploy_guard-35675e2bb2e81aac)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+
+     Running tests/deploy_guard_docker.rs (target/debug/deps/deploy_guard_docker-338e6e2dd3b04b27)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/engine_docker.rs (target/debug/deps/engine_docker-a7a8eeb65b5954fd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/guest_routing.rs (target/debug/deps/guest_routing-fa7b1ed1409d33d8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/guest_shares.rs (target/debug/deps/guest_shares-c66791619603be3a)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 8 filtered out; finished in 0.00s
+
+     Running tests/image_archive.rs (target/debug/deps/image_archive-1af03b7c4c0d8620)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/offhost_jobs.rs (target/debug/deps/offhost_jobs-c616609e11f8c627)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+
+     Running tests/pack_cli.rs (target/debug/deps/pack_cli-29317db87ffc6f42)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/preview_db.rs (target/debug/deps/preview_db-7e41cd6523e822fd)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 7 filtered out; finished in 0.00s
+
+     Running tests/preview_db_docker.rs (target/debug/deps/preview_db_docker-de60ee9cd7e26757)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/preview_safety.rs (target/debug/deps/preview_safety-663f1539cface110)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/restore_drill.rs (target/debug/deps/restore_drill-6d3eff8df45c23b6)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 9 filtered out; finished in 0.00s
+
+     Running tests/restore_drill_docker.rs (target/debug/deps/restore_drill_docker-eacbdec1f53a4aab)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s

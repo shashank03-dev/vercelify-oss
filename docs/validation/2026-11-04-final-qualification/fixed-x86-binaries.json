@@ -1,0 +1,10 @@
+{
+  "agent": {
+    "bytes": 7814200,
+    "sha256": "188b65f13707c48ac5bea89ce20cb05bb2dbae31a429d39c973d59f12b6e7f70"
+  },
+  "mesh": {
+    "bytes": 2920768,
+    "sha256": "1e6352e1787c4332679d2ffee14d1a4a8071999e588d1ff935a1b7c1d344b15c"
+  }
+}
