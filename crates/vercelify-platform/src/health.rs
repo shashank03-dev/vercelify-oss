@@ -124,7 +124,7 @@ pub async fn wait_healthy(w: Wait<'_>, log: &mut (dyn FnMut(&str) + Send)) -> Re
                 } else {
                     http_status(&ip, w.port, path, Duration::from_secs(5)).await
                 } {
-                    Ok(code) if code < 500 => true,
+                    Ok(code) if (200..400).contains(&code) => true,
                     Ok(code) => {
                         last = format!("GET {path} answered {code}");
                         false
@@ -270,5 +270,53 @@ mod tests {
         assert!(http_status("127.0.0.1", closed, "/", Duration::from_secs(1))
             .await
             .is_err());
+    }
+    /// A fake `docker` that reports one running container on 127.0.0.1.
+    fn running_docker(dir: &std::path::Path) -> Docker {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = dir.join("docker");
+        std::fs::write(
+            &bin,
+            "#!/bin/sh\necho '{\"State\":{\"Running\":true},\"NetworkSettings\":{\"Networks\":{\"test\":{\"IPAddress\":\"127.0.0.1\"}}}}'\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&bin, std::fs::Permissions::from_mode(0o755)).unwrap();
+        Docker {
+            bin: bin.to_string_lossy().into(),
+        }
+    }
+
+    /// Regression (audit A11): a readiness path answering 4xx is not ready.
+    #[tokio::test]
+    async fn readiness_needs_2xx_or_3xx() {
+        let dir = tempfile::tempdir().unwrap();
+        let docker = running_docker(dir.path());
+        let wait = |port, docker| Wait {
+            docker,
+            container: "c",
+            network: "test",
+            port,
+            probe: Probe::Http {
+                path: "/healthz".into(),
+            },
+            timeout: Duration::from_millis(600),
+            interval: Duration::from_millis(10),
+        };
+        for status in [
+            "404 Not Found",
+            "401 Unauthorized",
+            "403 Forbidden",
+            "429 Too Many Requests",
+        ] {
+            let port = server(status).await;
+            let err = wait_healthy(wait(port, &docker), &mut |_| {}).await.unwrap_err();
+            assert!(err.message().contains(&status[..3]), "{status}: {}", err.message());
+        }
+        for status in ["200 OK", "204 No Content", "302 Found"] {
+            let port = server(status).await;
+            wait_healthy(wait(port, &docker), &mut |_| {})
+                .await
+                .unwrap_or_else(|e| panic!("{status}: {e}"));
+        }
     }
 }

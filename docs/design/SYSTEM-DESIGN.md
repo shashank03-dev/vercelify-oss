@@ -1650,3 +1650,22 @@ Not yet: a remote Desktop managing another computer's host manager (it is local 
 the computer; the environment's agent is managed over the mesh as usual), Windows
 hosting before real-hardware qualification, automatic database failover between
 computers.
+
+### Restore, pairing and readiness review (November 2026)
+
+An instance restore enumerates its owned volumes and all their running writers.
+Docker inspection errors or writers remaining after Stop abort replacement before
+any live data changes and restart the stopped services. Other Docker volumes are
+excluded unless `--all-volumes` is explicit. Each volume is copied to a clean staging
+tree and swapped into place; the previous tree is retained for recovery, preventing
+post-snapshot WAL/data files from being mixed into restored state. Backup setup
+preserves off-site credentials and retention settings. See `docs/BACKUPS.md`.
+
+Mesh state updates hold a cross-process lock from identity verification through
+replacement, including pairing writes. Unix uses flock; Windows uses the standard
+file lock. Every atomic write owns a unique exclusive temporary file, so concurrent
+writers cannot truncate or rename another writer's temporary file.
+
+HTTP deployment readiness requires a 2xx or 3xx response, including probes made
+through the proxy for isolated previews. Authentication failures, missing paths,
+and throttling responses are readiness failures rather than successful publication.

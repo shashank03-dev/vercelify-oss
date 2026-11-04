@@ -42,9 +42,17 @@ default_backup_repo() {
   fi
 }
 
+# What a new `backup setup` keeps from the existing backup.env unless it is
+# given again: credentials of off-site repositories and how long backups are
+# kept (a reset would prune history the user chose to keep).
+BACKUP_KEPT_VARS=(AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY AWS_SESSION_TOKEN AWS_DEFAULT_REGION
+  B2_ACCOUNT_ID B2_ACCOUNT_KEY AZURE_ACCOUNT_NAME AZURE_ACCOUNT_KEY
+  GOOGLE_PROJECT_ID GOOGLE_APPLICATION_CREDENTIALS
+  BACKUP_KEEP_DAILY BACKUP_KEEP_WEEKLY BACKUP_KEEP_MONTHLY)
+
 # vercelify backup setup [--to REPO]... [--s3-key ID --s3-secret SECRET]
 backup_setup() {
-  local repos=() key='' secret='' pw r
+  local repos=() key='' secret='' pw r v
   while (( $# )); do
     case "$1" in
       --to) repos+=("${2:?--to needs a repository, e.g. sftp:root@pi:/mnt/storage/backups/$(hostname -s)}"); shift ;;
@@ -55,8 +63,7 @@ backup_setup() {
     shift
   done
   have "$RESTIC" || apt_install restic || die "could not install restic"
-  local had_env=0
-  [[ -e "$BACKUP_ENV_FILE" ]] && had_env=1
+  local -A kept=()
   if [[ -r "$BACKUP_ENV_FILE" ]]; then
     # shellcheck disable=SC1090
     pw=$(. "$BACKUP_ENV_FILE"; printf '%s' "${RESTIC_PASSWORD:-}")
@@ -64,41 +71,59 @@ backup_setup() {
       # shellcheck disable=SC1090
       read -r -a repos <<<"$(. "$BACKUP_ENV_FILE"; printf '%s' "${BACKUP_REPOS:-}")"
     fi
+    for v in "${BACKUP_KEPT_VARS[@]}"; do
+      # shellcheck disable=SC1090
+      if (unset "$v"; . "$BACKUP_ENV_FILE"; [[ -n "${!v+set}" ]]); then
+        # shellcheck disable=SC1090
+        kept[$v]=$(. "$BACKUP_ENV_FILE"; printf '%s' "${!v}")
+      fi
+    done
   fi
+  [[ -n "$key" ]] && kept[AWS_ACCESS_KEY_ID]=$key
+  [[ -n "$secret" ]] && kept[AWS_SECRET_ACCESS_KEY]=$secret
+  for v in BACKUP_KEEP_DAILY:7 BACKUP_KEEP_WEEKLY:4 BACKUP_KEEP_MONTHLY:3; do
+    [[ "${kept[${v%%:*}]:-}" =~ ^[0-9]{1,4}$ ]] || kept[${v%%:*}]=${v#*:}
+  done
   # Restoring onto a new machine: reuse the password of the existing backups.
   pw=${VERCELIFY_BACKUP_PASSWORD:-${pw:-$(random_hex 24)}}
   (( ${#repos[@]} )) || repos=("$(default_backup_repo)")
   for r in "${repos[@]}"; do
     [[ "$r" =~ ^[A-Za-z0-9:@/._~+=-]+$ ]] || die "invalid repository '$r'"
   done
+  # The new settings are checked against the repositories first, and only
+  # then replace the working file: a failed setup leaves it as it was.
+  local new="$BACKUP_ENV_FILE.new"
+  rm -f "$new"
   {
     echo "# Vercelify backups (sudo vercelify backup). Keep RESTIC_PASSWORD somewhere safe:"
     echo "# without it, nobody (you included) can restore these backups."
     backup_env_assignment RESTIC_PASSWORD "$pw"
     echo "BACKUP_REPOS=\"${repos[*]}\""
-    echo "BACKUP_KEEP_DAILY=7"
-    echo "BACKUP_KEEP_WEEKLY=4"
-    echo "BACKUP_KEEP_MONTHLY=3"
-    [[ -n "$key" ]] && backup_env_assignment AWS_ACCESS_KEY_ID "$key"
-    [[ -n "$secret" ]] && backup_env_assignment AWS_SECRET_ACCESS_KEY "$secret"
-  } | write_file "$BACKUP_ENV_FILE" 0600 || true
-  backup_load_env
+    for v in "${BACKUP_KEPT_VARS[@]}"; do
+      [[ -n "${kept[$v]+set}" ]] || continue
+      if [[ $v == BACKUP_KEEP_* ]]; then echo "$v=${kept[$v]}"; else backup_env_assignment "$v" "${kept[$v]}"; fi
+    done
+  } | write_file "$new" 0600 || true
+  setup_failed() { rm -f "$new"; die "$@"; }
+  if [[ -e "$new" ]]; then BACKUP_ENV_FILE=$new backup_load_env; else backup_load_env; fi
   for r in "${repos[@]}"; do
     [[ "$r" == /* ]] && run_cmd mkdir -p "$r"
     if RESTIC_REPOSITORY=$r "$RESTIC" cat config >/dev/null 2>&1; then
       ok "repository ready: $r"
     elif [[ -n "${VERCELIFY_BACKUP_PASSWORD:-}" ]] && [[ "$r" != /* || -e "$r/config" ]]; then
-      die "cannot open $r with that password"
+      setup_failed "cannot open $r with that password"
     elif [[ "$r" == /* && -e "$r/config" ]]; then
       # Backups from an earlier install whose password went with its config:
       # never re-create over them, say how to get them back.
-      (( had_env )) || rm -f "$BACKUP_ENV_FILE"
-      die "$r already holds backups locked with another password (from an earlier install?). Either put back the old $BACKUP_ENV_FILE, or give its password: sudo VERCELIFY_BACKUP_PASSWORD='…' vercelify backup setup — or start fresh, keeping the old ones aside: sudo mv $r $r.old && sudo vercelify backup setup"
+      setup_failed "$r already holds backups locked with another password (from an earlier install?). Either put back the old $BACKUP_ENV_FILE, or give its password: sudo VERCELIFY_BACKUP_PASSWORD='…' vercelify backup setup — or start fresh, keeping the old ones aside: sudo mv $r $r.old && sudo vercelify backup setup"
     else
-      run_cmd env RESTIC_REPOSITORY="$r" "$RESTIC" init >/dev/null || die "could not create the repository $r"
+      run_cmd env RESTIC_REPOSITORY="$r" "$RESTIC" init >/dev/null || setup_failed "could not create the repository $r"
       ok "created repository: $r"
     fi
   done
+  if [[ -e "$new" ]]; then
+    run_cmd mv -f "$new" "$BACKUP_ENV_FILE"
+  fi
   write_file "$SYSTEMD_DIR/vercelify-backup.service" 0644 <<EOF || true
 [Unit]
 Description=Vercelify backup
@@ -235,14 +260,52 @@ backup_list() {
   RESTIC_REPOSITORY=$r "$RESTIC" snapshots --tag vercelify
 }
 
-# vercelify backup restore [SNAPSHOT] [--target DIR | --instance] [--from REPO]
+# Docker volumes that belong to Vercelify (apps, previews, compose projects,
+# databases); anything else on the Docker host is someone else's data.
+owned_volume() { [[ $1 == vfy-* || $1 == vfyv2-* ]]; }
+
+# Running containers that write what an instance restore replaces: ours, and
+# any other one using a volume being restored (ALL=1: every container but the
+# proxy and the registry).
+restore_writers() { # ALL VOLUME...
+  local all=$1 v; shift
+  local output names=''
+  if (( all )); then
+    output=$(docker ps --format '{{.Names}}') || return 1
+    names=$(printf '%s\n' "$output" | grep -vx -e vercelify-proxy -e vfy-registry || true)
+  else
+    names=$(docker ps --filter label=vercelify.managed=platform --format '{{.Names}}') || return 1
+    for v in "$@"; do
+      output=$(docker ps --filter "volume=$v" --format '{{.Names}}') || return 1
+      names+=$'\n'"$output"
+    done
+  fi
+  printf '%s\n' "$names" | sed '/^$/d' | sort -u
+}
+
+# Replace LIVE with exactly SNAPSHOT's tree: copied beside it first, then
+# switched; the previous tree stays at LIVE.before-restore-STAMP.
+restore_tree() { # SNAPSHOT LIVE STAMP
+  local src=$1 live=$2 stage="$2.vfy-restore"
+  run_cmd rm -rf "$stage"
+  run_cmd mkdir -p "$(dirname "$live")"
+  run_cmd rsync -aHAX --numeric-ids --delete "$src/" "$stage/" || return 1
+  if [[ -e "$live" ]]; then run_cmd mv "$live" "$live.before-restore-$3" || return 1; fi
+  if ! run_cmd mv "$stage" "$live"; then
+    [[ -e "$live.before-restore-$3" ]] && run_cmd mv "$live.before-restore-$3" "$live"
+    return 1
+  fi
+}
+
+# vercelify backup restore [SNAPSHOT] [--target DIR | --instance [--all-volumes]] [--from REPO]
 backup_restore() {
   backup_load_env
-  local snap=latest target='' instance=0 repo=${BACKUP_REPOS%% *}
+  local snap=latest target='' instance=0 all=0 repo=${BACKUP_REPOS%% *}
   while (( $# )); do
     case "$1" in
       --target) target=${2:?}; shift ;;
       --instance) instance=1 ;;
+      --all-volumes) all=1 ;;
       --from) repo=${2:?}; shift ;;
       -*) die "unknown option $1" ;;
       *) snap=$1 ;;
@@ -268,17 +331,55 @@ backup_restore() {
   fi
   [[ -n "$db" ]] || die "no engine state in this snapshot; the files are in $t"
   [[ -f "$t$(master_key_file)" ]] || die "the snapshot has no master key: its secrets could not be unsealed. Files are in $t"
+  # The manifest: which volumes come back. Docker volumes that aren't ours
+  # are left alone unless --all-volumes says so.
+  local vols=() skipped=() hdd=() d name
+  for d in "$t$DOCKER_VOLUMES_DIR"/*/; do
+    [[ -d "$d/_data" ]] || continue
+    name=$(basename "$d")
+    if (( all )) || owned_volume "$name"; then vols+=("$name"); else skipped+=("$name"); fi
+  done
+  for d in "$t$STORAGE_MOUNT/volumes"/*/; do
+    [[ -d "$d" ]] && hdd+=("$(basename "$d")")
+  done
+  info "volumes to restore: ${vols[*]:-none}${hdd[*]:+; storage disk: ${hdd[*]}}"
+  (( ${#skipped[@]} )) && warn "not Vercelify's, left as they are: ${skipped[*]} (--all-volumes restores them too)"
   confirm "Replace this server's apps, settings, secrets and app data with the backup?" n || die "cancelled (files stay in $t)"
   # The engine stops first: it would put back what it last knew.
-  run_cmd systemctl stop vercelify-agent
-  # Volume files are rewritten under no running container: a database must
-  # not see its files change under it.
-  local running=()
-  mapfile -t running < <(docker ps --format '{{.Names}}' | grep -vx -e vercelify-proxy -e vfy-registry || true)
-  (( ${#running[@]} )) && { run_cmd docker stop "${running[@]}" >/dev/null || warn "some containers did not stop"; }
+  run_cmd systemctl stop vercelify-agent || die "the agent did not stop; nothing was changed (files are in $t)"
+  # Every writer of what is replaced stops, and is seen stopped, before any
+  # live file changes: a database must not see its files change under it.
+  local writers=() left=() observed
+  if ! observed=$(restore_writers "$all" "${vols[@]}"); then
+    run_cmd systemctl start vercelify-agent || true
+    die "could not inspect restore writers; nothing was changed (files are in $t)"
+  fi
+  [[ -z "$observed" ]] || mapfile -t writers <<<"$observed"
+  if (( ${#writers[@]} )); then
+    run_cmd docker stop "${writers[@]}" >/dev/null || warn "some containers did not stop"
+    if ! observed=$(restore_writers "$all" "${vols[@]}"); then
+      run_cmd docker start "${writers[@]}" >/dev/null || true
+      run_cmd systemctl start vercelify-agent || true
+      die "could not verify stopped restore writers; nothing was changed (files are in $t)"
+    fi
+    [[ -z "$observed" ]] || mapfile -t left <<<"$observed"
+  fi
+  if (( ${#left[@]} )); then
+    run_cmd docker start "${writers[@]}" >/dev/null || true
+    run_cmd systemctl start vercelify-agent || true
+    die "still running: ${left[*]} — nothing was changed and everything was started again (files are in $t)"
+  fi
+  local stamp tokens
+  stamp=$(date +%Y%m%d-%H%M%S)
+  tokens=$(agent_setting tokens_file "$VERCELIFY_STATE/tokens.json")
   run_cmd install -m 0600 "$t$(master_key_file)" "$(master_key_file)"
   run_cmd rm -f "$PLATFORM_DB-wal" "$PLATFORM_DB-shm"
   run_cmd install -m 0600 "$db" "$PLATFORM_DB"
+  # Who may use the API: paired devices' tokens (as of the backup — revoked
+  # since then means revoke again) and the server's own token. The machine's
+  # own settings (agent.toml, install.env, tunnels) stay as they are.
+  [[ -f "$t$tokens" ]] && run_cmd install -m 0600 "$t$tokens" "$tokens"
+  [[ -f "$t$VERCELIFY_ETC/agent.token" ]] && run_cmd install -m 0600 "$t$VERCELIFY_ETC/agent.token" "$VERCELIFY_ETC/agent.token"
   # The network's identity too (the coordinator's keys, this node's): workers
   # and devices keep their certificates and find the server again.
   local mesh=${MESH_DIR:-$VERCELIFY_STATE/mesh} restored_mesh=0
@@ -288,22 +389,36 @@ backup_restore() {
     run_cmd rsync -a --delete "$t$mesh/" "$mesh/"
     restored_mesh=1
   fi
-  [[ -d "$t$STORAGE_MOUNT/volumes" ]] && run_cmd rsync -aHAX --numeric-ids "$t$STORAGE_MOUNT/volumes/" "$STORAGE_MOUNT/volumes/"
-  [[ -d "$t$DOCKER_VOLUMES_DIR" ]] && run_cmd rsync -aHAX --numeric-ids "$t$DOCKER_VOLUMES_DIR/" "$DOCKER_VOLUMES_DIR/"
-  (( ${#running[@]} )) && { run_cmd docker start "${running[@]}" >/dev/null || true; }
+  # Each volume exactly as it was in the snapshot (no newer files mixed in).
+  local failed=()
+  for name in "${vols[@]}"; do
+    run_cmd docker volume create "$name" >/dev/null || true
+    restore_tree "$t$DOCKER_VOLUMES_DIR/$name/_data" "$DOCKER_VOLUMES_DIR/$name/_data" "$stamp" || failed+=("$name")
+  done
+  for name in "${hdd[@]}"; do
+    restore_tree "$t$STORAGE_MOUNT/volumes/$name" "$STORAGE_MOUNT/volumes/$name" "$stamp" || failed+=("$name")
+  done
+  (( ${#writers[@]} )) && { run_cmd docker start "${writers[@]}" >/dev/null || true; }
   # The engine reconciles from the restored state: apps and databases start
   # (or redeploy) as they were when the backup was taken.
   run_cmd systemctl start vercelify-agent
   (( restored_mesh )) && { run_cmd systemctl restart vercelify-mesh 2>/dev/null || true; }
+  (( ${#failed[@]} )) && die "these volumes could not be restored: ${failed[*]} (their previous data is unchanged or kept as *.before-restore-$stamp; files are in $t)"
   ok "instance restored — the engine is bringing apps and databases back as they were. Database dumps are in $t$BACKUP_STAGE/databases"
+  (( ${#vols[@]} + ${#hdd[@]} )) && info "the data each volume had before is kept beside it as *.before-restore-$stamp; remove it once the apps check out"
+  [[ -f "$t$tokens" ]] && info "device access is as it was at the backup: tokens revoked after it work again until revoked again (sudo vercelify tokens)"
+  return 0
+}
+
+# A string setting of agent.toml, else DEFAULT.
+agent_setting() { # KEY DEFAULT
+  local f
+  f=$(sed -n -E "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*\"([^\"]+)\".*/\\1/p" "${AGENT_CONFIG:-$VERCELIFY_ETC/agent.toml}" 2>/dev/null | head -1)
+  printf '%s\n' "${f:-$2}"
 }
 
 # The engine's master key (agent.toml `master_key_file`, else beside platform.db).
-master_key_file() {
-  local f
-  f=$(sed -n -E 's/^[[:space:]]*master_key_file[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' "${AGENT_CONFIG:-$VERCELIFY_ETC/agent.toml}" 2>/dev/null | head -1)
-  printf '%s\n' "${f:-$VERCELIFY_STATE/master.key}"
-}
+master_key_file() { agent_setting master_key_file "$VERCELIFY_STATE/master.key"; }
 
 backup_cli() {
   case "${1:-status}" in
@@ -322,6 +437,6 @@ backup_cli() {
       fi
       systemctl list-timers vercelify-backup.timer --no-pager 2>/dev/null | sed -n 2p || true
       ;;
-    *) die "usage: vercelify backup [status|setup [--to REPO]…|run|list|restore [SNAPSHOT] [--target DIR|--instance] [--from REPO]]" ;;
+    *) die "usage: vercelify backup [status|setup [--to REPO]…|run|list|restore [SNAPSHOT] [--target DIR|--instance [--all-volumes]] [--from REPO]]" ;;
   esac
 }
