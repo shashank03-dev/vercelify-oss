@@ -9,6 +9,7 @@ mod http;
 mod local;
 mod mesh;
 mod procs;
+mod supervise;
 mod tray;
 #[cfg(target_os = "macos")]
 mod vdisplay;
@@ -40,6 +41,8 @@ struct AppState {
     /// Through vercelify-mesh's SOCKS proxy (servers on the mesh, app mode).
     mesh_http: reqwest::Client,
     procs: Processes,
+    /// The sender's current run; Start and Stop change it (see supervise).
+    sender_run: Mutex<u64>,
     collector: Collector,
     /// Said once: the settings file couldn't be read and was put aside.
     config_notice: Mutex<Option<String>>,
@@ -537,7 +540,11 @@ fn forward_to(owner: &str, host: &str, ports: &[(bool, u16, u16)]) -> CmdResult<
 }
 
 #[tauri::command]
-async fn sender_start(state: State<'_, AppState>, mut config: SenderConfig) -> CmdResult<ProcessStatus> {
+async fn sender_start(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mut config: SenderConfig,
+) -> CmdResult<ProcessStatus> {
     sender_args(&config).map_err(|e| e.to_string())?;
     let bin = local::ffmpeg().ok_or("ffmpeg is not installed — on macOS: brew install ffmpeg")?;
     local::screen_recording_allowed()?;
@@ -561,12 +568,44 @@ async fn sender_start(state: State<'_, AppState>, mut config: SenderConfig) -> C
         config.url = u;
     }
     let args = sender_args(&config).map_err(|e| e.to_string())?;
-    state.procs.start(SENDER, &bin.to_string_lossy(), &args, true)
+    let bin = bin.to_string_lossy().into_owned();
+    let run = {
+        let mut run = state.sender_run.lock().unwrap_or_else(|e| e.into_inner());
+        *run += 1;
+        state.procs.start(SENDER, &bin, &args, true)?;
+        *run
+    };
+    // A capture that cannot start (no Screen Recording permission, a bad
+    // screen) fails at once: report that, rather than retrying it.
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let status = state.procs.status(SENDER);
+    if status.running {
+        std::thread::spawn(move || {
+            let state = app.state::<AppState>();
+            supervise::supervise(
+                &state.procs,
+                &state.sender_run,
+                run,
+                SENDER,
+                &bin,
+                &args,
+                &supervise::PACE,
+            );
+        });
+    }
+    Ok(status)
+}
+
+/// End the sender's run (no restarts) and stop it.
+fn end_sender(state: &AppState) {
+    let mut run = state.sender_run.lock().unwrap_or_else(|e| e.into_inner());
+    *run += 1;
+    state.procs.stop(SENDER);
 }
 
 #[tauri::command]
 fn sender_stop(state: State<'_, AppState>) -> ProcessStatus {
-    state.procs.stop(SENDER);
+    end_sender(&state);
     let _ = mesh::set_forwards("sender", &[]);
     // The extended desktop goes with its stream; windows on it move back.
     #[cfg(target_os = "macos")]
@@ -730,6 +769,7 @@ pub fn run() {
                 procs: Processes::default(),
                 #[cfg(target_os = "macos")]
                 extended: Mutex::new(None),
+                sender_run: Mutex::new(0),
                 collector: Collector::new(SysPaths::default(), env!("CARGO_PKG_VERSION")),
             });
             Ok(())
@@ -780,6 +820,7 @@ pub fn run() {
     app.run(|handle, event| {
         if let RunEvent::Exit = event {
             if let Some(state) = handle.try_state::<AppState>() {
+                end_sender(&state);
                 state.procs.stop_all();
             }
         }

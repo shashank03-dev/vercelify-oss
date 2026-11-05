@@ -1550,9 +1550,20 @@ from the user service manager, drops to that user with runuser, and shares the X
 socket directory through the agent's private /tmp boundary. Explicit backend/env
 configuration overrides detection. Receiver lifecycle operations are serialized;
 stop and agent shutdown kill the receiver process group, including a runuser child.
-A private mpv IPC socket supplies playback confirmation (`playback_active`) only
-when `vo-configured` is true and `core-idle` is false, separate
-from process liveness. The cockpit exposes a refresh/recovery step and establishes
+A private mpv IPC socket supplies playback confirmation (`playback_active`), separate
+from process liveness: the decoded position must have moved within the last two
+seconds, so a sender that stopped or a network that dropped ends "playing". Start
+refuses a UDP port another program holds (mpv would only log it and idle) and bounds
+SRT latency to 20–5000 ms. The SRT listener drops a caller silent for two seconds,
+the sender's caller keeps trying for ten, and the agent reloads the stream when mpv
+stays idle (it stops looping a stream whose open failed; `--loop-playlist=force`
+spins at full CPU on an instant failure). The cockpit restarts a sender that exits
+on its own until Stop, backing off and giving up after eight quick failures; a
+capture that fails within half a second is reported instead. The agent reads small
+request bodies before handlers run, so an ignored `{}` arriving late cannot reset the
+connection under the response. `host/tests/contract/screencast.py` checks all of this
+with the real sender, receiver and agent over netem-impaired network namespaces.
+The cockpit exposes a refresh/recovery step and establishes
 Moonlight forwards before opening Sunshine's setup page. Share screen can mirror
 a screen or extend the desktop: in Extend mode the app makes a display with
 CoreGraphics' `CGVirtualDisplay` (macOS 11+, the API DeskPad and BetterDisplay

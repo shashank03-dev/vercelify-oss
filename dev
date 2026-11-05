@@ -10,8 +10,12 @@
 #   ./dev check [PARTS] [--full]
 #                             what CI runs, here, in minutes. PARTS: rust host cockpit
 #                             website (default: the parts your branch changed, or all)
-#                             --full adds Playwright UI flows, the installer dry run
-#                             and the agent binaries
+#                             --full adds Playwright UI flows, the installer dry run,
+#                             the screencast contract and the agent binaries
+#   ./dev screencast [SCENARIO...]
+#                             the screen-sharing path for real: agent, mpv and ffmpeg
+#                             over a simulated Wi-Fi, lossy, cellular and dropped link
+#                             (Linux: sudo; macOS: in Colima's VM)
 #   ./dev fix                 cargo fmt + regenerate the TS types
 #
 #   ./dev build [--universal] [--install]
@@ -231,6 +235,45 @@ linux_clippy() {
     cd '$ROOT' && CARGO_TARGET_DIR=~/vercelify-target TS_RS_EXPORT_DIR=/tmp/ts ~/.cargo/bin/cargo clippy --locked --workspace --all-targets -- -D warnings"
 }
 
+# host/tests/contract/screencast.py: network namespaces and tc need root and
+# Linux, so on a Mac it runs in Colima's VM (this repo is mounted there).
+screencast_contract() {
+  local only='' IFS=,
+  only="$*"
+  unset IFS
+  local build='cargo build -q -p vercelify-agent -p vercelify-core --example sender_args'
+  if [[ $OS == Linux ]]; then
+    local t
+    for t in mpv ffmpeg tc python3; do have "$t" || { echo "missing $t (sudo apt install mpv ffmpeg iproute2)"; return 1; }; done
+    $build || return 1
+    sudo env ONLY="$only" CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}" python3 host/tests/contract/screencast.py
+    return
+  fi
+  docker_ready && have colima || { echo "needs Colima's Linux VM (./dev setup, then colima start)"; return 1; }
+  colima ssh -- bash -lc "
+    set -e
+    command -v cc >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq build-essential pkg-config >/dev/null; }
+    command -v mpv >/dev/null && command -v ffmpeg >/dev/null || { echo 'installing mpv and ffmpeg in the VM (once)'; sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends mpv ffmpeg iproute2 >/dev/null; }
+    [ -x ~/.cargo/bin/cargo ] || curl -fsSL https://sh.rustup.rs | sh -s -- -y -q --profile minimal >/dev/null
+    cd '$ROOT'
+    CARGO_TARGET_DIR=~/vercelify-target TS_RS_EXPORT_DIR=/tmp/ts ~/.cargo/bin/$build
+    sudo env ONLY='$only' CARGO_TARGET_DIR=\$HOME/vercelify-target python3 host/tests/contract/screencast.py"
+}
+
+# check --full runs it only when it can without asking for a password.
+screencast_ready() {
+  if [[ $OS == Linux ]]; then
+    [[ $EUID -eq 0 ]] || sudo -n true 2>/dev/null
+  else
+    docker_ready && have colima
+  fi
+}
+
+cmd_screencast() {
+  if [[ $OS == Darwin ]]; then say "screencast contract in Colima's VM"; else say "screencast contract (sudo)"; fi
+  screencast_contract "$@"
+}
+
 # Which parts the branch touches compared with main (committed or not).
 changed_parts() {
   local base files parts=''
@@ -288,6 +331,8 @@ cmd_check() {
         else skip "agent + mesh binaries $arch-linux-musl" "cargo-zigbuild missing (./dev setup)"; fi
       done
       [[ $OS == Darwin ]] && step "mesh on macOS (tests, 6 MiB budget)" mesh_macos
+      if screencast_ready; then step "screencast contract (agent, mpv, ffmpeg, netem)" screencast_contract
+      else skip "screencast contract" "needs passwordless sudo (Linux) or Colima (macOS)"; fi
     fi
   fi
 
@@ -632,6 +677,7 @@ case "$cmd" in
   host|ship) cmd_host "$@" ;;
   release) cmd_release "$@" ;;
   hooks) cmd_hooks "$@" ;;
+  screencast) cmd_screencast "$@" ;;
   help|-h|--help) usage ;;
   *) usage; die "unknown command $cmd" ;;
 esac

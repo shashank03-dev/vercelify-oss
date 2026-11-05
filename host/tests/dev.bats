@@ -28,3 +28,15 @@ teardown() { rm -rf "$T"; }
   VERCELIFY_ETC="$T/none" run bash -c ". '$REPO/host/tests/contract/lib-guard.sh'; echo ran"
   [ "$output" = ran ]
 }
+
+@test "the screencast contract names missing receiver tools before building anything" {
+  [ "$(uname -s)" = Linux ] || skip "the Linux path"
+  mkdir "$T/bin"
+  for t in bash env uname dirname git grep sed date cat; do
+    p=$(command -v "$t") && ln -s "$p" "$T/bin/$t"
+  done
+  PATH="$T/bin" HOME="$T" run "$REPO/dev" screencast
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"missing mpv"* ]]
+  [[ "$output" == *"apt install mpv ffmpeg"* ]]
+}
