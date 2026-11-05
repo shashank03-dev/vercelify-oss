@@ -203,6 +203,7 @@ fn router_with_upload(state: AppState, upload: Router<AppState>) -> Router {
         .route("/projects/{app}/sync", post(projects_sync))
         .route("/projects/{app}/crons/run", post(projects_cron_run))
         .merge(crate::platform_api::router())
+        .layer(middleware::from_fn(read_small_body))
         .layer(timeout(Duration::from_secs(120)));
     // Kept open: the live event stream.
     let stream = Router::new().route("/events", get(events_stream));
@@ -231,10 +232,7 @@ fn router_with_upload(state: AppState, upload: Router<AppState>) -> Router {
 
     // Mesh nodes authenticate with their own tokens; the map is a stream.
     let public = public.merge(crate::mesh::node_router());
-    let mut app = public
-        .nest("/v1", api)
-        .layer(middleware::from_fn(read_small_body))
-        .layer(TraceLayer::new_for_http());
+    let mut app = public.nest("/v1", api).layer(TraceLayer::new_for_http());
 
     if !state.config.cors_origins.is_empty() {
         let origins: Vec<HeaderValue> = state
@@ -997,5 +995,53 @@ mod tests {
         }
         assert_eq!(answers.matches("200 ok").count(), 2, "{answers}");
         assert!(!answers.contains("connection: close"), "{answers}");
+    }
+}
+
+#[cfg(test)]
+mod body_layer_tests {
+    use super::*;
+    use axum::{
+        body::{Body, Bytes},
+        http::{Request, StatusCode},
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test(start_paused = true)]
+    async fn authentication_does_not_wait_for_a_small_request_body() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut config = Config {
+            engine: "none".into(),
+            state_dir: dir.path().join("state"),
+            run_dir: dir.path().join("run"),
+            tokens_file: dir.path().join("tokens.json"),
+            audit_log: dir.path().join("audit.log"),
+            ..Config::default()
+        };
+        config.apply_defaults();
+        let app = router(AppState::new(config, "body-layer-test-owner".into()));
+        struct PendingBody;
+        impl http_body::Body for PendingBody {
+            type Data = Bytes;
+            type Error = std::convert::Infallible;
+            fn poll_frame(
+                self: std::pin::Pin<&mut Self>,
+                _: &mut std::task::Context<'_>,
+            ) -> std::task::Poll<Option<Result<http_body::Frame<Bytes>, Self::Error>>> {
+                std::task::Poll::Pending
+            }
+        }
+        let pending = Body::new(PendingBody);
+        let request = Request::builder()
+            .method("POST")
+            .uri("/v1/display/receiver/stop")
+            .header("content-length", "2")
+            .body(pending)
+            .unwrap();
+        let response = tokio::time::timeout(Duration::from_secs(1), app.oneshot(request))
+            .await
+            .expect("authentication waited for an untrusted body")
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 }

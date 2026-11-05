@@ -1509,6 +1509,22 @@ fn platform_api() {
     assert!(v["error"].as_str().unwrap().contains("deployer"));
     let (s, _) = send(&a, "POST", "/v1/tokens", &deployer, Some(json!({"name": "escalate"})));
     assert_eq!(s, 403, "deployers can't mint tokens");
+    // A compose file asking for the host is refused when saved, for any role
+    // (audit A02); the deployment re-checks the model Compose resolves.
+    for token in [deployer.as_str(), TOKEN] {
+        let (s, v) = send(
+            &a,
+            "POST",
+            "/v1/platform/apps",
+            token,
+            Some(
+                json!({"name": "rooted", "kind": "compose", "source": {"compose_content":
+                "services:\n  web:\n    image: alpine\n    privileged: true\n    volumes: [\"/var/run/docker.sock:/var/run/docker.sock\"]\n"}}),
+            ),
+        );
+        assert_eq!(s, 400, "{v}");
+        assert!(v["error"].as_str().unwrap().contains("access to the server"), "{v}");
+    }
     let (s, _) = send(&a, "GET", "/v1/platform/apps/blog", &viewer, None);
     assert_eq!(s, 200);
     let (s, _) = send(&a, "GET", "/v1/platform/apps/blog/env?reveal=true", &viewer, None);

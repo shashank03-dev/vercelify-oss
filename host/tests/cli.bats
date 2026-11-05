@@ -259,7 +259,7 @@ STUB
   [ ! -s "$T/calls" ]
 }
 
-@test "uninstall stops the apps and removes the proxy, builder and slice, and gives the lid back" {
+@test "uninstall stops owned apps without stopping the shared Docker slice" {
   mkdir -p "$T/bin" "$T/systemd" "$T/lib" "$T/logind"
   printf '#!/bin/sh\necho "systemctl $*" >>"%s/calls"\n' "$T" >"$T/bin/systemctl"
   cat >"$T/bin/docker" <<EOF
@@ -284,7 +284,8 @@ EOF
   [[ "$output" == *"stopped 2 app container(s)"* ]]
   grep -q 'docker rm -f vercelify-proxy' "$T/calls"
   grep -q 'docker rm -f buildx_buildkit_vercelify0' "$T/calls"
-  [ ! -e "$T/systemd/vercelify.slice" ]
+  [ -e "$T/systemd/vercelify.slice" ]
+  ! grep -q "systemctl stop vercelify.slice" "$T/calls"
   [ "$(jq -c . "$T/daemon.json")" = '{"log-driver":"json-file"}' ]
   [ ! -e "$T/logind/90-vercelify.conf" ]
   grep -q 'systemctl unmask --quiet sleep.target' "$T/calls"

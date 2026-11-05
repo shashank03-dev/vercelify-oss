@@ -641,10 +641,9 @@ cmd_uninstall() {
     systemctl disable --now "$u.timer" >/dev/null 2>&1 || true
     rm -f "$SYSTEMD_DIR/$u.timer" "$SYSTEMD_DIR/$u.service"
   done
-  # The memory-capped slice the containers ran in; Docker stops pointing at it
-  # (from its next restart).
-  systemctl stop vercelify.slice >/dev/null 2>&1 || true
-  rm -f "$SYSTEMD_DIR/vercelify.slice"
+  # Docker may also have unrelated containers in this shared slice. Keep
+  # its unit and current limits; stopping it would stop those containers.
+  # New Docker starts stop using it after the daemon's next restart.
   rm -f "$SYSTEMD_DIR/docker-.scope.d/90-vercelify-ordering.conf"
   rmdir "$SYSTEMD_DIR/docker-.scope.d" 2>/dev/null || true
   if [[ -s "$DOCKER_DAEMON_JSON" ]] && jq -e '."cgroup-parent" == "vercelify.slice"' "$DOCKER_DAEMON_JSON" >/dev/null 2>&1; then

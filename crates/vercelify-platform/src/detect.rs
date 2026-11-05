@@ -1,8 +1,9 @@
 //! "vfy pack": turn a checked-out repository into a build plan (design §6.3).
 //!
 //! Order: the app's explicit pack → a Dockerfile → a compose file (compose
-//! apps) → language detection, which writes a multi-stage Dockerfile. Only
-//! files are read; nothing from the repository runs on the host. The
+//! apps) → language detection, which writes a multi-stage Dockerfile → a
+//! compose file (repository apps where nothing else was found; the app
+//! becomes a compose app). Only files are read; nothing from the repository runs on the host. The
 //! generated Dockerfile is printed in the build log so it can be copied into
 //! the repository and adjusted.
 //!
@@ -152,6 +153,22 @@ pub fn build_env_file(vars: &[(String, String)]) -> String {
         .collect()
 }
 
+/// A repository path must stay in the repository once symbolic links are
+/// followed: BuildKit and Compose would otherwise read the server's files.
+fn contained(root: &Path, what: &str, rel: &Path) -> Result<()> {
+    let (Ok(root), Ok(real)) = (std::fs::canonicalize(root), std::fs::canonicalize(root.join(rel))) else {
+        return Ok(()); // missing: reported by the caller
+    };
+    if real.starts_with(&root) {
+        Ok(())
+    } else {
+        Err(Error::Invalid(format!(
+            "{what} {} leads outside the repository (a symbolic link)",
+            rel.display()
+        )))
+    }
+}
+
 pub fn plan(root: &Path, kind: AppKind, source: &AppSource, build: &AppBuild) -> Result<BuildPlan> {
     let context = build
         .context
@@ -160,6 +177,7 @@ pub fn plan(root: &Path, kind: AppKind, source: &AppSource, build: &AppBuild) ->
         .unwrap_or_else(|| ".".into());
     if context != "." {
         validate::repo_path("context", &context)?;
+        contained(root, "the build context", Path::new(&context))?;
     }
     if escapes(root, &context) {
         return Err(outside("the build context", &context));
@@ -221,7 +239,31 @@ pub fn plan(root: &Path, kind: AppKind, source: &AppSource, build: &AppBuild) ->
             dockerfile_plan(&dir, &dockerfile, &b)
         }
         BuildPack::Auto if has_dockerfile => dockerfile_plan(&dir, &dockerfile, &b),
-        BuildPack::Auto => detect(&dir, &b, vercel.framework.as_deref())?,
+        BuildPack::Auto => match detect(&dir, &b, vercel.framework.as_deref()) {
+            Ok(p) => p,
+            // Nothing to build, but a compose file: deploy that.
+            Err(e) if e.message().starts_with("couldn't tell how to build this repository:") => {
+                match compose_file_in(&dir) {
+                    Some(f) => {
+                        let file = if context == "." {
+                            f.to_string()
+                        } else {
+                            format!("{context}/{f}")
+                        };
+                        contained(root, "the compose file", Path::new(&file))?;
+                        return Ok(BuildPlan {
+                            kind: PlanKind::Compose(file),
+                            context,
+                            port: 80,
+                            framework: "Docker Compose".into(),
+                            notes: vec![format!("no Dockerfile or known language: using {f}")],
+                        });
+                    }
+                    None => return Err(e),
+                }
+            }
+            Err(e) => return Err(e),
+        },
         BuildPack::Static => static_plan(&dir, &b, "Static site")?,
         BuildPack::Node => node(&dir, &b, vercel.framework.as_deref())?,
         BuildPack::Python => python(&dir, &b)?,
@@ -234,6 +276,18 @@ pub fn plan(root: &Path, kind: AppKind, source: &AppSource, build: &AppBuild) ->
     };
     p.context = context;
     Ok(p)
+}
+
+/// Compose's own file names, in its order of preference.
+pub const COMPOSE_FILES: [&str; 4] = [
+    "compose.yaml",
+    "compose.yml",
+    "docker-compose.yaml",
+    "docker-compose.yml",
+];
+
+fn compose_file_in(dir: &Path) -> Option<&'static str> {
+    COMPOSE_FILES.into_iter().find(|f| dir.join(f).is_file())
 }
 
 /// The plan's build context on disk, checked again where it is used: what
@@ -1712,6 +1766,67 @@ mod tests {
         assert!(plan(d.path(), AppKind::Git, &AppSource::default(), &multi).is_err());
     }
 
+    /// Regression (audit A14): a repository with only a compose file deploys
+    /// it; a buildable app with a compose file for local development doesn't.
+    #[test]
+    fn repositories_with_only_a_compose_file() {
+        for f in COMPOSE_FILES {
+            let d = repo(&[(f, "services:\n  web:\n    image: nginx\n")]);
+            let p = auto(&d);
+            assert_eq!(p.kind, PlanKind::Compose(f.into()), "{f}");
+        }
+        let d = repo(&[
+            ("compose.yaml", "services: {}\n"),
+            ("docker-compose.yml", "services: {}\n"),
+        ]);
+        assert_eq!(
+            auto(&d).kind,
+            PlanKind::Compose("compose.yaml".into()),
+            "Compose's own order"
+        );
+        let d = repo(&[("site/docker-compose.yml", "services: {}\n")]);
+        let b = AppBuild {
+            context: Some("site".into()),
+            ..AppBuild::default()
+        };
+        let p = plan(d.path(), AppKind::Git, &AppSource::default(), &b).unwrap();
+        assert_eq!(p.kind, PlanKind::Compose("site/docker-compose.yml".into()));
+        let d = repo(&[
+            ("package.json", r#"{"scripts":{"start":"node s.js"}}"#),
+            ("docker-compose.yml", "services:\n  db:\n    image: postgres\n"),
+        ]);
+        assert!(
+            matches!(auto(&d).kind, PlanKind::Generated(_)),
+            "the app, not its dev database"
+        );
+        let d = repo(&[("Dockerfile", "FROM nginx\n"), ("compose.yaml", "services: {}\n")]);
+        assert!(matches!(auto(&d).kind, PlanKind::Dockerfile(_)));
+    }
+
+    /// Regression (audit A01): links can't take the build out of the checkout.
+    #[test]
+    fn contexts_and_files_stay_in_the_repository() {
+        use std::os::unix::fs::symlink;
+        let outside = repo(&[("index.html", "private"), ("Dockerfile", "FROM scratch\n")]);
+        let d = repo(&[("index.html", "site"), ("web/index.html", "w")]);
+        symlink(outside.path(), d.path().join("context-link")).unwrap();
+        let ctx = |c: &str| AppBuild {
+            context: Some(c.into()),
+            ..AppBuild::default()
+        };
+        let e = plan(d.path(), AppKind::Git, &AppSource::default(), &ctx("context-link")).unwrap_err();
+        assert!(e.message().contains("outside the repository"), "{e}");
+        plan(d.path(), AppKind::Git, &AppSource::default(), &ctx("web")).unwrap();
+        symlink(outside.path().join("Dockerfile"), d.path().join("Dockerfile")).unwrap();
+        assert!(plan(d.path(), AppKind::Git, &AppSource::default(), &AppBuild::default()).is_err());
+        symlink(outside.path().join("index.html"), d.path().join("docker-compose.yml")).unwrap();
+        assert!(plan(d.path(), AppKind::Compose, &AppSource::default(), &AppBuild::default()).is_err());
+        // Links inside the repository are fine.
+        std::fs::remove_file(d.path().join("Dockerfile")).unwrap();
+        symlink("web", d.path().join("alias")).unwrap();
+        plan(d.path(), AppKind::Git, &AppSource::default(), &ctx("alias")).unwrap();
+    }
+
     #[test]
     fn build_env_file_is_shell_safe() {
         let f = build_env_file(&[("A".into(), "it's $HOME `x`".into())]);
@@ -1722,5 +1837,31 @@ mod tests {
             .output()
             .unwrap();
         assert_eq!(String::from_utf8_lossy(&out.stdout), "it's $HOME `x`");
+    }
+}
+
+#[cfg(test)]
+mod compose_fallback_tests {
+    use super::*;
+
+    #[test]
+    fn compose_fallback_does_not_hide_errors_in_a_known_language() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("package.json"),
+            r#"{"scripts":{"start":"node server.js"}}"#,
+        )
+        .unwrap();
+        std::fs::write(
+            dir.path().join("compose.yaml"),
+            "services:\n  web:\n    image: alpine\n",
+        )
+        .unwrap();
+        let build = AppBuild {
+            build_command: Some("echo first\necho second".into()),
+            ..AppBuild::default()
+        };
+        let error = plan(dir.path(), AppKind::Git, &AppSource::default(), &build).unwrap_err();
+        assert!(error.message().contains("single line"), "{error}");
     }
 }

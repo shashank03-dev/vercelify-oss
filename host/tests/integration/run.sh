@@ -128,13 +128,13 @@ check "vercelify rollback" "vercelify rollback && $healthy && $served"
 
 echo "==> uninstall, then install again"
 x "ASSUME_YES=1 NO_COLOR=1 vercelify uninstall" >/tmp/vercelify-it-uninstall.log 2>&1 || { echo "  ✗ uninstall failed (see /tmp/vercelify-it-uninstall.log)"; fail=1; }
-# vercelify.slice stays: the apps' containers keep running in it, memory-capped.
+# vercelify.slice stays for unrelated containers; managed apps stop by design.
 check "no Vercelify services or timers left" '! systemctl list-unit-files "vercelify*" --no-legend | grep -v "^vercelify.slice " | grep -q .'
 check "agent, mesh and CLI binaries removed" '! test -e /usr/local/bin/vercelify-agent && ! test -e /usr/local/bin/vercelify-mesh && ! command -v vercelify'
 check "firewall chains removed" '! iptables -n -L VERCELIFY-IN && ! iptables -n -L VERCELIFY-FWD'
 check "the mesh interface is gone" '! ip link show vfy0'
 check "config, the engine's state and the app's container kept" 'test -s /etc/vercelify/agent.token && test -s /var/lib/vercelify/platform.db && docker ps -a --filter label=vercelify.app-name=it-web -q | grep -q .'
-check "the app keeps running in its memory-capped slice" "systemctl cat vercelify.slice | grep -q MemoryMax= && $served"
+check "managed apps are stopped with data and the shared slice preserved" 'systemctl cat vercelify.slice | grep -q MemoryMax= && test -z "$(docker ps --filter label=vercelify.app-name=it-web -q)" && ! docker inspect vercelify-proxy'
 if x "cd /src && NO_COLOR=1 $agent_env bash host/setup-host.sh -y --hostname it-host --storage-device $loop --no-remote" >/tmp/vercelify-it-3.log 2>&1; then
   echo "  ✓ installed again"
 else

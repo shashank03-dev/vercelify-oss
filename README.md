@@ -271,8 +271,10 @@ Each of these is one command on the laptop, whenever you want it.
 | Update Vercelify | `sudo vercelify update` |
 | Check that everything is fine | `sudo vercelify doctor` |
 
-The second screen needs nothing extra: open **Second screen** in the app and press
-**Start**.
+The second screen needs FFmpeg on the Mac, which sends the picture: `brew install ffmpeg`,
+or add `--with-display` when you run `install-mac.sh` (that also installs Moonlight, which
+only the desktop control above uses). Then open **Second screen** in the app and press
+**Start**; the app says what is missing if anything is.
 
 ## Try it first
 
