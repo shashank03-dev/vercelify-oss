@@ -20,7 +20,7 @@ jobs:
       matrix:
         target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Tag matches the version (the installer fetches the agent of its own version)
         if: startsWith(github.ref, 'refs/tags/')
         run: |
@@ -50,7 +50,7 @@ jobs:
     name: Shared build helper for macOS (universal)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -75,7 +75,7 @@ jobs:
       # Gatekeeper and the firewall treat the daemon like the app.
       HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_ID != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -127,7 +127,7 @@ jobs:
     name: vercelify-host for macOS (universal)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
@@ -153,7 +153,7 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo build --release --locked -p vercelify-host -p vercelify-mesh --features vercelify-mesh/daemon
       - name: Package
@@ -194,7 +194,7 @@ jobs:
       # password) and APPLE_TEAM_ID. Without them the build is unsigned.
       HAS_APPLE_SIGNING: ${{ secrets.APPLE_CERTIFICATE != '' && secrets.APPLE_ID != '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Sign and notarise the macOS app
         if: runner.os == 'macOS' && env.HAS_APPLE_SIGNING == 'true'
         env:

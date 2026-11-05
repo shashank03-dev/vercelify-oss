@@ -17,7 +17,7 @@ jobs:
     name: Rust (core, agent, cockpit backend)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: System libraries for Tauri
         run: |
           sudo apt-get update
@@ -40,7 +40,7 @@ jobs:
     name: Host scripts (ShellCheck + bats)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y shellcheck bats jq rsync
       - run: shellcheck -x -S warning dev install.sh install-mac.sh cli/vfy host/*.sh host/vercelify host/lib/*.sh host/tests/*.bash host/tests/contract/*.sh .github/scripts/*.sh
       - run: bats host/tests
@@ -54,7 +54,7 @@ jobs:
     name: Raspberry Pi (arm64 under QEMU)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-qemu-action@v4
         with:
           platforms: arm64
@@ -105,7 +105,7 @@ jobs:
     name: vercelify-mesh on macOS (utun, app mode)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -123,7 +123,7 @@ jobs:
     name: vercelify-host on macOS (Lima provider)
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -141,7 +141,7 @@ jobs:
     name: Windows (host manager, userspace mesh)
     runs-on: windows-2022
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -163,7 +163,7 @@ jobs:
       run:
         working-directory: cockpit
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -187,7 +187,7 @@ jobs:
       run:
         working-directory: website
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 22
@@ -203,7 +203,7 @@ jobs:
       matrix:
         target: [x86_64-unknown-linux-musl, aarch64-unknown-linux-musl]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: ${{ matrix.target }}
