@@ -1,0 +1,39 @@
+network: LAN 192.168.77.0/24 (main, pi) — router — 172.31.9.0/24 (far)
+coordinator: agent + vercelify-mesh in vfyt-main
+  ✓ coordinator on 10.77.0.1
+joining
+  ✓ pi joined (sealed enrollment over the LAN)
+  ✓ a join token works once
+  ✓ far joined (through the router)
+paths
+  ✓ pi → main (LAN)
+  ✓ far → main (routed)
+  ✓ pi → far directly (full mesh, not through main)
+  ✓ IPv6 on the mesh
+  ✓ status: main on the LAN, far direct
+  ✓ pi's endpoint for far is far itself (172.31.9.10:51820)
+names and services
+  ✓ far.vfy → 10.77.0.3, *.main.vfy → main, others refused
+  ✓ pi reaches main's agent at 10.77.0.1:7420
+  ✓ node tokens are refused from outside the mesh
+  ✓ ACL file written and the firewall hook ran
+a device and the firewall
+  ✓ firewall: the mac reaches the agent but not :9999; servers reach everything
+the Mac app: pairing by short code on the LAN, then app mode (no tun, no root)
+  ✓ the app finds main by mDNS (a pairing code is waiting)
+  ✓ short code over SPAKE2: a wrong one opens nothing; the right one gives the vfy2. code, and the app joined
+  ✓ SOCKS5: main.vfy:7420 from userspace, no tun device
+  ✓ forward 127.0.0.1:17420 → main.vfy:7420
+  ✓ the pairing's device token works at its agent_url (10.77.0.1:7420) through the mesh
+  ✓ 4 MB through the userspace stack, byte for byte
+  ✓ UDP forward 127.0.0.1:15600 → main.vfy:5600 and back (the display stream's path)
+  ✓ forwards added and removed while the daemon runs (the forwards file)
+  ✓ a device reaches Sunshine's ports (Moonlight)
+  ✓ SOCKS refuses the internet; main's firewall still applies to the app
+rotation
+  ✓ pi rotated its key; the mesh followed
+revocation
+  ✓ far revoked: peers dropped it, it knows, the rest keeps working
+restart with the last map, coordinator away
+  ✓ pi came back on its saved map while the coordinator's agent is down
+mesh: 28 checks passed

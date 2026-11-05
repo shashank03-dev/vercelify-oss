@@ -14,19 +14,22 @@ or after 25 minutes. I stopped it after 7 minutes because the temperature had
 plateaued (thermal.jsonl).
 
 - The peak was **86 °C**. It settled at 83–84 °C with all cores still at about
-  3.0 GHz (3.1 GHz at the start), so there was no thermal throttling.
+  3.0 GHz (3.1 GHz at the start), with no sustained frequency reduction visible
+  in these samples. Frequency samples alone do not establish absence of thermal throttling.
 - power-guard stayed `ok` throughout. Its pause (92 °C), freeze (95 °C) and
   shutdown (98 °C, three readings) thresholds were never reached.
-- Production and PR1 answered 293 of 300 external probes (thermal-external.jsonl).
-  The 7 failures were isolated 3 s timeouts (never two in a row). They happened
-  both during the load and after it stopped (18:56:52, 18:58:25, 18:59:05,
+- Production returned 200 in 295/300 requests and PR1 in 294/300 requests
+  (thermal-external.jsonl). Both succeeded in 293/300 paired observations.
+  The 7 failing observations contained 11 request timeouts, never in consecutive
+  observations. They happened both during the load and after it stopped (18:56:52, 18:58:25, 18:59:05,
   19:05:00), so they are not attributed to heat. Mesh probe flakiness is the
   likelier cause; see the open finding in ../2026-11-04-ac-return/.
 
-**Result:** with the vents unobstructed, this laptop cannot reach power-guard's
-thermal thresholds under full CPU load. The pause, freeze and thermal shutdown
-paths remain qualified only by the simulated-sensor bats tests. Reaching them
-physically would mean blocking airflow, which was deliberately not done.
+**Result:** this seven-minute run with unobstructed vents did not reach
+power-guard's thermal thresholds. It does not establish that longer runs or
+different ambient conditions cannot reach them. The pause, freeze and thermal
+shutdown paths remain qualified only by the simulated-sensor bats tests. No
+attempt was made to force threshold crossings by obstructing airflow.
 
 ## AC loss while serving → battery depletion
 
@@ -36,7 +39,7 @@ it out. battery.jsonl (fsync'd every 2 s) and shutdown-journal.txt record the ru
 | UTC | Event |
 | --- | --- |
 | 18:58:06 | AC 0, discharging, 96% |
-| 18:58:16 | power-guard `ok → warning` (running on battery) |
+| 18:58:07 | power-guard `ok → warning` (running on battery) |
 | 18:58–19:08 | Steady drain, about 1% per 10 s, down to 38% |
 | 19:08:2x | **Capacity fell from 38% to 5% between two readings** (worn-cell voltage cliff) |
 | 19:08:48 | power-guard `warning → shutting_down` at 3%: stops 3 app/data containers, then 1 core container |
@@ -99,7 +102,7 @@ boot-journal.txt, thermal.py, batt.py and the operator-confirmation timestamps.
   120 s on battery (this laptop reads `battery_health_pct=2`). See docs/POWER-RESILIENCE.md.
 - Finding 3: a reconcile refused only for a missing or stale capacity sample retries
   after 3 s and asks the fleet task to measure at once.
-- The post-boot mesh outage (../2026-11-04-ac-return/) had three causes, all fixed:
+- The post-boot mesh outage (../2026-11-04-ac-return/) led to three code mitigations:
   overlay (Tailscale) addresses announced as endpoints, overlay addresses learned
   and passed on as observed, and enrollment-time coordinator endpoints merged into
   the live map forever. After the update the registry lists only LAN and public
@@ -107,3 +110,14 @@ boot-journal.txt, thermal.py, batt.py and the operator-confirmation timestamps.
   Mac binary to be granted macOS Local Network permission: a rebuilt, ad-hoc-signed
   binary loses it, and without it the Mac can reach the laptop only through the relay.
   40/40 external probes succeeded afterwards.
+
+## Independent review clarification (2026-11-05)
+
+The recorded physical depletion used the previous guard. The new 5 s polling,
+critical first-reading shutdown and 120 s worn-cell timeout have automated test
+coverage, but have not been physically retested by this review. Likewise, 40
+successful mesh probes after the change do not reproduce the original reboot /
+overlay route-transition conditions or establish a root cause conclusively.
+Automatic AC-return startup remains unobserved with the current firmware.
+See ../2026-11-05-claude-review/VALIDATION.md for independent checks and restore
+safeguard corrections.

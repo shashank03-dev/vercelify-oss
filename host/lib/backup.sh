@@ -270,7 +270,7 @@ owned_volume() { [[ $1 == vfy-* || $1 == vfyv2-* ]]; }
 # ALL=1: every container but the proxy and the registry.
 restore_writers() { # ALL VOLUME|PATH...
   local all=$1 v; shift
-  local output names='' paths=() ids src src_list name
+  local output names='' paths=() ids
   if (( all )); then
     output=$(docker ps --format '{{.Names}}') || return 1
     names=$(printf '%s\n' "$output" | grep -vx -e vercelify-proxy -e vfy-registry || true)
@@ -286,14 +286,15 @@ restore_writers() { # ALL VOLUME|PATH...
       ids=$(docker ps -q) || return 1
       if [[ -n "$ids" ]]; then
         # shellcheck disable=SC2086
-        output=$(docker inspect -f '{{.Name}}{{range .Mounts}} {{.Source}}{{end}}' $ids) || return 1
-        while read -r name src_list; do
-          for src in $src_list; do
-            for v in "${paths[@]}"; do
-              [[ $src == "$v" || $src == "$v"/* ]] && names+=$'\n'"${name#/}"
-            done
-          done
-        done <<<"$output"
+        output=$(docker inspect $ids) || return 1
+        output=$(jq -r --args '
+          .[] | .Name as $name | .Mounts[]? | .Source as $source |
+          $ARGS.positional[] as $root |
+          select($source != "" and ($source == $root or $source == "/" or
+            ($source | startswith($root + "/")) or
+            ($root | startswith($source + "/")))) |
+          $name | ltrimstr("/")' "${paths[@]}" <<<"$output") || return 1
+        names+=$'\n'"$output"
       fi
     fi
   fi
@@ -304,7 +305,7 @@ restore_writers() { # ALL VOLUME|PATH...
 # copies (each restored tree is copied beside the live one before the switch,
 # and the live one is kept). Checked before anything is stopped.
 restore_space_ok() { # SNAPSHOT_ROOT VOLUME... -- STORAGE_NAME...
-  local root=$1 kb fs; shift
+  local root=$1 kb fs measure; shift
   local -A need=() where=()
   local storage=0 name src dst
   for name in "$@"; do
@@ -312,18 +313,33 @@ restore_space_ok() { # SNAPSHOT_ROOT VOLUME... -- STORAGE_NAME...
     if (( storage )); then
       src="$root$STORAGE_MOUNT/volumes/$name"; dst="$STORAGE_MOUNT/volumes"
     else
-      src="$root$DOCKER_VOLUMES_DIR/$name/_data"; dst="$DOCKER_VOLUMES_DIR"
+      src="$root$DOCKER_VOLUMES_DIR/$name/_data"; dst="$DOCKER_VOLUMES_DIR/$name"
     fi
-    [[ -d "$dst" ]] || dst=$(dirname "$dst")
-    kb=$(du -sk "$src" 2>/dev/null | awk '{print $1}')
-    fs=$(df -Pk "$dst" 2>/dev/null | awk 'NR==2 {print $6}')
-    [[ -n "$kb" && -n "$fs" ]] || continue
+    # Staging is beside the live tree, on its parent filesystem.
+    while [[ ! -d "$dst" && "$dst" != / ]]; do dst=$(dirname "$dst"); done
+    # rsync does not preserve sparse holes, so budget apparent bytes.
+    measure=$(du -sk --apparent-size "$src" 2>/dev/null) || {
+      err "could not measure restore size for $src"; return 1;
+    }
+    kb=$(awk '{print $1}' <<<"$measure")
+    fs=$(stat -c %d "$dst" 2>/dev/null) || {
+      err "could not measure restore filesystem for $dst"; return 1;
+    }
+    [[ "$kb" =~ ^[0-9]+$ && "$fs" =~ ^[0-9]+$ ]] || {
+      err "could not measure restore size or filesystem for $src"; return 1;
+    }
     need[$fs]=$(( ${need[$fs]:-0} + kb ))
     where[$fs]=$dst
   done
   local ok=0 avail
   for fs in "${!need[@]}"; do
-    avail=$(df -Pk "${where[$fs]}" | awk 'NR==2 {print $4}')
+    measure=$(df -Pk "${where[$fs]}" 2>/dev/null) || {
+      err "could not measure free space on ${where[$fs]}"; return 1;
+    }
+    avail=$(awk 'NR==2 {print $4}' <<<"$measure")
+    [[ "$avail" =~ ^[0-9]+$ ]] || {
+      err "could not measure free space on ${where[$fs]}"; return 1;
+    }
     # 5% and 256 MB of headroom: the disk must not fill while apps are down.
     if (( avail < need[$fs] + need[$fs] / 20 + 262144 )); then
       err "not enough free space on $fs: the restore needs about $(( need[$fs] / 1024 + 256 )) MB, $(( avail / 1024 )) MB free"

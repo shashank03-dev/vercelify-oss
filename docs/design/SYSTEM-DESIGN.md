@@ -1678,6 +1678,11 @@ computers.
 ### Restore, pairing and readiness review (November 2026)
 
 An instance restore enumerates its owned volumes and all their running writers.
+Writer detection includes bind sources above or below a restored storage path,
+without splitting paths containing spaces. Before stopping the engine, free-space
+admission groups destinations by their staging filesystem and budgets apparent file
+sizes (staging does not preserve sparse holes); missing or invalid size/free-space
+measurements refuse the restore without stopping workloads.
 Docker inspection errors or writers remaining after Stop abort replacement before
 any live data changes and restart the stopped services. Other Docker volumes are
 excluded unless `--all-volumes` is explicit. Each volume is copied to a clean staging

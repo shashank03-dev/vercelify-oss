@@ -1,0 +1,14 @@
+network: three home routers and a coordinator on 203.0.113.0/24
+coordinator in vfyn-main
+  ✓ coordinator on 10.77.0.1 (203.0.113.10)
+joining from behind the NATs
+  ✓ a, b and c joined over the internet (sealed enrollment through NAT)
+paths
+  ✓ everyone reaches main (public) directly
+  ✓ c → main direct through its symmetric NAT (main answers where c's packets come from)
+  ✓ a ↔ b direct through both NATs (hole punched to 203.0.113.22:51820, rtt 0.5 ms)
+  ✓ a ↔ c through the relay (c's NAT is symmetric)
+  ✓ main shows c on the relay, with the bytes it relayed
+revocation on the relay
+  ✓ c revoked: the relay dropped it and refuses its key; a ↔ b unaffected
+mesh-nat: 8 checks passed

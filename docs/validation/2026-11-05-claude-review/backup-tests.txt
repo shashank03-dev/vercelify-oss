@@ -1,0 +1,23 @@
+1..22
+ok 1 setup creates encrypted repositories, a private env file and a nightly timer
+ok 2 run dumps every database, saves the engine's state and records success
+ok 3 a failing repository is reported (doctor and alerts read backup.json)
+ok 4 restore to a directory, never over the live server without --instance
+ok 5 --instance: the engine's state comes back and no database sees its files change under it
+ok 6 --instance (audit A05): a writer that won't stop means nothing changes, and everything starts again
+ok 7 --instance (audit A05, A06): each of Vercelify's volumes comes back exactly; others are left alone
+ok 8 --instance: not enough disk for the staged copies stops before anything is touched
+ok 9 --instance: a container bind-mounting a restored storage-disk volume is stopped too
+ok 10 --instance: parent bind mounts are writers too
+ok 11 --instance: a bind source containing spaces is still a writer
+ok 12 --instance: failed space measurements refuse before stopping the agent
+ok 13 --instance: failed free-space lookup refuses before stopping the agent
+ok 14 --instance: sparse snapshots budget apparent bytes, not allocated blocks
+ok 15 --instance (audit A08): paired devices' tokens come back; this machine's settings stay
+ok 16 setup again (audit A07): off-site credentials and retention are kept unless given anew
+ok 17 not set up: clear message
+ok 18 a new machine reuses the old password to reach existing backups
+ok 19 a reinstall without the old config never re-creates over old backups, and says how to get them back
+ok 20 a database that can't be dumped doesn't stop the rest from being saved
+ok 21 a restored backup password keeps spaces and shell metacharacters literally
+ok 22 --instance refuses replacement when Docker writer inspection fails

@@ -1,0 +1,44 @@
+{
+  "reviewed_commits": [
+    "bdc2c72",
+    "8b8e28d"
+  ],
+  "rust": {
+    "passed": 807,
+    "failed": 0,
+    "ignored": 14
+  },
+  "linux_host_tests": 259,
+  "backup_final_tests": 22,
+  "regressions_reproduced_before_fix": [
+    "parent bind mounts",
+    "bind paths containing spaces",
+    "failed size measurement"
+  ],
+  "format": "passed",
+  "clippy_all_targets_all_features": "passed",
+  "shellcheck_changed_scripts": "passed",
+  "laptop": {
+    "services": [
+      "vercelify-agent: active",
+      "vercelify-mesh: active",
+      "vercelify-power-guard: active"
+    ],
+    "protected_containers_running": 5,
+    "production_http": 200,
+    "preview_http": 200,
+    "agent_sha256": "2fede93aa5d52348285d1fd372016dccf0afa4492d81d5dcef9956fbc1d3adbf",
+    "mesh_sha256": "d1818fbcdf085a4a9260bddaa28617d575e604aadecc0b711ffbfdfe9dada0c1",
+    "installed_matches_local_x86_releases": true,
+    "protected_container_ids": {
+      "preview": "db2a0f0262b9",
+      "postgresql": "2202ac6f511a",
+      "production": "df341f080ef2",
+      "proxy": "c036049dc516",
+      "media": "4a2a21ec2fc1"
+    }
+  },
+  "mesh_namespace_checks": 28,
+  "mesh_nat_checks": 8,
+  "arm64_release_build": "passed"
+}
