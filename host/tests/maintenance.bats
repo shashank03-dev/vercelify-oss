@@ -67,7 +67,7 @@ result() { jq -r .result "$T/state/maintenance.json"; }
   touch "$REBOOT_REQUIRED_FILE"
   # the engine reports a build in progress
   echo token >"$T/etc/agent.token"
-  printf '#!/usr/bin/env bash\ncat "$T/apps"; printf "\\n200"\n' >"$T/bin/curl"; chmod +x "$T/bin/curl"
+  printf '#!/usr/bin/env bash\ncat >/dev/null\ncat "$T/apps"; printf "\\n200"\n' >"$T/bin/curl"; chmod +x "$T/bin/curl"
   echo '[{"name":"shop","last_status":"healthy"},{"name":"blog","last_status":"building"}]' >"$T/apps"
   run "$CLI" maintenance run
   [ "$(result)" = skipped ]; jq -r .detail "$T/state/maintenance.json" | grep -q 'deployment is building'

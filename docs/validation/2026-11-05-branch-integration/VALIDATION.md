@@ -118,3 +118,10 @@ out the agent binary even when both packages are selected. `dev screencast` now
 builds the agent and example separately before running its contract. A sandbox
 regression refused the original single build (no fresh agent artifact), then
 passed with both builds; all four dev-helper tests passed on Linux.
+
+The next hook run passed native Linux tests but found a legacy maintenance-test
+curl stub that did not consume `-K -` authentication input. In the Debian
+container it could close the pipe before the producer wrote, making the mock API
+appear unavailable under pipefail. The fixture now drains stdin like curl;
+all six maintenance tests passed in the same container. Production maintenance
+logic and the reboot blockers were unchanged.
