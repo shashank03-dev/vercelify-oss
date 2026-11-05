@@ -40,3 +40,32 @@ teardown() { rm -rf "$T"; }
   [[ "$output" == *"missing mpv"* ]]
   [[ "$output" == *"apt install mpv ffmpeg"* ]]
 }
+
+@test "screencast builds a fresh agent and sender helper before running the contract" {
+  [ "$(uname -s)" = Linux ] || skip "the Linux path"
+  mkdir "$T/bin"
+  for t in bash env uname dirname git grep sed date cat touch; do
+    p=$(command -v "$t") && ln -s "$p" "$T/bin/$t"
+  done
+  for t in mpv ffmpeg tc; do
+    printf '#!/bin/sh\nexit 0\n' >"$T/bin/$t"
+  done
+  cat >"$T/bin/cargo" <<'STUB'
+#!/bin/sh
+# Cargo's example filter selects only examples, even with several packages.
+case "$*" in
+  *--example*) touch "$BUILD_ARTIFACTS/helper" ;;
+  *vercelify-agent*) touch "$BUILD_ARTIFACTS/agent" ;;
+esac
+STUB
+  printf '#!/bin/sh\nexec "$@"\n' >"$T/bin/sudo"
+  cat >"$T/bin/python3" <<'STUB'
+#!/bin/sh
+[ -f "$BUILD_ARTIFACTS/agent" ] && [ -f "$BUILD_ARTIFACTS/helper" ] || exit 1
+echo 'contract ran with both fresh binaries'
+STUB
+  chmod +x "$T/bin/cargo" "$T/bin/sudo" "$T/bin/python3" "$T/bin/mpv" "$T/bin/ffmpeg" "$T/bin/tc"
+  PATH="$T/bin" HOME="$T" BUILD_ARTIFACTS="$T" run "$REPO/dev" screencast api_validation
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"contract ran with both fresh binaries"* ]]
+}

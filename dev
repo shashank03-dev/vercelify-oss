@@ -209,6 +209,7 @@ agent_linux_tests() {
       set -e
       command -v cc >/dev/null || { sudo apt-get update -qq && sudo apt-get install -y -qq build-essential pkg-config >/dev/null; }
       [ -x ~/.cargo/bin/cargo ] || curl -fsSL https://sh.rustup.rs | sh -s -- -y -q --profile minimal >/dev/null
+      export CARGO_BUILD_JOBS=\${CARGO_BUILD_JOBS:-1}
       cd '$ROOT' && CARGO_TARGET_DIR=~/vercelify-target TS_RS_EXPORT_DIR=/tmp/ts ~/.cargo/bin/$test"
     return
   fi
@@ -232,6 +233,7 @@ linux_clippy() {
     set -e
     dpkg -s libwebkit2gtk-4.1-dev >/dev/null 2>&1 || { sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev >/dev/null; }
     ~/.cargo/bin/rustup component add clippy >/dev/null 2>&1
+    export CARGO_BUILD_JOBS=\${CARGO_BUILD_JOBS:-1}
     cd '$ROOT' && CARGO_TARGET_DIR=~/vercelify-target TS_RS_EXPORT_DIR=/tmp/ts ~/.cargo/bin/cargo clippy --locked --workspace --all-targets -- -D warnings"
 }
 
@@ -241,11 +243,12 @@ screencast_contract() {
   local only='' IFS=,
   only="$*"
   unset IFS
-  local build='cargo build -q -p vercelify-agent -p vercelify-core --example sender_args'
+  local build='cargo build -q -p vercelify-agent'
+  local example='cargo build -q -p vercelify-core --example sender_args'
   if [[ $OS == Linux ]]; then
     local t
     for t in mpv ffmpeg tc python3; do have "$t" || { echo "missing $t (sudo apt install mpv ffmpeg iproute2)"; return 1; }; done
-    $build || return 1
+    $build && $example || return 1
     sudo env ONLY="$only" CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}" python3 host/tests/contract/screencast.py
     return
   fi
@@ -256,7 +259,9 @@ screencast_contract() {
     command -v mpv >/dev/null && command -v ffmpeg >/dev/null || { echo 'installing mpv and ffmpeg in the VM (once)'; sudo apt-get update -qq && sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends mpv ffmpeg iproute2 >/dev/null; }
     [ -x ~/.cargo/bin/cargo ] || curl -fsSL https://sh.rustup.rs | sh -s -- -y -q --profile minimal >/dev/null
     cd '$ROOT'
+    export CARGO_BUILD_JOBS=\${CARGO_BUILD_JOBS:-1}
     CARGO_TARGET_DIR=~/vercelify-target TS_RS_EXPORT_DIR=/tmp/ts ~/.cargo/bin/$build
+    CARGO_TARGET_DIR=~/vercelify-target TS_RS_EXPORT_DIR=/tmp/ts ~/.cargo/bin/$example
     sudo env ONLY='$only' CARGO_TARGET_DIR=\$HOME/vercelify-target python3 host/tests/contract/screencast.py"
 }
 

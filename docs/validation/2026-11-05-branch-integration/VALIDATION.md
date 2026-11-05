@@ -104,3 +104,17 @@ A credential-pattern scan of the tracked tree found only an existing synthetic
 This record precedes the authorized fast-forward of local and remote main.
 GitHub CI/edge and a manually dispatched integration workflow must be assessed
 on that pushed revision separately. No force push or branch deletion is needed.
+
+## Pre-push helper follow-up
+
+The first push attempt ran the repository's pre-push hook and was withheld: two
+concurrent GNU linker processes exhausted the existing 2-GiB Colima guest (kernel
+OOM log identifies `ld`; Mac tests, Linux Clippy, host tests and builds passed).
+The Colima test/build helpers now default to one Cargo build job, preserving an
+explicit guest override. No check was disabled and the VM was not restarted.
+
+Review of that helper also found that `cargo build --example sender_args` filters
+out the agent binary even when both packages are selected. `dev screencast` now
+builds the agent and example separately before running its contract. A sandbox
+regression refused the original single build (no fresh agent artifact), then
+passed with both builds; all four dev-helper tests passed on Linux.

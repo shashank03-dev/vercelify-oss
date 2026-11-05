@@ -328,3 +328,8 @@ certificate: a new one means everyone allows Screen Recording once more.
   when one is out, "Update the app" appears at the bottom of the sidebar and
   opens the release with the `.dmg`. Running the `install-mac.sh` one-liner
   again does the same from a terminal.
+
+The Colima Rust helpers default to one Cargo build job so linking the test
+binaries fits a small guest. An explicit `CARGO_BUILD_JOBS` in the guest overrides
+that default. `dev screencast` builds both the agent and the argument helper
+before testing, so an older agent binary cannot supply the result.
