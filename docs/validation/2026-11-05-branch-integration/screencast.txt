@@ -1,0 +1,9 @@
+  ✓ api_validation (0.1s)
+  ✓ sender_validation (0.4s)
+  ✓ udp_clean (10.8s) — clean: 0.99× real time, longest freeze 109 ms
+  ✓ srt (19.3s) — SRT on cellular: 1.00× real time, longest freeze 108 ms; SRT with 5% loss: 1.00× real time, longest freeze 107 ms; reconnected in 0.8s
+  ✓ srt_reconnects (33.9s) — reconnects in [0.5, 0.8, 0.5, 0.9, 1.9, 1.2, 0.5, 1.8] s, sender restarted 0×
+  ✓ receiver_killed (1.3s)
+  ✓ port_taken (2.6s)
+  ✓ agent_shutdown (0.7s)
+8/8 scenarios passed

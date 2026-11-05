@@ -1,0 +1,94 @@
+{
+  "created_utc": "2026-11-05T03:06:41.418382+00:00",
+  "verified_code_commit": "7a3da21960e3bf9238164be980fb48d81025ede4",
+  "previous_remote_main": "17547d68f0a778856042a5d145db6d096e4354f1",
+  "branches": [
+    {
+      "branch": "docs/m6-release",
+      "head": "a72f248abaffa8a106bfb682b236ec1254531059",
+      "included_in_integration": true
+    },
+    {
+      "branch": "feat/m3-browser-gateway",
+      "head": "6100e944aaa41b6ccd97b957cc7488f6ef65263a",
+      "included_in_integration": true
+    },
+    {
+      "branch": "fix/audit-findings",
+      "head": "be01ad1f9656ef01bb621f16c9d964de704c2294",
+      "included_in_integration": true
+    },
+    {
+      "branch": "fix/m1-server-lifecycle",
+      "head": "3cdf779eede5f961fa6b7a1111f587fa70472b99",
+      "included_in_integration": true
+    },
+    {
+      "branch": "fix/m2-pairing",
+      "head": "046635f4f2a5a889efd2c1ca7a727d914393c9c7",
+      "included_in_integration": true
+    },
+    {
+      "branch": "fix/m4-second-screen",
+      "head": "50d8ac9a9fc0c4bb0c6e941763aae295aa110a0d",
+      "included_in_integration": true
+    },
+    {
+      "branch": "fix/m5-workflows",
+      "head": "0aecfd555c951912f0a0077c73acd9d9e8c65581",
+      "included_in_integration": true
+    },
+    {
+      "branch": "fix/m7-verification",
+      "head": "bb65b14a0e2aa4d7ff1e9004a69cd7b7043c2948",
+      "included_in_integration": true
+    },
+    {
+      "branch": "main",
+      "head": "a5187c78d551d20df20b2b411784bd6ead86aca5",
+      "included_in_integration": true
+    },
+    {
+      "branch": "screen-sharing-unpushed",
+      "head": "27d4a9c55f1798d4b5b653e5d5f1bf3466764166",
+      "included_in_integration": true
+    },
+    {
+      "branch": "shashank-agent/branch-integration",
+      "head": "7a3da21960e3bf9238164be980fb48d81025ede4",
+      "included_in_integration": true
+    },
+    {
+      "branch": "shashank-agent/installation-product-audit",
+      "head": "5d549c1b38976cb157f49f315d31732f3a6227fc",
+      "included_in_integration": true
+    },
+    {
+      "branch": "shashank-agent/review-fixes",
+      "head": "db1072b776d45589c29e655b1ad9a46a8855acf0",
+      "included_in_integration": true
+    },
+    {
+      "branch": "sunshine-auto-pair",
+      "head": "71971d8cea219fda3a335b827d6b3a6b73f3c442",
+      "included_in_integration": true
+    }
+  ],
+  "rust": {
+    "passed": 833,
+    "failed": 0,
+    "ignored": 14
+  },
+  "host_tests": 260,
+  "frontend_unit_tests": 152,
+  "browser_flows": 33,
+  "screen_smoke_scenarios": 8,
+  "real_docker_compose": "passed",
+  "real_docker_engine_lifecycle": "passed",
+  "clippy_all_targets_all_features": "passed",
+  "format": "passed",
+  "shellcheck": "passed",
+  "website_build": "passed",
+  "cockpit_build": "passed",
+  "generated_types": "unchanged"
+}
